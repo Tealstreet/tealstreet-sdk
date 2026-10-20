@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
+use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
     CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
@@ -141,6 +142,17 @@ pub enum Notice {
         command: CommandId,
         receipts: Vec<OrderIdentityReceipt>,
     },
+    /// Startup cannot complete without intervention (bad configuration or an
+    /// account the venue refuses); hosts fail `start` with it.
+    StartupFailed {
+        error: VenueError,
+    },
+    /// Completes a command with a structured failure; hosts report it like a
+    /// `CommandDone` error, plus the detail.
+    CommandFailed {
+        command: CommandId,
+        error: VenueError,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -205,6 +217,23 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+}
+
+/// Venue-specific actions outside the shared trading surface.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VenueAction {
+    /// Lighter: the cached account tier as a JSON string, or `null`.
+    FetchAccountTier,
+    /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
+    SetAccountTier { tier: String },
+}
+
+/// The shared rejection for a venue action the venue does not implement.
+pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
+    cx.done(
+        command,
+        Err("This action is not supported on this venue".into()),
+    );
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -298,6 +327,12 @@ pub enum Command {
     SetStpMode {
         command: CommandId,
         mode: crate::model::StpMode,
+    },
+    /// A venue-specific action; the engine rejects it unless the venue implements
+    /// `Venue::on_venue_action`, so venue `on_command` matches never see it.
+    Venue {
+        command: CommandId,
+        action: VenueAction,
     },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
@@ -1023,6 +1058,24 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
+        self.io.actions.push(Action::Notice(Notice::StartupFailed {
+            error: error.into(),
+        }));
+    }
+
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_locks.finish(command, true);
+            self.io.active_commands.remove(&command);
+        }
+        self.io.actions.push(Action::Notice(Notice::CommandFailed {
+            command,
+            error: error.into(),
+        }));
+    }
+
     /// Every placement in this response is proven accepted or explicitly rejected.
     pub fn placement_resolved(&mut self, command: CommandId) {
         #[cfg(feature = "order-locks")]
@@ -1148,6 +1201,15 @@ pub trait Venue {
         false
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
+    /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        command: CommandId,
+        _action: VenueAction,
+    ) {
+        unsupported_venue_action(cx, command);
+    }
     fn book(&self, symbol: &str) -> Option<&Book>;
     /// Every subscribed book, including unsynchronized subscriptions.
     /// Snapshot frames clear subscriptions for which `book` returns `None`.
@@ -1537,6 +1599,9 @@ impl<V: Venue> Engine<V> {
                     };
                     self.venue.on_timer(&mut cx, logical);
                 }
+            }
+            Event::Command(Command::Venue { command, action }) => {
+                self.venue.on_venue_action(&mut cx, command, action);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.supports_amend_order_with_symbol() =>
@@ -2944,6 +3009,26 @@ mod streaming_tests {
         assert!(
             engine.take_market_frame(2.).is_none(),
             "baseline must remain the last flushed size"
+        );
+    }
+
+    #[test]
+    fn venue_actions_default_to_one_shared_rejection() {
+        let mut engine = frame_engine();
+        engine.handle(
+            0.0,
+            Event::Command(Command::Venue {
+                command: 9,
+                action: VenueAction::FetchAccountTier,
+            }),
+        );
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+            _ => None,
+        });
+        assert_eq!(
+            result,
+            Some(Err("This action is not supported on this venue".into()))
         );
     }
 

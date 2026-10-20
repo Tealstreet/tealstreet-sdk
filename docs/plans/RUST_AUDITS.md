@@ -26,7 +26,8 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
    deleting a family.
 
-Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error;
+Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error
+(futures and spot; spot was placing the entry unprotected until verification);
 Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
 obvious improvements (clearer errors, better messages) need no decision.
 
@@ -85,9 +86,12 @@ High:
   ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
+  Verification found liquidation (`x=CALCULATED`) fills dropped; they emit again.
 
 Medium:
 - ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
+  Verification found the uncertain-placement fence never cleared on Phemex (cancel-all
+  failed for the session); a post-failure `activeList` read now reconciles it.
 - ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
 - ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
 - ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
@@ -373,6 +377,8 @@ per-venue canary holding the circular-evidence venues last.
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
   blank or malformed seed quotes start at 0 (row kept for live updates); a failed
   or unusable catalog/ticker read retries the whole product chain with backoff.
+  Verification: JSON `null` quotes now behave like blanks (they dropped the row),
+  live nulls keep the last good value, and an all-undecodable ticker read retries.
 - ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
   read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
@@ -388,12 +394,17 @@ per-venue canary holding the circular-evidence venues last.
 
 ### Hyperliquid
 Signing hash, order payload and price/size rounding match TS; no new highs.
-- Medium: HIP-3 leverage change sends cross where TS sends isolated
+- ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
   margin-type change with no position fails (default leverage 20 > market max,
   `trading.rs:759`). Spot open orders never reconciled and can go stale
   (`account.rs:426,1604`). Edit aborts when the source order already filled
-  (TS places a second order) — confirm fail-closed is intended.
+  (TS places a second order) — confirm fail-closed is intended.~~ Fixed:
+  `onlyIsolated`/`marginMode` seed isolated settings with leverage capped at the
+  market maximum, and cross on an isolated-only asset is refused before signing;
+  standalone spot reads `frontendOpenOrders` at startup, on every refresh and
+  every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
+  doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
   spot vault signs as vault (TS as master) — confirm; more terminal statuses;
   `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
@@ -412,7 +423,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   without sending (`trading.rs:224`)~~ (explicit errors; see
   [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
-  unsupported~~; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
+  unsupported~~; ~~USD-M journal (`fetchHistoricalPositions`) not wired in the host~~ (folds
+  per-symbol fills as TS).
 - Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
   STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
 - Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
@@ -425,19 +437,56 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
 
 ### Bybit family
-- High: Brazil inverse/option sockets routed to the linear host (engine
+- ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`); per-coin balances never set (`account.rs:662`);
-  fills history includes funding/settlement rows (`history.rs:564`); income
-  dedupe drops hedge-mode funding legs (`history.rs:131`).
-- Medium: option failures stall linear startup (`lib.rs:857`); option catalog
-  `baseCoin=All` unverified; live candles lack trade aggregation and seconds
-  intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
-  wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
-  poll (`account.rs:1838`); order/income history caps; ~~Partial TP/SL amend
-  semantics — decided: match TS (flip SL/TP on drag), do not amend in place~~
-  ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)); spot create params (`marketUnit`); one unmappable
-  order invalidates every later snapshot (`account.rs:1569`).
+  `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
+  by native URL (`publicWsRoutes`): inverse/spot use the `bybitinverse`/`bybitspot`
+  hosts as TS does; options stay direct (no option proxy is deployed).
+- ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
+  (equity, else wallet balance; USD value, else amount) from every accepted wallet
+  read, merged from stream pushes with explicit zeros; failed reads keep holdings.
+- ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
+  Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
+  without a valid side, price, quantity or time are excluded from REST fills.
+- ~~High: income dedupe drops hedge-mode funding legs (`history.rs:131`).~~ Fixed:
+  income ids keep TS's shape; distinct native rows that would share one (same-
+  instant hedge legs) get their native id, side and signed size appended, and
+  exact page repeats still collapse.
+- ~~Medium: option failures stall linear startup (`lib.rs:857`).~~ Fixed: a failed
+  option catalog or seed lets the other products publish (markets, tickers,
+  sockets, account); options join later by appending (stable indexes, live rows kept).
+- ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
+  documentation explicitly permits `baseCoin=All` for `category=option`.
+- ~~Medium: live candles lack trade aggregation and seconds intervals.~~ Fixed:
+  `publicTrade` extends the native kline bar (every trade in a packet, in order;
+  Monday weeks, UTC months), seconds intervals are built from trades alone; Hyro
+  stays native-kline-only.
+- ~~Medium: option WS ticker field names likely wrong.~~ Fixed: documented option
+  `bidPrice`/`askPrice`/`change24h` (REST option rows: `change24h`) now update quotes.
+- ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
+  with `accountType only support UNIFIED` switches the account to UTA and retries
+  once; other errors never change the account type.
+- ~~Medium: demo reduce-only fill check missing.~~ Fixed: a locally published Demo
+  reduce-only limit is checked against its executions at 1 s, 3 s and 8.25 s; a
+  complete cursor walk (20 pages, as TS) proving a full fill retires it (terminal
+  fence); otherwise, or on failure, orders are re-read after the grace. Partial,
+  failed or capped walks never prove a fill.
+- ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
+  read failing in transport or at the venue keeps the ready stream and last-good
+  state and retries next tick; malformed content and initial snapshots still
+  reconnect.
+- ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
+  every page up to TS's 20 × 50 per window (then warns and keeps the rows, as TS)
+  instead of truncating to 50; explicit
+  limits still cap after every category. Income caps match TS (unchanged).
+- ~~Medium: Partial TP/SL amend semantics — decided: match TS (flip SL/TP on drag),
+  do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
+- ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
+  is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
+- ~~Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).~~
+  Fixed: a well-formed row of an unsupported type keeps its last known state (or is
+  reported as not shown) while other orders commit; malformed rows still preserve
+  the whole last-good snapshot. Hyro stays strict.
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
@@ -559,12 +608,16 @@ TxFlow loses nothing (master TS was a placeholder).
 - High: ~~cancel-symbol also deletes the symbol's TP/SL stops
   (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`)~~ (stop-book deletion
   now only on account-wide cancel); one failed or
-  malformed markets/tickers read stops the venue, and futures private REST
-  waits for the private socket `welcome` (`lib.rs:767,954,1026`).
+  malformed markets/tickers read stops the venue (startup lane), ~~and futures
+  private REST waits for the private socket `welcome` (`lib.rs:767,954,1026`)~~
+  (reconciliation starts at launch).
 - Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
   (uncached IDs sent directly; later cancellations continue and failures surface);
-  one malformed REST row freezes reconciliation (`account.rs:652`); caller client
-  id on attached TP/SL rejected (`trading.rs:120`).
+  ~~one malformed REST row freezes reconciliation (`account.rs:652`)~~ (skipped
+  with the store's copy kept; still counted in the page census; verification fixed
+  attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
+  ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
+  the client-ID contract honours caller IDs only on plain Limit/Market).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
   5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
 - Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
@@ -584,9 +637,11 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
-  its executions still emit, the store keeps its copy).
-- Medium: one bad public row stops startup; one bad position row freezes a
-  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+  its executions still emit, the store keeps its copy; verification: documented
+  `Deactivated`/`Expired` rows now cancel instead of leaving the order Open).
+- Medium: one bad public row stops startup; ~~one bad position row freezes a
+  currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
+  store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.
@@ -677,7 +732,8 @@ Signing, integer scaling, tx encoding and nonces match TS.
   ratio/percentage/tick normalization now has REST/WS and 5x signing regressions.
 - Medium: ~~windowed fill history pages the whole account history then fails
   (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
-  account tier not exposed and `changeAccountTier` missing.
+  ~~account tier not exposed and `changeAccountTier` missing~~ (shared
+  `Command::Venue` action; Lighter implements fetch/set tier).
 - Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
   re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
   original size after a partial fill.~~ Rust now re-places the observed remaining
@@ -685,10 +741,12 @@ Signing, integer scaling, tx encoding and nonces match TS.
 
 ### WOO
 No confirmed highs; valid data matches TS.
-- Medium: algo child rows don't inherit the parent's side/status/reduceOnly, so
+- Medium: ~~algo child rows don't inherit the parent's side/status/reduceOnly, so
   fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
   position row freezes positions (`account.rs:749,949`); one unmappable
-  fill/order-history/instrument/ticker row fails the read or startup.
+  fill/order-history/instrument/ticker row fails the read or startup.~~
+  Children inherit missing parent fields (snapshot and stream); bad rows are
+  skipped keeping stored copies; hidden exposure on unknown markets warns once.
 - Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
   readback can report a false error; isolated warning; stop without reference
   price rejects the snapshot.
@@ -710,11 +768,16 @@ No confirmed highs.
 
 ### Crypto.com
 Mostly matches TS.
-- Medium: per-coin balances (`position_balances`) dropped
-  (`cryptocom/src/account.rs:232`); caller client id refused on stop/TP orders
-  (`trading.rs:76`).
-- Low: one invalid order fails the whole batch; null string fields fail reads;
-  one bad instrument row stops startup.
+- Medium: ~~per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`)~~ — published with the aggregate (REST and
+  `user.balance`). ~~Caller client id refused
+  on stop/TP orders (`trading.rs:76`).~~ Matches TS and the client-order-id
+  contract (`rust.exchange.ts` rejects it before the engine); a change is a
+  contract decision, not a port bug.
+- Low: ~~one invalid order fails the whole batch; null string fields fail reads;
+  one bad instrument row stops startup.~~ Bad rows in reads and pushed frames
+  are skipped with one summary warning, keeping stored copies; startup stops
+  visibly only when no row maps. Placement still validates the batch before writes.
 
 ### Bitrue
 - High: ~~orders refused on symbols with no account leverage data, and a fresh
@@ -735,18 +798,22 @@ Mostly matches TS.
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
+- Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
+  ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
+  balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
-- Medium: cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
+- Medium: ~~cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
   cancel-all marks untriggered stops terminal, `trading.rs:928`); one bad
   open-order row leaves the account side dead incl. signing state
   (`account.rs:975`); null fields drop whole private frames incl. fills
   (`private_wire.rs:205`); one odd `/v3/symbols` row blocks private start; a bad
-  omni key seed kills read-only monitoring (`account.rs:504`).
+  omni key seed kills read-only monitoring (`account.rs:504`).~~ Cancels fence by
+  version with a 5 s hide (kept orders reappear with a warning); bad rows are
+  skipped per row keeping stored copies and fills; a bad seed disables only placement.
 - Low: caller client id rejected on stops/brackets/splits; float remaining size;
   zero-price candle rejects batch; leverage always sent. Unchecked: private
   socket via Tealstreet proxy.
@@ -776,7 +843,9 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 
 ### Cross-venue: silent partial failures
 - Child-leg failures (TP/SL after an entry) must surface as errors on every
-  venue (~~Paradex logs at Warning~~; now Error with a native regression).
+  venue (~~Paradex logs at Warning~~; now Error with a native regression;
+  verification: a rejected TP no longer drops the queued SL, and wrong-side
+  brackets reject before any write instead of placing a bare entry).
 - Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
   Binance COIN-M, Bitrue cancels).
 - Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;
@@ -797,10 +866,12 @@ Signing and integer scaling exact; no highs.
 
 ### Polymarket (development-only)
 CLOB V2 signing and amounts match the official client.
-- Medium: one `null` in a Gamma market row breaks the venue with no retry
-  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).
-- Low: cancel-all reports failure after a successful cancel; one bad position
-  row freezes positions; auth failures invisible.
+- Medium: ~~one `null` in a Gamma market row breaks the venue with no retry
+  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).~~ Nulls tolerated, bad rows
+  skipped, market/midpoint reads retry (≤30 s).
+- Low: cancel-all reports failure after a successful cancel (kept: the test
+  deliberately requires proof for each cached order); ~~one bad position
+  row freezes positions~~; auth failures invisible.
 
 ### Registration and options (all RUST_VENUES aliases)
 Alias→product mapping, credentials, testnet, routing and broker/builder
@@ -818,11 +889,13 @@ with its production/proxy gate).
 
 ### Backpack
 Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
-- Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
+- Medium: ~~spot markets dropped — 88 SPOT pairs vanish and open spot orders
   can't be seen or cancelled (`backpack/src/lib.rs:543`); decided: retire
-  Backpack spot (remove any spot surface, no port). A mark-price failure or one bad ticker row
-  blocks startup (`lib.rs:211,787`).
-- Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
+  Backpack spot (remove any spot surface, no port).~~ No spot surface remains in
+  the Rust crate. ~~A mark-price failure or one bad ticker row
+  blocks startup (`lib.rs:211,787`).~~ Bad rows skipped; startup proceeds on last
+  price until marks load.
+- Low: ~~one bad fill row fails fill history (`history.rs:312`).~~ Verify live:
   open-order rows with `"quantity": null`.
 
 ### BreakoutProp (disabled in production)

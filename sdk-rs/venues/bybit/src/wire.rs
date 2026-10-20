@@ -17,41 +17,9 @@ fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
     Option::<BorrowedStr<'de>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
 }
 
-/// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
+/// A decimal string; empty, malformed or non-finite is NaN.
 pub fn float(text: &str) -> f64 {
-    // At most 15 digits keep both the numerator and decimal divisor exact in f64.
-    // One division then rounds the same rational as the full decimal parser.
-    if !text.is_empty() && text.len() <= 16 {
-        let short = || {
-            let (mut integer, mut divisor, mut digits) = (0u64, 0u64, 0);
-            for byte in text.bytes() {
-                if byte == b'.' && divisor == 0 {
-                    divisor = 1;
-                    continue;
-                }
-                let digit = byte.wrapping_sub(b'0');
-                if digit > 9 || digits == 15 {
-                    return None;
-                }
-                integer = integer * 10 + u64::from(digit);
-                digits += 1;
-                if divisor != 0 {
-                    divisor *= 10;
-                }
-            }
-            (digits != 0).then(|| {
-                if divisor <= 1 {
-                    integer as f64
-                } else {
-                    integer as f64 / divisor as f64
-                }
-            })
-        };
-        if let Some(value) = short() {
-            return value;
-        }
-    }
-    text.trim().parse::<f64>().unwrap_or(f64::NAN)
+    safe_cex_engine::num::parse_decimal(text).unwrap_or(f64::NAN)
 }
 
 /// An optional decimal string, NaN when absent or empty.
@@ -248,6 +216,8 @@ pub struct TickerRow<'a> {
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub price24h_pcnt: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
+    pub change24h: Opt<'a>,
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub open_interest: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub funding_rate: Opt<'a>,
@@ -339,6 +309,13 @@ pub struct TickerDelta<'a> {
     pub index_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub price24h_pcnt: Option<f64>,
+    /// Option frames spell quotes and change differently from derivatives.
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub bid_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub ask_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub change24h: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub open_interest: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
@@ -616,6 +593,25 @@ pub struct WsKline<'a> {
     pub close: Str<'a>,
     #[serde(borrow)]
     pub volume: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct TradeEvent<'a> {
+    #[serde(borrow)]
+    pub topic: Str<'a>,
+    #[serde(borrow, default)]
+    pub data: Vec<WsTrade<'a>>,
+}
+
+/// One `publicTrade` execution: time (ms), price and size.
+#[derive(Deserialize)]
+pub struct WsTrade<'a> {
+    #[serde(rename = "T")]
+    pub time: f64,
+    #[serde(rename = "p", borrow)]
+    pub price: Str<'a>,
+    #[serde(rename = "v", borrow)]
+    pub size: Str<'a>,
 }
 
 /// REST kline row: `[startTime, open, high, low, close, volume, turnover]`.
@@ -927,6 +923,12 @@ pub struct MarginModeReason<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionRow<'a> {
     #[serde(borrow, default)]
+    pub id: Opt<'a>,
+    #[serde(borrow, default)]
+    pub side: Opt<'a>,
+    #[serde(borrow, default)]
+    pub size: Opt<'a>,
+    #[serde(borrow, default)]
     pub symbol: Opt<'a>,
     #[serde(rename = "type", borrow, default)]
     pub kind: Opt<'a>,
@@ -1036,7 +1038,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }
@@ -1079,7 +1086,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }

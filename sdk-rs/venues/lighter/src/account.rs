@@ -1,5 +1,6 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::de::number;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
@@ -18,6 +19,9 @@ pub struct Lookup {
 pub enum Request {
     Limits {
         started_at: f64,
+    },
+    ChangeTier {
+        command: safe_cex_engine::CommandId,
     },
     Lookup {
         candidates: VecDeque<Lookup>,
@@ -89,23 +93,6 @@ pub struct Snapshot {
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Num(#[serde(deserialize_with = "number")] f64);
-fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Atom<'a>(#[serde(borrow, deserialize_with = "atom")] Cow<'a, str>);
@@ -1297,7 +1284,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
-            Request::Limits { .. } => {}
+            Request::Limits { .. } | Request::ChangeTier { .. } => {}
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1485,6 +1472,7 @@ impl Lighter {
                 || response.body.trim_start().starts_with('['));
         match request {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
+            Request::ChangeTier { command } => self.tier_changed(cx, command, response),
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1640,6 +1628,12 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
+            Request::ChangeTier { command } => cx.done(
+                command,
+                Err(format!(
+                    "Lighter account tier change outcome is unknown: {error}"
+                )),
+            ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;

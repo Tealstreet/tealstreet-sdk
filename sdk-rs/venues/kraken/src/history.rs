@@ -5,6 +5,7 @@ use crate::wire::{number, optional_number};
 use crate::{Kraken, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::time;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -967,14 +968,7 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
     let hour = n(11, 13)?;
     let minute = n(14, 16)?;
     let second = n(17, 19)?;
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return None,
-    };
+    let days = time::days_in_month(year, month)?;
     if day < 1 || day > days || hour > 23 || minute > 59 || second > 59 {
         return None;
     }
@@ -1007,39 +1001,13 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
         }
         _ => return None,
     };
-    let adjusted = year - i64::from(month <= 2);
-    let era = adjusted.div_euclid(400);
-    let yoe = adjusted - era * 400;
-    let mp = month + if month > 2 { -3 } else { 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let epoch_days = era * 146097 + doe - 719468;
+    let epoch_days = time::days_from_civil(year, month, day);
     let ms = (epoch_days * 86400 + hour * 3600 + minute * 60 + second - offset) as f64 * 1000.0
         + fraction;
     (ms >= 0.0).then_some(ms)
 }
 fn iso(ms: f64) -> String {
-    let ms = ms as i64;
-    let seconds = ms.div_euclid(1000);
-    let days = seconds.div_euclid(86400);
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let mut year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    let time = seconds.rem_euclid(86400);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        time / 3600,
-        (time % 3600) / 60,
-        time % 60,
-        ms.rem_euclid(1000)
-    )
+    time::iso_millis(ms as i64)
 }
 #[cfg(test)]
 mod tests {

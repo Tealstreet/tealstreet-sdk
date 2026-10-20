@@ -1034,3 +1034,119 @@ fn urgent_repair_replaces_parked_poll_without_orphan_registration() {
         .collect();
     assert_eq!(times, vec![h.now + 1_000.0]);
 }
+#[test]
+fn account_reconciliation_starts_without_the_private_socket() {
+    let mut h = Harness {
+        engine: Engine::new(Kucoin::new(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        })),
+        actions: vec![],
+        now: 1610000000000.0,
+        socket: SocketId(0),
+    };
+    h.engine.start(h.now);
+    h.collect();
+    h.reply("/contracts/active", MARKET);
+    h.reply("/allTickers", TICKERS);
+    let bullet = h.http("/bullet-private");
+    h.respond(&bullet, 503, "unavailable");
+    h.ready();
+    assert!(h.engine.store().loaded().positions);
+    assert!(h.engine.store().loaded().orders);
+}
+
+#[test]
+fn unmappable_order_row_does_not_freeze_the_order_snapshot() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    let site = ORDER
+        .replace("5cdfc138b21023a909e5ad55", "site-twap")
+        .replace("\"size\":10", "\"size\":\"lots\"");
+    h.reply(
+        "/orders?",
+        &format!(
+            r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":2,"items":[{ORDER},{site}]}}}}"#
+        ),
+    );
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().orders);
+    assert!(h.engine.store().order("5cdfc138b21023a909e5ad55").is_some());
+    assert!(h.engine.store().order("site-twap").is_none());
+}
+
+#[test]
+fn unmappable_position_row_does_not_block_the_position_snapshot() {
+    let mut h = Harness::new();
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
+    );
+    assert!(h.engine.store().loaded().positions);
+}
+
+#[test]
+fn unmappable_parent_row_keeps_its_attached_protection_legs() {
+    let mut h = Harness::new();
+    let attached = ORDER.replace(
+        "\"createdAt\"",
+        "\"triggerStopDownPrice\":80,\"triggerStopUpPrice\":120,\"createdAt\"",
+    );
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    h.reply("/orders?", &Harness::page(&attached, 1));
+    h.reply("/stopOrders?", EMPTY);
+    let ids = [
+        "5cdfc138b21023a909e5ad55",
+        "5cdfc138b21023a909e5ad55__stop_loss",
+        "5cdfc138b21023a909e5ad55__take_profit",
+    ];
+    let before: Vec<_> = ids
+        .iter()
+        .map(|id| h.engine.store().order(id).cloned().expect("seeded order"))
+        .collect();
+    h.poll();
+    h.reply(
+        "/orders?",
+        &Harness::page(&attached.replace("\"size\":10", "\"size\":\"lots\""), 1),
+    );
+    h.reply("/stopOrders?", EMPTY);
+    let after: Vec<_> = ids
+        .iter()
+        .map(|id| h.engine.store().order(id).cloned())
+        .collect();
+    assert_eq!(after, before.into_iter().map(Some).collect::<Vec<_>>());
+}
+
+#[test]
+fn unmappable_position_row_keeps_the_stored_position() {
+    let mut h = Harness::new();
+    h.ready();
+    let before = h.engine.store().positions().to_vec();
+    assert_eq!(before.len(), 1);
+    h.poll();
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
+    );
+    assert_eq!(h.engine.store().positions(), before.as_slice());
+}
