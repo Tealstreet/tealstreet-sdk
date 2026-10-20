@@ -163,6 +163,7 @@ class FrameSource implements WasmEngineLike {
     return new Uint8Array(consumerFrame(this.current));
   };
   snapshotFrame = () => new Uint8Array(consumerFrame(this.current));
+  accountSnapshotFrame = () => new Uint8Array(consumerFrame(this.current, undefined, false, undefined, true));
 }
 const sources: FrameSource[] = [];
 const workers: ExchangeWorker[] = [];
