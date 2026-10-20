@@ -186,6 +186,24 @@ impl H {
             _ => unreachable!(),
         }
     }
+    fn retry(&mut self, low: f64, high: f64) {
+        let (index, timer, at) = self
+            .actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, a)| match a {
+                Action::SetTimer { timer, at_ms }
+                    if (low..=high).contains(&(*at_ms - self.now)) =>
+                {
+                    Some((index, *timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("bounded retry timer");
+        self.actions.remove(index);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
     fn timer(&mut self, delay: f64) {
         let i = self
             .actions
@@ -268,7 +286,7 @@ fn ticker_envelopes_cannot_bypass_control_kind_or_public_socket_readiness() {
         socket: h.public,
         code: 1006,
     });
-    h.timer(1000.0);
+    h.retry(750.0, 1000.0);
     h.reply("/bullet-public",r#"{"code":"200000","data":{"token":"fresh-public","instanceServers":[{"endpoint":"wss://spot.example.test/public","pingInterval":18000,"pingTimeout":10000}]}}"#);
     let socket = h
         .actions
@@ -282,6 +300,7 @@ fn ticker_envelopes_cannot_bypass_control_kind_or_public_socket_readiness() {
     let text = r#"{"data":{"price":"103"},"subject":"BTC-USDT","topic":"/market/ticker:all","type":"message"}"#;
     h.event(Event::WsMessage { socket, text });
     assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 100.0);
+    h.event(Event::WsOpened { socket });
     h.event(Event::WsMessage {
         socket,
         text: r#"{"type":"welcome"}"#,
@@ -463,7 +482,7 @@ fn assert_prewelcome_pong_preserves_recovery(private: bool) {
     let mut h = H::new(private);
     let socket = if private { h.private } else { h.public };
     h.event(Event::WsClosed { socket, code: 1006 });
-    h.timer(1000.0);
+    h.retry(750.0, 1000.0);
     h.reply(if private { "/bullet-private" } else { "/bullet-public" }, r#"{"code":"200000","data":{"token":"replacement","instanceServers":[{"endpoint":"wss://spot.example.test/replacement","pingInterval":18000,"pingTimeout":10000}]}}"#);
     let socket = h
         .actions
@@ -480,7 +499,7 @@ fn assert_prewelcome_pong_preserves_recovery(private: bool) {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -494,13 +513,14 @@ fn assert_prewelcome_pong_preserves_recovery(private: bool) {
             .any(|a| matches!(a, Action::ClearTimer { timer: t } if *t == timer))
     );
     assert!(!h.actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
-    h.timer(10000.0);
+    h.now += 10000.0;
+    h.event(Event::TimerFired { timer });
     assert!(
         h.actions
             .iter()
             .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
     );
-    h.timer(1000.0);
+    h.retry(1500.0, 2000.0);
     assert_eq!(
         h.http(if private {
             "/bullet-private"
@@ -533,7 +553,7 @@ fn valid_pong_schedules_one_ping_and_unsolicited_pong_cannot_postpone_it() {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 18000.0 => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000.0 => Some(*timer),
                 _ => None,
             })
             .unwrap();
@@ -729,7 +749,7 @@ fn watchdog_closes_silent_socket_and_gets_fresh_bullet_token() {
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==h.public))
     );
-    h.timer(1000.0);
+    h.retry(750.0, 1000.0);
     let r = h.http("/bullet-public");
     assert_eq!(r.method, Method::Post);
 }
@@ -1312,4 +1332,299 @@ fn secondary_config_never_authenticates_public_only_account_commands() {
             .iter()
             .any(|(name, _)| name.starts_with("KC-API-"))
     }));
+}
+
+fn spot_bullet_body(token: &str, interval: f64, timeout: f64) -> String {
+    json!({"code":"200000","data":{"token":token,"instanceServers":[{"endpoint":"wss://spot.example.test/recovered","pingInterval":interval,"pingTimeout":timeout}]}}).to_string()
+}
+fn spot_private_path(private: bool) -> &'static str {
+    if private {
+        "/bullet-private"
+    } else {
+        "/bullet-public"
+    }
+}
+fn spot_latest_socket(h: &H, private: bool) -> SocketId {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(role),
+                ..
+            } if *role
+                == if private {
+                    SocketChannel::Private
+                } else {
+                    SocketChannel::Public
+                } =>
+            {
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+fn spot_latest_watch(h: &H) -> safe_cex_engine::TimerId {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("connection or acquisition watchdog")
+}
+fn spot_retire_and_acquire(h: &mut H, private: bool) -> HttpRequest {
+    let socket = if private { h.private } else { h.public };
+    h.actions.clear();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.retry(750.0, 1000.0);
+    h.http(spot_private_path(private))
+}
+
+#[test]
+fn spot_supervisors_repost_role_tokens_with_increasing_backoff_and_restore_interests() {
+    for private in [false, true] {
+        let mut h = H::new(private);
+        if !private {
+            h.command(Command::SubscribeOrderBook {
+                symbol: "BTC-USDT".into(),
+            });
+            h.command(Command::SubscribeCandles {
+                symbol: "BTC-USDT".into(),
+                interval: "1m".into(),
+            });
+        }
+        let old = if private { h.private } else { h.public };
+        let request = spot_retire_and_acquire(&mut h, private);
+        assert_eq!(request.method, Method::Post);
+        assert_eq!(
+            request.headers.iter().any(|(key, _)| *key == "KC-API-KEY"),
+            private
+        );
+        h.actions.clear();
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        h.event(Event::WsMessage {
+            socket: old,
+            text: r#"{"type":"welcome"}"#,
+        });
+        assert!(h.actions.is_empty());
+        h.respond(&request, 503, r#"{"code":"503000","msg":"unavailable"}"#);
+        assert!(
+            !h.actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "token failure must back off"
+        );
+        h.retry(1500.0, 2000.0);
+        let request = h.http(spot_private_path(private));
+        h.respond(
+            &request,
+            200,
+            &spot_bullet_body("fresh-token", 18000.0, 10000.0),
+        );
+        let socket = spot_latest_socket(&h, private);
+        assert_ne!(old, socket);
+        assert!(h.actions.iter().any(
+            |a| matches!(a, Action::WsConnect { url, .. } if url.contains("token=fresh-token"))
+        ));
+        h.actions.clear();
+        h.event(Event::WsOpened { socket });
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"type":"welcome"}"#,
+        });
+        for topic in if private {
+            vec!["/spotMarket/tradeOrdersV2", "/account/balance"]
+        } else {
+            vec![
+                "/market/ticker:all",
+                "/spotMarket/level2Depth50:BTC-USDT",
+                "/market/candles:BTC-USDT_1min",
+            ]
+        } {
+            assert!(h.actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains(topic))), "restore {topic}");
+        }
+        h.now += 1.0;
+        h.event(Event::WsClosed { socket, code: 1006 });
+        h.retry(3000.0, 4000.0);
+        assert_eq!(h.http(spot_private_path(private)).method, Method::Post);
+    }
+}
+
+#[test]
+fn spot_hung_bullet_acquisition_retires_late_success_and_failure_without_touching_new_request() {
+    for private in [false, true] {
+        for failed in [false, true] {
+            let mut h = H::new(private);
+            let old = spot_retire_and_acquire(&mut h, private);
+            let watch = spot_latest_watch(&h);
+            h.now += 10_000.0;
+            h.event(Event::TimerFired { timer: watch });
+            h.retry(1500.0, 2000.0);
+            let current = h.http(spot_private_path(private));
+            h.actions.clear();
+            if failed {
+                h.event(Event::HttpFailed {
+                    request: old.id,
+                    error: "late reset",
+                });
+            } else {
+                h.respond(
+                    &old,
+                    200,
+                    &spot_bullet_body("retired-token", 18000.0, 10000.0),
+                );
+            }
+            assert!(
+                h.actions.is_empty(),
+                "retired token outcome cannot affect current acquisition"
+            );
+            h.respond(
+                &current,
+                200,
+                &spot_bullet_body("current-token", 18000.0, 10000.0),
+            );
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::WsConnect { .. }))
+                    .count(),
+                1
+            );
+            assert!(h.actions.iter().any(|a| matches!(a, Action::WsConnect { url, .. } if url.contains("token=current-token"))));
+        }
+    }
+}
+
+#[test]
+fn spot_never_opened_connections_and_early_messages_cannot_escape_connect_timeout() {
+    for private in [false, true] {
+        let mut h = H::new(private);
+        let request = spot_retire_and_acquire(&mut h, private);
+        h.respond(&request, 200, &spot_bullet_body("fresh", 18000.0, 10000.0));
+        let socket = spot_latest_socket(&h, private);
+        let watch = spot_latest_watch(&h);
+        h.actions.clear();
+        for text in [r#"{"type":"welcome"}"#, r#"{"type":"pong"}"#] {
+            h.event(Event::WsMessage { socket, text });
+        }
+        assert!(
+            h.actions.is_empty(),
+            "host must open before protocol messages establish readiness"
+        );
+        h.now += 10000.0;
+        h.event(Event::TimerFired { timer: watch });
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        );
+        h.retry(1500.0, 2000.0);
+        assert_eq!(h.http(spot_private_path(private)).method, Method::Post);
+    }
+}
+
+#[test]
+fn spot_negotiated_welcome_deadline_ignores_pongs_and_cannot_send_unauthenticated_ping() {
+    for private in [false, true] {
+        let mut h = H::new(private);
+        let request = spot_retire_and_acquire(&mut h, private);
+        h.respond(
+            &request,
+            200,
+            &spot_bullet_body("short-welcome", 2000.0, 1500.0),
+        );
+        let socket = spot_latest_socket(&h, private);
+        h.actions.clear();
+        h.event(Event::WsOpened { socket });
+        let watch = h
+            .actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1500.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        h.now += 1000.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        });
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        h.now += 500.0;
+        h.event(Event::TimerFired { timer: watch });
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        );
+    }
+}
+
+#[test]
+fn spot_account_or_market_data_cannot_satisfy_mandatory_pong() {
+    for private in [false, true] {
+        let mut h = H::new(private);
+        let socket = if private { h.private } else { h.public };
+        let pong = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        h.now += 9999.0;
+        if private {
+            h.ws(
+                true,
+                "/account/balance",
+                json!({"currency":"USDT","available":"900","hold":"100","total":"1000"}),
+            );
+        } else {
+            h.ws(false, "/market/ticker:BTC-USDT", json!({"price":"101"}));
+        }
+        h.now += 1.0;
+        h.event(Event::TimerFired { timer: pong });
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        );
+        h.retry(750.0, 1000.0);
+        assert_eq!(h.http(spot_private_path(private)).method, Method::Post);
+    }
+}
+
+#[test]
+fn spot_invalid_negotiated_heartbeat_intervals_reject_before_connecting() {
+    for private in [false, true] {
+        for (interval, timeout) in [
+            (0.0, 10000.0),
+            (18000.0, 0.0),
+            (-1.0, 10000.0),
+            (18000.0, 999.0),
+        ] {
+            let mut h = H::new(private);
+            let request = spot_retire_and_acquire(&mut h, private);
+            h.actions.clear();
+            h.respond(
+                &request,
+                200,
+                &spot_bullet_body("invalid-timing", interval, timeout),
+            );
+            assert!(
+                !h.actions
+                    .iter()
+                    .any(|a| matches!(a, Action::WsConnect { .. }))
+            );
+            h.retry(1500.0, 2000.0);
+            assert_eq!(h.http(spot_private_path(private)).method, Method::Post);
+        }
+    }
 }

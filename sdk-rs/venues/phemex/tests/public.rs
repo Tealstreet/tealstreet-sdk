@@ -404,3 +404,11 @@ fn startup_retry_waits_for_the_complete_rate_limit_pause() {
             .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/public/products")))
     );
 }
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let (e, socket) = started();
+    socket_checks::flaps(e, socket, 100.);
+}
