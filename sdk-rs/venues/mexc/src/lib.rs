@@ -302,10 +302,12 @@ impl MexcFutures {
             state.buffering = None;
         }
         state.generation = state.generation.wrapping_add(1);
-        state.failures += 1;
-        if let Some(timer) = state.retry.take() {
-            cx.clear_timer(timer);
+        // A pending retry keeps its deadline; re-arming it on every overflow
+        // during backoff would postpone the next anchor indefinitely.
+        if state.retry.is_some() {
+            return;
         }
+        state.failures += 1;
         state.retry =
             Some(cx.set_timer((250.0 * 2f64.powi(state.failures.min(7) as i32)).min(30_000.0)));
     }

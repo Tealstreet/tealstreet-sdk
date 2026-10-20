@@ -912,3 +912,48 @@ fn recovery_buffer_overflow_invalidates_the_old_request_and_retained_chain() {
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(59999., 0.002)]);
     assert!(has_depth_frame(&mut e, 670.));
 }
+
+#[test]
+fn recovery_buffer_overflow_during_backoff_keeps_the_pending_retry_deadline() {
+    let (mut e, socket) = started();
+    e.drain_actions().for_each(drop);
+    let _ = e.take_frame(100.);
+    e.handle(
+        150.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let first = requests(&mut e).remove(0);
+    recovery_depth(&mut e, socket, 160., 40, "[[60000,40]]");
+    recovery_snapshot(&mut e, &first, 170., 10, "[[60000,10]]");
+    let retry: Vec<_> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms: 670. } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(retry.len(), 1);
+    for version in 41..=2041 {
+        recovery_depth(
+            &mut e,
+            socket,
+            180.,
+            version,
+            &format!("[[60000,{version}]]"),
+        );
+    }
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. })),
+        "overflow while backing off must not postpone the pending retry"
+    );
+    e.handle(670., Event::TimerFired { timer: retry[0] });
+    let second = requests(&mut e).remove(0);
+    recovery_snapshot(&mut e, &second, 680., 2040, "[[60000,2040]]");
+    assert_eq!(
+        e.book("BTCUSDT").unwrap().bids(),
+        [(60000., 2041. * 0.0001)]
+    );
+}
