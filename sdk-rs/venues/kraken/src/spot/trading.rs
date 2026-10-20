@@ -49,6 +49,9 @@ impl KrakenSpot {
         if o.client_order_id.is_some() {
             return Err("Kraken Spot does not support caller client order IDs".into());
         }
+        if o.trigger_price.is_some() && !o.redundant_protective_trigger() {
+            return Err("Kraken Spot triggerPrice must match the stop price".into());
+        }
         let m = cx
             .store
             .market(&o.symbol)
@@ -140,7 +143,7 @@ impl KrakenSpot {
                     .any(|price| price.is_some_and(|price| price != 0.))
             {
                 return Err(
-                    "Kraken Spot does not support take-profit/stop-loss legs on a market entry; use a limit entry"
+                    "Kraken Spot attaches take-profit/stop-loss legs only to a limit entry, not a market entry or stop"
                         .into(),
                 );
             }
