@@ -4,6 +4,7 @@ import type { ExchangeName, ExchangeOptions, OrderFillEvent } from '../../types'
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
+import { extractLighterAccountTierFromPayload } from '../../exchanges/lighter/lighter.account-tier';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -14,7 +15,7 @@ const KEY = `01${'00'.repeat(39)}`;
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-const recorded = () => {
+const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium' }) => {
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const sockets: Array<{ subscriptions: string[]; message(text: string): void }> = [];
   let marginMode = 0;
@@ -85,7 +86,7 @@ const recorded = () => {
             },
           ],
         });
-      if (pathname.endsWith('/accountLimits')) return response({ code: 200, user_tier_name: 'premium' });
+      if (pathname.endsWith('/accountLimits')) return response(accountLimits);
       if (pathname.endsWith('/accountActiveOrders')) return response({ code: 200, orders: [] });
       if (pathname.endsWith('/nextNonce')) return response({ code: 200, nonce: 10 });
       if (pathname.endsWith('/sendTx')) {
@@ -111,8 +112,8 @@ const options = (): ExchangeOptions => ({
   applicationId: '718895',
   testnet: true,
 });
-const start = async (opts = options(), name: ExchangeName = 'lighter') => {
-  const tape = recorded();
+const start = async (opts = options(), name: ExchangeName = 'lighter', accountLimits?: unknown) => {
+  const tape = recorded(accountLimits);
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => tape.transport);
   const store = new DefaultStore();
@@ -130,7 +131,7 @@ const until = async (check: () => boolean) => {
 };
 
 describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary', (name) => {
-  const variantStart = (opts = options()) => start(opts, name);
+  const variantStart = (opts = options(), accountLimits?: unknown) => start(opts, name, accountLimits);
   it('rejects caller IDs on regular, bracket and later batch orders before any signing write', async () => {
     const { exchange, requests, store } = await variantStart();
     expect(store.markets.map((m) => m.symbol)).toEqual(['ETH']);
@@ -253,6 +254,25 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
       [500, 1],
     ]);
     expect(new Set(writes().map((w) => w.tx.Sig)).size).toBe(3);
+  });
+
+  it.each([
+    { code: 200, user_tier_name: 'standard' },
+    { code: 200, user_tier_name: ['standard'] },
+    { code: 200, data: { userTierName: [' STD '] } },
+    { code: 200, data: { account: { accountType: ['standard'] } } },
+  ])('blocks attributed placements for TS-recognized Standard payload %j', async (accountLimits) => {
+    expect(extractLighterAccountTierFromPayload(accountLimits)).toBe('standard');
+    const { exchange, requests } = await variantStart(
+      { ...options(), extra: { lighterIntegratorAccountIndex: '158385' } },
+      accountLimits,
+    );
+    const before = requests.length;
+    await expect(
+      exchange.placeOrder({ symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.2, price: 90 }),
+    ).rejects.toThrow('Plus or Premium');
+    expect(requests.slice(before).some((r) => new URL(r.url).pathname.endsWith('/accountLimits'))).toBe(true);
+    expect(requests.slice(before).some((r) => r.method !== 'GET' || /nextNonce|account\?/.test(r.url))).toBe(false);
   });
 
   it('polls remote-only account data without remote callbacks, authenticated reads or writes', async () => {

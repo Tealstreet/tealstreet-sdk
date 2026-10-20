@@ -189,3 +189,28 @@ No TS Lighter venue is deleted, no new TS bug divergence is introduced, and no
 gate thresholds or existing fixtures are weakened. Implementation, local gates
 and phase reviews are complete; the feature PR tracks adversarial review, CI
 and landing status.
+
+## PR adversarial repairs
+
+PR #1336 targets `feat/rust-rewrite`. The first independent protocol/signing
+review passed. A second reviewer reproduced a P2: a singleton-array Standard
+label became unknown in Rust and allowed attributed placement. The actual old
+WASM boundary regression failed six array cases while both scalar controls
+passed. Fix the venue's typed tier decoder to accept singleton/nested label
+sequences, preserve unknown/multiple-label handling, and match the tier label's
+BOM/NEL whitespace rules. Native regressions verify zero approval, nonce or
+submission requests for Standard; unknown and eligible tiers still require
+approval. Independent repair review PASS. This is Rust parity repair, not a new
+TS bug or gate exception.
+
+CI's shared harness also caught an unclassified live-smoke alias. Explicitly
+classify Robinhood as unreviewed for credentialed lifecycle capture/sizing;
+all modes refuse before credential access. No live profile or funded run is
+invented. Profile tests 14/14, full shared harness 558/558, package typecheck
+and lint PASS. Scoped native account-limits tests 7/7 PASS. Final WASM boundary,
+acceptance replay and CI checks continue before landing.
+
+Rebuilt combined release WASM after the repair: all 22 real-WASM boundary tests
+PASS, including the six formerly failing array cases. No account transaction
+or callback is sent by the rejection regressions. Preserve this stable repair
+before integrating the newer server-adapter landing `c10f7e190a`.

@@ -235,3 +235,82 @@ fn root_standard_tier_overrides_malformed_nested_payloads_and_replaces_cached_pr
             Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.contains("Plus or Premium"))), "{payload}");
     }
 }
+
+#[test]
+fn singleton_and_nested_standard_labels_block_attributed_placement_before_any_read_or_write() {
+    for label in [
+        r#"["standard"]"#,
+        r#"[[" STD "]]"#,
+        r#"[[[["StAnDaRd"]]]]"#,
+        r#"["\ufeffstandard\ufeff"]"#,
+    ] {
+        let mut client = Client::new(options());
+        let read = client.tick(2_000.0).pop().unwrap();
+        reply_at(
+            &mut client.engine,
+            NOW + 3_000.0,
+            &read,
+            200,
+            &format!(r#"{{"code":200,"user_tier_name":{label}}}"#),
+        );
+        let actions = client.place(4_000.0);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_))),
+            "no approval, nonce or POST for {label}"
+        );
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.contains("Plus or Premium"))), "{label}");
+    }
+}
+
+#[test]
+fn unknown_and_nonlabel_values_do_not_become_standard_or_skip_builder_approval() {
+    for label in [
+        r#"["standard","standard"]"#,
+        r#"["standard",null]"#,
+        r#"[["standard",""]]"#,
+        r#"[]"#,
+        r#"null"#,
+        r#"{}"#,
+        r#"false"#,
+        r#"42"#,
+        r#"[["unknown"]]"#,
+        r#"["\u0085standard\u0085"]"#,
+        r#"{"toString":"standard"}"#,
+        r#"[["premium"]]"#,
+        r#"["plus"]"#,
+    ] {
+        let mut client = Client::new(options());
+        let read = client.tick(2_000.0).pop().unwrap();
+        reply_at(
+            &mut client.engine,
+            NOW + 3_000.0,
+            &read,
+            200,
+            &format!(r#"{{"code":200,"user_tier_name":{label}}}"#),
+        );
+        let actions = client.place(4_000.0);
+        let reads = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(read) => Some(read),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), 1, "{label}");
+        assert_eq!(reads[0].method, safe_cex_engine::Method::Get);
+        assert!(
+            reads[0].url.contains("/account?"),
+            "approval still required for {label}"
+        );
+        assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 51, .. })
+            )),
+            "{label}"
+        );
+    }
+}

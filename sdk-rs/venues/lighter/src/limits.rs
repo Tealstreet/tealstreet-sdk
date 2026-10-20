@@ -13,6 +13,43 @@ enum Tier {
     Premium,
     Plus,
 }
+struct TierLabel(Option<Tier>);
+impl<'de> Deserialize<'de> for TierLabel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct LabelVisitor;
+        impl<'de> serde::de::Visitor<'de> for LabelVisitor {
+            type Value = TierLabel;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a known Lighter account-tier label or singleton sequence")
+            }
+            fn visit_str<E: serde::de::Error>(self, label: &str) -> Result<Self::Value, E> {
+                let label = label.trim_matches(|c: char| {
+                    c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
+                });
+                Ok(TierLabel(match label.to_ascii_lowercase().as_str() {
+                    "standard" | "std" => Some(Tier::Standard),
+                    "premium" => Some(Tier::Premium),
+                    "plus" => Some(Tier::Plus),
+                    _ => None,
+                }))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut sequence: A,
+            ) -> Result<Self::Value, A::Error> {
+                let first = sequence
+                    .next_element::<TierLabel>()?
+                    .unwrap_or(TierLabel(None));
+                let mut multiple = false;
+                while sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    multiple = true;
+                }
+                Ok(if multiple { TierLabel(None) } else { first })
+            }
+        }
+        deserializer.deserialize_any(LabelVisitor)
+    }
+}
 #[derive(Default)]
 pub(crate) struct Limits {
     tier: Option<Tier>,
@@ -80,13 +117,7 @@ impl Payload<'_> {
         Self::normalize(account.as_ref()?.own_name()?)
     }
     fn normalize(raw: &RawValue) -> Option<Tier> {
-        let name = serde_json::from_str::<String>(raw.get()).ok()?;
-        match name.trim().to_ascii_lowercase().as_str() {
-            "standard" | "std" => Some(Tier::Standard),
-            "premium" => Some(Tier::Premium),
-            "plus" => Some(Tier::Plus),
-            _ => None,
-        }
+        serde_json::from_str::<TierLabel>(raw.get()).ok()?.0
     }
 }
 impl Lighter {

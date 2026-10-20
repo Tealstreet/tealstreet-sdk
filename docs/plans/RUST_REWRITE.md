@@ -619,6 +619,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `bitget`, `bitgetusdc`, `bitgetinverse` | `BITGET` | `KEY`, `SECRET`, `PASSPHRASE` | Testnet selects `susdt-futures`, `susdc-futures`, `scoin-futures` and simulated collateral on the shared `api.bitget.com` / `ws.bitget.com` origins. UTA testnet is unsupported. |
 | `orderly`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
 | `lighter` | `LIGHTER` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | Testnet: `testnet-api.lighter.xyz`, `testnet.zklighter.elliot.ai`; indices are decimal strings. |
+| `lighter-robinhood` | — | — | Broker endpoint and signing replay are covered, but credentialed lifecycle capture/sizing has no reviewed live-smoke profile. Every mode refuses before credential access. |
 | `phemex` | `PHEMEX` | `KEY`, `SECRET` | Testnet: `testnet-api.phemex.com` |
 | `cryptocom` | `CRYPTOCOM` | `KEY`, `SECRET` | UAT through `--testnet`: `uat-api.3ona.co`, `uat-stream.3ona.co` |
 | `hyperliquid` | `HYPERLIQUID` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS` | Testnet: `api.hyperliquid-testnet.xyz`; optional `VAULT_ADDRESS` |
