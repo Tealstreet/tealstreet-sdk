@@ -1032,28 +1032,32 @@ impl Store {
     }
 
     fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let mut rows: Vec<_> = self.settings.iter().collect();
-        rows.sort_unstable_by(|(a, _), (b, _)| {
-            self.market_ref(a).cmp(&self.market_ref(b)).then(a.cmp(b))
+        let mut rows: Vec<_> = self
+            .settings
+            .iter()
+            .map(|(symbol, setting)| (self.market_ref(symbol), symbol, setting))
+            .collect();
+        rows.sort_unstable_by(|(a_index, a_symbol, _), (b_index, b_symbol, _)| {
+            a_index.cmp(b_index).then(a_symbol.cmp(b_symbol))
         });
         w.begin_revision(section::SETTINGS, 1);
         w.u32(rows.len() as u32);
-        w.u32s(rows.iter().map(|(symbol, _)| self.market_ref(symbol)));
+        w.u32s(rows.iter().map(|(market, _, _)| *market));
         w.u32s(
             rows.iter()
-                .map(|(_, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+                .map(|(_, _, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
         );
         w.pad();
-        w.f64s(rows.iter().map(|(_, s)| s.leverage));
+        w.f64s(rows.iter().map(|(_, _, s)| s.leverage));
         w.f64s(
             rows.iter()
-                .map(|(_, s)| s.buy_leverage.unwrap_or(s.leverage)),
+                .map(|(_, _, s)| s.buy_leverage.unwrap_or(s.leverage)),
         );
         w.f64s(
             rows.iter()
-                .map(|(_, s)| s.sell_leverage.unwrap_or(s.leverage)),
+                .map(|(_, _, s)| s.sell_leverage.unwrap_or(s.leverage)),
         );
-        for (symbol, _) in &rows {
+        for (_, symbol, _) in &rows {
             let symbol = w.string(symbol);
             w.u32(symbol);
         }

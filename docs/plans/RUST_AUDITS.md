@@ -213,6 +213,24 @@ Both original failures reproduce with a passing control; all 32 public tests and
 formatting pass, and independent review passes. Full workspace native tests run
 with no-fail-fast to discover any remaining stale fixtures in one pass. Refreshed
 SDK recovery/contract/worker tests also pass 62/62.
+Full workspace verification at `164baa955c` passes 2,802 tests across 218 test
+results, with zero failures; both general CI runs are green. Native CI and
+Paradex pass. The bounded CPU retry still misses Hyperliquid Spot startup by
+0.4 ms and Hyro by 0.1 ms, with identical output and passing steady/memory.
+Profiling identifies repeated market-index hashing inside the symbol-settings
+sort introduced by this repair. Each row now captures its current index once,
+then sorts and encodes that same value; indices are never cached across flushes.
+Independent review confirms identical known/orphan/empty-symbol order and rails.
+A first paired timing was inconclusive. A balanced three-variant fixture
+comparison then measures original/cached-index main medians 43.387/38.418 ms,
+startup 31.526/27.951 ms, steady 10.736/10.950 ms and identical complete output.
+WASM shrinks 1,128,738 → 1,103,477 bytes. Canonical standalone Hyperliquid Spot
+passes main TS/Rust 39.3/38.7 ms, steady 12.3/11.2 ms, retained 18.9/6.1 MB.
+The constant ticker-loop experiment showed no benefit (+80 bytes), and a
+separate serializer boundary added no clear benefit; both were removed. Only
+the cached per-flush SETTINGS index is retained. Engine tests pass 95 unit +
+9 feed integration, cross-language writer tests 7/7, formatting and Clippy pass.
+The final combined rebuild, replays and exact-head CI follow.
 
 ## Security
 
