@@ -263,3 +263,28 @@ KuCoin final public/private gates and actual Spot SDK test pass. Exact commands,
 artifact/tape/harness hashes, counts and medians are committed in
 `venue-ports/KUCOIN_GATES.json`. Four other standard artifacts are being refreshed
 before the combined-host and actual SDK suite, PR reviews and CI.
+
+
+## Shared command compatibility correction
+
+A narrow audit of the newly introduced `AmendOrderWithSymbol` found unsupported
+native handlers could panic (KuCoin futures), complete the wrong ID (BloFin), or
+leave commands pending. This is compatibility for this lane's new command,
+not the separate roster-capability audit. `03f9b37c93` adds a default-false Venue
+opt-in and rejects the command centrally before unsupported venue callbacks.
+KuCoin Spot alone opts in and receives the entire original command unchanged.
+No translation to the legacy amendment drops routing context.
+
+The actual futures regression proves the original panic and then verifies one
+error for the caller's command, no I/O and byte-identical state before/after
+startup. Engine tests pin default rejection, unchanged legacy forwarding and
+opt-in payload forwarding. Engine plus KuCoin: 207 tests pass (KuCoin 138,
+including 38 Spot). Workspace Clippy and two independent reviews pass; full
+workspace validation and all six final standard artifacts are being refreshed.
+Earlier measurements above and in committed evidence retain their measured
+source attribution until those refreshes finish.
+
+`2db149c25c` also preserves browser URL resolution in Electron renderers exposing
+Node, plus worker location resolution. Six URL mode/runtime cases and the
+routing suites pass: 276 focused tests, 44 typecheck tasks, 28 lint tasks and
+independent review. This changes host callback handling only.
