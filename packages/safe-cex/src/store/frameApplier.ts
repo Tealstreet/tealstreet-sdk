@@ -303,7 +303,7 @@ export class FrameApplier {
       for (let i = 0; i < rows.length; i += width) {
         const price = rows[i];
         const amount = rows[i + 1];
-        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) {
+        if (!Number.isFinite(price) || !Number.isFinite(amount) || amount < 0) {
           throw new Error('Order book snapshot required: invalid level');
         }
         if (amount === 0) levels.delete(price);
@@ -341,7 +341,7 @@ export class FrameApplier {
         for (let i = 0; i < levels.length; i += 3) {
           const price = levels[i];
           const amount = levels[i + 1];
-          if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) {
+          if (!Number.isFinite(price) || !Number.isFinite(amount) || amount < 0) {
             throw new Error('Order book snapshot required: invalid level');
           }
           if (descending ? price >= previous : price <= previous) return side(levelMap(levels), descending);

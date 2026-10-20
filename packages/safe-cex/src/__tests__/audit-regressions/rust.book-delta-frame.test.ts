@@ -158,4 +158,20 @@ describe('Rust BOOK_DELTA reconstruction', () => {
     expect(applier.books(next)[0].orderbook.bids).toEqual(levels([[99, 2, 2], [98, 4, 6]]));
   });
 
+  it('retains a legitimate zero-price level through a full baseline, update and deletion', () => {
+    const applier = new FrameApplier(new DefaultStore());
+    const first = frame({ markets: [['outcome-native', 'OUTCOME']], books: [
+      { market: 0, bids: [0.5, 3, 3, 0, 2, 5], asks: [] },
+    ] });
+    applier.apply(first);
+    expect(applier.books(first)[0].orderbook.bids).toEqual(levels([[0.5, 3, 3], [0, 2, 5]]));
+    const update = frame({ deltas: [{ market: 0, bids: [0, 5], asks: [] }] });
+    applier.apply(update);
+    expect(applier.books(update)[0].orderbook.bids).toEqual(levels([[0.5, 3, 3], [0, 5, 8]]));
+    const deletion = frame({ deltas: [{ market: 0, bids: [0, 0], asks: [] }] });
+    applier.apply(deletion);
+    expect(applier.books(deletion)[0].orderbook.bids).toEqual(levels([[0.5, 3, 3]]));
+    expect(applier.books(first)[0].orderbook.bids).toEqual(levels([[0.5, 3, 3], [0, 2, 5]]));
+  });
+
 });

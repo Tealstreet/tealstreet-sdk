@@ -251,7 +251,9 @@ applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios
 
 `FrameApplier` retains book baselines by symbol and market ID, independent of
 market-row ordering. `BOOK` replaces both sides, including an empty reset;
-`BOOK_DELTA` upserts price/amount pairs and deletes zero amounts. Consumers
+`BOOK_DELTA` upserts price/amount pairs and deletes zero amounts. Prices may
+be any finite value, including zero-price prediction levels; only amount zero
+deletes a level. Consumers
 receive best-first sorted levels with recomputed cumulative totals. A delta
 without a matching full baseline throws a snapshot-required error; reconnect
 must create a new stream from its snapshot before applying deltas. Frame book

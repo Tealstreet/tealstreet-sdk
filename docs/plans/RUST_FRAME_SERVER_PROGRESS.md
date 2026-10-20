@@ -230,3 +230,16 @@ both web and Node, **11,209 bytes** under the unchanged budget, still only
 79 bytes above the landed twenty-three-venue CI artifact. Artifact-dependent
 host tests are deferred until the combined build is restored; a diagnostic
 single-venue run's two missing-feature errors are not counted as acceptance.
+
+Final root review caught a cross-venue compatibility regression in the newly
+added consumer validation: Polymarket accepts zero-price levels, but both
+FrameApplier paths rejected nonpositive prices. Removed that extra price-domain
+restriction, retaining finite prices and finite nonnegative amounts. A real
+zero-price full baseline/update/delete regression also checks totals and retained
+output. Independent review passes; focused frame suites now pass 26 tests, and
+post-fix package typecheck/lint pass. This fixes this branch's new implementation,
+not a TS venue defect; no KNOWN_TS_FIXES change is needed.
+
+On the twenty-three-venue tree, root typecheck passes 44 tasks and lint 28 tasks;
+harness unit tests pass 368/368. Full JS integration still waits for combined
+WASM artifacts, and full native/workspace checks remain in flight.
