@@ -165,7 +165,12 @@ are repaired and independently re-reviewed: 27 decoder tests and 37 recovery
 tests pass, with three failing-before controls for each defect, plus typecheck
 and production lint. Required references reject NONE while optional values and
 empty strings retain their contracts. Local/RPC snapshots share coherent capture.
-CI integration repairs and final green-CI verification remain in progress.
+CI exposed stale tests for the repaired contracts: BreakoutProp synthetic
+candles expected a market-only startup flush, and two WASM consumer fixtures
+omitted FILLS.orderId. Corrected tests preserve their original data assertions;
+36 BreakoutProp public tests and 262 WASM consumer tests pass. The initial CI
+also hit Paradex size and two small CPU comparisons; fixed-budget integration
+and final green-CI verification remain in progress.
 
 ## Security
 
