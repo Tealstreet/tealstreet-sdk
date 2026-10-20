@@ -83,6 +83,7 @@ const RESPONSES: Record<string, string> = {
   order: '{"orderId":4242,"status":"NEW","clientOrderId":"x"}',
   allOpenOrders: '{"code":200,"msg":"The operation of cancel all open order is done."}',
   algoOpenOrders: '{"code":200,"msg":"success"}',
+  trades: '[{"id":1,"price":"100.5","qty":"0.2","quoteQty":"20.1","time":1700000000000,"isBuyerMaker":true}]',
 };
 
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
@@ -239,6 +240,17 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
       expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
     },
   );
+
+  it('reads public trades and adopts capabilities from the worker without a main-thread engine', async () => {
+    const { tape } = await start(true);
+    await expect(main!.fetchPublicTrades('BTCUSDT')).resolves.toEqual([
+      expect.objectContaining({ id: '1', symbol: 'BTCUSDT', price: 100.5, side: 'sell' }),
+    ]);
+    expect(tape.requests.filter((request) => request.includes('/fapi/v1/trades?'))).toHaveLength(1);
+    await vi.waitFor(() => expect(main!.engineCapabilities).toEqual((worker!.exchange as RustEngineExchange).engineCapabilities));
+    await expect(main!.loadCapabilities()).resolves.toEqual(worker!.exchange!.capabilities);
+    expect(main!.hasStarted).toBe(false);
+  });
 
   it('reports a worker-side preflight rejection once and sends nothing', async () => {
     const { tape } = await start(true);

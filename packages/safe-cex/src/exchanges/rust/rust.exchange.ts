@@ -31,7 +31,7 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, WorkerTradingMethod } from '../base';
+import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
@@ -61,7 +61,7 @@ import {
   BaseExchange,
   type ExchangeCapabilities,
   markBaseCapabilityFallback,
-  WORKER_TRADING_METHODS,
+  WORKER_FORWARDED_METHODS,
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
@@ -253,6 +253,7 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukeOrders',
 ]);
 const MULTI_COMMAND_WAIT_FACTOR = 5;
+const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -327,8 +328,41 @@ export class RustEngineExchange extends BaseExchange {
   fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
-    await this.ensureHost();
+    // A main-thread mirror asks the worker's engine rather than building its own.
+    if (this.routesToWorker && !this.host) await this.loadWorkerCapabilities();
+    else await this.ensureHost();
     return this.capabilities;
+  };
+
+  /** Worker side of `loadCapabilities` for a main-thread mirror. */
+  fetchEngineCapabilities = async (): Promise<EngineCapabilities | undefined> => {
+    await this.ensureHost();
+    return this.capabilityRecord;
+  };
+
+  private workerCapabilities?: Promise<void>;
+  private workerCapabilityRetryAt = 0;
+  private stopWorkerCapabilitySync?: () => void;
+
+  private loadWorkerCapabilities = (): Promise<void> =>
+    (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
+      (record) => {
+        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptCapabilities(record as EngineCapabilities);
+      },
+      (error: unknown) => {
+        this.workerCapabilities = undefined;
+        this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
+        throw error;
+      },
+    ));
+
+  // A mirror learns capability-defined methods (Lighter tiers, history axes) once the worker has loaded.
+  private syncWorkerCapabilities = () => {
+    if (this.capabilityRecord || this.host || this.workerCapabilities || this.isDisposed) return;
+    if (!this.store.loaded.markets || !this.routesToWorker || Date.now() < this.workerCapabilityRetryAt) return;
+    void this.loadWorkerCapabilities().catch(() => {
+      /* Retried on a later store update; explicit loadCapabilities callers see the failure. */
+    });
   };
 
   /** What the venue answers, as its engine reports it; unknown until the engine exists. */
@@ -358,11 +392,17 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
+        if (this.routesToWorker) {
+          await this.callWorker('changeAccountTier', tier);
+          return;
+        }
         await this.command<null>({ op: 'setAccountTier', tier });
         this.writeLighterTier(tier);
       };
-      this.fetchAccountTier = async () =>
-        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      this.fetchAccountTier = async () => {
+        if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
+        return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      };
     }
   }
 
@@ -423,7 +463,8 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
-    this.forwardTradingToWorker();
+    this.forwardToWorker();
+    this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
   get isPublicDataOnly(): boolean {
@@ -735,15 +776,16 @@ export class RustEngineExchange extends BaseExchange {
     return this.emitter.hasListeners('callMethod');
   }
 
-  private forwardTradingToWorker() {
-    for (const method of WORKER_TRADING_METHODS) {
+  /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+
+  private forwardToWorker() {
+    for (const method of WORKER_FORWARDED_METHODS) {
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerTradingMethod, unknown>)[method] = async (...args: unknown[]) => {
+      (this as Record<WorkerForwardedMethod, unknown>)[method] = async (...args: unknown[]) => {
         if (!this.routesToWorker) return local(...args);
-        const result = await (this.callMethodInWorker as (m: WorkerTradingMethod, ...a: unknown[]) => Promise<unknown>)(
-          method,
-          ...args,
-        );
+        const result = await this.callWorker(method, ...args);
         // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
         return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
       };
@@ -1649,6 +1691,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopWorkerCapabilitySync?.();
+    this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());

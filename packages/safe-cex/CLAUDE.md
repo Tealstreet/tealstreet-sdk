@@ -124,8 +124,9 @@ once the engine exists.
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
-worker bridge) forwards the `WORKER_TRADING_METHODS` in `exchanges/base.ts` whole
-through `callMethodInWorker`, so preflight, placement scopes and nuke retries run
+worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
+(trading, nuke, client-ID lookup, public trades) whole through
+`callMethodInWorker`, so preflight, placement scopes and nuke retries run
 against the worker's state and report there once. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
 worker never has that listener. Without a bridge, an instance runs locally.
@@ -134,6 +135,13 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+
+A bridged mirror never builds an engine for capabilities: `loadCapabilities`
+asks the worker (`fetchEngineCapabilities`), and once the mirror store reports
+markets loaded it adopts that record automatically. Capability-defined methods
+(Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
+the mirror, and the tier methods forward to the worker
+(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds.
 
 ## Rust engine failure
 

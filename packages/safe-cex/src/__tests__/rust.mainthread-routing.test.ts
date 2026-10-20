@@ -79,4 +79,39 @@ describe('main-thread Rust trading routing', () => {
       },
     });
   });
+
+  it('learns capability methods from the worker and forwards Lighter tier changes there', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange('lighter', { key: 'k', secret: 's', apiKeyIndex: '3' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const answers: Record<string, unknown> = {
+      fetchEngineCapabilities: { accountTier: true, fillHistory: false, orderHistory: true, incomeHistory: true },
+      changeAccountTier: null,
+      fetchAccountTier: 'premium',
+    };
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', {
+          requestId: event.requestId,
+          success: true,
+          result: answers[event.method],
+        }),
+      );
+    });
+    expect(main.changeAccountTier).toBeUndefined();
+    main.store.update({ loaded: { ...main.store.loaded, markets: true } });
+    await vi.waitFor(() => expect(main!.changeAccountTier).toBeTypeOf('function'));
+    expect(main.capabilities.fillHistory).toBe(false);
+    await main.changeAccountTier!('premium');
+    await expect(main.fetchAccountTier!()).resolves.toBe('premium');
+    expect(calls).toEqual([
+      { method: 'fetchEngineCapabilities', args: [] },
+      { method: 'changeAccountTier', args: ['premium'] },
+      { method: 'fetchAccountTier', args: [] },
+    ]);
+    expect(main.hasStarted).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+  });
 });
