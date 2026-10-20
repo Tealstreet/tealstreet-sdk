@@ -26,6 +26,7 @@ js-sys = "0.3.106"
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
+safe-cex-venue-hyperliquid = { path = "venues/hyperliquid" }
 safe-cex-venue-blofin = { path = "venues/blofin" }
 safe-cex-venue-mexc = { path = "venues/mexc" }
 safe-cex-venue-bingx = { path = "venues/bingx" }
@@ -79,9 +80,9 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep dispatch/serialization glue compact. The shared engine stays at O3.
+# Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"
@@ -98,5 +99,10 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-orderly]
 opt-level = "z"
 
-[profile.release.package.safe-cex-crypto]
-opt-level = "z"
+# Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized
+# for throughput while the aggregate WASM build optimizes other crates for size.
+[profile.release.package.safe-cex-venue-bitget]
+opt-level = 3
+
+[profile.release.package.safe-cex-engine]
+opt-level = 3

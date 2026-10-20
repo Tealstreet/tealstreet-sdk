@@ -216,3 +216,13 @@ Unused hmac_sha512 helper removed; spec-required P5a signing primitives retained
 Legacy built-in HOW tunnel cannot preserve signed bytes and currently fails
 explicitly; raw custom transport/proxy routes preserve bytes. Document/review
 this limitation before shipping.
+
+### Landing refresh (c5bc2c4adf)
+
+Merged the landing branch after the quota interruption, preserving Bitget and
+Hyperliquid, strict harness request/write accounting, and optional per-venue
+WASM builds. Orderly now participates in those feature builds; the landing
+per-venue budget replaces the obsolete aggregate-size workaround above.
+The new shared client-order lookup query fails explicitly for Orderly.
+Locked native checks of the Orderly crate and complete WASM host pass.
+Remaining integration and lifecycle gates above remain open.

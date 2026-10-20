@@ -62,6 +62,16 @@ pub fn private_started() -> (
     Vec<HttpRequest>,
     safe_cex_engine::TimerId,
 ) {
+    private_started_with_markets(MARKETS)
+}
+pub fn private_started_with_markets(
+    markets: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    safe_cex_engine::TimerId,
+) {
     let mut e = Engine::new(MexcFutures::new(Options {
         public_data_only: false,
         key: Some("replay-key".into()),
@@ -69,7 +79,7 @@ pub fn private_started() -> (
     }));
     e.start(0.0);
     let r = requests(&mut e).remove(0);
-    response(&mut e, &r, MARKETS);
+    response(&mut e, &r, markets);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, TICKERS);
     let actions: Vec<_> = e.drain_actions().collect();

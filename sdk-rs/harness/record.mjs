@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
-import { canonicalUrl } from './tape.mjs';
+import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { venueOf } from './venues.mjs';
 
@@ -97,18 +97,15 @@ const recording = {
   },
 };
 
-const { WasmEngine } = await loadEngine();
+const options = { ...venue.options, ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
+const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;
 const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
     venue.rust,
-    JSON.stringify({
-      ...venue.options,
-      ...venue.publicOptions,
-      publicDataOnly: true,
-    }),
+    JSON.stringify(options),
   ),
   recording,
   {

@@ -182,6 +182,11 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Query {
+    /// Resolve an uncertain placement using the venue-native client ID.
+    OrderByClientId {
+        symbol: String,
+        client_order_id: String,
+    },
     /// The account's own executions.
     Fills {
         symbol: Option<String>,
@@ -401,6 +406,7 @@ impl<P> Cx<'_, P> {
         self.request_streamed_body(method, url, headers, None, at, pending)
     }
 
+    /// Stream a POSTed read while retaining its typed request body.
     pub fn request_streamed_body(
         &mut self,
         method: Method,
@@ -504,6 +510,23 @@ pub trait Venue {
         _pending: &mut Self::Pending,
         _item: &str,
     ) {
+    }
+    /// A complete envelope arrived without its expected streamed list. Venues
+    /// may recognize business errors; successful missing lists still fail.
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
     }
     fn on_request_failed(
         &mut self,
@@ -659,6 +682,19 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                let body = splitter.envelope();
+                if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
+                    self.venue.on_stream_error(
+                        &mut cx,
+                        pending,
+                        Response {
+                            status: incoming.status,
+                            headers: &incoming.headers,
+                            body,
+                        },
+                    );
+                    return;
+                }
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");

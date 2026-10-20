@@ -212,6 +212,15 @@ impl Request {
 impl Cryptocom {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, path, symbol, order_id, income_kind, from_ms, to_ms, limit) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err(
+                        "Crypto.com client order lookup is not supported by the Rust engine".into(),
+                    ),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,

@@ -199,11 +199,22 @@ impl Blofin {
         command: CommandId,
         query: Query,
     ) {
-        if !matches!(query, Query::PublicTrades { .. }) && !self.signed() {
+        if !matches!(
+            query,
+            Query::PublicTrades { .. } | Query::OrderByClientId { .. }
+        ) && !self.signed()
+        {
             cx.done(command, Ok("[]".into()));
             return;
         }
         let (symbol, from, to) = match &query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("BloFin client-order-ID lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 from_ms,
@@ -242,6 +253,13 @@ impl Blofin {
             return;
         }
         let rows = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("BloFin client-order-ID lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills { .. } => Rows::Fills(vec![]),
             Query::OrderHistory { .. } => Rows::Orders(vec![]),
             Query::Income { .. } => Rows::Income(vec![]),
@@ -265,6 +283,13 @@ impl Blofin {
     }
     fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let (endpoint, symbol, from, to, limit) = match &request.query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    request.command,
+                    Err("BloFin client-order-ID lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 from_ms,

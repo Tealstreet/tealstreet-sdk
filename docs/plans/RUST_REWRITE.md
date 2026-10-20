@@ -267,7 +267,7 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
+  wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
 
@@ -287,14 +287,16 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
 | BingX | done (#1305) |
-| MEXC | done (#1304); conditional/trailing parity check pending |
+| MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
+| Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
-| Bitget, Hyperliquid, Bitunix | wave 1, PRs in review |
-| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
-| KuCoin, Phemex | wave 2 lanes running |
+| Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
+| Bitunix | wave 1, PR in review |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane running |
+| KuCoin, Phemex, WOO, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
+| Lighter, Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

@@ -43,3 +43,16 @@ export function fixWeexConditionals(account, records) {
     }
   }
 }
+
+// BlofinMetadata.supportsPositionMargin is false, and its TS mapPositions omits
+// marginSize. Store merges can retain a zero-size placeholder's marginSize=0;
+// the unavailable field is null in the comparison, independently of Rust.
+export function fixBlofinAccount(account) {
+  for (const position of account.positions) {
+    if (position.marginSize === 0) position.marginSize = null;
+  }
+  if (account.positions.length === 0) {
+    account.balance.used = 0;
+    account.balance.upnl = 0;
+  }
+}
