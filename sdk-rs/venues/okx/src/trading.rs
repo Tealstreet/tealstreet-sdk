@@ -1,7 +1,9 @@
 //! Commands are preflighted once, then executed as ordered, non-retried writes.
 use crate::{Okx, Pending, wire};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -34,6 +36,8 @@ struct Job {
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
     continue_cancel_errors: bool,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 enum Finish {
     Ids,
@@ -154,7 +158,10 @@ impl Okx {
                 return;
             }
             Command::SetMarginType { command, .. } => {
-                cx.done(command, Err("Only cross mode is supported".into()));
+                cx.fail(
+                    command,
+                    not_sent("Only cross mode is supported").kind(ErrorKind::Unsupported),
+                );
                 return;
             }
             Command::SetLeverage {
@@ -229,11 +236,11 @@ impl Okx {
             _ => return,
         };
         if self.credentials.is_none() || !self.account.ready {
-            cx.done(id, Err("OKX account is not ready".into()));
+            cx.fail(id, not_sent("OKX account is not ready"));
             return;
         }
         if self.trading.jobs.contains_key(&id) {
-            cx.done(id, Err("command is already running".into()));
+            cx.fail(id, not_sent("command is already running"));
             return;
         }
         match result {
@@ -254,7 +261,7 @@ impl Okx {
                 self.trading.jobs.insert(id, job);
                 self.next_write(cx, id);
             }
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput)),
         }
     }
 
@@ -861,11 +868,9 @@ impl Okx {
             return;
         }
         if !(200..300).contains(&response.status) {
-            self.trade_failed(
-                cx,
-                request,
-                &format!("OKX HTTP {}: {}", response.status, response.body),
-            );
+            let code = parsed.as_ref().ok().map(|reply| reply.code);
+            let error = format!("OKX HTTP {}: {}", response.status, response.body);
+            self.trade_failed(cx, request, rejection(error, code, response.status));
             return;
         }
         let envelope = match parsed {
@@ -884,11 +889,9 @@ impl Okx {
                 if matches!(envelope.code, "0" | "2") {
                     self.trade_lost(cx, request, "Malformed OKX write response");
                 } else {
-                    self.trade_failed(
-                        cx,
-                        request,
-                        &format!("OKX {}: {}", envelope.code, envelope.msg),
-                    );
+                    let error = format!("OKX {}: {}", envelope.code, envelope.msg);
+                    let error = rejection(error, Some(envelope.code), response.status);
+                    self.trade_failed(cx, request, error);
                 }
                 return;
             }
@@ -971,25 +974,29 @@ impl Okx {
         {
             cx.placement_resolved(request.command);
         }
-        let errors: Vec<_> = acks
+        let failed = acks
             .iter()
-            .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty())
+            .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty());
+        let first_code = failed.clone().next().map(|a| a.s_code);
+        let errors: Vec<_> = failed
             .map(|a| format!("{} (code {})", a.s_msg, a.s_code))
             .collect();
         if envelope.code != "0"
             && !(job.continue_cancel_errors && envelope.code == "2" && !errors.is_empty())
         {
             let error = if errors.is_empty() {
-                format!("OKX {}: {}", envelope.code, envelope.msg)
+                let error = format!("OKX {}: {}", envelope.code, envelope.msg);
+                rejection(error, Some(envelope.code), response.status)
             } else {
-                errors.join("; ")
+                rejection(errors.join("; "), first_code, response.status)
             };
-            self.trade_failed(cx, request, &error);
+            self.trade_failed(cx, request, error);
             return;
         }
         if !errors.is_empty() {
             if !job.continue_cancel_errors {
-                self.trade_failed(cx, request, &errors.join("; "));
+                let error = rejection(errors.join("; "), first_code, response.status);
+                self.trade_failed(cx, request, error);
                 return;
             }
             for error in errors {
@@ -1001,14 +1008,16 @@ impl Okx {
             return;
         }
         job.steps.pop_front();
+        job.effective = true;
         self.next_write(cx, request.command);
     }
 
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
         self.finish_failed_trade(cx, request, error, false);
     }
 
     pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        let error = VenueError::new(error).outcome(Outcome::Unknown);
         self.finish_failed_trade(cx, request, error, true);
         self.account_after_uncertain_write(cx);
     }
@@ -1017,10 +1026,14 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        mut error: VenueError,
         uncertain: bool,
     ) {
         if let Some(job) = self.trading.jobs.remove(&request.command) {
+            // A later rejection after a step took effect cannot mean nothing happened.
+            if job.effective && !uncertain {
+                error.outcome = None;
+            }
             for (id, status) in job.optimistic {
                 if !uncertain
                     && cx.store.order(&id).is_some_and(|o| {
@@ -1031,8 +1044,33 @@ impl Okx {
                 }
             }
         }
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
+}
+
+/// A definitive OKX refusal, classified by its code or HTTP status.
+fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
+    let kind = match (code, status) {
+        (Some("50011" | "50061"), _) | (_, 429) => ErrorKind::RateLimited,
+        (Some("50111" | "50112" | "50113" | "50114" | "50119"), _) | (_, 401) => {
+            ErrorKind::AuthInvalid
+        }
+        (Some("50110" | "50120"), _) | (_, 403) => ErrorKind::AuthPermission,
+        (Some("50014" | "51000"), _) => ErrorKind::InvalidInput,
+        _ => ErrorKind::Rejected,
+    };
+    let mut error = VenueError::new(message)
+        .kind(kind)
+        .outcome(Outcome::Rejected);
+    if let Some(code) = code.filter(|code| !code.is_empty()) {
+        error = error.venue_code(code);
+    }
+    error
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
 
 fn empty_payload() -> OrderPayload {
@@ -1085,6 +1123,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         finish,
         optimistic: Vec::new(),
         continue_cancel_errors: false,
+        effective: false,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
