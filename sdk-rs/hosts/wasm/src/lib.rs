@@ -7,6 +7,7 @@
 #[cfg(not(any(
     feature = "bitrue",
     feature = "binance",
+    feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
@@ -25,13 +26,15 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "apexomni")]
+use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
 #[cfg(feature = "asterdex")]
 use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "backpack")]
@@ -119,6 +122,7 @@ struct KucoinExtra {
 
 #[cfg(any(
     feature = "binance",
+    feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
@@ -152,6 +156,7 @@ struct EngineOptions {
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "binance",
+        feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
@@ -181,10 +186,14 @@ struct EngineOptions {
         feature = "okx",
         feature = "weex",
         feature = "blofin",
-        feature = "bitget"
+        feature = "bitget",
+        feature = "apexomni"
     ))]
     #[serde(default)]
     passphrase: Option<String>,
+    #[cfg(feature = "apexomni")]
+    #[serde(default)]
+    omni_key_seed: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
         feature = "asterdex",
@@ -406,6 +415,9 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    GetAccount {
+        command: u32,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -550,6 +562,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
                 symbol,
@@ -721,6 +734,7 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[cfg(any(
         feature = "binance",
+        feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
@@ -759,6 +773,16 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "apexomni")]
+            "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                omni_key_seed: options.omni_key_seed,
+                tick_interval_ms: None,
+            }))),
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
                 testnet: options.testnet,
@@ -1088,6 +1112,18 @@ impl WasmEngine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn account_command_aliases_share_the_engine_read() {
+        for op in ["getAccount", "fetchAccount"] {
+            let wire: CommandIn =
+                serde_json::from_str(&format!(r#"{{"op":"{op}","command":77}}"#)).unwrap();
+            assert!(matches!(
+                Command::from(wire),
+                Command::FetchAccount { command: 77 }
+            ));
+        }
+    }
+
     #[test]
     fn http_route_metadata_is_optional_and_has_stable_host_names() {
         let actions = [

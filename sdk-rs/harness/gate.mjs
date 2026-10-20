@@ -152,6 +152,18 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+  apexomni: [],
   kraken: {
     output: fixKrakenOutput,
     fixes: [

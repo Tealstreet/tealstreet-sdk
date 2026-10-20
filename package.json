@@ -52,7 +52,8 @@
     "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
     "rust:private-tape-binancespot": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancespot",
     "rust:private-tape-binanceinverse": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binanceinverse",
-    "rust:private-tape-binancepm": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancepm"
+    "rust:private-tape-binancepm": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancepm",
+    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
