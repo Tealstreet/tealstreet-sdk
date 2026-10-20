@@ -370,3 +370,25 @@ jobs:
             yarn rust:private-tape-coinbase --venue coinbasespot --profile spot --algorithm "$algorithm" --out "$tape"
             yarn rust:gate --venue coinbasespot --tape "$tape" --runs 1 --books ''
           done
+
+      # Keep failed replay evidence; these jobs use offline, generated fixture accounts.
+      - name: Retain raw replay results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-replay-${{ matrix.venue }}-${{ github.run_attempt }}
+          path: sdk-rs/harness/out/**/*.json
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Retain isolated WASM family packages
+        if: always() && matrix.venue == 'binance'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-wasm-families-${{ github.run_attempt }}
+          # The extra directory level selects families and excludes aggregate outputs.
+          path: |
+            sdk-rs/hosts/wasm/pkg/web/*/safe_cex_wasm*
+            sdk-rs/hosts/wasm/pkg/node/*/safe_cex_wasm*
+            sdk-rs/hosts/wasm/pkg/node/*/package.json
+          retention-days: 3
+          if-no-files-found: ignore

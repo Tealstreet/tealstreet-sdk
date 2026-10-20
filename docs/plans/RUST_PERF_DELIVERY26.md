@@ -675,3 +675,43 @@ and new KuCoin Spot private generators; reuse 62 verified tapes. Public tapes
 changed for Bitrue, KuCoin and Paradex, plus new Spot. Source-bound old numbers
 remain historical. Final real-WASM checks, measurements, wider margins and
 green CI remain pending.
+
+## Current CI evidence and bounded collection policy
+
+At `a5814effbc`, CI passes actual-WASM SDK436/15 files, host182, product16,
+frame-wire1 and native session1. Native test/Clippy and wasm32 jobs also pass.
+The workflow remains red: four package families exceed caps (Binance966515,
+Bitrue848368, Hyperliquid1092969, KuCoinSpot718820), and Hyro steady CPU fails.
+The unused signing export gate saves 2094 bytes on Bitrue/Hyperliquid and 2033
+on Spot compared with initial CI. These are size observations, not CPU wins.
+Review only four explicit actual-plus-3%-rounded-KiB caps after fresh physical
+Node/web verification: 996352/874496/1126400/741376 respectively. Other 23 caps
+stay fixed; do not perform more compiler trials. Preserve both CI failures and
+the initial SDK failure (434/436; missing Paradex loader argument, now fixed).
+
+All 64 private tapes are prepared: two offline generators (changed Bitrue and
+new KuCoin Spot) pass; 62 prior tapes/logs are byte-verified unchanged. The
+40-profile roster preserves prior ordering and appends Spot, with 20 AB/20 BA.
+Use Node22.23.3 for the next source-bound collection, matching CI's major
+version, with one executable/hash for both arms. This explicitly changes the
+Node26 method; no existing numerical outcome is retried or relabelled.
+
+Declare independent-case continuation before any new public samples: execute
+each private case and each fixed public arm once. Preserve operational, parity,
+audit, missing-output and invalid-metric cases as unresolved, never passing or
+contributing a comparison. Compare only fully valid pairs with identical
+per-implementation logical hashes across all six samples. Any unresolved case,
+missing coverage or failed objective prevents overall pass. Source/config/
+binding drift remains globally fatal. Check and clean the owned process group
+after every gate; leaked descendants make that case unresolved, and inability
+to confirm cleanup stops the whole collection. Pure counterexamples pass101;
+no engine children or configuration freeze have run. Independent review of
+the final runner remains required. `RUST_PERF_DELIVERY27_ROSTER_CI.json.gz`
+retains the metadata, scripts, CI numeric receipts and full CI status.
+
+CI now retains offline replay JSON and isolated family packages for three days,
+including failures, with attempt-specific artifact names. Exclude tapes,
+environment files, source and aggregate bindings. This improves reviewable
+evidence and does not add publishing or live-account automation. Local full
+Rust verification and isolated current-control/release builds are still active;
+the PR remains draft and the full performance task remains unfinished.
