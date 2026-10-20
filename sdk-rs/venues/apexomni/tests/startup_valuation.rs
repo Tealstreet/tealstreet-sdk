@@ -1,4 +1,4 @@
-//! Private reported PnL remains authoritative before and after public quotes.
+//! Live last prices value the balance like TS; reported PnL covers absent or placeholder quotes.
 mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, TimerId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
@@ -75,8 +75,8 @@ impl Harness {
     }
 }
 #[test]
-fn native_position_pnl_drives_funded_balance_even_with_zero_invalid_or_conflicting_quotes() {
-    for price in [0.0, -1.0, f64::NAN, f64::INFINITY, 900.0] {
+fn native_position_pnl_drives_funded_balance_with_placeholder_or_invalid_quotes() {
+    for price in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let mut h = Harness::new();
         h.engine
             .store_mut()
@@ -98,6 +98,24 @@ fn native_position_pnl_drives_funded_balance_even_with_zero_invalid_or_conflicti
         assert!(h.logs.iter().any(|s| s.contains("PnL unavailable")));
     }
 }
+#[test]
+fn real_last_price_values_the_balance_even_when_native_position_pnl_lags() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .update_ticker("BTCUSDT", |t| t.last = 95.0);
+    h.snapshot(Some(0.0));
+    assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 0.0);
+    let b = h.engine.store().balance();
+    assert_eq!(
+        (b.total, b.free, b.used, b.upnl),
+        (1010.0, 900.0, 20.0, -10.0)
+    );
+    h.poll();
+    h.snapshot(None);
+    assert_eq!(h.engine.store().balance().upnl, -10.0);
+}
+
 #[test]
 fn missing_initial_native_pnl_keeps_exposure_without_using_entry_as_a_market_price() {
     let mut h = Harness::new();
