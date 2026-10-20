@@ -60,6 +60,7 @@ pub struct AccountState {
     pub tifs: HashMap<String, TimeInForce>,
     pub reduces: HashMap<String, bool>,
     pub filled: HashMap<String, (f64, f64)>,
+    pub pending_executions: HashMap<String, f64>,
     pub login_retry: Option<TimerId>,
 }
 impl Axis {
@@ -314,6 +315,10 @@ impl BitunixFutures {
             self.account.filled.retain(|id, _| {
                 self.account.terminal.contains_key(id) || cx.store.order(id).is_some()
             });
+            // Deferred metadata follows the same bounded lifetime as execution watermarks.
+            self.account.pending_executions.retain(|id, _| {
+                self.account.terminal.contains_key(id) || cx.store.order(id).is_some()
+            });
             self.read_axis(cx, Axis::Balance);
             self.account.count += 1;
             if self.account.count.is_multiple_of(32) {
@@ -558,6 +563,10 @@ impl BitunixFutures {
         let retained: std::collections::HashSet<_> = orders.iter().map(|o| o.id.clone()).collect();
         self.account.native.retain(|id, _| retained.contains(id));
         for (id, baseline) in read.baselines {
+            // A snapshot must not consume an observed execution awaiting price or side.
+            if self.account.pending_executions.contains_key(&id) {
+                continue;
+            }
             let previous = self.account.filled.entry(id).or_insert(baseline);
             if baseline.0 > previous.0 {
                 *previous = baseline;
@@ -790,6 +799,7 @@ impl BitunixFutures {
                         cx.log(LogLevel::Warning, "Bitunix order event missing identity");
                         return;
                     }
+                    let emitted = self.account.filled.get(raw).map_or(0.0, |v| v.0);
                     let (filled, updated, closed) = cx
                         .store
                         .orders()
@@ -803,11 +813,7 @@ impl BitunixFutures {
                                     .is_some_and(|meta| meta.raw_id == raw)
                         })
                         .fold(
-                            (
-                                self.account.filled.get(raw).map_or(0.0, |v| v.0),
-                                0.0_f64,
-                                false,
-                            ),
+                            (emitted, 0.0_f64, false),
                             |(filled, updated, closed), row| {
                                 (
                                     filled.max(row.filled),
@@ -819,9 +825,11 @@ impl BitunixFutures {
                     let timestamp = time_ms(&o.mtime);
                     let stale_timestamp = timestamp > 0.0 && timestamp < updated;
                     let cumulative = o.deal_amount.map(|value| value.0);
+                    // Visible cumulative quantity can advance before execution metadata arrives.
+                    // Recovery advances the emission watermark, even if quantity is unchanged.
                     let advancing_execution = !tpsl
                         && matches!(o.event.as_ref(), "CLOSE" | "UPDATE")
-                        && cumulative.is_some_and(|value| value > filled);
+                        && cumulative.is_some_and(|value| value > emitted);
                     // Fence stale events before touching raw protection metadata too.
                     // A late terminal execution can still advance a canceled order.
                     if (!tpsl
@@ -838,11 +846,17 @@ impl BitunixFutures {
                         && o.event != "CLOSE"
                         && !(o.event == "UPDATE"
                             && !tpsl
-                            && cumulative.is_some_and(|value| value > filled))
+                            && cumulative.is_some_and(|value| value > emitted))
                     {
                         self.debounce(cx, Axis::Orders);
                         return;
                     }
+                    // Capture the reconciled parent before CREATE can synthesize defaults.
+                    let execution_parent = cx
+                        .store
+                        .order(raw)
+                        .filter(|row| row.symbol == o.symbol.as_ref())
+                        .map(|row| (row.side, row.price));
                     if !stale_timestamp {
                         for n in self.account.native.values_mut().filter(|n| n.raw_id == raw) {
                             if let Some(p) = o.tp_price {
@@ -871,7 +885,13 @@ impl BitunixFutures {
                             }
                         }
                     }
-                    if o.event == "CREATE" && !self.account.terminal.contains_key(raw) {
+                    if o.event == "CREATE"
+                        && !self.account.terminal.contains_key(raw)
+                        // A sparse CREATE must not manufacture a parent side for later fills.
+                        && (tpsl
+                            || o.side.eq_ignore_ascii_case("BUY")
+                            || o.side.eq_ignore_ascii_case("SELL"))
+                    {
                         let (rows, native) = self.map_orders(cx, &o, tpsl, true);
                         if !o.client_id.is_empty() && !o.effect.is_empty() {
                             self.account
@@ -882,7 +902,9 @@ impl BitunixFutures {
                             cx.store.upsert_order(row);
                         }
                         self.account.native.extend(native);
-                    } else if o.event != "CREATE" {
+                    } else if o.event != "CREATE"
+                        || (!tpsl && execution_parent.is_some() && o.side.is_empty())
+                    {
                         if o.event == "CLOSE" {
                             self.account.terminal.insert(raw.to_owned(), cx.now);
                         }
@@ -965,27 +987,64 @@ impl BitunixFutures {
                         }
                     }
                     if !tpsl {
-                        let previous = self
-                            .account
-                            .filled
-                            .entry(o.order_id.to_string())
-                            .or_insert((0.0, 0.0));
+                        let previous = self.account.filled.get(raw).copied().unwrap_or((0.0, 0.0));
                         let cumulative = cumulative.unwrap_or(previous.0);
                         let delta = cumulative - previous.0;
                         if delta > 0.0 {
-                            let cost = if o.average_price.0 > 0.0 {
-                                o.average_price.0 * cumulative
+                            let side = if o.side.eq_ignore_ascii_case("BUY") {
+                                Some(OrderSide::Buy)
+                            } else if o.side.eq_ignore_ascii_case("SELL") {
+                                Some(OrderSide::Sell)
+                            } else if o.side.is_empty() {
+                                execution_parent.map(|(side, _)| side)
                             } else {
-                                previous.1 + delta * o.price.0
+                                None
                             };
-                            cx.fill(Fill {
-                                order_id: o.order_id.to_string(),
-                                symbol: o.symbol.to_string(),
-                                side: order_side(&o.side),
-                                price: (cost - previous.1) / delta,
-                                amount: delta,
-                            });
-                            *previous = (cumulative, cost);
+                            let price = if o.price.0 == 0.0 {
+                                execution_parent.map(|(_, price)| price)
+                            } else {
+                                Some(o.price.0)
+                            }
+                            .filter(|price| price.is_finite() && *price > 0.0);
+                            let cost = if o.average_price.0 > 0.0 {
+                                Some(o.average_price.0 * cumulative)
+                            } else {
+                                price.map(|price| previous.1 + delta * price)
+                            };
+                            if let Some((side, cost)) = side.zip(cost).filter(|(_, cost)| {
+                                let price = (*cost - previous.1) / delta;
+                                price.is_finite() && price > 0.0
+                            }) {
+                                cx.fill(Fill {
+                                    order_id: o.order_id.to_string(),
+                                    symbol: o.symbol.to_string(),
+                                    side,
+                                    price: (cost - previous.1) / delta,
+                                    amount: delta,
+                                });
+                                self.account
+                                    .filled
+                                    .insert(raw.to_owned(), (cumulative, cost));
+                                if self
+                                    .account
+                                    .pending_executions
+                                    .get(raw)
+                                    .is_some_and(|pending| cumulative >= *pending)
+                                {
+                                    self.account.pending_executions.remove(raw);
+                                }
+                            } else {
+                                // Leave the execution watermark available for a complete event.
+                                self.account
+                                    .pending_executions
+                                    .entry(raw.to_owned())
+                                    .and_modify(|pending| *pending = pending.max(cumulative))
+                                    .or_insert(cumulative);
+                                cx.log(
+                                    LogLevel::Warning,
+                                    "Bitunix fill metadata is not reconciled",
+                                );
+                            }
                         }
                     }
                 }

@@ -2947,3 +2947,32 @@ original source reproduces nonzero rustfmt in the distinct
 file as a globalfmt pass. Future full checks use new publication-prefixed logs.
 Fresh combined452compiledSDKcases passed the first private candidate; final
 recovery changes still require rebuilt compiled validation before publication.
+
+
+Private recovery phase COMPLETE and independently reviewed PASS. Eleven new
+native controls preserve all originals: five source-metadata cases fail on
+prior source; three terminal/CREATE controls fail on the first candidate;
+two additional causal REST/partial-recovery controls fail before pending-state
+tracking, with ordinary REST baselines protected by a passing control. The last
+fail-before run is22pass/2fail; final source is restored byte-for-byte afterward.
+Highest pending cumulative targets skip only unresolved REST baselines, survive
+partial recovery and clear once complete; cleanup reuses filled/terminal
+retention, without new timers or indefinite unknown-ID state. Parent identity,
+terminal status/timestamp, finite prices, cost deltas and netPNL remain correct.
+
+Final publication validation PASS:2,948native tests/227groups/zero failed or
+ignored; globalfmt, bans, strict native and WASMClippy; fresh combined release
+build and452compiledSDKcases/16files. The851helper pass remains current after
+the committed auth change (private follow-ups touch Rust only). Source/root and
+other consumer proofs above remain unchanged. Logs use distinct
+/tmp/bitunix-publication-* names; all completed CPU failures and incomplete
+baseline attempts are retained separately. No output/metric/gate-policy waiver.
+
+Commit private phase, then quiet /tmp/bitunix-publication-gates.sh: refresh
+Bitunix private/public on final source, rebuild the already-reviewed OKXopt3
+artifact and evaluate only its pending base/inverse/EUxperp public profiles,
+then Paradex/Bitrue private/public. Each gate independently requires the same
+two below500percent readings15seconds apart immediately before its launch.
+Stop on any failure. No passed opt3EU/private controls are repeated merely to
+select different samples. Exact-published-head adversarial reviews, all green
+CI, merge and fresh branch remain mandatory after local gates complete.

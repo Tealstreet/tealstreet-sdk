@@ -4,6 +4,406 @@ use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus};
 use safe_cex_engine::{Action, Event, Notice};
 use support::*;
 
+fn observed_fills(e: &mut TestEngine) -> Vec<(u32, f64, f64)> {
+    let Some(frame) = e.take_market_frame(100.0) else {
+        return vec![];
+    };
+    let Some((_, payload)) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+    else {
+        return vec![];
+    };
+    let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+    let values = (4 + count * 12).next_multiple_of(8);
+    (0..count)
+        .map(|i| {
+            let side = 4 + count * 8 + i * 4;
+            let value = values + i * 16;
+            (
+                u32::from_le_bytes(payload[side..side + 4].try_into().unwrap()),
+                f64::from_le_bytes(payload[value..value + 8].try_into().unwrap()),
+                f64::from_le_bytes(payload[value + 8..value + 16].try_into().unwrap()),
+            )
+        })
+        .collect()
+}
+
+fn reconcile_order_snapshot(e: &mut TestEngine, at: f64, body: &str) {
+    let timer = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms == at => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .expect("the private event must schedule its reconciliation");
+    e.handle(at, Event::TimerFired { timer });
+    let reads = requests(e);
+    assert_eq!(reads.len(), 2);
+    assert!(reads.iter().any(|request| request.url.contains("/tpsl/")));
+    for request in reads {
+        assert!(request.url.ends_with("get_pending_orders"));
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: if request.url.contains("/tpsl/") {
+                        TPSL
+                    } else {
+                        body
+                    },
+                },
+            },
+        );
+    }
+}
+
+#[test]
+fn reconciliation_cannot_consume_a_market_execution_awaiting_metadata() {
+    let (mut e, s) = startup();
+    e.handle(
+        100.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"market","side":"BUY","type":"MARKET","qty":"2","price":"0","dealAmount":"0"}}"#,
+        },
+    );
+    e.take_frame(100.0);
+    e.handle(
+        200.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"market","dealAmount":"1"}}"#,
+        },
+    );
+    assert_eq!(e.store().order("market").unwrap().filled, 1.0);
+    assert!(observed_fills(&mut e).is_empty());
+    reconcile_order_snapshot(
+        &mut e,
+        1200.0,
+        r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"market","side":"BUY","orderType":"MARKET","qty":"2","price":"0","tradeQty":"1","avgPrice":"125"}]}}"#,
+    );
+    assert!(observed_fills(&mut e).is_empty());
+    let complete = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"market","dealAmount":"1","averagePrice":"125"}}"#;
+    for at in [1201.0, 1202.0] {
+        e.handle(
+            at,
+            Event::WsMessage {
+                socket: s,
+                text: complete,
+            },
+        );
+    }
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 125.0, 1.0)]
+    );
+    let row = e.store().order("market").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Open, 1.0, 1.0)
+    );
+}
+
+#[test]
+fn ordinary_reconciliation_still_advances_the_execution_baseline() {
+    let (mut e, s) = startup();
+    e.take_frame(0.0);
+    e.handle(
+        200.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one"}}"#,
+        },
+    );
+    reconcile_order_snapshot(
+        &mut e,
+        1200.0,
+        r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"one","side":"SELL","orderType":"LIMIT","qty":"3","price":"100","tradeQty":"2","avgPrice":"150"}]}}"#,
+    );
+    assert!(observed_fills(&mut e).is_empty());
+    let complete = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"3","averagePrice":"125"}}"#;
+    for at in [1201.0, 1202.0] {
+        e.handle(
+            at,
+            Event::WsMessage {
+                socket: s,
+                text: complete,
+            },
+        );
+    }
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Sell as u32, 75.0, 1.0)]
+    );
+}
+
+#[test]
+fn partial_metadata_recovery_keeps_the_highest_deferred_execution_pending() {
+    let (mut e, s) = startup();
+    e.take_frame(0.0);
+    e.handle(
+        100.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"2"}}"#,
+        },
+    );
+    assert!(observed_fills(&mut e).is_empty());
+    e.handle(
+        200.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"1","side":"BUY","averagePrice":"125"}}"#,
+        },
+    );
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 125.0, 1.0)]
+    );
+    reconcile_order_snapshot(
+        &mut e,
+        1200.0,
+        r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"unknown","side":"BUY","orderType":"MARKET","qty":"3","price":"0","tradeQty":"2","avgPrice":"125"}]}}"#,
+    );
+    let complete = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"2","averagePrice":"125"}}"#;
+    for at in [1201.0, 1202.0] {
+        e.handle(
+            at,
+            Event::WsMessage {
+                socket: s,
+                text: complete,
+            },
+        );
+    }
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 125.0, 1.0)]
+    );
+}
+
+#[test]
+fn sparse_buy_updates_and_closes_use_reconciled_parent_execution_fields() {
+    for kind in ["UPDATE", "CLOSE"] {
+        let (mut e, s) = startup();
+        e.store_mut()
+            .update_order("one", |row| row.side = OrderSide::Buy);
+        e.take_frame(0.0);
+        let text = format!(
+            r#"{{"ch":"order","data":{{"event":"{kind}","symbol":"BTCUSDT","orderId":"one","dealAmount":"2","orderStatus":"FILLED"}}}}"#
+        );
+        event(&mut e, s, &text);
+        event(&mut e, s, &text);
+        assert_eq!(
+            observed_fills(&mut e),
+            [(OrderSide::Buy as u32, 100.0, 1.0)],
+            "{kind}",
+        );
+        let row = e.store().order("one").unwrap();
+        assert_eq!(
+            (row.side, row.price, row.filled),
+            (OrderSide::Buy, 100.0, 2.0)
+        );
+        assert_eq!(
+            row.status,
+            if kind == "CLOSE" {
+                OrderStatus::Closed
+            } else {
+                OrderStatus::Open
+            }
+        );
+    }
+}
+
+#[test]
+fn explicit_execution_price_and_cumulative_average_override_parent_fallback() {
+    let (mut e, s) = startup();
+    e.store_mut()
+        .update_order("one", |row| row.side = OrderSide::Buy);
+    e.take_frame(0.0);
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2","price":"112"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","dealAmount":"3","averagePrice":"110","price":"999","orderStatus":"FILLED"}}"#,
+    );
+    assert_eq!(
+        observed_fills(&mut e),
+        [
+            (OrderSide::Buy as u32, 112.0, 1.0),
+            (OrderSide::Buy as u32, 118.0, 1.0),
+        ]
+    );
+}
+
+#[test]
+fn late_sparse_buy_executions_advance_terminals_once_without_rewinding_state() {
+    let (mut e, s) = startup();
+    e.store_mut()
+        .update_order("one", |row| row.side = OrderSide::Buy);
+    e.take_frame(0.0);
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","dealAmount":"1","orderStatus":"CANCELED","mtime":"2025-04-05T16:05:42Z"}}"#,
+    );
+    let updated = e.store().order("one").unwrap().last_update;
+    let update = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2","mtime":"2025-04-05T16:05:41Z"}}"#;
+    event(&mut e, s, update);
+    event(&mut e, s, update);
+    assert_eq!(
+        e.store().order("one").unwrap().status,
+        OrderStatus::Canceled
+    );
+    let close = r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","dealAmount":"3","averagePrice":"110","orderStatus":"FILLED","mtime":"2025-04-05T16:05:41Z"}}"#;
+    event(&mut e, s, close);
+    event(&mut e, s, close);
+    assert_eq!(
+        observed_fills(&mut e),
+        [
+            (OrderSide::Buy as u32, 100.0, 1.0),
+            (OrderSide::Buy as u32, 130.0, 1.0),
+        ]
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Closed, 3.0, 0.0)
+    );
+    assert_eq!((row.price, row.last_update), (100.0, updated));
+}
+
+#[test]
+fn unknown_sparse_executions_wait_for_metadata_without_consuming_the_watermark() {
+    for fields in [r#", "price":"120""#, r#", "side":"BUY""#, ""] {
+        let (mut e, s) = startup();
+        e.take_frame(0.0);
+        event(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"ch":"order","data":{{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"2"{fields}}}}}"#
+            ),
+        );
+        assert!(observed_fills(&mut e).is_empty(), "{fields}");
+        let complete = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"2","side":"BUY","averagePrice":"125"}}"#;
+        event(&mut e, s, complete);
+        event(&mut e, s, complete);
+        assert_eq!(
+            observed_fills(&mut e),
+            [(OrderSide::Buy as u32, 125.0, 2.0)],
+            "{fields}",
+        );
+    }
+}
+
+#[test]
+fn an_unknown_sparse_create_cannot_supply_a_fabricated_side_to_later_fills() {
+    let (mut e, s) = startup();
+    e.take_frame(0.0);
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"unknown","qty":"3","price":"120","dealAmount":"0"}}"#,
+    );
+    assert!(e.store().order("unknown").is_none());
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"1","price":"120"}}"#,
+    );
+    assert!(observed_fills(&mut e).is_empty());
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"1","price":"120","side":"BUY"}}"#,
+    );
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 120.0, 1.0)]
+    );
+}
+
+fn recover_sparse_market_close(kind: &str, timestamp: &str) {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"market","side":"BUY","type":"MARKET","qty":"2","price":"0","dealAmount":"0","mtime":"2025-04-05T16:05:40Z"}}"#,
+    );
+    e.take_frame(0.0);
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"market","dealAmount":"2","orderStatus":"FILLED","mtime":"2025-04-05T16:05:42Z"}}"#,
+    );
+    let row = e.store().order("market").unwrap();
+    let updated = row.last_update;
+    assert_eq!(
+        (row.status, row.filled, row.remaining, row.price),
+        (OrderStatus::Closed, 2.0, 0.0, 0.0)
+    );
+    assert!(observed_fills(&mut e).is_empty());
+    let recovery = format!(
+        r#"{{"ch":"order","data":{{"event":"{kind}","symbol":"BTCUSDT","orderId":"market","dealAmount":"2","side":"BUY","averagePrice":"125","orderStatus":"FILLED"{timestamp}}}}}"#
+    );
+    event(&mut e, s, &recovery);
+    event(&mut e, s, &recovery);
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 125.0, 2.0)]
+    );
+    let row = e.store().order("market").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining, row.price),
+        (OrderStatus::Closed, 2.0, 0.0, 0.0)
+    );
+    assert_eq!(row.last_update, updated);
+}
+
+#[test]
+fn complete_update_recovers_a_sparse_market_close_at_the_same_cumulative_quantity() {
+    recover_sparse_market_close("UPDATE", "");
+}
+
+#[test]
+fn older_complete_close_recovers_execution_metadata_without_rewinding_the_order() {
+    recover_sparse_market_close("CLOSE", r#", "mtime":"2025-04-05T16:05:41Z""#);
+}
+
+#[test]
+fn a_known_sparse_create_merges_execution_quantity_without_replacing_parent_identity() {
+    let (mut e, s) = startup();
+    e.store_mut()
+        .update_order("one", |row| row.side = OrderSide::Buy);
+    let parent = e.store().order("one").unwrap().clone();
+    e.take_frame(0.0);
+    let create = r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"one","qty":"4","price":"101","dealAmount":"2","mtime":"2025-04-05T16:05:42Z"}}"#;
+    event(&mut e, s, create);
+    event(&mut e, s, create);
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Buy as u32, 101.0, 1.0)]
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.amount, row.filled, row.remaining, row.price),
+        (OrderStatus::Open, 4.0, 2.0, 2.0, 101.0)
+    );
+    assert_eq!((row.kind, row.side), (parent.kind, parent.side));
+    assert_eq!(row.client_order_id, parent.client_order_id);
+    assert_eq!(row.time_in_force, parent.time_in_force);
+    assert_eq!(e.store().order("one__tp").unwrap().price, 80.0);
+    assert_eq!(e.store().order("one__sl").unwrap().price, 110.0);
+}
+
 #[test]
 fn reordered_updates_cannot_regress_fills_prices_or_native_protection() {
     let (mut e, s) = startup();
