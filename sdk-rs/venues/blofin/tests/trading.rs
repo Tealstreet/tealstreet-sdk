@@ -924,3 +924,43 @@ fn successful_cancel_ack_cannot_downgrade_an_intervening_filled_status() {
     );
     assert_eq!(h.e.store().order("12").unwrap().status, OrderStatus::Closed);
 }
+
+#[test]
+fn broker_payload_gate_covers_normal_trigger_and_protective_orders_without_rewriting_ids() {
+    for attributed in [false, true] {
+        for (raw, endpoint) in [
+            (
+                r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":50000,"clientOrderId":"Caller123"}]"#,
+                "batch-orders",
+            ),
+            (
+                r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"price":50000,"triggerPrice":51000}]"#,
+                "order-algo",
+            ),
+            (
+                r#"[{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"price":40000}]"#,
+                "order-tpsl",
+            ),
+        ] {
+            let mut h = Harness::with_broker_attribution(attributed);
+            h.seed();
+            place(&mut h, raw);
+            let request = h.take(endpoint);
+            let body: serde_json::Value =
+                serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+            let row = body.as_array().map_or(&body, |rows| &rows[0]);
+            if attributed {
+                assert_eq!(row["brokerId"], "b3cdedc0a20880ba");
+            } else {
+                assert!(row.get("brokerId").is_none());
+            }
+            let client = row["clientOrderId"].as_str().unwrap();
+            if raw.contains("Caller123") {
+                assert_eq!(client, "Caller123");
+            } else {
+                assert!(client.starts_with("b3cdedc0a20880ba"));
+                assert_eq!(client.len(), 32);
+            }
+        }
+    }
+}
