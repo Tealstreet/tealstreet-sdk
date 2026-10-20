@@ -756,11 +756,13 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 
 ### GRVT
 Signing and integer scaling exact; no highs.
-- Medium: builder check fails once → every order rejected for the session, and
+- Medium: ~~builder check fails once → every order rejected for the session, and
   a matching row without `mfr` treated as unknown (`grvt/src/account.rs:1531,1011`,
   `trading.rs:777`); one unknown-instrument row hides all positions or orders
   (`account.rs:516,422,970`); GRVT's rejection message dropped and misleading
-  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).
+  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).~~
+  Builder check retried (TS budget) with orders held FIFO; rows skipped keeping
+  stored copies; venue code/message surfaced, reconcile advice only when unknown.
 - Low: order history fails on one bad row; signer mismatch blocks trading;
   1008 loses the proxy-whitelist message; amend may cancel without replacing if
   cancels are asynchronous (verify live).
