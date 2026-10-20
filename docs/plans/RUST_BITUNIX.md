@@ -2317,3 +2317,30 @@ status, and compares all account economics/commands/outbound writes exactly.
 USD-M private likewise retains the filled ETH order, with strict output/write
 comparison unchanged. No fixture retiming or normalization. Logs are under
 /tmp/bitunix-df2-usdmfix-*. Remaining GRVT and other integration gates continue.
+
+
+GRVT public/private and Lighter parent public/mainnet/testnet private gates pass.
+Robinhood public passes, but Robinhood private stops on raw signed transaction
+bytes: ten writes each, identical outputs and zero crypto/protocol errors, with
+fresh ExpiredAt differing by 293 ms and therefore different Sig. Preserve
+/tmp/bitunix-df2-usdmfix-lighter-robinhood-private.log; no unchanged retry.
+
+Independent dataflow reviews identify a replay-only identity duplication:
+SharedTape validates crypto and matches/records typed request intent, but the
+production outbound override computes another key. Its allowlist includes
+Lighter and omits Robinhood, falling back to raw form strings there. Approved
+bounded generic correction reuses the actual just-recorded SharedTape write
+identity after validation, with identical write classification. No new fields
+are normalized. Controls must exercise the actual production override, custom
+contracts/comparison bodies, signature rejection and unmatched/missing ACKs.
+
+A separate real-verifier probe finds unsupported query fields named signature,
+timestamp or clientOrderId can disappear under generic URL filtering. Make the
+Lighter profile preserve these unknown fields explicitly; only independently
+verified auth may be projected. Add real Go-WASM positive differing-expiry
+controls for both deployments, freshly re-signed economic/target/nonce/unknown
+mutations, invalid credentials/signatures/expiry, duplicate forms and single-use
+ACK assertions. Native source, tapes, thresholds, deadlines and metrics are
+unchanged. Independent final review and helper suite precede fresh Lighter,
+Bitunix/Binance private controls and the remaining batch. Public write-free
+behavior is unchanged; final CI still covers every declared profile.
