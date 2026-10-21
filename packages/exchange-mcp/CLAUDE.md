@@ -62,6 +62,14 @@ The TS on-demand policy also disables TS adapter polling, after the actual
 instance has been selected. Keep native REST timers active as well as sockets:
 BreakoutProp has no stream and its tools depend on periodic reconciliation.
 A real native protocol regression requires changed quotes after its REST poll.
+History UTC mapping preserves the SDK's non-enumerable incompleteness marker.
+For known partial history, tool text JSON is `{ requestId, rows, completeness:
+{ incomplete: true } }`, using the owning JSON-RPC request ID. Unflagged
+responses retain the existing array shape; absence does not prove exhaustive
+history. Empty partial results still carry metadata, and failed reads remain
+errors. Consumers must handle the partial envelope before calculating totals
+or recording coverage.
+
 The license generator includes the pinned engine's non-dev Cargo dependency
 closure and the existing adapted zkLink notice. Run it after building WASM.
 Its `cargo metadata --locked --filter-platform wasm32-unknown-unknown` command
