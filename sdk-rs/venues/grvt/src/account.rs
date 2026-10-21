@@ -930,7 +930,8 @@ impl Grvt {
             cx.clear_timer(timer);
         }
     }
-    fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>) {
+    /// `code` is `auth.rejected` only when GRVT refused the credentials.
+    fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>, code: &'static str) {
         self.cancel_pong_ping(cx);
         self.account.authentication_failed = true;
         self.account.authenticated = false;
@@ -942,7 +943,7 @@ impl Grvt {
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
-        cx.notice(Level::Error, code::AUTH_REJECTED,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+        cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.login_pending || self.account.authentication_failed {
@@ -957,7 +958,7 @@ impl Grvt {
             self.account.healthy_since = None;
         }
         if self.account.refresh_attempts >= 1 {
-            self.fail_authentication(cx);
+            self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
             return;
         }
         self.account.refresh_attempts += 1;
@@ -1359,7 +1360,7 @@ impl Grvt {
                 self.account.login_pending = false;
                 let (cookie, account_id) = session_headers(&response);
                 let (Some(cookie), Some(account_id)) = (cookie, account_id) else {
-                    self.fail_authentication(cx);
+                    self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
                     self.fail_waiting(cx);
                     return;
                 };
@@ -1767,7 +1768,15 @@ impl Grvt {
         match request {
             Request::Login => {
                 self.account.login_pending = false;
-                self.fail_authentication(cx);
+                let refused = error.contains("(HTTP 401") || error.contains("(HTTP 403");
+                self.fail_authentication(
+                    cx,
+                    if refused {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::STREAM_UNAVAILABLE
+                    },
+                );
                 self.fail_waiting(cx);
             }
             Request::Summary => {

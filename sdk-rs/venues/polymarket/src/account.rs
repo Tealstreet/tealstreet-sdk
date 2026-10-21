@@ -663,7 +663,7 @@ impl Polymarket {
                     // otherwise its market is unlisted (e.g. closed), as in TS.
                     if self.catalogue_may_hold(row.slug) {
                         snapshot.invalid = true;
-                        cx.notice(Level::Warn, code::ROW_SKIPPED,
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                             "Polymarket owned holding has unavailable market metadata; preserving previous positions");
                     } else if self.account.unlisted.insert(row.asset.into()) {
                         cx.notice(

@@ -823,7 +823,7 @@ impl ApexOmni {
                     .and_then(|raw| {
                         if cx.store.market_by_id(&raw.symbol)
                             .or_else(|| cx.store.market(&raw.symbol)).is_none() {
-                            cx.notice(Level::Warn, code::ROW_SKIPPED, "ApeX owned order has unavailable market metadata; preserving previous orders");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
                         map_order(cx.store, &raw, cx.now)
@@ -1549,7 +1549,7 @@ impl ApexOmni {
         let Some(order) = rows.first() else {
             cx.notice(
                 Level::Warn,
-                code::ROW_SKIPPED,
+                code::SNAPSHOT_DISCARDED,
                 "ApeX owned order has unavailable market metadata; preserving previous orders",
             );
             return;

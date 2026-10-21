@@ -318,7 +318,7 @@ impl Hyperliquid {
             {
                 cx.notice(
                     Level::Warn,
-                    code::AUTH_REJECTED,
+                    code::CONFIG_INVALID,
                     "Hyperliquid invalid credentials: private key does not match API wallet",
                 );
             }
