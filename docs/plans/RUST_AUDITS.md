@@ -695,6 +695,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   are resent.
 
 ### BloFin
+
+- ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
+  request command before retained rows complete. Its native cap regression
+  checks exact ownership and ordering even at Error-only log level.
+
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
   after usable markets and retries ticker discovery; #1615 (`c63acfc19c2`)
@@ -968,9 +973,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never

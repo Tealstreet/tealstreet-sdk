@@ -116,6 +116,8 @@ fn unknown_symbols_read_nothing_and_the_page_cap_warns() {
     fetch(&mut h, Some("NOPEUSDT"), None, None);
     assert_eq!(result(&h), Some(Ok("[]".into())));
 
+    h.actions.clear();
+    h.e.set_log_level(safe_cex_engine::Level::Error);
     fetch(&mut h, None, None, None);
     for p in 0..100u64 {
         let rows: Vec<String> = (0..100u64)
@@ -127,4 +129,27 @@ fn unknown_symbols_read_nothing_and_the_page_cap_warns() {
     assert_eq!(got.len(), 10_000);
     assert!(h.actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.level == safe_cex_engine::Level::Warn && event.message.contains("100-page cap"))));
+    let (marker_index, marker) = h
+        .actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("semantic coverage survives Error-only logging");
+    assert_eq!(
+        marker.fields,
+        vec![("command", safe_cex_engine::Value::Num(9.0))]
+    );
+    let done_index = h
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 9, .. })))
+        .unwrap();
+    assert!(marker_index < done_index, "coverage precedes retained rows");
 }
