@@ -373,6 +373,9 @@ Native `production_entropy()` supplies independent OS-backed identity/signing
 sources, including `FrameServer` construction. Custom Rust hosts must pass a
 provider at construction; native `with_entropy` / `with_signing_entropy` and
 engine setters can replace their respective sources only before startup.
+Direct Rust signing-helper callers also supply entropy explicitly: Lighter
+`Signer` signing/auth methods, Coinbase `Credentials::jwt`/`headers`, and
+Bitunix `sign::headers`. SDK venue adapters already pass signing entropy.
 
 JS `EngineHost` keeps its existing constructor and adds optional fourth-options
 `entropy?: (length: number) => Uint8Array` and independent `signingEntropy?` with
