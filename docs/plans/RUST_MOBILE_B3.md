@@ -47,11 +47,20 @@ was run on a device.
    `controllers/CLAUDE.md:41-64`; mobile screens call `@web/order/createMarketOrder`,
    `createLimitOrder`, `createStopLossOrder`, `cancelOrders`). Leverage, margin,
    position mode, chasers, TWAP, candles and history go to the server through
-   `callMethodInWorker` (NX `order/setLeverage.ts:19`; `ExchangeServerWorker.ts:1140`).
+   `callMethodInWorker` (NX `order/setLeverage.ts:19`; `ExchangeServerWorker.ts:1140`;
+   `controllers/CLAUDE.md:50-51` still says leverage runs on the mirror, which the
+   code no longer does). **Lighter cannot sign there:** mobile's Metro config
+   replaces poseidon-crypto with a stub that throws ("Lighter DEX features are
+   unavailable", MOB `src/mobile/shims/poseidon-crypto-stub.js`), and Lighter's
+   signer needs it (NX `lighter.signer.ts:4`, `lighter.exchange.ts:737-740`), so
+   Lighter order writes from the mirror fail today.
 5. **Keys live in plaintext.** API keys and secrets are in AsyncStorage behind
    a localStorage shim (MOB `polyfills/localStorage-shim.js`,
    `syncKeyVaultNative.ts:12-15`); SecureStore/Keychain is not used. Cloud sync
    stores one client-encrypted blob (NX `docs/accounts/CLOUD-SYNC-v1.md:198-238`).
+   At runtime the secrets are in two places: Hermes memory (the mirror) and the
+   WebView Worker's `signingOptions` (NX `signingHost.ts:80-100`), inside a page
+   served from the web origin.
 
 ### Mobile venues and the engine
 
@@ -73,7 +82,9 @@ Everything not listed here goes through the hosted session socket.
 
 | Flow | Where | Target | Venue | Signed (key) | Read/write |
 | --- | --- | --- | --- | --- | --- |
-| **Place / cancel / update orders** | NX `order/*`; MOB order screens | venue REST, or a Tealstreet proxy (`*.jp`/`*.asia.tealstreet.io`) when `tealstreetProxy` is set | every mobile venue | venue secret (HMAC; EIP-712 wallet key on Hyperliquid) on Hermes | **write** |
+| **Place / cancel / update orders** | NX `order/*`; MOB order screens | venue REST, or a Tealstreet proxy (`*.jp`/`*.asia.tealstreet.io`) when `tealstreetProxy` is set | every mobile venue except Lighter (its signer is stubbed out on Hermes, so writes fail) | venue secret (HMAC; EIP-712 wallet key on Hyperliquid) on Hermes | **write** |
+| Hyperliquid builder-fee approval | NX `HyperliquidBuilderFee.tsx:8-13` → `hyperliquid.builderFee` | Hyperliquid exchange API | hyperliquid | wallet key on Hermes | **write** |
+| Add-account validation (`validateAccount`) | MOB `AccountForm.tsx:10,215` → NX `useAccountForm` | venue REST | every mobile venue | venue secret on Hermes | read |
 | Warm-start reads (`fetchMarkets`, `fetchOrders`, `fetchPositions`) | NX `eagerExchangeWarmStart.ts:58,75,86` via `exchangeAccountController.ts:1755` | venue REST | every mobile venue | venue secret on Hermes | read |
 | Recovery reads (empty-ticker refetch; Phemex `fetchPositions`) | NX `exchangeAccountController.ts:666-697,863` | venue REST | tickers: any; positions: Phemex | public / venue secret | read |
 | HTTP `sign-req` answers | NX `ExchangeServerWorker.ts:900-903` | over the hosted socket | every venue | venue secret in the WebView Worker | signs the server's reads and writes |
@@ -83,11 +94,14 @@ Everything not listed here goes through the hosted session socket.
 | Tealstreet API (`/api/proxykey`, `/api/settings`, `/api/synced-exchanges`, `/api/auth-twofa`, marketplace, `/api/time`) | MOB `proxyToken.ts:71`, `api.ts:26-65`, settings screens | `preview.tealstreet.io/api/*` | — | Auth0 Bearer | read/write |
 | Auth, news, push, OTA, error reports | MOB `auth0-native.tsx`, `MobileNewsFeedsWorker`, `notificationsApi.ts`, `pushRegistration`, `app.config.js` | Auth0, `news.tealstreet.io`, Expo, Sentry | — | OAuth / proxy token | read/write |
 
-Only the first three rows touch a venue, and only the first is a write. They
-are what B3 is about. **Unverified risk:** since NX `ec966018a1` safe-cex falls
+The first five rows touch a venue; the order writes and the Hyperliquid
+builder-fee approval are writes. Those are what B3 is about. Listen keys and
+private WS run server-side through `sign-req`; the device opens no public venue
+socket. **Unverified risk:** since NX `ec966018a1` safe-cex falls
 back to `directTransport` unless the host registers a transport. Web does that
 in `registerTealstreetRealm.ts`, but no tracked mobile file imports it, so a
-Hermes mirror with `tealstreetProxy` set may throw (`transport/direct.ts:15`).
+Hermes mirror with `tealstreetProxy` or `tealstreetTunnel` set may throw
+(`transport/direct.ts:15`).
 `createExchangeFromAccount.ts:66-69` forces `tealstreetProxy` on for
 `requiresCors` venues: bitget, blofin and binanceinverse on mobile. Confirm on a
 built bundle before relying on today's mobile order path.
@@ -108,13 +122,26 @@ path, so the device keeps signing but no longer sends anything to a venue.
   - tealstreet-next: the warm-start skip for hosted mirrors (already a listed
     cutover edit).
   - Mobile: nothing beyond `yarn sync`.
-- **Effort:** SDK forwarding 3-4 days; tests and a hosted mobile soak 2-3 days;
-  about 1-1.5 weeks. JavaScript only, so it ships OTA.
+- **Lost-send semantics (the hard part):** a forwarded call on a TS mirror
+  uses the base 5 s timeout and a plain `Timeout callMethodInWorker` error
+  (`base.ts:1755-1759`), while the server waits up to 15 s per signature
+  (NX `remote-signer.ts:8`) and one order can need several. The device would
+  report failure while the server still places the order, and a retry
+  duplicates it. TS forwarding needs what Rust has: `COMMAND_TIMEOUT` with
+  `clientOrderIds`, `outcome: 'unknown'` and a reconcile step
+  (`rust.exchange.ts:888-898`). The web optimistic-order-id and
+  `resolveOrderId` flows also assume a local placement. Warm-start reads are
+  simpler to skip in hosted mode than to forward.
+- **Effort:** SDK forwarding with timeout/outcome parity 1-1.5 weeks; web order
+  flows and a hosted mobile soak 1 week; about 2-2.5 weeks. JavaScript only, so
+  it ships OTA (SDK and web through `yarn sync`).
 - **Latency:** an order write becomes device → server → device signs → server →
   venue, instead of device → venue. The sign round trip has measured 819 ms+
   against an 11-93 ms ping, all inside the client (NX `remote-signer.ts:466-470`);
-  with the Worker signer it should be far less, but it must be measured before
-  committing. Web hosted accounts on Rust venues already pay this (B4).
+  that figure was on the browser main thread, and the Worker signer measured
+  2 ms (NX `signingHost.ts:13-15`), so it should be far less, but it must be
+  measured before committing. No hosted account pays this today: hosted
+  accounts run TS, whose mirrors send orders directly (#1498).
 - **Security:** fewer client-to-venue paths, and the whitelisted-IP egress moves
   to the server, but the device still holds and uses every secret.
 
@@ -135,8 +162,9 @@ an Expo module. The mirror then runs `RustEngineExchange` with the native loader
   path.
 - **Variant:** run the engine as wasm inside the existing exchange-host WebView,
   which has `WebAssembly`, and send the mirror's writes there. Cheaper (about
-  1-2 weeks) and OTA, but it is a second hosted-style hop inside the device and
-  converges on (a) anyway.
+  1-2 weeks) and it ships with a web deploy (`/exchange-host` is served from the
+  web origin), but it needs the same lost-send work as (a), is a second hop
+  inside the device, and converges on (a) anyway.
 
 ### (c) Keep TS venues on the device
 
@@ -169,22 +197,24 @@ would let exchange-server sign locally on the engine without the device.
 
 | | (a) Route through exchange-server | (b) Engine on device | (c) Keep TS on device |
 | --- | --- | --- | --- |
-| Effort | ~1-1.5 weeks, OTA | ~5-8 weeks, native releases (WebView-wasm variant ~1-2 weeks) | ~0.5-1 day, OTA |
+| Effort | ~2-2.5 weeks, OTA | ~5-8 weeks, native releases (WebView-wasm variant ~1-2 weeks, web deploy) | ~0.5-1 day, OTA |
 | Order latency | +1 server hop and a sign round trip | as today | as today |
 | Secrets on device | yes (until session keys) | yes | yes |
 | Device → venue traffic | none | as today | as today |
 | Lets TS venues be deleted | yes, once hosted runs Rust for those venues (B2) | yes | no |
 | Fits session keys | yes; it is the routing half | no | neutral |
-| Main risk | order-latency regression; needs measurement | native code on the money path; release cadence | TS/Rust divergence for mobile users |
+| Main risk | lost-send duplicates unless timeouts match the server's; order latency | native code on the money path; release cadence | TS/Rust divergence for mobile users; Lighter writes stay broken |
 
 ## Recommendation
 
 - **For cutover: (c).** It is under a day and fixes the one hard break (the
   Metro bundle). It keeps mobile on master's behaviour, and B3 stops blocking
   cutover. Verify the `directTransport` risk above on a built bundle as part of
-  the smoke.
+  the smoke. Lighter order writes fail on mobile today with or without
+  cutover; fixing them needs (a) or a Hermes-safe Lighter signer.
 - **As the direction: (a), tied to session keys.** Route mobile's direct writes
-  through exchange-server once the order-latency cost is measured. If session
+  through exchange-server once the order-latency cost is measured and TS
+  forwarding has Rust's timeout and outcome semantics. If session
   keys land, mobile drops its venue secrets entirely, which also removes the
   plaintext-AsyncStorage exposure.
 - **Not (b)** unless there is a requirement for on-device execution without the
