@@ -948,3 +948,31 @@ fn rejected_position_row_with_no_stored_copy_is_reported_as_an_error() {
         ]
     );
 }
+#[test]
+fn a_repeated_position_skip_logs_once_until_the_row_maps_again() {
+    let read = |h: &mut H, positions: &str| {
+        h.fire_after(75_000.0);
+        // The periodic clock re-sync gates signed reads.
+        if h.requests.iter().any(|r| r.url.contains("/time")) {
+            let time = format!(r#"{{"serverTime":{}}}"#, h.now);
+            h.reply("/time", &time);
+        }
+        h.reply("/positionRisk", positions);
+        h.reply("/openOrders", "[]");
+    };
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#;
+    let mut h = H::new();
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors, ["Aster skipped malformed position row BTCUSDT"]);
+    // The same skip on the next poll is not reported again.
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 1);
+
+    // Once the row maps, a recurrence is reported again.
+    read(&mut h, POSITION);
+    assert_eq!(h.engine.store().positions().len(), 1);
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 2);
+}

@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const PAGE: usize = 500;
 const FILL_CAP: usize = 100_000;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -36,6 +37,8 @@ pub struct AccountState {
     fills_exhausted: bool,
     settings: HashMap<String, MarketSetting>,
     pub(crate) order_ids: HashMap<String, String>,
+    /// Leg ids, `asset N` or empty (unidentified) whose skipped position was already logged.
+    skip_logged: HashSet<String>,
 }
 enum Skipped {
     Unidentified,
@@ -47,6 +50,21 @@ fn skip_level(harmless: bool) -> LogLevel {
         LogLevel::Warning
     } else {
         LogLevel::Error
+    }
+}
+/// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.log(level, message);
     }
 }
 #[derive(Clone, Copy)]
@@ -664,6 +682,7 @@ impl TxFlow {
             {
                 Ok(p) => {
                     if let Some(p) = p {
+                        self.account.skip_logged.remove(&p.id);
                         positions.push(p);
                     }
                 }
@@ -677,7 +696,10 @@ impl TxFlow {
                         *hold = true;
                     }
                     Skipped::Unlisted { asset, owned } => {
-                        cx.log(
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            format!("asset {asset}"),
                             skip_level(!owned),
                             format!("TxFlow skipped position on unlisted asset {asset}"),
                         );
@@ -685,7 +707,10 @@ impl TxFlow {
                     }
                     Skipped::Legs { keys, owned } => {
                         let stored = keys.iter().any(|key| cx.store.position(key).is_some());
-                        cx.log(
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            keys.join(", "),
                             skip_level(stored || !owned),
                             format!("TxFlow skipped malformed position {}", keys.join(", ")),
                         );
@@ -694,8 +719,12 @@ impl TxFlow {
                         }
                     }
                     Skipped::Unidentified => {
-                        cx.log(
-                            skip_level(!cx.store.positions().is_empty()),
+                        let level = skip_level(!cx.store.positions().is_empty());
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            String::new(),
+                            level,
                             "TxFlow skipped malformed position without an asset",
                         );
                         positions.reject(None);
@@ -1011,6 +1040,9 @@ impl TxFlow {
         if apply_mode && let Some(p) = positions.rows().first() {
             cx.store
                 .set_hedged(p.position_mode == Some(PositionMode::Hedged));
+        }
+        if positions.rejected() == 0 {
+            self.account.skip_logged.clear();
         }
         let positions = positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
         cx.store.set_positions(positions);

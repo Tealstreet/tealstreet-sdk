@@ -718,11 +718,24 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
             .iter()
             .any(|l| l.contains('{') || l.contains("leverage"))
     );
+    // The same skip on the next poll is not reported again.
+    let (timer, logs) = cycle(
+        &mut e,
+        timer,
+        NOW + 15_025.0,
+        &[(4.0, 5.0), (-5.0, 0.0)],
+        &[order(42, "B", "1"), order(43, "X", "1")],
+    );
+    assert!(
+        !logs
+            .iter()
+            .any(|l| l.contains("skipped malformed position"))
+    );
 
     cycle(
         &mut e,
         timer,
-        NOW + 15_025.0,
+        NOW + 20_025.0,
         &[(4.0, 5.0)],
         &[order(42, "B", "1")],
     );

@@ -15,6 +15,8 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+const SKIP_LOG_LIMIT: usize = 4_096;
+
 #[derive(Default)]
 pub struct AccountState {
     pub socket: Option<SocketId>,
@@ -53,6 +55,8 @@ pub struct AccountState {
     mode_timer: Option<TimerId>,
     mode_failures: u32,
     order_position_sides: HashMap<String, PositionSide>,
+    /// Position ids, symbols or empty (unidentified) whose skipped row was already logged.
+    skip_logged: HashSet<String>,
 }
 
 /// Hedge routing depends on the account mode; placements wait for its first read.
@@ -229,6 +233,7 @@ fn side(ps: &str, amount: f64) -> PositionSide {
 /// Every caller's row is owned or of unreadable size, so one with no stored copy is an error.
 fn reject_position(
     cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
     rows: &mut SnapshotBuilder<String, Position>,
     symbol: &str,
     position_side: Option<&str>,
@@ -243,7 +248,10 @@ fn reject_position(
     };
     let label = if ids.len() == 1 { &ids[0] } else { symbol };
     let stored = ids.iter().any(|id| cx.store.position(id).is_some());
-    cx.log(
+    log_skip(
+        cx,
+        logged,
+        label,
         if stored {
             LogLevel::Warning
         } else {
@@ -253,6 +261,21 @@ fn reject_position(
     );
     for id in ids {
         rows.reject(Some(id));
+    }
+}
+/// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.log(level, message);
     }
 }
 fn hedge_side(text: Option<&str>) -> Option<PositionSide> {
@@ -546,16 +569,24 @@ impl AsterDex {
                 }
                 let Ok(p) = serde_json::from_str::<RestPosition>(item) else {
                     match serde_json::from_str::<Identity>(item) {
-                        Ok(row) if !row.symbol.is_empty() => {
-                            reject_position(cx, rows, &row.symbol, row.position_side.as_deref())
-                        }
+                        Ok(row) if !row.symbol.is_empty() => reject_position(
+                            cx,
+                            &mut self.account.skip_logged,
+                            rows,
+                            &row.symbol,
+                            row.position_side.as_deref(),
+                        ),
                         _ => {
-                            cx.log(
-                                if cx.store.positions().is_empty() {
-                                    LogLevel::Error
-                                } else {
-                                    LogLevel::Warning
-                                },
+                            let level = if cx.store.positions().is_empty() {
+                                LogLevel::Error
+                            } else {
+                                LogLevel::Warning
+                            };
+                            log_skip(
+                                cx,
+                                &mut self.account.skip_logged,
+                                "",
+                                level,
                                 "Aster skipped malformed position row without a symbol",
                             );
                             rows.reject(None);
@@ -565,7 +596,13 @@ impl AsterDex {
                 };
                 let r = p.row;
                 let Some(amount) = parse_decimal(&r.position_amt) else {
-                    reject_position(cx, rows, &r.symbol, Some(&r.position_side));
+                    reject_position(
+                        cx,
+                        &mut self.account.skip_logged,
+                        rows,
+                        &r.symbol,
+                        Some(&r.position_side),
+                    );
                     return;
                 };
                 let leverage = r
@@ -596,7 +633,13 @@ impl AsterDex {
                 ]
                 .map(parse_decimal);
                 let [Some(entry), Some(upnl), Some(notional), Some(liquidation)] = values else {
-                    reject_position(cx, rows, &r.symbol, Some(&r.position_side));
+                    reject_position(
+                        cx,
+                        &mut self.account.skip_logged,
+                        rows,
+                        &r.symbol,
+                        Some(&r.position_side),
+                    );
                     return;
                 };
                 let mode = if r.position_side == "BOTH" || r.position_side.is_empty() {
@@ -606,6 +649,7 @@ impl AsterDex {
                 };
                 let side = side(&r.position_side, amount);
                 let id = position_id(&r.symbol, side, mode);
+                self.account.skip_logged.remove(&id);
                 rows.push(Position {
                     id: id.clone(),
                     symbol: r.symbol.to_string(),
@@ -795,6 +839,9 @@ impl AsterDex {
                 self.account.positions_in_flight = false;
                 self.account.last_positions = cx.now;
                 if valid && version == self.account.position_version {
+                    if rows.rejected() == 0 {
+                        self.account.skip_logged.clear();
+                    }
                     // A skipped row cannot prove its leg flat; keep what the store knows.
                     let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     cx.store.set_positions(rows);

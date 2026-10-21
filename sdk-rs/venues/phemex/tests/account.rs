@@ -1442,7 +1442,20 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
     assert_eq!(e.store().balance().upnl, derived);
     assert_eq!(e.store().balance().total, 1000. + 200. - derived);
 
-    cycle(&mut e, &actions, NOW + 4_000., &long);
+    // The same skips on the next poll are not reported again.
+    let skipped = |logs: &[(LogLevel, String)]| {
+        logs.iter()
+            .filter(|(_, m)| m.starts_with("Phemex skipped"))
+            .count()
+    };
+    let rows = format!("{long},{bad_short},{missing}");
+    let (actions, logs) = cycle(&mut e, &actions, NOW + 4_000., &rows);
+    assert_eq!(skipped(&logs), 0);
+
+    let (actions, _) = cycle(&mut e, &actions, NOW + 6_000., &long);
     assert!(e.store().position("ETHUSDC:short").is_none());
     assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 3.);
+    // A clean slice re-arms them: a recurrence is reported again.
+    let (_, logs) = cycle(&mut e, &actions, NOW + 8_000., &rows);
+    assert_eq!(skipped(&logs), 2);
 }

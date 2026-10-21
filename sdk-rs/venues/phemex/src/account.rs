@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const CURRENCIES: [&str; 2] = ["USDT", "USDC"];
 const RETAINED_EVENTS: usize = 20_000;
 const SNAPSHOT_DEADLINE_MS: f64 = 20_000.;
+const SKIP_LOG_LIMIT: usize = 4_096;
 const SOCKET: Config = Config {
     connect_timeout_ms: 15_000.,
     auth_timeout_ms: Some(SNAPSHOT_DEADLINE_MS),
@@ -44,14 +45,22 @@ pub struct Request {
 impl Request {
     /// Rejects every position id a row on `symbol` may carry; its legs keep their stored copies.
     /// An owned row with no stored copy is reported as an error: it commits as flat.
-    fn reject(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, size: f64, message: String) {
+    fn reject(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        logged: &mut HashSet<String>,
+        symbol: &str,
+        size: f64,
+        message: String,
+    ) {
         let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
         let level = if size != 0. && !stored {
             LogLevel::Error
         } else {
             LogLevel::Warning
         };
-        cx.log(level, message);
+        let key = format!("{}:{symbol}", CURRENCIES[self.currency]);
+        log_skip(cx, logged, key, level, message);
         for id in [
             symbol.to_owned(),
             format!("{symbol}:long"),
@@ -59,6 +68,21 @@ impl Request {
         ] {
             self.positions.reject(Some(id));
         }
+    }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.log(level, message);
     }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
@@ -129,6 +153,8 @@ pub struct State {
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
+    /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
+    skip_logged: HashSet<String>,
 }
 impl State {
     pub fn new() -> Self {
@@ -394,7 +420,10 @@ impl PhemexPerpetuals {
                     .market(&p.symbol)
                     .is_some_and(|m| m.quote == currency)
             });
-            cx.log(
+            log_skip(
+                cx,
+                &mut self.account.skip_logged,
+                format!("{currency}:"),
                 if stored {
                     LogLevel::Warning
                 } else {
@@ -409,7 +438,13 @@ impl PhemexPerpetuals {
         let Some(market) = cx.store.market(&symbol) else {
             if row.size != 0.0 && self.discovery_settled() {
                 let message = format!("Phemex skipped {symbol} position on an unavailable market");
-                request.reject(cx, &symbol, row.size, message);
+                request.reject(
+                    cx,
+                    &mut self.account.skip_logged,
+                    &symbol,
+                    row.size,
+                    message,
+                );
             } else if row.size != 0.0 {
                 cx.log(
                     LogLevel::Warning,
@@ -423,7 +458,13 @@ impl PhemexPerpetuals {
             || (!row.currency.is_empty() && row.currency != CURRENCIES[request.currency])
         {
             let message = format!("Phemex skipped {symbol} position with mismatched settlement");
-            request.reject(cx, &symbol, row.size, message);
+            request.reject(
+                cx,
+                &mut self.account.skip_logged,
+                &symbol,
+                row.size,
+                message,
+            );
             return;
         }
         let prior = request
@@ -433,7 +474,13 @@ impl PhemexPerpetuals {
             .or_else(|| self.account.context(&row.symbol.to_ascii_uppercase()));
         let Some((context, position)) = row.map(cx.store, prior) else {
             let message = format!("Phemex skipped unmappable {symbol} position row");
-            request.reject(cx, &symbol, row.size, message);
+            request.reject(
+                cx,
+                &mut self.account.skip_logged,
+                &symbol,
+                row.size,
+                message,
+            );
             return;
         };
         request
@@ -520,6 +567,21 @@ impl PhemexPerpetuals {
                         .max(request.versions.get(&key).copied().unwrap_or(0));
                     self.account.position_versions.insert(key.clone(), version);
                     self.account.position_absent.insert(key);
+                }
+            }
+            // A clean slice re-arms its skip logs; otherwise only the symbols it mapped.
+            let prefix = format!("{}:", CURRENCIES[currency]);
+            if request.positions.rejected() == 0 {
+                self.account
+                    .skip_logged
+                    .retain(|key| !key.starts_with(&prefix));
+            } else {
+                for p in request.positions.rows() {
+                    if request.positions.allows_absence(&p.id) {
+                        self.account
+                            .skip_logged
+                            .remove(&format!("{prefix}{}", p.symbol));
+                    }
                 }
             }
             positions.extend(request.positions.commit(slice, |p| p.id.clone()));

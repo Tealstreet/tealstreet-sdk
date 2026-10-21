@@ -504,6 +504,38 @@ fn upnl_sums_committed_holdings_and_an_unstored_rejected_holding_is_an_error() {
     assert_eq!(h.e.store().balance().upnl, -1.0);
 }
 #[test]
+fn a_repeated_holding_skip_logs_once() {
+    let mut h = H::new();
+    h.initial();
+    let snapshot = |h: &mut H| {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+        );
+        h.response(
+            "/positions",
+            200,
+            r#"[{"asset":"2","size":"NaN","avgPrice":0.4}]"#,
+        );
+    };
+    snapshot(&mut h);
+    snapshot(&mut h);
+    let skipped = |h: &H| {
+        h.logs
+            .iter()
+            .filter(|m| *m == "Polymarket skipped malformed holding 2")
+            .count()
+    };
+    assert_eq!(skipped(&h), 1);
+}
+#[test]
 fn unusable_current_price_still_commits_the_fresh_holding_size() {
     for cur in ["7", r#""bogus""#, "null", r#"{"x":1}"#] {
         let mut h = H::new();

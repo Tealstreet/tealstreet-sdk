@@ -24,6 +24,7 @@ const MAX_PAGES: usize = 10000;
 // page is incomplete, never permission to replace holdings with a prefix.
 const MAX_POSITION_OFFSET: usize = 10000;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 pub enum Request {
     Time,
@@ -66,6 +67,8 @@ pub(crate) struct Account {
     executions: HashMap<String, HashMap<String, f64>>,
     coverage: HashMap<String, Vec<(f64, HashSet<String>)>>,
     unlisted: HashSet<String>,
+    /// Assets (empty for an unidentified row) whose skipped holding was already logged.
+    skip_logged: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -606,14 +609,14 @@ impl Polymarket {
                             if !snapshot.ids.insert(asset.to_string()) {
                                 snapshot.invalid = true;
                             }
-                            reject_holding(cx, snapshot, Some(&asset));
+                            reject_holding(cx, &mut self.account, snapshot, Some(&asset));
                         }
-                        _ => reject_holding(cx, snapshot, None),
+                        _ => reject_holding(cx, &mut self.account, snapshot, None),
                     }
                     return;
                 };
                 if row.asset.is_empty() {
-                    reject_holding(cx, snapshot, None);
+                    reject_holding(cx, &mut self.account, snapshot, None);
                     return;
                 }
                 if !snapshot.ids.insert(row.asset.into()) {
@@ -621,10 +624,11 @@ impl Polymarket {
                     return;
                 }
                 if row.size.0 < 0.0 || !(0.0..=1.0).contains(&row.avg_price.0) {
-                    reject_holding(cx, snapshot, Some(row.asset));
+                    reject_holding(cx, &mut self.account, snapshot, Some(row.asset));
                     return;
                 }
                 if row.size.0 == 0.0 {
+                    self.account.skip_logged.remove(row.asset);
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
@@ -682,7 +686,10 @@ impl Polymarket {
                     } else {
                         LogLevel::Error
                     };
-                    cx.log(
+                    log_skip(
+                        cx,
+                        &mut self.account,
+                        row.asset,
                         level,
                         format!(
                             "Polymarket skipped owned holding {}: price unavailable",
@@ -696,6 +703,7 @@ impl Polymarket {
                     .store
                     .market_index_by_id(row.asset)
                     .expect("known market");
+                self.account.skip_logged.remove(row.asset);
                 snapshot.holdings.push(PredictionHolding {
                     market: index,
                     redeemable: row.redeemable,
@@ -955,6 +963,9 @@ impl Polymarket {
                         .copied()
                         .collect();
                     snapshot.holdings.extend(kept);
+                    if snapshot.rows.rejected() == 0 {
+                        self.account.skip_logged.clear();
+                    }
                     let rows = snapshot
                         .rows
                         .commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
@@ -1240,7 +1251,12 @@ impl Polymarket {
 
 /// Rejects a holding row; a known market keys its stored copy, while an unknown
 /// one has no stored copy to keep. A row with nothing stored to keep is an error.
-fn reject_holding(cx: &mut Cx<'_, Pending>, snapshot: &mut PositionSnapshot, asset: Option<&str>) {
+fn reject_holding(
+    cx: &mut Cx<'_, Pending>,
+    account: &mut Account,
+    snapshot: &mut PositionSnapshot,
+    asset: Option<&str>,
+) {
     let level = |stored: bool| {
         if stored {
             LogLevel::Warning
@@ -1249,8 +1265,12 @@ fn reject_holding(cx: &mut Cx<'_, Pending>, snapshot: &mut PositionSnapshot, ass
         }
     };
     let Some(asset) = asset else {
-        cx.log(
-            level(!cx.store.positions().is_empty()),
+        let level = level(!cx.store.positions().is_empty());
+        log_skip(
+            cx,
+            account,
+            "",
+            level,
             "Polymarket skipped malformed holding without an asset",
         );
         snapshot.rows.reject(None);
@@ -1260,13 +1280,31 @@ fn reject_holding(cx: &mut Cx<'_, Pending>, snapshot: &mut PositionSnapshot, ass
     let stored = symbol
         .as_ref()
         .is_some_and(|symbol| cx.store.position(symbol).is_some());
-    cx.log(
+    log_skip(
+        cx,
+        account,
+        asset,
         level(stored),
         format!("Polymarket skipped malformed holding {asset}"),
     );
     snapshot
         .rows
         .reject(Some(symbol.unwrap_or_else(|| asset.to_owned())));
+}
+/// Logs a skipped holding once per asset until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    account: &mut Account,
+    asset: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if account.skip_logged.len() >= SKIP_LOG_LIMIT {
+        account.skip_logged.clear();
+    }
+    if account.skip_logged.insert(asset.to_owned()) {
+        cx.log(level, message);
+    }
 }
 
 #[cfg(test)]
