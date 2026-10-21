@@ -175,6 +175,8 @@ initialization ordering and the shared startup visibility scope are updated belo
 The Bitunix socket/book follow-up checks #1639 at `77a5e5faaec`; NX empty-book
 propagation, smoothing and canvas rendering were checked read-only at
 `65e086a3c90`. The required caller repair below remains open.
+The Bitunix secondary-read follow-up checks #1640 at `93bb218ffda`; identity,
+egress and the limits of account-auth evidence are recorded below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -259,6 +261,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1637 / `673565c2e` | Runtime bridge policy now follows engine capability flags/enums; shared construction rules retain synchronous policy and expose optional `construction().bridge`. Capability-dependent public calls wait for an existing startup; no-start/failed-start calls reject with method-named `ExchangeError` `invalidInput`/`notSent`. Worker forwarding stays first. NX explicit readiness is recommended; typed rejection handling is required. See [Runtime capability readiness](#runtime-capability-readiness-1637). |
 | #1636 / `62adf7651` | A usable Bitunix catalogue starts private initialization before ticker seeding finishes. Valid public rows survive malformed typed peers; unusable required seeds retry without false loaded-empty readiness. Independent discovery retries honor rate floors and use existing startup.degraded/recovered codes. Ticker recovery does not restart private settings/polling; private/history failure policy and caller shapes stay unchanged. |
 | #1639 / `77a5e5faa` | Bitunix retains socket supervision/backoff per feed, rejects retired socket/timer events and replays current interests once on replacement. Futures-socket retirement immediately publishes empty books before retry; public ticker-shard retirement leaves the separate futures books intact. **Required, high priority:** NX must propagate empty-book invalidation through raw/smoothed listeners and clear displayed depth, rather than keep stale levels. See [Bitunix disconnected books](#bitunix-disconnected-books-1639). |
+| #1640 / `93bb218ff` | Bitunix signed GETs now use configured secondary read credentials and matching secondary egress; mutations, posted reads and private WS login stay primary, and public discovery stays unsigned. Account/settings requests tag the selected slot and scope, without adding native auth-outcome classification. Existing caller options remain; malformed secondary identities are rejected before I/O. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2271,6 +2274,24 @@ two-sided recovery. Source `sdk-rs/venues/bitunix/tests/socket_lifecycle.rs`
 already verifies immediate empty BOOK publication, retired-epoch exclusion,
 replay once and one-sided recovery; it does not prove NX rendering. NX remains
 read-only in this docs lane; the caller repair and runtime proof are still open.
+
+### Bitunix secondary GET identity and egress (#1640)
+
+Existing SDK `secondary_key`/`secondary_secret` options now reach Bitunix through
+registry `readCredentials`. A signed GET uses that identity when configured;
+otherwise it uses the primary identity. The SDK recognizes the `api-key` header
+so GET signing identity and secondary proxy/HOW egress agree, including the
+existing native serialized routing policy. Mutations, reads issued as POST and
+private WS login continue using the primary identity/egress; public discovery
+remains unsigned. No caller argument or host runtime path is added.
+
+Formed secondary credentials require a nonempty key and secret before startup
+I/O, including public-only construction. Account balance/position/order/TP-SL
+reads and symbol settings tag the credential slot actually selected and their
+existing scope. History, public discovery and trading requests do not create
+account-auth evidence. Request tagging is not native success/rejection
+classification: #1640 does not add Bitunix `account_auth_outcome` handling or
+justify clearing a credential badge from unrelated successful traffic.
 
 ## Required startup degradation visibility
 
