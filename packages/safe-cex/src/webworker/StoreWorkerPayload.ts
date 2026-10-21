@@ -76,6 +76,8 @@ export type StoreWorkerOutgoingOp =
   | 'deactivate-status'
   | 'start-status'
   | 'ws-reconnected'
+  // Structured Rust event; data is [EngineEvent].
+  | 'engine-event'
   // Logging
   | 'log'
   | 'error'
