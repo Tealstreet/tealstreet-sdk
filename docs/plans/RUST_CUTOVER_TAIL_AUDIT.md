@@ -78,8 +78,10 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    data/refusals fail. A precise shared decoder feature admits standalone JSON
    requests without unrelated venue commands. Crypto.com, GRVT, Paradex and WEEX
    remain parity gaps; streaming subscriptions are separate. MEXC's existing
-   standalone JSON decoder omission is a separate queued correction. Add each
-   remaining native query/capability without synthesizing an absent stream book.
+   standalone JSON decoder omission is repaired by opting into the precise book
+   feature, with a JSON-to-native-HTTP/result regression; native book semantics
+   stay unchanged. Add each remaining native query/capability without synthesizing
+   an absent stream book.
 4. **Hyperliquid dead-man switch:** TS `scheduleCancel(time?: number | null)`
    sends a signed account-wide action; Rust inherits the base rejection and
    has no matching engine command. Preserve cancellation semantics, UTC-ms
