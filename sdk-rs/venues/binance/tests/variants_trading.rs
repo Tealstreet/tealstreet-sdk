@@ -626,3 +626,30 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         assert!(h.result(77).unwrap().is_ok());
     }
 }
+
+#[test]
+fn spot_market_take_profit_still_amends_while_spot_take_profit_limit_refuses() {
+    for (native, refused) in [("TAKE_PROFIT", false), ("TAKE_PROFIT_LIMIT", true)] {
+        let mut h = ready(Variant::Spot);
+        let socket = h.socket("ws-api/v3").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "ws-api/v3",
+            r#"{"id":"tealstreet-user-data-10","status":200,"result":{"subscriptionId":0}}"#,
+        );
+        h.message("ws-api/v3", &format!(r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":1,"s":"BTCUSDT","c":"tp","S":"SELL","o":"{native}","X":"NEW","x":"NEW","p":"0","P":"120","L":"0","q":"2","z":"0","l":"0"}}}}"#));
+        assert!(h.engine.store().order("tp").is_some(), "{native}");
+        h.event(Event::Command(Command::AmendOrder {
+            command: 88,
+            id: "tp".into(),
+            price: Some(125.0),
+            amount: None,
+        }));
+        let failed = h
+            .failures
+            .iter()
+            .any(|(c, e)| *c == 88 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported));
+        assert_eq!(failed, refused, "{native}");
+        assert_eq!(h.requests.is_empty(), refused, "{native}");
+    }
+}

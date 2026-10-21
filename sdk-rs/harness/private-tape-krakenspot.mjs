@@ -32,7 +32,9 @@ export function buildKrakenSpotTape() {
     const ordertype = { limit: 'limit', market: 'market', stop_market: 'stop-loss', take_profit_market: 'take-profit', trailing_stop_market: 'trailing-stop' }[type];
     http('POST', '/0/private/AddOrder', { txid: [id], descr: { order: 'documented order' } }, { pair: 'XXBTZUSD', type: 'sell', ordertype, volume: '0.25', cl_ord_id: 'a'.repeat(32), ...(price === undefined ? {} : { price: type === 'trailing_stop_market' ? '+5' : String(price) }) }, stage());
   };
-  place(1000, 'limit', 110, 'O-201');
+  // Off the TS one-second balance poll: TS signs each of its two clients with its
+  // own nonce counter, so two requests in one millisecond can go out of order.
+  place(1100, 'limit', 110, 'O-201');
   place(1400, 'market', undefined, 'O-202');
   place(1800, 'stop_market', 80, 'O-203');
   place(2200, 'take_profit_market', 120, 'O-204');
@@ -44,7 +46,7 @@ export function buildKrakenSpotTape() {
   command(3600, 'cancelOrders', { ids: ['O-100'] });
   http('POST', '/0/private/CancelOrder', { count: 1 }, { txid: 'O-100' }, stage());
   http('POST', '/0/private/OpenOrders', { open: {} }, {}, stage());
-  ws(3800, 'executions', 'update', [execution({ exec_type: 'canceled' })]);
+  ws(3800, 'executions', 'update', [execution({ exec_type: 'canceled', timestamp: new Date(KRAKEN_SPOT_EPOCH + 3800).toISOString() })]);
   for (const op of ['fetchFills', 'fetchOrderHistory', 'fetchIncome']) command(4400, op, { symbol: 'XBT/USD' });
   command(4600, 'fetchCandles', { symbol: 'XBT/USD', interval: '1m', from: KRAKEN_SPOT_EPOCH - 60000, to: KRAKEN_SPOT_EPOCH });
   http('GET', `/0/public/OHLC?pair=XXBTZUSD&interval=1&since=${KRAKEN_SPOT_EPOCH / 1000 - 60}`,

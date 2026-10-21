@@ -1,12 +1,13 @@
 use crate::{Coinbase, Pending, ProductKind, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
@@ -1072,7 +1073,7 @@ impl Coinbase {
             Request::Daily {
                 symbol, generation, ..
             } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 if let Some(state) = self
                     .public
                     .daily
@@ -1087,7 +1088,7 @@ impl Coinbase {
                     Request::Products { kind, .. } => Some(kind),
                     _ => None,
                 };
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 if let Some(timer) = self.public.poll.take() {
                     cx.clear_timer(timer);
                 }
@@ -1173,7 +1174,11 @@ impl Coinbase {
             return true;
         };
         if envelope.kind == "error" {
-            cx.log(LogLevel::Warning, envelope.message.as_ref());
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                envelope.message.as_ref(),
+            );
             self.reconnect_public(cx);
             return true;
         }
@@ -1401,8 +1406,9 @@ impl Coinbase {
                         Err("Coinbase public startup command queue is full".into()),
                     );
                 }
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
                     "Coinbase public startup command queue is full",
                 );
                 return None;

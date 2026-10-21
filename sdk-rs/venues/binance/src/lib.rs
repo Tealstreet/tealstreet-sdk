@@ -31,6 +31,9 @@ const SILENCE_LIMIT_MS: f64 = 20_000.0;
 /// Background reads pause at 80% of the 2,400 request-weight budget.
 const WEIGHT_PAUSE_THRESHOLD: f64 = 1_920.0;
 const WEIGHT_PAUSE_MS: f64 = 60_000.0;
+/// Binance IP bans can last hours; a longer or overflowing `Retry-After` is capped
+/// so background reads resume instead of stopping for good.
+const MAX_BAN_PAUSE_MS: f64 = 86_400_000.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Variant {
@@ -473,7 +476,9 @@ impl BinanceFutures {
                     .header("retry-after")
                     .map(num::parse)
                     .filter(|seconds| *seconds > 0.0)
-                    .map_or(WEIGHT_PAUSE_MS, |seconds| seconds * 1_000.0),
+                    .map_or(WEIGHT_PAUSE_MS, |seconds| {
+                        (seconds * 1_000.0).min(MAX_BAN_PAUSE_MS)
+                    }),
             )
         } else {
             response
@@ -1054,7 +1059,8 @@ impl BinanceFutures {
         state.failures += 1;
         let backoff = Backoff::new(1_000.0, u32::MAX, MAX_SNAPSHOT_BACKOFF_MS)
             .delay(state.failures.saturating_sub(1));
-        state.sync = Sync::Cooldown(cx.set_timer(backoff.max(min_delay_ms)));
+        let delay = cx.jittered(backoff).max(min_delay_ms);
+        state.sync = Sync::Cooldown(cx.set_timer(delay));
     }
 
     fn on_depth_snapshot(
@@ -1311,6 +1317,10 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         match self.options.variant {

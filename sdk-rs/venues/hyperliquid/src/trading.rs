@@ -167,6 +167,18 @@ impl Hyperliquid {
                 _ => {}
             }
         }
+        // TS: leverage and margin on a merged spot pair are silent no-ops (always 1x cross).
+        if let Command::SetLeverage {
+            command, symbol, ..
+        }
+        | Command::SetMarginType {
+            command, symbol, ..
+        } = &command
+            && self.spot_market(cx, symbol)
+        {
+            cx.done(*command, Ok("[]".into()));
+            return;
+        }
         let mut replacement = None;
         let mut amend_source = None;
         let (command, steps) = match command {
@@ -408,7 +420,7 @@ impl Hyperliquid {
             if [o.stop_loss, o.take_profit]
                 .into_iter()
                 .flatten()
-                .any(|p| !p.is_finite() || p < 0.0 || (!self.spot && p == 0.0))
+                .any(|p| !p.is_finite() || p < 0.0)
             {
                 return Err("Invalid bracket trigger price".into());
             }
@@ -418,6 +430,14 @@ impl Hyperliquid {
         }
         Ok(())
     }
+    /// A spot pair, in the standalone spot venue or merged into the perp account.
+    pub(crate) fn spot_market(&self, cx: &Cx<'_, Pending>, symbol: &str) -> bool {
+        self.spot
+            || cx
+                .store
+                .market(symbol)
+                .is_some_and(|m| m.is_spot == Some(true))
+    }
     fn base_price(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<f64, String> {
         let t = cx.store.ticker(symbol).ok_or("Missing ticker price data")?;
         if self.spot {
@@ -425,7 +445,12 @@ impl Hyperliquid {
                 .then_some(t.last)
                 .ok_or_else(|| "Missing valid ticker price data".into());
         }
-        [t.mark, t.last, t.mid_price.unwrap_or(0.0), t.index]
+        let candidates = if self.spot_market(cx, symbol) {
+            [t.last, t.mid_price.unwrap_or(0.0), t.mark, t.index]
+        } else {
+            [t.mark, t.last, t.mid_price.unwrap_or(0.0), t.index]
+        };
+        candidates
             .into_iter()
             .find(|p| p.is_finite() && *p > 0.0)
             .ok_or_else(|| "Missing valid ticker price data".into())
@@ -462,7 +487,8 @@ impl Hyperliquid {
                     0.95
                 }
         };
-        let price = price_wire(p, m.precision.amount, self.spot)?;
+        let spot = self.spot || m.is_spot == Some(true);
+        let price = price_wire(p, m.precision.amount, spot)?;
         let cloid = match &opts.client_order_id {
             Some(c) => c.clone(),
             None => mint_cloid()?,
@@ -471,11 +497,7 @@ impl Hyperliquid {
             WireType::Trigger {
                 trigger: TriggerWire {
                     is_market: true,
-                    trigger_px: price_wire(
-                        opts.price.unwrap_or(0.0),
-                        m.precision.amount,
-                        self.spot,
-                    )?,
+                    trigger_px: price_wire(opts.price.unwrap_or(0.0), m.precision.amount, spot)?,
                     tpsl: if opts.kind == OrderType::TakeProfit {
                         "tp"
                     } else {
@@ -501,24 +523,25 @@ impl Hyperliquid {
             b: opts.side == OrderSide::Buy,
             p: price,
             s: float_wire(if positional { 0.0 } else { size })?,
-            r: !self.spot && opts.reduce_only.unwrap_or(false),
+            r: !spot && opts.reduce_only.unwrap_or(false),
             t,
             c: cloid,
         };
         let mut wires = vec![main];
         if opts.kind == OrderType::Limit {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
-                if let Some(trigger) = value.filter(|p| !self.spot || *p != 0.0) {
+                // Like TS, a zero bracket price means no bracket on every market.
+                if let Some(trigger) = value.filter(|p| *p != 0.0) {
                     wires.push(OrderWire {
                         a: asset,
                         b: opts.side != OrderSide::Buy,
                         p: wires[0].p.clone(),
                         s: float_wire(size)?,
-                        r: !self.spot,
+                        r: !spot,
                         t: WireType::Trigger {
                             trigger: TriggerWire {
                                 is_market: true,
-                                trigger_px: price_wire(trigger, m.precision.amount, self.spot)?,
+                                trigger_px: price_wire(trigger, m.precision.amount, spot)?,
                                 tpsl: kind,
                             },
                         },

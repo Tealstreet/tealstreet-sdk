@@ -597,12 +597,17 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::Native,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            host_clock: true,
             account_leverage: true,
             ..safe_cex_engine::Capabilities::BASE
         }

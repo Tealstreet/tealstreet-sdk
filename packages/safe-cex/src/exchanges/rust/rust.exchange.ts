@@ -63,7 +63,6 @@ import {
   hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -188,24 +187,21 @@ const needsTsPayloadSigner = (
 ) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
 
 /**
- * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
- * account stays on the TS venue, which merges spot markets into the perp account; the
- * engine's perp venue does not, and refuses the option when constructed directly. A
- * keyless remote-signed account stays on TS too, which signs through the browser, as
- * does a payload-signed account outside Paradex.
+ * Whether `engine: 'rust'` runs this account on the engine. A keyless remote-signed
+ * account stays on the TS venue, which signs through the browser, as does a
+ * payload-signed account outside Paradex.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
   options: Partial<
     Pick<
       ExchangeOptions,
-      'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
+      'engine' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
     >
   >,
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
-  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
   !isKeylessRemoteSigned(name, options) &&
   !needsTsPayloadSigner(name, options);
 
@@ -636,6 +632,17 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   }
 
+  private authFailureNoted = false;
+  /** One engine dispatch often reports a rejection twice (`auth.rejected` and `deactivate`). */
+  private noteAuthFailure = () => {
+    if (this.authFailureNoted) return;
+    this.authFailureNoted = true;
+    queueMicrotask(() => {
+      this.authFailureNoted = false;
+    });
+    this.recordAuthFailure();
+  };
+
   override recordAuthSuccess(): void {
     super.recordAuthSuccess();
     this.updatePollingPolicy();
@@ -701,37 +708,14 @@ export class RustEngineExchange extends BaseExchange {
         throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
       }
     }
-    if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error(
-        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
-      );
-    }
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Factories route TS payload-signer venues to TS; elsewhere no implementation signs
-    // with it, so refuse rather than ignore it, even on venues exempt from the guard below.
+    // Factories route these to TS. A private engine account would otherwise ignore the
+    // signer and send unsigned requests, even on venues exempt from the Rust local-credential rule.
     if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
-    if (
-      ![
-        'hyperliquid',
-        'paradex',
-        'lighter',
-        'lighter-robinhood',
-        'txflow',
-        'coinbase',
-        'coinbasespot',
-        'polymarket',
-        'breakoutprop',
-      ].includes(this.name) &&
-      !this.isPublicDataOnly &&
-      (!this.options.key ||
-        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
-    ) {
-      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -776,97 +760,63 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
-        ...(this.name !== 'asterdex' && this.options.secondary_key
+        ...(this.options.secondary_key
           ? { readCredentials: {
               key: this.options.secondary_key,
               secret: this.options.secondary_secret,
               passphrase: this.options.secondary_passphrase ?? passphrase,
             } }
           : {}),
-        ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
+        omniKeySeed,
         testnet: Boolean(testnet),
-        ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
+        brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy),
         publicDataOnly: Boolean(publicDataOnly),
-        ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
-        extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
+        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
+        extra: { kucoinBroker: this.options.extra?.kucoinBroker },
         endpoints,
-        ...([
-          'backpack',
-          'bitrue',
-          'breakoutprop',
-          'binance',
-          'binancepm',
-          'binancespot',
-          'binanceinverse',
-          'bybit',
-          'bybitinverse',
-          'bybitspot',
-          'bybitdemo',
-          'hyrotrader',
-          'mexc',
-        ].includes(this.name)
-          ? { recvWindow: this.options.extra?.recvWindow }
-          : {}),
+        recvWindow: this.options.extra?.recvWindow,
         applicationId,
-        ...(this.name === 'breakoutprop'
-          ? {
-              subaccount: this.options.subaccount,
-            }
-          : {}),
-        ...(['lighter', 'lighter-robinhood'].includes(this.name)
-          ? {
-              apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
-              lighterRemoteSigner: Boolean(this.options.remoteSigner),
-              lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
-                ?.lighterSignerProvider,
-              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
-              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
-            }
-          : {}),
+        subaccount: this.options.subaccount,
+        apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+        lighterRemoteSigner: Boolean(this.options.remoteSigner),
+        lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
+          ?.lighterSignerProvider,
+        lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+        lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
-        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)
-          ? {
-              enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
-              enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
-            }
-          : {}),
-        ...(this.name === 'grvt'
-          ? {
-              grvtTradingAccountId: this.options.grvtTradingAccountId,
-              grvtSignerAddress: this.options.grvtSignerAddress,
-            }
-          : {}),
-        ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
-        ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress, payloadSigner: Boolean(this.options.payloadSigner) } : {}),
-        ...(this.name === 'asterdex'
-          ? {
-              asterdex: {
-                apiVersion: resolveAsterDEXApiVersion(this.options),
-                userAddress: this.options.auth?.userAddress,
-                signerAddress: this.options.auth?.signerAddress,
-                privateKey: this.options.auth?.privateKey,
-                builderAddress: this.options.extra?.asterBuilderAddress,
-                builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
-                builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
-                readKey: this.options.secondary_key,
-                readSecret: this.options.secondary_secret,
-              },
-            }
-          : {}),
+        enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
+        enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
+        grvtTradingAccountId: this.options.grvtTradingAccountId,
+        grvtSignerAddress: this.options.grvtSignerAddress,
+        polymarket: this.options.polymarket,
+        paradexAddress,
+        subkeyAddress,
+        payloadSigner: Boolean(this.options.payloadSigner),
+        asterdex: {
+          apiVersion: resolveAsterDEXApiVersion(this.options),
+          userAddress: this.options.auth?.userAddress,
+          signerAddress: this.options.auth?.signerAddress,
+          privateKey: this.options.auth?.privateKey,
+          builderAddress: this.options.extra?.asterBuilderAddress,
+          builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
+          builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
+          readKey: this.options.secondary_key,
+          readSecret: this.options.secondary_secret,
+        },
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },
         // The engine reports account sections missing at startup only when untilLoaded waits for them.
         accountStartup: !this.isPublicDataOnly,
-        ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
+    // Set from the engine's record before startup: venues that take the host clock as-is get the synced one.
+    let hostClock = false;
     const host = new EngineHost(
       engine,
-      ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
-        ? { ...transport, now: virtualClock.getCurrentTimeMs }
-        : transport,
+      { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
@@ -875,7 +825,7 @@ export class RustEngineExchange extends BaseExchange {
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
-          this.recordAuthFailure();
+          this.noteAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
@@ -889,7 +839,9 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptEngineCapabilities(host.capabilities());
+      const capabilities = host.capabilities();
+      hostClock = capabilities.hostClock;
+      this.adoptEngineCapabilities(capabilities);
     } catch (error) {
       host.dispose();
       throw error;
@@ -1316,7 +1268,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
-    if (event.code === 'auth.rejected') this.recordAuthFailure();
+    if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
   };
 

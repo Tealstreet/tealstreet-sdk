@@ -1,7 +1,7 @@
 //! Venue-reported closed positions: raw positions-history rows, deduped and paged by historyId.
 #![allow(dead_code)]
 mod support;
-use safe_cex_engine::{Action, Command, Event, LogLevel, Notice, VenueAction};
+use safe_cex_engine::{Action, Command, Event, Notice, VenueAction};
 use support::*;
 
 fn fetch(h: &mut Harness, symbol: Option<&str>, from: Option<f64>, to: Option<f64>) {
@@ -123,5 +123,5 @@ fn unknown_symbols_read_nothing_and_the_page_cap_warns() {
     let got: Vec<serde_json::Value> = serde_json::from_str(&result(&h).unwrap().unwrap()).unwrap();
     assert_eq!(got.len(), 10_000);
     assert!(h.actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: LogLevel::Warning, message }) if message.contains("100-page cap"))));
+        Action::Notice(Notice::Event(event)) if event.level == safe_cex_engine::Level::Warn && event.message.contains("100-page cap"))));
 }

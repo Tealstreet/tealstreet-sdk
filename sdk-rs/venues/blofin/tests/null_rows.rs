@@ -79,7 +79,7 @@ fn malformed_ws_order_row_retains_known_order_and_processes_valid_sibling() {
     assert_eq!(h.e.store().orders().len(), 2);
     assert_eq!(h.e.store().order("123").unwrap().amount, 0.001);
     assert!(h.e.store().order("456").is_some());
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log {message, ..}) if message.contains("Malformed BloFin order row"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains("Malformed BloFin order row"))));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn malformed_ws_ticker_row_retains_known_ticker_and_processes_valid_sibling() {
     assert_eq!(h.e.store().ticker("BTCUSDT").unwrap().last, 60000.0);
     assert_eq!(h.e.store().ticker("ETHUSDT").unwrap().last, 3000.0);
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Log {message, ..}) if message.contains("Malformed BloFin ticker row"))));
+        Action::Notice(Notice::Event(event)) if event.message.contains("Malformed BloFin ticker row"))));
 }
 
 #[test]

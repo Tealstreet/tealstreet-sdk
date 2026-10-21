@@ -1,11 +1,13 @@
 //! Fixtures follow KuCoin Classic Futures documented account and private-order examples.
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_kucoin::{Kucoin, Options};
+use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
 
@@ -1090,7 +1092,7 @@ fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
             format!("Skipping KuCoin position on uncatalogued market {symbol}")
         };
         assert!(h.actions.iter().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))), "{symbol}");
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(&needle))), "{symbol}");
     }
 }
 
@@ -1126,7 +1128,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     assert_eq!(store.orders().len(), 1);
     assert_eq!(store.orders()[0].id, "5cdfc138b21023a909e5ad55");
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
 }
 
 #[test]
@@ -1165,7 +1167,9 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let i = h
         .actions
         .iter()
-        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1610000001000.0))
+        .position(|a| {
+            matches!(a, Action::SetTimer { at_ms, .. } if jittered(*at_ms - 1610000000000.0, 1000.0))
+        })
         .expect("partial catalogue retry");
     let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
         unreachable!()
@@ -1204,7 +1208,7 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
     assert_eq!(h.engine.store().orders(), before);
     assert!(h.fill_rows().is_empty());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("market unavailable"))));
 }
 
 #[test]
