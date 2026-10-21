@@ -446,6 +446,130 @@ fn watchdog_closes_silent_socket_and_reconnects_with_quiet_snapshot_request() {
 }
 
 #[test]
+fn bounded_candle_reads_use_history_seconds_and_sort_and_filter_results() {
+    #[derive(serde::Deserialize)]
+    struct CandleTime {
+        timestamp: f64,
+    }
+    for (from, to, suffix) in [
+        (Some(120_001.0), Some(240_999.0), "&from=120&to=240"),
+        (Some(120_000.0), None, "&from=120&to=300"),
+        (None, Some(240_000.0), "&from=0&to=240"),
+    ] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        e.handle(
+            300_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 91,
+                symbol: "BTCUSDC".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: Some(2),
+                from_ms: from,
+                to_ms: to,
+            }),
+        );
+        let request = requests(&mut e).pop().unwrap();
+        assert!(
+            request.url.ends_with(&format!(
+                "/v1/tv/kline_history?symbol=PERP_BTC_USDC&resolution=1m&limit=2{suffix}"
+            )),
+            "{}",
+            request.url
+        );
+        reply(
+            &mut e,
+            &request,
+            r#"{"s":"ok","t":[240,180,120],"o":[1,1,1],"h":[2,2,2],"l":[1,1,1],"c":[2,2,2],"v":[0,0,0]}"#,
+        );
+        let rows = actions(&mut e)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::CommandDone {
+                    command: 91,
+                    result: json,
+                }) => Some(serde_json::from_str::<Vec<CandleTime>>(&json).unwrap()),
+                _ => None,
+            })
+            .expect("candle completion");
+        assert_eq!(
+            rows.iter().map(|r| r.timestamp).collect::<Vec<_>>(),
+            [180.0, 240.0]
+        );
+    }
+}
+
+#[test]
+fn candle_history_no_data_and_future_lower_bound_return_empty() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    for future in [false, true] {
+        e.handle(
+            300_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 93,
+                symbol: "BTCUSDC".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: Some(2),
+                from_ms: Some(if future { 360_000.0 } else { 120_000.0 }),
+                to_ms: None,
+            }),
+        );
+        let mut out = actions(&mut e);
+        if future {
+            assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+        } else {
+            let request = out
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(request) => Some(request),
+                    _ => None,
+                })
+                .unwrap();
+            reply(&mut e, request, r#"{"s":"no_data"}"#);
+            out = actions(&mut e);
+        }
+        assert!(out.iter().any(|a| matches!(a,
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command: 93, result: json }) if json == "[]"
+        )));
+    }
+}
+
+#[test]
+fn malformed_history_candles_fail_instead_of_publishing_partial_rows() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    for body in [
+        r#"{"s":"error","errmsg":"rate limit"}"#,
+        r#"{"s":"ok","t":[120],"o":[],"h":[2],"l":[1],"c":[2],"v":[0]}"#,
+        r#"{"s":"ok","t":[120],"o":[3],"h":[2],"l":[1],"c":[2],"v":[0]}"#,
+        r#"{"s":"ok","t":[120,120],"o":[1,1],"h":[2,2],"l":[1,1],"c":[2,2],"v":[0,0]}"#,
+        r#"{"s":"ok","t":[120],"o":[1],"h":[2],"l":[1],"c":[2],"v":[-1]}"#,
+    ] {
+        e.handle(
+            1000.0,
+            Event::Command(Command::FetchCandles {
+                command: 92,
+                symbol: "BTCUSDC".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: None,
+                from_ms: None,
+                to_ms: Some(240_000.0),
+            }),
+        );
+        let request = requests(&mut e).pop().unwrap();
+        reply(&mut e, &request, body);
+        assert!(
+            actions(&mut e).iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 92, .. })
+            )),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
     let (mut e, _) = ready();
     actions(&mut e);
@@ -470,10 +594,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
         reply(&mut e, &r, body);
         assert!(actions(&mut e).iter().any(|a| matches!(
             a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone {
-                command: 42,
-                result: Err(_)
-            })
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, .. })
         )));
     }
 }

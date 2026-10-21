@@ -686,7 +686,7 @@ impl Woo {
     ) {
         let Some(m) = cx.store.market(symbol) else {
             if let Some(id) = command {
-                cx.done(id, Err("Market not found".into()));
+                cx.fail(id, "Market not found");
             }
             return;
         };
@@ -708,7 +708,7 @@ impl Woo {
             Pending::Account(req),
         ) && let Some(id) = command
         {
-            cx.done(id, Err(e));
+            cx.fail(id, e);
         }
     }
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
@@ -1532,7 +1532,10 @@ impl Woo {
                     Err(e) => Err(e),
                 };
                 if let Some(command) = command {
-                    cx.done(command, result);
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 } else if let Err(e) = result {
                     cx.notice(Level::Warn, code::REQUEST_FAILED, e);
                 }
@@ -1589,7 +1592,7 @@ impl Woo {
             } => {
                 self.account.metadata_at.remove(&symbol);
                 if let Some(id) = command {
-                    cx.done(id, Err(error.into()));
+                    cx.fail(id, error);
                     return;
                 }
             }

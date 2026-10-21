@@ -334,7 +334,7 @@ impl BitunixFutures {
     }
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Candles { command } => cx.done(command, Err(error.into())),
+            Pending::Candles { command } => cx.fail(command, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {

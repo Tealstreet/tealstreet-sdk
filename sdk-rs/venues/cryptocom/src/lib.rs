@@ -726,14 +726,17 @@ impl Venue for Cryptocom {
                 command,
                 rows,
                 invalid,
-            } => cx.done(
-                command,
-                if invalid {
+            } => {
+                let result: Result<String, String> = if invalid {
                     Err("invalid candle row".into())
                 } else {
                     Ok(serde_json::to_string(&rows).unwrap())
-                },
-            ),
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -741,7 +744,7 @@ impl Venue for Cryptocom {
             Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
@@ -864,7 +867,7 @@ impl Venue for Cryptocom {
                         },
                     );
                 }
-                Err(error) => cx.done(command, Err(error)),
+                Err(error) => cx.fail(command, error),
             },
             Command::Query { command, query } => self.query(cx, command, query),
             command => self.trade_command(cx, command),

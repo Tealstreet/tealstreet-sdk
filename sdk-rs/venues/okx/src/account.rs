@@ -185,11 +185,11 @@ impl Okx {
         symbol: String,
     ) {
         let Some(m) = cx.store.market(&symbol) else {
-            cx.done(command, Err(format!("unknown market {symbol}")));
+            cx.fail(command, format!("unknown market {symbol}"));
             return;
         };
         if self.credentials.is_none() {
-            cx.done(command, Err("OKX leverage requires credentials".into()));
+            cx.fail(command, "OKX leverage requires credentials");
             return;
         }
         let inst_id = m.id.clone();
@@ -547,7 +547,10 @@ impl Okx {
                 version,
             } => {
                 let result = self.leverage_result(cx, data, &symbol, &inst_id, version);
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Request::Config { mode_version } => {
                 self.account.config_in_flight = false;
@@ -841,7 +844,7 @@ impl Okx {
                 return;
             }
             Request::Leverage { command, .. } => {
-                cx.done(command, Err(error.to_owned()));
+                cx.fail(command, error.to_owned());
                 return;
             }
         }

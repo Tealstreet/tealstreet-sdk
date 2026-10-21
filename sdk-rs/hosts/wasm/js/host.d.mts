@@ -260,7 +260,15 @@ export interface EngineHealth {
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */
+export interface EngineConstruction {
+  canSign?: boolean;
+  publicDataOnly?: boolean;
+  asterdexApiVersion?: 'v1' | 'v3';
+}
+
 export interface WasmEngineLike {
+  /** Resolved account choices, without credentials. Older hosts may omit it. */
+  construction?(): string;
   accountId?(): string | undefined;
   /** JSON-encoded {@link EngineHealth}. */
   health?(): string;

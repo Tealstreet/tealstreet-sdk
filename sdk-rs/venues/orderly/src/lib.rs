@@ -81,6 +81,12 @@ pub enum Pending {
         from: Option<f64>,
         to: Option<f64>,
     },
+    CandleHistory {
+        command: CommandId,
+        from: Option<f64>,
+        to: Option<f64>,
+        limit: usize,
+    },
 }
 struct Connection {
     socket: Option<SocketId>,
@@ -720,7 +726,10 @@ impl Venue for Orderly {
         }
         let result: Result<(), String> = (|| {
             match pending {
-                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
+                Pending::Account(_)
+                | Pending::Trade(_)
+                | Pending::History(_)
+                | Pending::CandleHistory { .. } => unreachable!(),
                 Pending::Markets { rows, .. } => {
                     let r: MarketRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     let Some((base, settlement)) = native_parts(&r.symbol) else {
@@ -831,7 +840,10 @@ impl Venue for Orderly {
                     return;
                 }
                 Pending::Candles { invalid, .. } => *invalid = true,
-                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
+                Pending::Account(_)
+                | Pending::Trade(_)
+                | Pending::History(_)
+                | Pending::CandleHistory { .. } => unreachable!(),
             }
             cx.notice(Level::Error, code::STREAM_MALFORMED, e);
         }
@@ -848,6 +860,19 @@ impl Venue for Orderly {
         }
         if let Pending::History(request) = pending {
             self.history_response(cx, request, response);
+            return;
+        }
+        if let Pending::CandleHistory {
+            command,
+            from,
+            to,
+            limit,
+        } = pending
+        {
+            match candle_history(response, from, to, limit) {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            };
             return;
         }
         if let Err(e) = checked(response) {
@@ -907,7 +932,7 @@ impl Venue for Orderly {
                 ..
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                cx.done(command, serde_json::to_string(&rows).unwrap());
             }
             invalid => self.on_request_failed(cx, invalid, "Orderly invalid response rows"),
         }
@@ -931,7 +956,9 @@ impl Venue for Orderly {
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } | Pending::CandleHistory { command, .. } => {
+                cx.fail(command, error)
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1093,11 +1120,11 @@ impl Venue for Orderly {
                 to_ms,
             } => {
                 let Some(native) = self.native.get(&symbol) else {
-                    cx.done(command, Err("Orderly unknown symbol".into()));
+                    cx.fail(command, "Orderly unknown symbol");
                     return;
                 };
                 if !interval_valid(interval) {
-                    cx.done(command, Err(interval.unsupported("Orderly")));
+                    cx.fail(command, interval.unsupported("Orderly"));
                     return;
                 }
                 if limit == Some(0)
@@ -1107,7 +1134,38 @@ impl Venue for Orderly {
                         .any(|n| !n.is_finite() || !(0.0..=253402300799000.0).contains(&n))
                     || from_ms.zip(to_ms).is_some_and(|(a, b)| a > b)
                 {
-                    cx.done(command, Err("Orderly invalid candle parameters".into()));
+                    cx.fail(command, "Orderly invalid candle parameters");
+                    return;
+                }
+                if from_ms.is_some() || to_ms.is_some() {
+                    let limit = limit.unwrap_or(500).min(1000) as usize;
+                    let from = from_ms.unwrap_or(0.0);
+                    let to = to_ms.unwrap_or(cx.now);
+                    if from > to {
+                        cx.done(command, "[]".into());
+                        return;
+                    }
+                    // Both bounds are mandatory on the native history endpoint.
+                    let mut path = format!(
+                        "/v1/tv/kline_history?symbol={native}&resolution={interval}&limit={limit}"
+                    );
+                    path.push_str(&format!(
+                        "&from={:.0}&to={:.0}",
+                        (from / 1000.0).floor(),
+                        (to / 1000.0).floor()
+                    ));
+                    cx.request(
+                        Method::Get,
+                        format!("{}{path}", self.rest()),
+                        vec![],
+                        None,
+                        Pending::CandleHistory {
+                            command,
+                            from: from_ms,
+                            to: to_ms,
+                            limit,
+                        },
+                    );
                     return;
                 }
                 let path = format!(
@@ -1130,7 +1188,13 @@ impl Venue for Orderly {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),
-            Command::FetchAccount { command } => cx.done(command, self.account_identity()),
+            Command::FetchAccount { command } => {
+                let result: Result<String, String> = self.account_identity();
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
             trade => self.trade_command(cx, trade),
         }
     }

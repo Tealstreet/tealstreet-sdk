@@ -91,7 +91,7 @@ impl Session {
         for a in self.e.drain_actions().collect::<Vec<_>>() {
             match a {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
-                    self.results.push((command, result))
+                    self.results.push((command, Ok(result)))
                 }
                 Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
                     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {

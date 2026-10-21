@@ -790,9 +790,15 @@ Futures matches TS on nearly every input; no high regression.
 TxFlow loses nothing (master TS was a placeholder).
 - ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
-- Low: one bad market row or unknown order row fails closed (startup lane);
-  trailing-stop display price; cancels skipped for unknown/finished ids;
-  candle `from`/`to` filtering a latest-N fetch.
+- Low: ~~one bad market row or unknown order row fails closed~~ (stale:
+  discovery skips malformed rows; order snapshot coverage retains rejected
+  roots and commits valid peers); ~~trailing-stop display price~~ (maps native
+  extreme/callback value or rate using order side, for REST and WS);
+  ~~cancels skipped for unknown/finished ids~~ (unknown IDs reject explicitly;
+  finished IDs are an intentional no-op. **RISKY** to infer normal/algo endpoint,
+  symbol or sibling repair from an uncached ID; keep reconciled-order preflight);
+  ~~candle `from`/`to` filtering a latest-N fetch~~ (bounded reads use native
+  `/v1/tv/kline_history`, validate parallel arrays and filter exact bounds).
 
 ### KuCoin
 - High: ~~cancel-symbol also deletes the symbol's TP/SL stops
@@ -896,8 +902,18 @@ Normal inputs send the same requests as TS; the risk is resilience.
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
   accepted, imported TP/SL amend keeps row working types, partial credentials
   deactivate visibly.
-- Low: isolated leverage sets both sides; index triggers rejected; fill without
-  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+- Low: ~~isolated leverage sets both sides~~ (selected isolated rail changes;
+  required opposite payload rail is preserved, including flat symbols; cross
+  leverage is coupled); ~~fetchLeverage returns max~~ (bridge returns cached
+  native buy/sell rails, not market limits).
+  **RISKY — retained:** index-source placement needs a verified native wire
+  contract (TS substitutes mark price for IndexPrice, which changes semantics).
+  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query,
+  while an empty identity string is still skipped. Inventing a fill identity is
+  unsafe; the empty-string handling remains a limitation. Income with neither
+  `asset` nor its `coin` alias rejects the affected page (range walks continue
+  with an explicit incomplete marker); assuming USDT without accounting evidence
+  can mislabel value.
 
 ### Coinbase (already defaults to Rust)
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's

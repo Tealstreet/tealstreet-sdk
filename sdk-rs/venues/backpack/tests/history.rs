@@ -8,7 +8,9 @@ fn result(e: &mut Driver) -> Result<String, String> {
     e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
+                Some(Ok(result))
+            } else if let Action::Notice(Notice::CommandFailed { error, .. }) = a {
+                Some(Err(error.legacy_text()))
             } else {
                 None
             }
@@ -68,7 +70,6 @@ fn malformed_fill_rows_are_skipped_and_logged_while_valid_fills_return() {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     assert!(json.contains("\"id\":\"999\""));
     assert!(!json.contains("998"));

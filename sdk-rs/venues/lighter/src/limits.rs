@@ -172,7 +172,7 @@ impl Lighter {
                     .limits
                     .tier
                     .map_or_else(|| "null".into(), |t| format!("\"{}\"", t.label()));
-                cx.done(command, Ok(tier));
+                cx.done(command, tier);
             }
             VenueAction::SetAccountTier { tier } => {
                 let result = (|| {
@@ -199,7 +199,7 @@ impl Lighter {
                             Pending::Account(account::Request::ChangeTier { command }),
                         );
                     }
-                    Err(error) => cx.done(command, Err(error)),
+                    Err(error) => cx.fail(command, error),
                 }
             }
             #[allow(unreachable_patterns)]
@@ -220,15 +220,15 @@ impl Lighter {
             self.limits.tier = None;
             self.limits.next_fetch_at = 0.0;
             self.refresh_limits(cx);
-            cx.done(command, Ok("null".into()));
+            cx.done(command, "null".into());
         } else {
             let message = envelope
                 .and_then(|e| e.message)
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("HTTP {}", response.status));
-            cx.done(
+            cx.fail(
                 command,
-                Err(format!("Lighter account tier change failed: {message}")),
+                format!("Lighter account tier change failed: {message}"),
             );
         }
     }

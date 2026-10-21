@@ -309,10 +309,7 @@ impl Orderly {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Orderly client-order lookup is not supported".into()),
-                );
+                cx.fail(command, "Orderly client-order lookup is not supported");
                 return;
             }
             Query::Fills {
@@ -352,9 +349,9 @@ impl Orderly {
                 if kind.as_ref().is_some_and(|k| {
                     !matches!(k.to_ascii_uppercase().as_str(), "FUNDING" | "FUNDING_FEE")
                 }) {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Orderly income supports settled funding payments only".into()),
+                        "Orderly income supports settled funding payments only",
                     );
                     return;
                 }
@@ -402,7 +399,7 @@ impl Orderly {
         let native = match validation {
             Ok(native) => native,
             Err(e) => {
-                cx.done(command, Err(e));
+                cx.fail(command, e);
                 return;
             }
         };
@@ -512,7 +509,7 @@ impl Orderly {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.done(request.command, Err(e)),
+            Err(e) => cx.fail(request.command, e),
         }
     }
     pub(crate) fn history_item(
@@ -882,15 +879,19 @@ impl Orderly {
                 .then_with(|| b.id().cmp(a.id()))
         });
         request.rows.truncate(request.limit);
-        cx.done(
-            request.command,
-            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            }
+        };
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(
+        cx.fail(
             request.command,
-            Err(format!("Orderly history read failed: {error}")),
+            format!("Orderly history read failed: {error}"),
         );
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
