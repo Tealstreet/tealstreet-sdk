@@ -128,8 +128,10 @@ closures: [`RUST_AUDIT_BINANCE_BYBIT.md`](RUST_AUDIT_BINANCE_BYBIT.md).
 Execution and Bybit terminal retention are bounded; private verification remains scripted.
 
 
-Engine root causes: `Fill` has no execution id and the store replaces lists with
-no freshness fence, so every venue reinvents dedupe and terminal fencing.
+Engine root causes: ~~`Fill` has no execution id~~ (optional execution identity
+now crosses FILLS revision 2; Hyperliquid publishes `tid`). The store replaces
+lists with no freshness fence, so venue-specific dedupe and terminal fencing
+remain necessary.
 
 ## Wire contract
 
@@ -422,8 +424,9 @@ Remaining evidence limitations:
 
 - No venue has live private evidence; private tapes are documented/synthetic.
   Several TS handlers emit execution identity or timestamps, now preserved by
-  the comparison. Rust live-fill frames lack those fields; other TS handlers
-  lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
+  the comparison. Rust now preserves Hyperliquid execution IDs; other venues'
+  execution IDs and live-fill timestamps remain unreported where not supplied.
+  Other TS handlers lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
   remain missing, never reconstructed into candidate output from the tape.
 - Some tape-derived TS corrections still rebuild sections. Their declared leaf
   fields and overwrite counts are visible; raw checkpoints do not use them.
@@ -546,8 +549,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   TS); ~~signed fees~~ (deliberate: TS `abs` mislabels rebates); ~~unified
   balance spot slices not populated~~ (spot holdings publish as `coins`;
   currencies stay unset because TS's `currencies.USDC` is a synthetic sizing
-  slice, not the raw spot row); fills lack execution id, realized PnL and fee
-  (engine `Fill`; claude-i2upd7).
+  slice, not the raw spot row); ~~fills lack execution id, realized PnL and fee~~
+  (FILLS revision 2 carries `tid`; #1430 financials retain live venue conventions).
 
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
@@ -964,8 +967,13 @@ Signing, integer scaling, tx encoding and nonces match TS.
   (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
   ~~account tier not exposed and `changeAccountTier` missing~~ (shared
   `Command::Venue` action; Lighter implements fetch/set tier).
-- Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
-  re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
+- Low: ~~thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
+  re-check races a fixed 2 s timer~~. Documented HTTP405/429 failures include
+  neutral guidance and retain native diagnostics/outcome; explicit 21613
+  placement rejection refreshes account plus orders without mode guessing or
+  resubmission. Missing reduce-only exposure waits for a matching account-read
+  completion (10 s deadline), including target size/absence evidence. Timed-out
+  reads cannot release later queued orders. ~~Shared with TS: amend re-places the full
   original size after a partial fill.~~ Rust now re-places the observed remaining
   size for price-only amendments; explicit replacement quantities are preserved.
 

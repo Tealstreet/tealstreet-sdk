@@ -282,7 +282,7 @@ impl Okx {
             (false, false) => "ws.okx.com",
         };
         let path = ["public", "private", "business"][channel];
-        format!("wss://{host}:8443/ws/v5/{path}")
+        format!("wss://{host}/ws/v5/{path}")
     }
 
     fn headers(

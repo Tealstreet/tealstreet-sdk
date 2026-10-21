@@ -1078,6 +1078,11 @@ Uses the singleton `HyperliquidCrossCache`:
 - `sessionStorage` IS used for pre-placement and pending order caches
 - Fill snapshots (`isSnapshot: true`) are processed for realized PnL tracking but do not emit fill events
 
+Rust FILLS revision 2 preserves `tid` as the execution event `id` for perp,
+merged spot and spot-only accounts, with `oid` retained separately as `orderId`.
+Live financial conventions and the existing snapshot/deduplication rules stay
+the same.
+
 ### Realized PnL Tracking
 
 The private WS tracks per-position realized PnL in `handleFills`:

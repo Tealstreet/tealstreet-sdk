@@ -1547,6 +1547,7 @@ impl ApexOmni {
         });
         if !snapshot {
             cx.fill(Fill {
+                id: None,
                 order_id: raw.order_id.clone(),
                 symbol,
                 side,

@@ -1245,6 +1245,7 @@ export class ExchangeWorker {
     });
 
     const logEvents = [
+      'engine-event',
       'error',
       'warning',
       'log',

@@ -13,7 +13,7 @@ use safe_cex_engine::model::{
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -188,14 +188,14 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: String,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.notice(Level::from(level), code::ROW_SKIPPED, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 
@@ -603,11 +603,11 @@ impl BinanceFutures {
                 let message = format!("Binance user data stream unavailable: {message}");
                 // One toast per failure streak; later attempts only log.
                 let level = if self.account.listen_key_failures == 0 {
-                    LogLevel::Error
+                    Level::Error
                 } else {
-                    LogLevel::Warning
+                    Level::Warn
                 };
-                cx.notice(Level::from(level), code::STREAM_UNAVAILABLE, message);
+                cx.notice(level, code::STREAM_UNAVAILABLE, message);
                 self.account.resync_orders_on_open = true;
                 let delay = cx.jittered(LISTEN_KEY_RETRY.delay(self.account.listen_key_failures));
                 self.account.listen_key_failures += 1;
@@ -616,11 +616,11 @@ impl BinanceFutures {
             Request::Keepalive => {
                 let message = format!("Binance user data stream keepalive failed: {message}");
                 let level = if self.account.keepalive_failing {
-                    LogLevel::Warning
+                    Level::Warn
                 } else {
-                    LogLevel::Error
+                    Level::Error
                 };
-                cx.notice(Level::from(level), code::STREAM_UNAVAILABLE, message);
+                cx.notice(level, code::STREAM_UNAVAILABLE, message);
                 self.account.keepalive_failing = true;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
@@ -1478,7 +1478,7 @@ impl BinanceFutures {
                 cx,
                 &mut self.account.order_skip_logged,
                 id.clone(),
-                LogLevel::Warning,
+                Level::Warn,
                 message,
             );
             join.rejected_symbols
@@ -1516,11 +1516,7 @@ impl BinanceFutures {
             );
             return;
         }
-        let level = if stored {
-            LogLevel::Warning
-        } else {
-            LogLevel::Error
-        };
+        let level = if stored { Level::Warn } else { Level::Error };
         let logged = &mut self.account.position_skip_logged;
         log_skip(cx, logged, key.clone().unwrap_or_default(), level, message);
         skipped.reject(key);
@@ -1801,6 +1797,7 @@ impl BinanceFutures {
                 .and_modify(|seen| *seen = seen.max(filled))
                 .or_insert(filled);
             cx.fill(Fill {
+                id: None,
                 order_id: id.clone(),
                 symbol: o.s.to_string(),
                 side: order_side(&o.side),
@@ -2825,6 +2822,7 @@ impl BinanceFutures {
         self.account.spot_delivery.entry(key.clone()).or_default();
         if is_trade && self.fresh_spot_execution(&key, filled, event.t) {
             cx.fill(Fill {
+                id: None,
                 order_id: id.clone(),
                 symbol: event.s.to_string(),
                 side: order_side(&event.side),

@@ -135,6 +135,14 @@ extensions (all absent optional numbers are NaN and strings are `0xFFFFFFFF`):
 - SETTINGS appends mandatory f64 buyLeverage/sellLeverage columns, then
   `u32 symbol[n]`.
 
+FILLS now writes revision 2: the unchanged numeric rows and revision-1 symbol
+refs are followed by `u32 executionId[n]` string refs, then aligned f64
+`realizedPnl[n]` and `fee[n]`. Missing IDs use `0xFFFFFFFF`; missing financials
+use NaN. Readers retain revision 0/1 support, including revision 1 both without
+financials and with the optional length-detected realized-PnL/fee tails from
+#1430. Revision 2 is accepted only for FILLS. SDK events use the execution ID
+when reported, falling back to the order ID, and keep `orderId` separately.
+
 Writers use revision 0 for MARKETS without display labels and TICKERS/DELTAS
 without midpoint fields. Unknown enum values decode as absent. Unknown section
 kinds can be skipped; unsupported revisions of known kinds require a snapshot.
@@ -744,7 +752,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `paradex` | `PARADEX` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | Testnet: `api.testnet.paradex.trade`, `ws.api.testnet.paradex.trade` |
 | `woo` | `WOO` | `KEY`, `SECRET`, `APPLICATION_ID` | Staging through `--testnet`: `api.staging.woox.io`, `wss.staging.woox.io`; public candles use `api-pub.woox.io` |
 | `blofin` | `BLOFIN` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: `demo-trading-openapi.blofin.com` |
-| `okx`, `okxdemo`, `okxeu`, `okxeudemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com:8443`; EU `eea.okx.com` / `wseeapap.okx.com:8443` |
+| `okx`, `okxdemo`, `okxeu`, `okxeudemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com` (default TLS 443); EU `eea.okx.com` / `wseeapap.okx.com` (default TLS 443) |
 | `kraken` | `KRAKEN` | `KEY`, `SECRET` | Futures demo: `demo-futures.kraken.com` |
 | `coinbase`, `coinbasespot` | `COINBASE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. CDP key name and ES256 private key PEM. |
 | `backpack` | `BACKPACK` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. Base64 Ed25519 public key and seed. |
