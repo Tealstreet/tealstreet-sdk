@@ -1370,3 +1370,11 @@ queued orders. Both Lighter deployments keep their existing placement units and
 result shapes. HTTP405/429 include neutral guidance with native diagnostics;
 explicit invalid-margin21613 rejection refreshes state without changing cached
 mode by guess or automatically replaying a placement.
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.

@@ -153,9 +153,11 @@ Medium:
    policy (#1392). AsterDEX version inference is shared by native construction
    and registry metadata; the bridge forwards only explicit overrides and reads
    the native version after WASM loads. Its synchronous pre-host fallback stays
-   under a compiled TS/Rust parity matrix. Follow-ups: public-mode derivation with
-   Paradex's rule, and the HyroTrader endpoint and
-   payload-signer name branches in `createHost`.
+   under a compiled TS/Rust parity matrix. Public-mode/signing rules now come
+   from one JSON table embedded by Rust and synchronously imported by TS;
+   raw `publicMode` intent lets the registry own Paradex's explicit-private
+   rule. CI checks every registered name. Follow-ups: HyroTrader endpoints and
+   the payload-signer name branch in `createHost`.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:
    `model::Interval` decoded at the command boundary; AsterDEX, Kraken and

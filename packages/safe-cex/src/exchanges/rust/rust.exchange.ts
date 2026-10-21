@@ -61,7 +61,6 @@ import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverri
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import {
-  hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
 } from '../asterdex/asterdex.types';
@@ -76,6 +75,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
+import { derivePublicMode } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
@@ -292,6 +292,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 };
 
 export type WasmEngineModule = {
+  resolveConstruction?: (venue: string, optionsJson: string) => string;
   WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike;
 };
 
@@ -591,26 +592,8 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
-    if (this.name === 'polymarket') return this.options.publicDataOnly === true || !this.options.key;
-    if (this.name === 'paradex') {
-      return (
-        this.options.publicDataOnly === true ||
-        !Boolean(this.options.key && this.options.paradexAddress && this.options.subkeyAddress)
-      );
-    }
-    if (this.name === 'txflow') return this.options.publicDataOnly === true;
-    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
-      return (
-        this.options.publicDataOnly === true ||
-        (!this.options.secret && !this.options.remoteSigner) ||
-        !this.options.apiKeyIndex
-      );
-    }
-    if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
-    return (
-      this.options.publicDataOnly === true ||
-      !Boolean(this.options.vault || this.options.applicationId || this.options.key)
-    );
+    return this.constructionRecord?.publicDataOnly ??
+      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).publicDataOnly;
   }
 
   private constructionRecord?: EngineConstruction;
@@ -621,14 +604,8 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   protected override get canSign(): boolean {
-    if (this.name === 'txflow') return Boolean(this.options.secret && this.options.applicationId);
-    if (['coinbase', 'coinbasespot'].includes(this.name)) return Boolean(this.options.key);
-    if (this.name !== 'asterdex') return super.canSign;
-    if (!this.options.key) return false;
-    if (this.options.remoteSigner) return true;
-    return this.asterApiVersion === 'v3'
-      ? hasAsterDEXV3AuthContext(this.options)
-      : Boolean(this.options.secret);
+    return this.constructionRecord?.canSign ??
+      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).canSign;
   }
   private updateTickerSymbols = () => {
     this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
@@ -711,11 +688,6 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(this.options, this.name);
-    if (this.name === 'paradex') {
-      if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
-        throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
-      }
-    }
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
@@ -779,6 +751,12 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy),
         publicDataOnly: Boolean(publicDataOnly),
+        publicMode: {
+          requested: this.options.publicDataOnly ?? null,
+          remoteSigner: Boolean(this.options.remoteSigner),
+          payloadSigner: Boolean(this.options.payloadSigner),
+          apiKeyIndexPresent: Boolean(this.options.apiKeyIndex),
+        },
         remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         extra: { kucoinBroker: this.options.extra?.kucoinBroker },
         endpoints,
