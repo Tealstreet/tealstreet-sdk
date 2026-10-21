@@ -25,3 +25,17 @@ WEEX metadata, GRVT builder errors and browser measurements; avoid that overlap.
 Other venues remain refused until their own parity batch lands. Preserve retired
 Backpack spot and all cutover owner/live/NX boundaries; no budget changes or local
 release WASM/full timing matrices. Four local Cargo jobs.
+
+Plan audit refinement before implementation:
+- Actual WEEX metadata #1675 (`22c6c6133f2841f8cce897666a44c214f6f79bba`)
+  is genuinely integrated before source work, preserving its shared capability
+  fixture/SDK changes and its independent metadata policy.
+- Existing JSON FetchOrderBook decoding is cfg-gated only by AsterDEX/Polymarket
+  command features. Add a precise command-order-book feature, retain their
+  activation through feature dependencies, and enable it for Backpack via its
+  engine dependency. Add a real JSON-ingress regression in the single-venue
+  native build; combined host and direct enum tests alone hide this defect.
+- MEXC appears to share the pre-existing standalone decoder omission; report it
+  separately and keep its venue activation out of the Backpack behavior batch.
+- Keep zero quantities, raw lexical price IDs and unsorted/duplicate levels as
+  TS does. Public errors must remain typed and owned, never account auth.
