@@ -12,15 +12,17 @@ fn subscribe(e: &mut TestEngine) {
     );
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    Ok(e.drain_actions()
+    e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
+                Some(Ok(result))
+            } else if let Action::Notice(Notice::CommandFailed { error, .. }) = a {
+                Some(Err(error.legacy_text()))
             } else {
                 None
             }
         })
-        .unwrap())
+        .unwrap()
 }
 const UPDATE: &str = r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":102,"data":{"bids":[[59000,4],[58000,5]],"asks":[[61000,0]]}}"#;
 

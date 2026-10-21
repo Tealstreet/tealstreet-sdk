@@ -67,16 +67,19 @@ fn fills() -> Query {
     }
 }
 fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
-    Ok(actions(e)
+    actions(e)
         .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 10,
                 result,
-            }) => Some(result),
+            }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 10, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
-        .expect("completion"))
+        .expect("completion")
 }
 fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, streamed: bool) {
     let Action::Http(r) = request else {

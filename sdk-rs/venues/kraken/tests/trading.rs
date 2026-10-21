@@ -55,12 +55,13 @@ fn ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str, status: &str) {
     );
 }
 fn done(e: &mut Engine<Kraken>) -> Result<String, String> {
-    Ok(e.drain_plain()
+    e.drain_plain()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .expect("command completion"))
+        .expect("command completion")
 }
 fn inject(e: &mut Engine<Kraken>, id: &str, kind: OrderType, trigger: Option<StopTriggerType>) {
     e.store_mut().upsert_order(Order {

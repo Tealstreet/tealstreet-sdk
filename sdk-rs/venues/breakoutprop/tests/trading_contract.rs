@@ -76,7 +76,7 @@ fn body(request: &HttpRequest) -> serde_json::Value {
 fn done_count(rig: &Rig, id: u32) -> usize {
     rig.notices
         .iter()
-        .filter(|notice| matches!(notice, Notice::CommandDone { command, .. } if *command == id))
+        .filter(|notice| matches!(notice, Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. } if *command == id))
         .count()
 }
 

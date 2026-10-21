@@ -427,7 +427,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     let out = ack(&mut e, a, true);
     assert!(
         out.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: _, .. })))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
     );
 }
 

@@ -217,10 +217,11 @@ fn fetch_book(
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    let [Action::Notice(Notice::CommandDone { command: 9, result })] = &actions[..] else {
-        panic!("unexpected book response actions: {actions:?}");
-    };
-    Ok(result.clone())
+    match &actions[..] {
+        [Action::Notice(Notice::CommandDone { command: 9, result })] => Ok(result.clone()),
+        [Action::Notice(Notice::CommandFailed { command: 9, error })] => Err(error.legacy_text()),
+        _ => panic!("unexpected book response actions: {actions:?}"),
+    }
 }
 
 #[test]

@@ -15,15 +15,18 @@ fn ask_with_id(e: &mut Driver, command: u32, query: Query) {
     e.handle(2000.0, Event::Command(Command::Query { command, query }));
 }
 fn result(e: &mut Driver) -> Result<String, String> {
-    Ok(e.drain_actions()
+    e.drain_actions()
         .find_map(|action| match action {
             Action::Notice(Notice::CommandDone {
                 command: 77,
                 result,
-            }) => Some(result),
+            }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
-        .expect("query completed"))
+        .expect("query completed")
 }
 fn request(e: &mut Driver) -> HttpRequest {
     requests(e).pop().expect("history request")

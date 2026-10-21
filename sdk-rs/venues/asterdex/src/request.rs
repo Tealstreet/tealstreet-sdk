@@ -585,6 +585,9 @@ mod tests {
                     Action::Notice(Notice::CommandDone { result, .. }) => {
                         self.done.push(Ok(result))
                     }
+                    Action::Notice(Notice::CommandFailed { error, .. }) => {
+                        self.done.push(Err(error.legacy_text()))
+                    }
                     _ => {}
                 }
             }

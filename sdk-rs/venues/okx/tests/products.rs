@@ -1467,7 +1467,7 @@ mod product_semantics {
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: s, .. }) if s.legacy_text().contains("incomplete source"))));
         assert!(
             !out.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: _, .. })))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
         );
     }
 

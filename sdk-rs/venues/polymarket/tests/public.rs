@@ -63,6 +63,9 @@ impl H {
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    self.done.push(Err(error.legacy_text()))
+                }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 _ => {}
             }

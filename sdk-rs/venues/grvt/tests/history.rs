@@ -45,6 +45,9 @@ impl Harness {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.results.push((command, Ok(result)))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.results.push((command, Err(error.legacy_text())))
+                }
                 _ => {}
             }
         }

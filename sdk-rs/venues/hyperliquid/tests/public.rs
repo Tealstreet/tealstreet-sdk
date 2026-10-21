@@ -203,7 +203,7 @@ fn posted_candle_read_preserves_body_and_streams() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: _, .. })
+        Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
     )));
 }
 #[test]

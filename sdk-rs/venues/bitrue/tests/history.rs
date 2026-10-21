@@ -66,15 +66,18 @@ fn request(e: &mut Engine<Bitrue>) -> HttpRequest {
         .unwrap()
 }
 fn result(e: &mut Engine<Bitrue>) -> Result<String, String> {
-    Ok(e.drain_actions()
+    e.drain_actions()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 99,
                 result,
-            }) => Some(result),
+            }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
-        .unwrap())
+        .unwrap()
 }
 fn response(e: &mut Engine<Bitrue>, r: HttpRequest, body: &str) {
     e.handle(

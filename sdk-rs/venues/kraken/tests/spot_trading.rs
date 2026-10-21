@@ -11,14 +11,17 @@ fn done(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
     command: u32,
 ) -> Result<String, String> {
-    Ok(e.drain_plain()
+    e.drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
-                Some(result)
+                Some(Ok(result))
+            }
+            Action::Notice(Notice::CommandFailed { command: c, error }) if c == command => {
+                Some(Err(error.legacy_text()))
             }
             _ => None,
         })
-        .unwrap())
+        .unwrap()
 }
 #[test]
 fn every_spot_bracket_leg_receipts_its_exact_native_cl_ord_id_before_dispatch() {

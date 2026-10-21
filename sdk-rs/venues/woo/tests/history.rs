@@ -31,19 +31,21 @@ fn query(e: &mut TestEngine, q: Query) -> safe_cex_engine::HttpRequest {
     requests(e).remove(0)
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    Ok(e.drain_actions()
+    e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone {
                 command: 99,
                 result,
             }) = a
             {
-                Some(result)
+                Some(Ok(result))
+            } else if let Action::Notice(Notice::CommandFailed { command: 99, error }) = a {
+                Some(Err(error.legacy_text()))
             } else {
                 None
             }
         })
-        .unwrap())
+        .unwrap()
 }
 fn fills(limit: Option<u32>) -> Query {
     Query::Fills {
