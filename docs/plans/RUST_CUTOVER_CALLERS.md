@@ -197,6 +197,8 @@ The Bitunix balance-progress follow-up checks #1665 at `8f7b0cee3ff`, including
 the currentness predicate shared by financial publication and auth/recovery.
 The settings/fill-identity batch checks Bitunix #1668 (`7fd70c13e34`) and
 WEEX #1670 (`ce906e1368e`) at their actual merges.
+The WEEX metadata-hook catch-up checks #1675 at `22c6c6133f2`; its incoming
+B8 and hook inventory updates are retained.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -296,6 +298,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1665 / `8f7b0cee3` | Ordinary Bitunix balance reads can publish current financial state and scoped auth evidence during WS notifications. Reads coalesce around their serial/ten-second dispatch bound; accepted position-mode ACKs fence older responses through a separate write revision. Recovery gates, balance mapping and caller/write-retry APIs stay unchanged. |
 | #1668 / `7fd70c13e` | Bitunix per-symbol leverage/margin metadata and scoped auth/recovery use the current symbol attempt serial plus accepted-settings-write revision, so WS position-ID traffic no longer starves flat-symbol settings. Accepted leverage/margin/mode ACKs still fence older reads; caller APIs and command-owned prerequisites stay unchanged. |
 | #1670 / `ce906e136` | In-scope WEEX fill-history rows with parsed empty `id`/`tradeId`/`fillId` remain skipped without invented identity. Useful peers resolve with one per-query Warn `row.skipped` (`field: id`) and owned `history.incomplete`. Error-only logging retains the semantic marker, while the ordinary row diagnostic is suppressed. Strict parsing and method shapes remain; B11 consumers must not complete coverage for retained partial or flagged-empty rows. |
+| #1675 / `22c6c6133` | WEEX now reports `onReadAndMetadata`, so the existing ready private `updateSymbolMetadata(symbol)` hook performs a fresh native configuration read even for cached/flat symbols. Malformed reads reject while good rails remain; public-only skips private I/O. Explicit reads and caller arguments stay unchanged; await capability readiness and preserve ordinary hook rejection handling. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2551,6 +2554,23 @@ issuance before request allocation; notification repair cannot bypass an
 outstanding failure backoff. Balance mapping, polling controls, caller signatures
 and write retries stay unchanged. Consumers can see fresher balances and scoped
 auth outcomes under busy private traffic; no caller-issued resync is required.
+
+### WEEX selected-symbol metadata refresh (#1675)
+
+Native WEEX now selects the shared `onReadAndMetadata` policy instead of
+`onRead`. With a loaded capability record, the private SDK hook
+`updateSymbolMetadata(symbol)` dispatches `fetchLeverage` even when rails are
+cached or the symbol has no position. Repeated hooks and explicit
+`fetchLeverageForSymbol` calls read fresh configuration. Malformed responses
+reject without replacing the last good rails; a later valid refresh can recover.
+
+The existing hook returns without private I/O for public-only accounts or when
+the capability record is unavailable. It does not itself wait for startup, so
+callers should await worker-aware capability readiness before requesting the
+refresh and retain ordinary rejection handling. No argument change or
+caller-issued cache invalidation is needed. The three actual-WASM regressions
+cover repeated cached/flat refresh, malformed retention/recovery and public-only
+isolation; they do not establish NX runtime adoption or close other B8 gaps.
 
 ### Bitunix per-symbol settings progress (#1668)
 
