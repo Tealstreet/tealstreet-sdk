@@ -1183,12 +1183,14 @@ and reported closed-PnL mapping. Their readiness behavior is now explicit:
 | State at a capability-dependent call | SDK behavior |
 | --- | --- |
 | Existing startup is pending | Wait for that same lifecycle, even if its capability record arrives before startup completes, then apply policy/dispatch. No second startup, mirror engine or new timeout knob is introduced. |
-| No runtime record and no startup in progress | Reject as `ExchangeError` with `kind: 'invalidInput'`, `outcome: 'notSent'` and a message naming `name.method` and asking for `start()` or `loadCapabilities()` first. The method does not silently start the exchange. |
+| No runtime record and no startup in progress | Reject as `ExchangeError` with `kind: 'invalidInput'`, `outcome: 'notSent'` and a message naming `name.method` and asking for `start()` or `loadCapabilities()` first. The method does not silently start the exchange. An already-dead engine rethrows its stored terminal error. |
 | Startup failed, including an undispatched call queued during disposal/trap | Reject with the same typed classification and a method-named startup-failed/reconnect message. Available startup cause is retained; a queued write whose startup traps remains `notSent` with `cause.code: 'ENGINE_DEAD'`, since it was never dispatched. |
 | Ready runtime record | Existing immediate dispatch timing and venue policy remain; internal startup commands use their separate synchronous path and cannot await themselves. |
 
 **Required caller handling:** catch typed pre-start/failed-start rejections and
-handle them as unsent operations. Ordinary no-start errors use the existing
+handle them as unsent operations. Also handle an existing terminal engine error
+through the engine-death path, preserving its classification/outcome. Ordinary
+no-start errors use the existing
 classified SDK error notification and `errorReported`; honor that marker to
 avoid a duplicate toast in the promise catch. A terminal engine notification
 already reports a startup trap, so queued call rejections do not emit another
