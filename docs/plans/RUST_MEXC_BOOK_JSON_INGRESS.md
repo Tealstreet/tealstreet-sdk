@@ -33,5 +33,15 @@ Verification:
 - All 391 MEXC+Binance native tests, strict MEXC all-target Clippy, format and bans
   pass. Two independent correctness/preservation reviews are clear.
 - Exact-head full CI and actual predecessor landing remain required. The final
-  post-predecessor guard must list exactly the five owned files and no Backpack
+  post-predecessor guard must list exactly the six owned files and no Backpack
   or previously landed caller documentation changes.
+
+CI isolation refinement:
+- Native workspace feature unification can hide later removal of a family's
+  decoder opt-in even though the targeted regression proves the defect locally.
+  The existing family artifact matrix now probes actual JSON fetchOrderBook for
+  every successfully constructed family instance advertising the capability.
+  Returned sans-I/O requests are never dispatched. This catches the decoder
+  omission in isolated shipped artifacts without local release builds or timing.
+- The final own scope is six files including this existing harness matrix test;
+  all runtime mapper/error/capability semantics remain unchanged.
