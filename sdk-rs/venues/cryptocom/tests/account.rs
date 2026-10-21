@@ -477,7 +477,7 @@ fn unmappable_snapshot_rows_are_skipped_and_keep_known_state() {
         );
         assert!(warned(
             &h,
-            "skipped 1 unmappable position rows (first: BTCUSD-PERP)"
+            "Crypto.com skipped unmappable position row BTCUSD-PERP"
         ));
         assert!(!warned(&h, "ETHUSD-PERP"), "foreign rows stay quiet");
         h.reply("user-balance", BALANCE);
@@ -490,6 +490,12 @@ fn unmappable_snapshot_rows_are_skipped_and_keep_known_state() {
         }
     }
     assert!(orders_read, "orders were never re-read");
+    let position_skips = h
+        .actions
+        .iter()
+        .filter(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("position row BTCUSD-PERP")))
+        .count();
+    assert_eq!(position_skips, 1, "a persistent skip is logged once");
     let bad = r#"{"order_id":"9007199254740993","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"BUY","quantity":null}"#;
     let fresh = r#"{"order_id":"77","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"SELL","quantity":"1","limit_price":"110","cumulative_quantity":null,"time_in_force":null,"exec_inst":null}"#;
     h.reply(
@@ -499,7 +505,7 @@ fn unmappable_snapshot_rows_are_skipped_and_keep_known_state() {
     h.reply("advanced/get-open-orders", EMPTY);
     assert!(warned(
         &h,
-        "skipped 1 unmappable order rows (first: 9007199254740993)"
+        "Crypto.com skipped unmappable order row 9007199254740993"
     ));
     let mut ids: Vec<_> = h
         .engine
@@ -689,4 +695,113 @@ fn pushed_balance_publishes_per_coin_balances_with_the_aggregate() {
     );
     assert_eq!(h.engine.store().balance().total, 2100.0);
     assert_eq!(coins(&h).len(), 2);
+}
+
+/// Polls until an order read is issued, answering every read; returns the logs it produced.
+fn reconcile_with_orders(h: &mut Harness, positions: &str, orders: &str) -> Vec<String> {
+    let start = h.actions.len();
+    loop {
+        next_tick(h);
+        h.reply(
+            "get-positions",
+            &format!(r#"{{"code":0,"result":{{"data":[{positions}]}}}}"#),
+        );
+        h.reply("user-balance", BALANCE);
+        if h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("private/get-open-orders")))
+        {
+            h.reply(
+                "private/get-open-orders",
+                &format!(r#"{{"code":0,"result":{{"data":[{orders}]}}}}"#),
+            );
+            h.reply("advanced/get-open-orders", EMPTY);
+            break;
+        }
+    }
+    h.actions[start.min(h.actions.len())..]
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+#[test]
+fn an_unidentified_snapshot_row_protects_stored_rows_while_valid_peers_commit() {
+    let instruments = INSTRUMENTS.replace(
+        "]}}",
+        r#",{"symbol":"ETHUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"ETH","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"ETHUSD-INDEX"}]}}"#,
+    );
+    let mut h = Harness::with_instruments(&instruments);
+    let position = |symbol: &str, qty: &str, time: u32| {
+        format!(
+            r#"{{"instrument_name":"{symbol}","quantity":"{qty}","cost":"200","update_timestamp_ms":{time}}}"#
+        )
+    };
+    let order = |price: &str, time: u32| {
+        format!(
+            r#"{{"order_id":"77","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"SELL","quantity":"1","limit_price":"{price}","status":"ACTIVE","update_time":{time}}}"#
+        )
+    };
+    h.reply(
+        "get-positions",
+        &format!(
+            r#"{{"code":0,"result":{{"data":[{},{}]}}}}"#,
+            position("BTCUSD-PERP", "1", 1),
+            position("ETHUSD-PERP", "-2", 1)
+        ),
+    );
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(
+            r#"{{"code":0,"result":{{"data":[{ORDER},{}]}}}}"#,
+            order("110", 1)
+        ),
+    );
+    h.reply("advanced/get-open-orders", EMPTY);
+    let eth = h
+        .engine
+        .store()
+        .position("ETHUSD-PERP:short")
+        .unwrap()
+        .clone();
+    let stored_order = h.engine.store().order("9007199254740993").unwrap().clone();
+
+    let unnamed_position = r#"{"quantity":"1","cost":null}"#;
+    let unnamed_order = r#"{"instrument_name":"BTCUSD-PERP","order_type":"LIMIT","quantity":null}"#;
+    for round in 0..2 {
+        let logs = reconcile_with_orders(
+            &mut h,
+            &format!(
+                "{},{unnamed_position}",
+                position("BTCUSD-PERP", "3", 2 + round)
+            ),
+            &format!("{},{unnamed_order}", order("111", 2 + round)),
+        );
+        let store = h.engine.store();
+        assert_eq!(store.position("BTCUSD-PERP:long").unwrap().contracts, 3.0);
+        assert_eq!(store.position("ETHUSD-PERP:short"), Some(&eth));
+        assert_eq!(store.order("77").unwrap().price, 111.0);
+        assert_eq!(store.order("9007199254740993"), Some(&stored_order));
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &[
+                "Crypto.com skipped unmappable position row without an instrument",
+                "Crypto.com skipped unmappable order row without an id",
+            ]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("null") || l.contains('{')));
+    }
+
+    reconcile_with_orders(&mut h, &position("BTCUSD-PERP", "3", 9), &order("111", 9));
+    let store = h.engine.store();
+    let positions: Vec<_> = store.positions().iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(positions, ["BTCUSD-PERP:long"]);
+    let orders: Vec<_> = store.orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(orders, ["77"]);
 }

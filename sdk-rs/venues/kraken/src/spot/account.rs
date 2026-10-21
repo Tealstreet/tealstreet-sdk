@@ -1,17 +1,20 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::url;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
 };
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone)]
 pub enum Kind {
@@ -55,6 +58,29 @@ pub struct Account {
     started: bool,
     wallet_valuation_pending: bool,
     wallet_valuation_warnings: u8,
+    /// `coin:`/`order:` + key of rows already logged as skipped.
+    skip_logged: HashSet<String>,
+}
+impl Account {
+    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, message: String) {
+        if self.skip_logged.len() >= SKIP_LOG_LIMIT {
+            self.skip_logged.clear();
+        }
+        if self.skip_logged.insert(key) {
+            cx.log(LogLevel::Warning, message);
+        }
+    }
+    /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
+    fn rearm_skips<'a>(&mut self, prefix: &str, clean: bool, ids: impl Iterator<Item = &'a str>) {
+        if clean {
+            self.skip_logged.retain(|key| !key.starts_with(prefix));
+        } else {
+            for id in ids {
+                self.skip_logged.remove(&format!("{prefix}{id}"));
+            }
+        }
+    }
 }
 #[derive(Deserialize)]
 struct RestOrder<'a> {
@@ -489,10 +515,18 @@ impl KrakenSpot {
         text: &str,
         revision: u64,
     ) -> Result<(), String> {
-        let mut currencies = vec![];
-        map_each::<Amount>(text, |raw, amount| {
-            let amount = amount.0;
-            if amount <= 0. || raw.contains('.') {
+        let mut currencies = SnapshotBuilder::default();
+        let mut skipped = vec![];
+        map_each::<&RawValue>(text, |raw, value| {
+            if raw.contains('.') {
+                return;
+            }
+            // An unreadable amount keeps the stored balance of its asset.
+            let Ok(Amount(amount)) = serde_json::from_str::<Amount>(value.get()) else {
+                skipped.push(asset(&raw).to_owned());
+                return;
+            };
+            if amount <= 0. {
                 return;
             }
             currencies.push(CurrencyBalance {
@@ -506,6 +540,12 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid balance")?;
+        for currency in skipped {
+            let message = format!("Kraken Spot skipped malformed {currency} balance");
+            self.account
+                .log_skip(cx, format!("coin:{currency}"), message);
+            currencies.reject(Some(currency));
+        }
         let current = revision == self.account.balance_revision;
         // An admitted stale read is re-read by the caller's stale-revision path.
         if self
@@ -513,6 +553,17 @@ impl KrakenSpot {
             .balance_guard
             .admit_issued(current, revision, STALE_SNAPSHOT_LIMIT)
         {
+            self.account.rearm_skips(
+                "coin:",
+                currencies.rejected() == 0,
+                currencies
+                    .rows()
+                    .iter()
+                    .map(|c| c.currency.as_str())
+                    .filter(|c| currencies.allows_absence(&c.to_string())),
+            );
+            let stored = cx.store.currency_balances().unwrap_or_default().to_vec();
+            let currencies = currencies.commit(stored, |c| c.currency.clone());
             cx.store.set_currency_balances(currencies);
             self.account.wallet_valuation_pending = true;
             self.revalue_pending_balances(cx);
@@ -527,31 +578,32 @@ impl KrakenSpot {
     ) -> Result<(), String> {
         let e: Open<'_> =
             serde_json::from_str(text).map_err(|_| "Kraken Spot missing open orders")?;
-        let mut rows = vec![];
+        let mut rows = SnapshotBuilder::default();
         let mut provenance = HashMap::new();
-        let mut invalid = false;
-        map_each::<RestOrder<'_>>(e.open.get(), |id, o| {
-            let Some(kind) = order_kind(&o.descr.ordertype) else {
-                invalid = true;
+        // The object key names every row, so a bad row keeps only its stored copy.
+        let mut skipped = vec![];
+        map_each::<&RawValue>(e.open.get(), |id, raw| {
+            let mapped = serde_json::from_str::<RestOrder<'_>>(raw.get())
+                .ok()
+                .filter(|o| !id.is_empty() && o.vol > 0. && o.vol_exec >= 0. && o.vol_exec <= o.vol)
+                .and_then(|o| {
+                    let kind = order_kind(&o.descr.ordertype)?;
+                    let side = match &*o.descr.side {
+                        "buy" => OrderSide::Buy,
+                        "sell" => OrderSide::Sell,
+                        _ => return None,
+                    };
+                    Some((o, kind, side))
+                });
+            let Some((o, kind, side)) = mapped else {
+                skipped.push(id.into_owned());
                 return;
             };
-            if id.is_empty() || o.vol <= 0. || o.vol_exec < 0. || o.vol_exec > o.vol {
-                invalid = true;
-                return;
-            }
             let symbol = self
                 .identities
                 .get(&*o.descr.pair)
                 .cloned()
                 .unwrap_or_else(|| o.descr.pair.to_string());
-            let side = match &*o.descr.side {
-                "buy" => OrderSide::Buy,
-                "sell" => OrderSide::Sell,
-                _ => {
-                    invalid = true;
-                    return;
-                }
-            };
             provenance.insert(id.to_string(), o.descr.ordertype.to_string());
             rows.push(order(
                 id.to_string(),
@@ -570,10 +622,31 @@ impl KrakenSpot {
             ));
         })
         .map_err(|_| "Kraken Spot invalid orders")?;
-        if invalid {
-            return Err("Kraken Spot invalid orders".into());
+        for id in skipped {
+            if id.is_empty() {
+                let message = "Kraken Spot skipped order row without an id".to_owned();
+                self.account.log_skip(cx, "order:".into(), message);
+                rows.reject(None);
+            } else {
+                let message = format!("Kraken Spot skipped unmappable order {id}");
+                self.account.log_skip(cx, format!("order:{id}"), message);
+                rows.reject(Some(id));
+            }
         }
         if revision == self.account.revision {
+            self.account.rearm_skips(
+                "order:",
+                rows.rejected() == 0,
+                rows.rows().iter().map(|o| o.id.as_str()),
+            );
+            let mut rows = rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+            for o in &rows {
+                if let Some(kind) = self.account.provenance.get(&o.id)
+                    && !provenance.contains_key(&o.id)
+                {
+                    provenance.insert(o.id.clone(), kind.clone());
+                }
+            }
             self.account.provenance = provenance;
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);

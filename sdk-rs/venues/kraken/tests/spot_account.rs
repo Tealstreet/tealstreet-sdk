@@ -119,7 +119,7 @@ fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
     reply(
         &mut e,
         &balance,
-        r#"{"error":[],"result":{"ZUSD":"invalid"}}"#,
+        r#"{"error":[],"result":{"ZUSD":"invalid","XXBT":"2","XETH":"3","USDT":"5"}}"#,
     );
     assert_eq!(e.store().balance().total, 1355.);
     message(
@@ -140,6 +140,51 @@ fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
         r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"new","cum_qty":0.5,"order_qty":2,"timestamp":"2023-11-14T22:13:20Z"}]}"#,
     );
     assert_eq!(e.store().order("O-100").unwrap().filled, 1.5);
+}
+#[test]
+fn bad_balance_row_keeps_its_stored_asset_while_peers_update() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
+    let balance = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &balance,
+        r#"{"error":[],"result":{"ZUSD":"invalid","XXBT":"3","XETH":"3","USDT":"5"}}"#,
+    );
+    assert_eq!(e.store().balance().total, 1455.);
+}
+#[test]
+fn bad_open_order_row_keeps_its_stored_copy_while_peers_commit() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"new","cum_qty":0.5,"order_qty":2,"timestamp":"2023-11-14T22:13:20Z"}]}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .unwrap();
+    e.handle(NOW + 5_000., Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    reply(
+        &mut e,
+        &read,
+        r#"{"error":[],"result":{"open":{"O-100":{"descr":{"pair":"XBTUSD","type":"buy","ordertype":"limit","price":"99"},"vol":"x","vol_exec":"0.5"},"O-200":{"descr":{"pair":"ETHUSD","type":"sell","ordertype":"limit","price":"60"},"vol":"1","vol_exec":"0","opentm":1700000001}}}}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().amount, 2.);
+    assert!(e.store().order("O-200").is_some());
 }
 #[test]
 fn snapshot_history_never_emits_and_live_execution_reconnect_duplicates_dedupe() {

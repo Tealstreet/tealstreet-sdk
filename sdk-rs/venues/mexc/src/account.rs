@@ -1,12 +1,15 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone, Copy, Default)]
 pub struct Rails {
@@ -40,7 +43,7 @@ pub enum Request {
         bad: bool,
     },
     Mode,
-    Snapshot(Snapshot),
+    Snapshot(Box<Snapshot>),
 }
 pub struct Snapshot {
     pub symbol: Option<String>,
@@ -48,10 +51,11 @@ pub struct Snapshot {
     pub revision: u64,
     pub page: u32,
     pub page_count: usize,
+    /// A structural failure (scope mismatch, held catalogue exposure): nothing commits.
     pub bad: bool,
-    pub orders: Vec<Order>,
-    pub positions: Vec<Position>,
-    pub assets: Vec<(String, Balance)>,
+    pub orders: SnapshotBuilder<String, Order>,
+    pub positions: SnapshotBuilder<String, Position>,
+    pub assets: SnapshotBuilder<String, (String, Balance)>,
     pub full: bool,
     pub native_ids: Vec<(String, String)>,
 }
@@ -87,6 +91,8 @@ pub struct Account {
     pub auth_rejected: bool,
     pub fills: HashMap<String, f64>,
     pub paused_until: f64,
+    /// `coin:`/`position:`/`order:` + identity (empty when unreadable) of skips already logged.
+    skip_logged: HashSet<String>,
 }
 
 impl Account {
@@ -101,6 +107,17 @@ impl Account {
             ..Self::default()
         }
     }
+}
+
+/// Ids (by `key`) of accepted rows whose identity no rejection protects: they recovered.
+fn mapped_ids<T>(builder: &SnapshotBuilder<String, T>, key: impl Fn(&T) -> &String) -> Vec<String> {
+    builder
+        .rows()
+        .iter()
+        .map(key)
+        .filter(|id| builder.allows_absence(id))
+        .cloned()
+        .collect()
 }
 
 impl MexcFutures {
@@ -222,22 +239,22 @@ impl MexcFutures {
             return;
         }
         self.account.in_flight.insert(scope);
-        let snapshot = Snapshot {
+        let snapshot = Box::new(Snapshot {
             symbol,
             scope,
             revision: self.account.revision,
             page: 1,
             page_count: 0,
             bad: false,
-            orders: vec![],
-            positions: vec![],
-            assets: vec![],
+            orders: SnapshotBuilder::default(),
+            positions: SnapshotBuilder::default(),
+            assets: SnapshotBuilder::default(),
             full,
             native_ids: vec![],
-        };
+        });
         self.snapshot_page(cx, snapshot);
     }
-    fn snapshot_page(&self, cx: &mut Cx<'_, Pending>, snapshot: Snapshot) {
+    fn snapshot_page(&self, cx: &mut Cx<'_, Pending>, snapshot: Box<Snapshot>) {
         let mut path = match snapshot.scope {
             Scope::Assets => "/api/v1/private/account/assets",
             Scope::Positions => "/api/v1/private/position/open_positions",
@@ -862,7 +879,20 @@ impl MexcFutures {
                         },
                     ));
                 }
-                Err(_) => snapshot.bad = true,
+                // An unreadable asset keeps its stored balance.
+                Err(_) => {
+                    let currency = serde_json::from_str::<RowIdentity<'_>>(item)
+                        .ok()
+                        .map(|row| row.currency.into_owned())
+                        .filter(|currency| !currency.is_empty());
+                    let message = match &currency {
+                        Some(currency) => format!("MEXC skipped malformed {currency} asset row"),
+                        None => "MEXC skipped asset row without a currency".into(),
+                    };
+                    let key = format!("coin:{}", currency.as_deref().unwrap_or_default());
+                    self.log_skip(cx, key, LogLevel::Warning, message);
+                    snapshot.assets.reject(currency);
+                }
             },
             Scope::Positions => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(r) => {
@@ -884,7 +914,48 @@ impl MexcFutures {
                         snapshot.positions.push(p);
                     }
                 }
-                Err(_) => snapshot.bad = true,
+                // An unreadable position keeps its stored legs.
+                Err(_) => {
+                    let symbol = serde_json::from_str::<RowIdentity<'_>>(item)
+                        .ok()
+                        .map(|row| compact(&row.symbol))
+                        .filter(|symbol| !symbol.is_empty());
+                    let Some(symbol) = symbol else {
+                        let level = if cx.store.positions().is_empty() {
+                            LogLevel::Error
+                        } else {
+                            LogLevel::Warning
+                        };
+                        let message = "MEXC skipped position row without a symbol";
+                        self.log_skip(cx, "position:".into(), level, message);
+                        snapshot.positions.reject(None);
+                        return;
+                    };
+                    if cx.store.market(&symbol).is_none()
+                        && self.malformed_markets.contains(&symbol)
+                    {
+                        snapshot.bad = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "MEXC owned position market unavailable; preserving previous snapshot",
+                        );
+                        return;
+                    }
+                    let level = if cx.store.positions().iter().any(|p| p.symbol == symbol) {
+                        LogLevel::Warning
+                    } else {
+                        LogLevel::Error
+                    };
+                    let message = format!("MEXC skipped malformed {symbol} position row");
+                    self.log_skip(cx, format!("position:{symbol}"), level, message);
+                    for id in [
+                        symbol.clone(),
+                        format!("{symbol}:long"),
+                        format!("{symbol}:short"),
+                    ] {
+                        snapshot.positions.reject(Some(id));
+                    }
+                }
             },
             scope => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(r) => {
@@ -910,30 +981,69 @@ impl MexcFutures {
                         } else {
                             &r.id
                         };
-                        if id.is_empty() {
-                            // Without an identity, this could be any missing
-                            // known order: the snapshot cannot prove absence.
-                            snapshot.bad = true;
-                            return;
-                        }
-                        cx.log(
-                            LogLevel::Warning,
-                            format!("Skipping unmappable MEXC order {id} on {}", r.symbol),
-                        );
-                        // A typed but unmappable row is not proof that a known
-                        // order vanished. Keep that id while committing good rows.
-                        if let Some(previous) = cx.store.order(id)
-                            && snapshot
-                                .symbol
-                                .as_ref()
-                                .is_none_or(|symbol| *symbol == previous.symbol)
-                        {
-                            snapshot.orders.push(previous.clone());
-                        }
+                        // A typed but unmappable row is not proof that a known order
+                        // vanished; one without an id could be any of them.
+                        self.reject_order(cx, snapshot, id, &r.symbol);
                     }
                 }
-                Err(_) => snapshot.bad = true,
+                Err(_) => {
+                    let row = serde_json::from_str::<RowIdentity<'_>>(item).ok();
+                    let id = row.as_ref().map_or("", |row| {
+                        let (first, second) = if scope == Scope::Regular {
+                            (&row.order_id, &row.id)
+                        } else {
+                            (&row.id, &row.order_id)
+                        };
+                        if first.is_empty() { second } else { first }
+                    });
+                    let symbol = row.as_ref().map_or("", |row| &row.symbol);
+                    self.reject_order(cx, snapshot, id, symbol);
+                }
             },
+        }
+    }
+    fn reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        snapshot: &mut Snapshot,
+        id: &str,
+        symbol: &str,
+    ) {
+        if id.is_empty() {
+            let message = "MEXC skipped order row without an id";
+            self.log_skip(cx, "order:".into(), LogLevel::Warning, message);
+            snapshot.orders.reject(None);
+        } else {
+            let message = format!("MEXC skipped unmappable order {id} on {symbol}");
+            self.log_skip(cx, format!("order:{id}"), LogLevel::Warning, message);
+            snapshot.orders.reject(Some(id.to_owned()));
+        }
+    }
+    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    fn log_skip(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        key: String,
+        level: LogLevel,
+        message: impl Into<String>,
+    ) {
+        let logged = &mut self.account.skip_logged;
+        if logged.len() >= SKIP_LOG_LIMIT {
+            logged.clear();
+        }
+        if logged.insert(key) {
+            cx.log(level, message);
+        }
+    }
+    /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
+    fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
+        let logged = &mut self.account.skip_logged;
+        if clean {
+            logged.retain(|key| !key.starts_with(prefix));
+        } else {
+            for id in ids {
+                logged.remove(&format!("{prefix}{id}"));
+            }
         }
     }
     pub fn account_response(
@@ -1113,24 +1223,33 @@ impl MexcFutures {
                 match s.scope {
                     Scope::Assets => {
                         if self.account.balance_revision <= s.revision {
-                            let chosen = s
-                                .assets
+                            let mapped = mapped_ids(&s.assets, |(currency, _)| currency);
+                            self.rearm_skips("coin:", s.assets.rejected() == 0, mapped);
+                            // Rejected rows keep their stored balances, which the choice may use.
+                            let current = cx
+                                .store
+                                .currency_balances()
+                                .unwrap_or_default()
+                                .iter()
+                                .map(|c| (c.currency.clone(), c.balance.clone()))
+                                .collect::<Vec<_>>();
+                            let assets = s.assets.commit(current, |(currency, _)| currency.clone());
+                            let chosen = assets
                                 .iter()
                                 .find(|(a, b)| {
                                     matches!(a.as_str(), "USDT" | "USDC")
                                         && (b.free != 0.0 || b.total != 0.0)
                                 })
                                 .or_else(|| {
-                                    s.assets
+                                    assets
                                         .iter()
                                         .find(|(a, _)| matches!(a.as_str(), "USDT" | "USDC"))
                                 })
-                                .or_else(|| s.assets.first());
+                                .or_else(|| assets.first());
                             cx.store
                                 .set_balance(chosen.map(|(_, b)| b.clone()).unwrap_or_default());
                             // Duplicate rows keep the last one, as the TS reducer does.
-                            let currencies: BTreeMap<String, Balance> = s
-                                .assets
+                            let currencies: BTreeMap<String, Balance> = assets
                                 .into_iter()
                                 .filter(|(currency, _)| !currency.is_empty())
                                 .collect();
@@ -1146,7 +1265,12 @@ impl MexcFutures {
                         }
                     }
                     Scope::Positions => {
-                        let mut rows = s.positions;
+                        let mapped = mapped_ids(&s.positions, |p| &p.symbol);
+                        self.rearm_skips("position:", s.positions.rejected() == 0, mapped);
+                        // Rejected rows keep their stored legs; newer stream rows still win.
+                        let mut rows = s
+                            .positions
+                            .commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                         rows.retain(|p| {
                             self.account
                                 .position_updates
@@ -1194,8 +1318,31 @@ impl MexcFutures {
                         cx.store.set_positions(rows);
                     }
                     scope => {
-                        self.reconcile_snapshot_orders(cx, &mut s.orders, s.revision);
-                        for o in &s.orders {
+                        let mapped = mapped_ids(&s.orders, |o| &o.id);
+                        self.rearm_skips("order:", s.orders.rejected() == 0, mapped);
+                        // Rejected rows keep the stored open orders of this scope and symbol.
+                        let current: Vec<Order> = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|o| {
+                                o.status == OrderStatus::Open
+                                    && s.symbol.as_ref().is_none_or(|symbol| *symbol == o.symbol)
+                                    && match scope {
+                                        Scope::Plan => self.account.plan_ids.contains(&o.id),
+                                        Scope::Stop => self.account.stop_ids.contains(&o.id),
+                                        _ => {
+                                            !self.account.plan_ids.contains(&o.id)
+                                                && !self.account.stop_ids.contains(&o.id)
+                                        }
+                                    }
+                            })
+                            .cloned()
+                            .collect();
+                        let mut orders =
+                            std::mem::take(&mut s.orders).commit(current, |o| o.id.clone());
+                        self.reconcile_snapshot_orders(cx, &mut orders, s.revision);
+                        for o in &orders {
                             if scope == Scope::Stop {
                                 self.account.stop_ids.insert(o.id.clone());
                             }
@@ -1207,7 +1354,7 @@ impl MexcFutures {
                             if self.account.full_failed {
                                 return;
                             }
-                            self.account.staged.extend(s.orders);
+                            self.account.staged.extend(orders);
                             self.account.stage_mask |= match scope {
                                 Scope::Regular => 1,
                                 Scope::Plan => 2,
@@ -1245,7 +1392,7 @@ impl MexcFutures {
                             }
                             Self::commit_order_snapshot(cx, rows);
                         } else {
-                            let mut rows = s.orders;
+                            let mut rows = orders;
                             for o in cx.store.orders() {
                                 let is_stop = self.account.stop_ids.contains(&o.id)
                                     || self.account.plan_ids.contains(&o.id);

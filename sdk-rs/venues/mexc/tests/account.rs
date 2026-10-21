@@ -775,6 +775,67 @@ fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
 }
 
 #[test]
+fn bad_position_row_keeps_its_stored_legs_while_peers_commit() {
+    let (mut e, socket, reads, _) = private_started_with_markets(&catalogue_with("0.0001"));
+    answer_snapshot(&mut e, reads, POSITION);
+    assert_eq!(e.store().positions()[0].contracts, 0.006);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    let bad = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let peer = POSITION
+        .replace("BTC_USDT", "BAD_USDT")
+        .replace("739113577038255616", "1");
+    answer_snapshot(&mut e, reads, &format!("{bad},{peer}"));
+    let btc = e.store().positions().iter().find(|p| p.symbol == "BTCUSDT");
+    assert_eq!(btc.unwrap().contracts, 0.006, "stored copy kept");
+    assert!(e.store().positions().iter().any(|p| p.symbol == "BADUSDT"));
+}
+
+#[test]
+fn bad_asset_row_keeps_its_stored_balance_while_peers_update() {
+    let (mut e, socket, reads, _) = private_started();
+    let r = reads.iter().find(|r| r.url.contains("assets")).unwrap();
+    response(
+        &mut e,
+        r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000},{"currency":"BTC","availableBalance":0.5,"cashBalance":0.75}]}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.asset","data":{"currency":"USDT","availableBalance":900}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1200.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1200.0, Event::TimerFired { timer });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("assets"))
+        .unwrap();
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":900,"equity":950},{"currency":"BTC","availableBalance":"bad"}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 950.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("BTC".into(), 0.75, 0.5, 0.25, 0.0),
+            ("USDT".into(), 950.0, 900.0, 50.0, 0.0),
+        ]
+    );
+}
+
+#[test]
 fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let mut e = Engine::new(MexcFutures::new(Options {
         read_credentials: None,
@@ -960,7 +1021,7 @@ fn unmappable_order_id_preserves_known_copy_but_empty_full_snapshot_clears_it() 
 }
 
 #[test]
-fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_load() {
+fn missing_order_identity_protects_known_orders_and_commits_its_peers() {
     for initialized in [false, true] {
         let (mut e, socket, mut reads, _) = private_started();
         if initialized {
@@ -977,22 +1038,24 @@ fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_loa
             reads = requests(&mut e);
         }
         let missing_id = ORDER.replace("\"orderId\":739113577038255617,", "");
+        let fresh = ORDER.replace("739113577038255617", "\"fresh\"");
         for request in reads {
             let body = if request.url.contains("open_orders") {
-                format!(r#"{{"success":true,"code":0,"data":[{missing_id}]}}"#)
+                format!(r#"{{"success":true,"code":0,"data":[{missing_id},{fresh}]}}"#)
             } else {
                 r#"{"success":true,"code":0,"data":[]}"#.into()
             };
             response(&mut e, &request, &body);
         }
-        assert_eq!(e.store().loaded().orders, initialized);
+        assert!(e.store().loaded().orders);
+        assert!(e.store().order("fresh").is_some());
         if initialized {
             assert_eq!(e.store().order("739113577038255617").unwrap().amount, 0.003);
         } else {
-            assert!(e.store().orders().is_empty());
+            assert_eq!(e.store().orders().len(), 1);
         }
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("Malformed MEXC snapshot row"))));
+            Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("MEXC skipped order row without an id"))));
     }
 }
 

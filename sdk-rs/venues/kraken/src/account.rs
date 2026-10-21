@@ -1,6 +1,7 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
     json::{self, ArrayAt},
@@ -15,6 +16,7 @@ use std::{
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
+const SKIP_LOG_LIMIT: usize = 4_096;
 /// Recent execution deduplication and terminal fences survive reconnects without
 /// retaining every historical identity for the lifetime of the engine.
 #[derive(Default)]
@@ -54,9 +56,10 @@ pub struct Request {
     scope: Scope,
     revision: u64,
     settings_revision: u64,
-    orders: Vec<Order>,
-    positions: Vec<Position>,
+    orders: SnapshotBuilder<String, Order>,
+    positions: SnapshotBuilder<String, Position>,
     settings: Vec<(String, Option<f64>)>,
+    /// False on a structural failure or held catalogue exposure: nothing commits.
     valid: bool,
 }
 impl Request {
@@ -65,8 +68,8 @@ impl Request {
             scope,
             revision,
             settings_revision,
-            orders: vec![],
-            positions: vec![],
+            orders: SnapshotBuilder::default(),
+            positions: SnapshotBuilder::default(),
             settings: vec![],
             valid: true,
         }
@@ -108,8 +111,35 @@ pub struct Account {
     snapshot_positions_seen: bool,
     read_failures: u32,
     unlisted_logged: HashSet<String>,
+    /// `order:`/`position:` + identity (empty when unreadable) of REST skips already logged.
+    skip_logged: HashSet<String>,
 }
 impl Account {
+    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    fn log_skip(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        key: String,
+        level: LogLevel,
+        message: String,
+    ) {
+        if self.skip_logged.len() >= SKIP_LOG_LIMIT {
+            self.skip_logged.clear();
+        }
+        if self.skip_logged.insert(key) {
+            cx.log(level, message);
+        }
+    }
+    /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
+    fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
+        if clean {
+            self.skip_logged.retain(|key| !key.starts_with(prefix));
+        } else {
+            for id in ids {
+                self.skip_logged.remove(&format!("{prefix}{id}"));
+            }
+        }
+    }
     pub(crate) fn new() -> Self {
         Self {
             supervisor: Supervisor::new(Config {
@@ -120,6 +150,29 @@ impl Account {
             ..Self::default()
         }
     }
+}
+/// What a REST list row that failed to decode still says about its identity.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RowIdentity<'a> {
+    #[serde(borrow, alias = "order_id", alias = "uid")]
+    order_id: Cow<'a, str>,
+    #[serde(borrow, alias = "instrument")]
+    symbol: Cow<'a, str>,
+}
+/// Log labels of accepted rows whose id no rejection protects: they recovered.
+/// `key` returns a row's (store id, log label).
+fn recovered<T>(
+    builder: &SnapshotBuilder<String, T>,
+    key: impl Fn(&T) -> (&String, &String),
+) -> Vec<String> {
+    builder
+        .rows()
+        .iter()
+        .map(key)
+        .filter(|(id, _)| builder.allows_absence(id))
+        .map(|(_, label)| label.clone())
+        .collect()
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1173,6 +1226,52 @@ impl Kraken {
         }
         cx.store.set_positions(positions);
     }
+    /// A row without an id protects every stored order; otherwise only its own.
+    fn account_reject_order(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, id: &str) {
+        if id.is_empty() {
+            let message = "Kraken skipped order row without an id".to_owned();
+            self.account
+                .log_skip(cx, "order:".into(), LogLevel::Warning, message);
+            request.orders.reject(None);
+        } else {
+            let message = format!("Kraken skipped unmappable order {id}");
+            self.account
+                .log_skip(cx, format!("order:{id}"), LogLevel::Warning, message);
+            request.orders.reject(Some(id.to_owned()));
+        }
+    }
+    /// Both legs of `symbol` keep their stored copies; an empty symbol protects all.
+    /// A row with no stored copy is reported as an error: it commits as flat.
+    fn account_reject_position(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        symbol: &str,
+    ) {
+        let stored = cx
+            .store
+            .positions()
+            .iter()
+            .any(|p| symbol.is_empty() || p.symbol == symbol);
+        let level = if stored {
+            LogLevel::Warning
+        } else {
+            LogLevel::Error
+        };
+        if symbol.is_empty() {
+            let message = "Kraken skipped position row without a symbol".to_owned();
+            self.account
+                .log_skip(cx, "position:".into(), level, message);
+            request.positions.reject(None);
+        } else {
+            let message = format!("Kraken skipped unmappable {symbol} position row");
+            self.account
+                .log_skip(cx, format!("position:{symbol}"), level, message);
+            for side in ["long", "short"] {
+                request.positions.reject(Some(format!("{symbol}:{side}")));
+            }
+        }
+    }
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1183,12 +1282,13 @@ impl Kraken {
             Scope::Orders => match serde_json::from_str::<OrderWire<'_>>(item) {
                 Ok(row) => {
                     if row.symbol.is_empty() {
-                        request.valid = false;
+                        self.account_reject_order(cx, request, &row.order_id);
                     } else if cx.store.market(&row.symbol).is_some() {
+                        let id = row.order_id.to_string();
                         if let Some(order) = self.map_order(cx, row) {
                             request.orders.push(order);
                         } else {
-                            request.valid = false;
+                            self.account_reject_order(cx, request, &id);
                         }
                     } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                         request.valid = false;
@@ -1196,17 +1296,27 @@ impl Kraken {
                         self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
-                Err(_) => request.valid = false,
+                Err(_) => {
+                    let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+                    if self.skipped_markets.contains(row.symbol.as_ref())
+                        && cx.store.market(&row.symbol).is_none()
+                    {
+                        request.valid = false;
+                    } else {
+                        self.account_reject_order(cx, request, &row.order_id);
+                    }
+                }
             },
             Scope::Positions => match serde_json::from_str::<PositionWire<'_>>(item) {
                 Ok(row) => {
                     if row.symbol.is_empty() {
-                        request.valid = false;
+                        self.account_reject_position(cx, request, "");
                     } else if cx.store.market(&row.symbol).is_some() {
+                        let symbol = row.symbol.to_string();
                         if let Some(p) = self.map_position(cx, row, false) {
                             request.positions.push(p);
                         } else {
-                            request.valid = false;
+                            self.account_reject_position(cx, request, &symbol);
                         }
                     } else if row.balance.or(row.size) == Some(0.0) {
                     } else if self.skipped_markets.contains(row.symbol.as_ref()) {
@@ -1215,7 +1325,16 @@ impl Kraken {
                         self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
-                Err(_) => request.valid = false,
+                Err(_) => {
+                    let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+                    if row.symbol.is_empty() || cx.store.market(&row.symbol).is_some() {
+                        self.account_reject_position(cx, request, &row.symbol);
+                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
+                        request.valid = false;
+                    } else {
+                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
+                    }
+                }
             },
             Scope::Settings => match serde_json::from_str::<Preference<'_>>(item) {
                 Ok(p) => {
@@ -1264,20 +1383,33 @@ impl Kraken {
         match request.scope {
             Scope::Orders => {
                 if request.revision == self.account.orders_revision {
-                    self.account_commit_orders(cx, request.orders, false);
+                    let orders = request.orders;
+                    let mapped = recovered(&orders, |o| (&o.id, &o.id));
+                    self.account
+                        .rearm_skips("order:", orders.rejected() == 0, mapped);
+                    // Rejected rows keep their stored copies.
+                    let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                    self.account_commit_orders(cx, orders, false);
                 }
             }
             Scope::Positions => {
                 if request.revision == self.account.positions_revision {
+                    let builder = request.positions;
+                    let mapped = recovered(&builder, |p| (&p.id, &p.symbol));
+                    self.account
+                        .rearm_skips("position:", builder.rejected() == 0, mapped);
+                    // Rejected rows keep both stored legs.
+                    let mut positions =
+                        builder.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     if request.settings_revision != self.account.settings_revision {
-                        for p in &mut request.positions {
+                        for p in &mut positions {
                             if let Some((l, m)) = self.account_setting(&p.symbol) {
                                 p.leverage = l;
                                 p.margin_type = Some(m);
                             }
                         }
                     }
-                    self.account_commit_positions(cx, request.positions);
+                    self.account_commit_positions(cx, positions);
                 }
             }
             Scope::Settings => {

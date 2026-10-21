@@ -2,10 +2,54 @@
 use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const SKIP_LOG_LIMIT: usize = 4_096;
+
+/// A skipped row is an error only when the store has no copy for it to keep.
+fn skip_level(stored: bool) -> LogLevel {
+    if stored {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.log(level, message);
+    }
+}
+/// The identity fields of a position or order row that failed to decode.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RowIdentity<'a> {
+    #[serde(borrow, default)]
+    inst_id: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    inst_type: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    position_side: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    order_id: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    tpsl_id: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    algo_id: Option<Str<'a>>,
+}
 
 #[derive(Clone, Default)]
 pub struct Source {
@@ -67,6 +111,10 @@ pub(crate) struct Account {
     /// Consecutive 152409 answers per settings read, indexed by `StartupRead`.
     signature_rejections: [u8; 2],
     pub startup_rejected: bool,
+    /// Instrument ids (empty when unidentified) whose skipped position row was already logged.
+    position_skips: HashSet<String>,
+    /// Order ids (empty when unidentified) whose skipped row was already logged.
+    order_skips: HashSet<String>,
 }
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum StartupRead {
@@ -138,7 +186,7 @@ pub enum Request {
         revision: u64,
     },
     Positions {
-        positions: Vec<Position>,
+        positions: SnapshotBuilder<String, Position>,
         used: f64,
         upnl: f64,
         positions_revision: u64,
@@ -146,7 +194,7 @@ pub enum Request {
         failed: bool,
     },
     Balance {
-        positions: Vec<Position>,
+        positions: SnapshotBuilder<String, Position>,
         used: f64,
         upnl: f64,
         available: f64,
@@ -162,7 +210,7 @@ pub enum Request {
         cursor: String,
         last_cursor: String,
         page_rows: usize,
-        rows: Vec<Order>,
+        rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
         revision: u64,
         failed: bool,
@@ -492,7 +540,7 @@ impl Blofin {
             cx,
             "/api/v1/account/positions",
             Request::Positions {
-                positions: vec![],
+                positions: SnapshotBuilder::default(),
                 used: 0.0,
                 upnl: 0.0,
                 positions_revision: self.account.positions_revision,
@@ -516,7 +564,7 @@ impl Blofin {
                 cursor: String::new(),
                 last_cursor: String::new(),
                 page_rows: 0,
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
                 revision: self.account.orders_revision,
                 failed: false,
@@ -850,6 +898,7 @@ impl Blofin {
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
+                    self.account.position_skips.remove(p.inst_id.as_ref());
                     if (p.inst_type.is_empty() || p.inst_type.eq_ignore_ascii_case("SWAP"))
                         && p.positions.0 != 0.0
                         && cx.store.market_by_id(&p.inst_id).is_none()
@@ -877,7 +926,7 @@ impl Blofin {
                         positions.push(position);
                     }
                 }
-                Err(_) => *failed = true,
+                Err(_) => self.reject_position(cx, positions, failed, item),
             },
             Request::Balance {
                 available,
@@ -901,6 +950,9 @@ impl Blofin {
                 ..
             } => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(o) => {
+                    for id in [&o.order_id, &o.tpsl_id, &o.algo_id] {
+                        self.account.order_skips.remove(id.as_ref());
+                    }
                     if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
                         && !matches!(
                             o.state.as_ref(),
@@ -934,10 +986,108 @@ impl Blofin {
                         rows.push(order);
                     }
                 }
-                Err(_) => *failed = true,
+                Err(_) => {
+                    let Some(cursor) = self.reject_order(cx, *family, rows, item) else {
+                        *failed = true;
+                        return;
+                    };
+                    // Still counted for paging; its stored copies stay.
+                    *page_rows += 1;
+                    *last_cursor = cursor;
+                }
             },
             _ => {}
         }
+    }
+    /// Rejects an undecodable position row by its instrument's legs. A row on a
+    /// catalogue-malformed market holds the snapshot; one on a filtered market is skipped.
+    fn reject_position(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        positions: &mut SnapshotBuilder<String, Position>,
+        failed: &mut bool,
+        item: &str,
+    ) {
+        let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+        if row
+            .inst_type
+            .as_deref()
+            .is_some_and(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SWAP"))
+        {
+            return;
+        }
+        let inst_id = row.inst_id.as_deref().unwrap_or_default();
+        let skips = &mut self.account.position_skips;
+        if inst_id.is_empty() {
+            let level = skip_level(!cx.store.positions().is_empty());
+            let message = "BloFin skipped malformed position row without an instrument";
+            log_skip(cx, skips, "", level, message);
+            positions.reject(None);
+            return;
+        }
+        let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
+            if self.malformed_markets.contains(inst_id) {
+                *failed = true;
+            }
+            return;
+        };
+        let ids = match row.position_side.as_deref() {
+            Some("net") => vec![symbol.clone()],
+            Some(side @ ("long" | "short")) => vec![format!("{symbol}:{side}")],
+            _ => vec![
+                symbol.clone(),
+                format!("{symbol}:long"),
+                format!("{symbol}:short"),
+            ],
+        };
+        let level = skip_level(ids.iter().any(|id| cx.store.position(id).is_some()));
+        let message = format!("BloFin skipped malformed position row {inst_id}");
+        log_skip(cx, skips, inst_id, level, message);
+        for id in ids {
+            positions.reject(Some(id));
+        }
+    }
+    /// Rejects an undecodable order row by every id it may map to and returns its paging
+    /// cursor; None (the read fails) when it names no cursor or a catalogue-malformed market.
+    fn reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        family: u8,
+        rows: &mut SnapshotBuilder<String, Order>,
+        item: &str,
+    ) -> Option<String> {
+        let row = serde_json::from_str::<RowIdentity<'_>>(item).ok()?;
+        if let Some(inst_id) = row.inst_id.as_deref().filter(|id| !id.is_empty())
+            && cx.store.market_by_id(inst_id).is_none()
+            && self.malformed_markets.contains(inst_id)
+        {
+            return None;
+        }
+        let text = |id: &Option<Str<'_>>| id.as_deref().unwrap_or_default().to_owned();
+        let (order_id, tpsl_id, algo_id) =
+            (text(&row.order_id), text(&row.tpsl_id), text(&row.algo_id));
+        let cursor = match family {
+            0 => order_id.clone(),
+            1 => tpsl_id.clone(),
+            _ => algo_id.clone(),
+        };
+        if cursor.is_empty() {
+            return None;
+        }
+        let mut ids = vec![];
+        for base in [&order_id, &tpsl_id] {
+            if !base.is_empty() {
+                ids.extend(["take_profit", "stop_loss"].map(|suffix| format!("{base}__{suffix}")));
+            }
+        }
+        ids.extend([order_id, algo_id].into_iter().filter(|id| !id.is_empty()));
+        let level = skip_level(ids.iter().any(|id| cx.store.order(id).is_some()));
+        let message = format!("BloFin skipped malformed order row {cursor}");
+        log_skip(cx, &mut self.account.order_skips, &cursor, level, message);
+        for id in ids {
+            rows.reject(Some(id));
+        }
+        Some(cursor)
     }
     pub(crate) fn account_response(
         &mut self,
@@ -1108,6 +1258,20 @@ impl Blofin {
             }
             Request::Positions {
                 positions,
+                positions_revision,
+                ..
+            } if positions.rejected() > 0 => {
+                // Used margin and UPnL sum the rows, so the balance waits for a clean read.
+                self.account.account_busy = false;
+                if positions_revision == self.account.positions_revision {
+                    // A rejected row cannot prove its position flat; keep the stored copy.
+                    let positions =
+                        positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
+                    self.commit_positions(cx, positions);
+                }
+            }
+            Request::Positions {
+                positions,
                 used,
                 upnl,
                 positions_revision,
@@ -1140,7 +1304,8 @@ impl Blofin {
             } => {
                 self.account.account_busy = false;
                 if positions_revision == self.account.positions_revision {
-                    self.commit_positions(cx, positions);
+                    self.account.position_skips.clear();
+                    self.commit_positions(cx, positions.commit([], |p| p.id.clone()));
                 }
                 if balance_revision == self.account.balance_revision {
                     let used = round_usd(used);
@@ -1160,7 +1325,7 @@ impl Blofin {
                 cursor,
                 last_cursor,
                 page_rows,
-                mut rows,
+                rows,
                 mut sources,
                 revision,
                 failed: false,
@@ -1221,9 +1386,18 @@ impl Blofin {
                     if !self.account.orders_seeded {
                         // Even when newer WS state rejects this store snapshot, its
                         // complete cumulative rows still prove execution prefixes.
-                        self.seed_startup_executions(cx, &rows, &sources);
+                        self.seed_startup_executions(cx, rows.rows(), &sources);
                     }
                     if revision == self.account.orders_revision {
+                        let clean = rows.rejected() == 0;
+                        if clean {
+                            self.account.order_skips.clear();
+                        }
+                        let accepted = rows.rows().len();
+                        let mut rows =
+                            rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                        // Stored copies kept for rejected rows bypass the snapshot's own rules.
+                        let mut kept = rows.split_off(accepted);
                         for order in cx.store.orders() {
                             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 self.account.remember_terminal(&order.id);
@@ -1321,9 +1495,22 @@ impl Blofin {
                             }
                         }
                         rows.extend(extra);
+                        kept.retain(|order| {
+                            !self.account.terminal.contains(&order.id)
+                                && !rows.iter().any(|row| row.id == order.id)
+                        });
+                        for order in &kept {
+                            if let Some(source) = self.account.sources.get(&order.id) {
+                                sources.insert(order.id.clone(), source.clone());
+                            }
+                        }
+                        rows.extend(kept);
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
-                        cx.orders_reconciled(None);
+                        // A rejected row may be an uncertain placement; it proves nothing.
+                        if clean {
+                            cx.orders_reconciled(None);
+                        }
                     } else if self.account.retry.is_none() {
                         self.account.retry = Some((cx.set_timer(1_000.0), 1));
                     }

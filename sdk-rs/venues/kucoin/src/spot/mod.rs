@@ -4,6 +4,7 @@ mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -19,6 +20,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use wire::*;
 const REST: &str = "https://api.kucoin.com";
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 pub enum Pending {
     Markets {
@@ -52,7 +54,7 @@ pub struct ReadOrders {
     symbols: VecDeque<String>,
     symbol: String,
     page: u32,
-    rows: Vec<Order>,
+    rows: SnapshotBuilder<String, Order>,
     lookup: Option<(CommandId, String)>,
 }
 struct Socket {
@@ -106,6 +108,8 @@ pub struct KucoinSpot {
     wallet_valuation_pending: bool,
     tickers_applied: bool,
     wallet_unquoted_warned: bool,
+    /// `coin:`/`order:` + identity (empty when unreadable) of skips already logged.
+    skip_logged: HashSet<String>,
     poll: Option<TimerId>,
     heal_orders: Option<TimerId>,
     heal_balance: Option<TimerId>,
@@ -149,6 +153,7 @@ impl KucoinSpot {
             wallet_valuation_pending: false,
             tickers_applied: false,
             wallet_unquoted_warned: false,
+            skip_logged: HashSet::new(),
             poll: None,
             heal_orders: None,
             heal_balance: None,
@@ -430,21 +435,63 @@ impl KucoinSpot {
         }
     }
     fn account_balance(&mut self, cx: &mut Cx<'_, Pending>, data: &RawValue) -> Result<(), String> {
-        let rows: Vec<Account> = serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
+        let rows: Vec<&RawValue> = serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
+        let mut builder = SnapshotBuilder::default();
+        for raw in rows {
+            let row = serde_json::from_str::<Account>(raw.get()).ok().filter(|r| {
+                !r.currency.is_empty()
+                    && r.available.0 >= 0.0
+                    && r.holds.0 >= 0.0
+                    && r.balance.0 >= 0.0
+            });
+            let Some(r) = row else {
+                // An unreadable currency row keeps its stored balance.
+                let currency = serde_json::from_str::<RowIdentity>(raw.get())
+                    .ok()
+                    .map(|row| row.currency.to_owned())
+                    .filter(|currency| !currency.is_empty());
+                let message = match &currency {
+                    Some(c) => format!("KuCoin Spot skipped malformed {c} balance row"),
+                    None => "KuCoin Spot skipped balance row without a currency".into(),
+                };
+                self.log_skip(
+                    cx,
+                    format!("coin:{}", currency.as_deref().unwrap_or_default()),
+                    message,
+                );
+                builder.reject(currency);
+                continue;
+            };
+            builder.push(CurrencyBalance {
+                currency: r.currency.into(),
+                balance: Balance {
+                    free: r.available.0,
+                    used: r.holds.0,
+                    total: r.balance.0,
+                    upnl: 0.0,
+                },
+            });
+        }
+        let mapped: Vec<String> = builder
+            .rows()
+            .iter()
+            .filter(|c| builder.allows_absence(&c.currency))
+            .map(|c| c.currency.clone())
+            .collect();
+        self.rearm_skips("coin:", builder.rejected() == 0, mapped);
+        let stored = cx.store.currency_balances().unwrap_or_default().to_vec();
+        // The USD wallet sums the committed rows, retained copies included.
+        let currencies = builder.commit(stored, |c| c.currency.clone());
         let mut sum = Balance::default();
-        let mut currencies = vec![];
         let mut coins = vec![];
         let mut unpriced = false;
         let mut unquoted = false;
-        for r in rows {
-            if r.currency.is_empty() || r.available.0 < 0.0 || r.holds.0 < 0.0 || r.balance.0 < 0.0
-            {
-                return Err("invalid KuCoin Spot trade-account balance".into());
-            }
-            let p = if matches!(r.currency, "USD" | "USDT" | "USDC") {
+        for r in &currencies {
+            let currency = r.currency.as_str();
+            let p = if matches!(currency, "USD" | "USDT" | "USDC") {
                 1.0
             } else {
-                let symbols = ["USDT", "USDC", "USD"].map(|q| format!("{}-{q}", r.currency));
+                let symbols = ["USDT", "USDC", "USD"].map(|q| format!("{currency}-{q}"));
                 let price = symbols
                     .iter()
                     .filter_map(|symbol| cx.store.ticker(symbol))
@@ -453,7 +500,7 @@ impl KucoinSpot {
                 // Before the first ticker snapshot, a tradable USD route without a
                 // quote is not evidence of zero value; afterwards it is valued at 0.
                 if price.is_none()
-                    && r.balance.0 > 0.0
+                    && r.balance.total > 0.0
                     && symbols
                         .iter()
                         .any(|symbol| cx.store.market(symbol).is_some_and(|m| m.active))
@@ -466,23 +513,14 @@ impl KucoinSpot {
                 }
                 price.unwrap_or(0.0)
             };
-            currencies.push(CurrencyBalance {
-                currency: r.currency.into(),
-                balance: Balance {
-                    free: r.available.0,
-                    used: r.holds.0,
-                    total: r.balance.0,
-                    upnl: 0.0,
-                },
-            });
             coins.push(CoinBalance {
-                base: r.currency.into(),
-                amount: r.balance.0,
-                notional: r.balance.0 * p,
+                base: currency.into(),
+                amount: r.balance.total,
+                notional: r.balance.total * p,
             });
-            sum.free += r.available.0 * p;
-            sum.used += r.holds.0 * p;
-            sum.total += r.balance.0 * p;
+            sum.free += r.balance.free * p;
+            sum.used += r.balance.used * p;
+            sum.total += r.balance.total * p;
         }
         cx.store.set_currency_balances(currencies);
         let newly_unpriced = unpriced && !self.wallet_valuation_pending;
@@ -506,6 +544,41 @@ impl KucoinSpot {
         cx.store.set_coin_balances(coins);
         cx.store.set_balance(sum);
         Ok(())
+    }
+    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, message: String) {
+        if self.skip_logged.len() >= SKIP_LOG_LIMIT {
+            self.skip_logged.clear();
+        }
+        if self.skip_logged.insert(key) {
+            cx.log(LogLevel::Warning, message);
+        }
+    }
+    /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
+    fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
+        if clean {
+            self.skip_logged.retain(|key| !key.starts_with(prefix));
+        } else {
+            for id in ids {
+                self.skip_logged.remove(&format!("{prefix}{id}"));
+            }
+        }
+    }
+    fn reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &mut SnapshotBuilder<String, Order>,
+        id: &str,
+    ) {
+        if id.is_empty() {
+            let message = "KuCoin Spot skipped active-order row without an id".to_owned();
+            self.log_skip(cx, "order:".into(), message);
+            rows.reject(None);
+        } else {
+            let message = format!("KuCoin Spot skipped unmappable active order {id}");
+            self.log_skip(cx, format!("order:{id}"), message);
+            rows.reject(Some(id.to_owned()));
+        }
     }
     fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
         if m.topic.starts_with("/account/balance") {
@@ -1016,7 +1089,7 @@ impl Venue for KucoinSpot {
                     symbols,
                     symbol: String::new(),
                     page: 1,
-                    rows: vec![],
+                    rows: SnapshotBuilder::default(),
                     lookup: None,
                 };
                 if let Some(symbol) = r.symbols.pop_front() {
@@ -1041,12 +1114,16 @@ impl Venue for KucoinSpot {
                 };
                 let count = p.items.len();
                 for raw in p.items {
-                    let row = match serde_json::from_str::<OrderRow>(raw.get()) {
-                        Ok(row) => row,
-                        Err(e) => {
-                            self.on_request_failed(cx, Pending::Orders(r), &e.to_string());
-                            return;
-                        }
+                    let Ok(row) = serde_json::from_str::<OrderRow>(raw.get()) else {
+                        let id = serde_json::from_str::<RowIdentity>(raw.get()).map_or("", |row| {
+                            if row.id.is_empty() {
+                                row.order_id
+                            } else {
+                                row.id
+                            }
+                        });
+                        self.reject_order(cx, &mut r.rows, id);
+                        continue;
                     };
                     if row.id().is_empty()
                         || row.symbol.is_empty()
@@ -1054,46 +1131,41 @@ impl Venue for KucoinSpot {
                         || !matches!(row.event, "limit" | "market")
                         || row.size.or(row.origin_size).is_none()
                     {
+                        self.reject_order(cx, &mut r.rows, row.id());
+                        continue;
+                    }
+                    let Some(mut o) = row.order(cx.now, None, false) else {
+                        self.reject_order(cx, &mut r.rows, row.id());
+                        continue;
+                    };
+                    if o.id.is_empty()
+                        || !valid_order(&o)
+                        || (o.kind == OrderType::Limit && row.price.is_none())
+                    {
+                        self.reject_order(cx, &mut r.rows, row.id());
+                        continue;
+                    }
+                    if o.symbol != r.symbol
+                        || r.rows.rows().len() >= 20_000
+                        || r.rows.rows().iter().any(|row| row.id == o.id)
+                    {
                         self.on_request_failed(
                             cx,
                             Pending::Orders(r),
-                            "invalid KuCoin Spot active-order row",
+                            "invalid or oversized KuCoin Spot active-order snapshot",
                         );
                         return;
                     }
-                    if let Some(mut o) = row.order(cx.now, None, false) {
-                        if o.id.is_empty()
-                            || !valid_order(&o)
-                            || (o.kind == OrderType::Limit && row.price.is_none())
-                            || o.symbol != r.symbol
-                            || r.rows.len() >= 20_000
-                            || r.rows.iter().any(|row| row.id == o.id)
-                        {
-                            self.on_request_failed(
-                                cx,
-                                Pending::Orders(r),
-                                "invalid or oversized KuCoin Spot active-order snapshot",
-                            );
-                            return;
+                    if let Some(current) = cx.store.order(&o.id) {
+                        if o.last_update < current.last_update || o.amount < current.filled {
+                            o = current.clone();
+                        } else {
+                            o.filled = o.filled.max(current.filled);
+                            o.remaining = o.remaining.min((o.amount - o.filled).max(0.0));
                         }
-                        if let Some(current) = cx.store.order(&o.id) {
-                            if o.last_update < current.last_update || o.amount < current.filled {
-                                o = current.clone();
-                            } else {
-                                o.filled = o.filled.max(current.filled);
-                                o.remaining = o.remaining.min((o.amount - o.filled).max(0.0));
-                            }
-                        }
-                        if !self.terminal.contains(&o.id) && o.status == OrderStatus::Open {
-                            r.rows.push(o);
-                        }
-                    } else {
-                        self.on_request_failed(
-                            cx,
-                            Pending::Orders(r),
-                            "missing KuCoin Spot active-order identity",
-                        );
-                        return;
+                    }
+                    if !self.terminal.contains(&o.id) && o.status == OrderStatus::Open {
+                        r.rows.push(o);
                     }
                 }
                 let more = p.total_page.map_or(count >= 50, |n| r.page < n);
@@ -1112,14 +1184,29 @@ impl Venue for KucoinSpot {
                     r.symbol = symbol;
                     r.page = 1;
                     self.page(cx, r);
-                } else if let Some((command, id)) = r.lookup {
-                    cx.done(command, Ok(lookup_output(&r.symbol, &id, &r.rows)));
                 } else {
-                    self.orders_loading = false;
-                    if r.revision == self.revision {
-                        cx.store.set_orders(r.rows);
+                    let mapped: Vec<String> = r
+                        .rows
+                        .rows()
+                        .iter()
+                        .filter(|o| r.rows.allows_absence(&o.id))
+                        .map(|o| o.id.clone())
+                        .collect();
+                    let clean = r.rows.rejected() == 0;
+                    // Rejected rows keep their stored copies.
+                    let rows = r
+                        .rows
+                        .commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                    if let Some((command, id)) = r.lookup {
+                        cx.done(command, Ok(lookup_output(&r.symbol, &id, &rows)));
                     } else {
-                        self.heal(cx, false);
+                        self.orders_loading = false;
+                        if r.revision == self.revision {
+                            self.rearm_skips("order:", clean, mapped);
+                            cx.store.set_orders(rows);
+                        } else {
+                            self.heal(cx, false);
+                        }
                     }
                 }
             }
@@ -1469,7 +1556,7 @@ impl KucoinSpot {
                             symbols: VecDeque::new(),
                             symbol,
                             page: 1,
-                            rows: vec![],
+                            rows: SnapshotBuilder::default(),
                             lookup: Some((command, client_order_id)),
                         },
                     );

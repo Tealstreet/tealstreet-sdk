@@ -25,6 +25,8 @@ pub struct Request {
     /// Rows that failed to map; the store keeps its copy of these IDs/symbols.
     skipped_orders: HashSet<String>,
     skipped_symbols: HashSet<String>,
+    /// A position row without a symbol: absence removes no stored position.
+    unidentified: bool,
     page: u32,
     retries: u8,
     invalid: bool,
@@ -39,6 +41,7 @@ impl Request {
             native_ids: HashSet::new(),
             skipped_orders: HashSet::new(),
             skipped_symbols: HashSet::new(),
+            unidentified: false,
             page: 1,
             retries: 0,
             invalid: false,
@@ -88,6 +91,8 @@ pub(crate) struct Account {
     closures: HashMap<String, f64>,
     executions: HashSet<String>,
     execution_queue: VecDeque<String>,
+    /// A symbol-less position row was logged; re-armed by a read without one.
+    unidentified_logged: bool,
 }
 
 #[derive(Deserialize)]
@@ -682,7 +687,15 @@ impl Kucoin {
                             .skipped_symbols
                             .insert(self::symbol(cx.store, &symbol));
                     }
-                    None => request.invalid = true,
+                    None => {
+                        if !std::mem::replace(&mut self.account.unidentified_logged, true) {
+                            cx.log(
+                                LogLevel::Warning,
+                                "KuCoin skipped position row without a symbol",
+                            );
+                        }
+                        request.unidentified = true;
+                    }
                 },
             },
             Read::Orders(_) => match serde_json::from_str::<&RawValue>(item)
@@ -752,6 +765,7 @@ impl Kucoin {
                 // A failed page cannot leave rows staged from that page.
                 request.skipped_orders.clear();
                 request.skipped_symbols.clear();
+                request.unidentified = false;
                 if matches!(request.read, Read::Positions) {
                     request.positions.clear();
                 } else if matches!(request.read, Read::Orders(_)) {
@@ -842,6 +856,7 @@ impl Kucoin {
                         .copied()
                         .unwrap_or(0)
                         > request.revision
+                        || request.unidentified
                         || request.skipped_symbols.contains(&old.symbol)
                     {
                         if !positions.iter().any(|p| p.id == old.id) {
@@ -852,6 +867,9 @@ impl Kucoin {
                             .closures
                             .insert(old.id.clone(), old.last_update.unwrap_or(cx.now));
                     }
+                }
+                if !request.unidentified {
+                    self.account.unidentified_logged = false;
                 }
                 cx.store.set_positions(positions);
             }

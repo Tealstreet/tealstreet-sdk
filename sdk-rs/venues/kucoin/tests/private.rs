@@ -1106,3 +1106,21 @@ fn unmappable_position_row_keeps_the_stored_position() {
     );
     assert_eq!(h.engine.store().positions(), before.as_slice());
 }
+
+#[test]
+fn position_row_without_a_symbol_no_longer_discards_the_position_snapshot() {
+    let mut h = Harness::new();
+    h.ready();
+    let before = h.engine.store().positions()[0].contracts;
+    h.poll();
+    let grown = POSITION
+        .replace("\"currentQty\":10", "\"currentQty\":20")
+        .replace("1610000000000", "1610000001000");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{{"currentQty":"lots"}},{grown}]}}"#),
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, before * 2.0);
+}

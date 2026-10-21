@@ -3,6 +3,7 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -11,6 +12,7 @@ use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone, Copy)]
 pub enum Next {
@@ -25,8 +27,9 @@ pub enum Request {
         revision: u64,
     },
     Positions {
-        rows: Vec<Position>,
-        invalid: bool,
+        rows: SnapshotBuilder<String, Position>,
+        /// An owned row on a catalogue-malformed market keeps the last snapshot.
+        hold: bool,
         revision: u64,
         next: Next,
     },
@@ -36,9 +39,10 @@ pub enum Request {
         next: Next,
     },
     Orders {
-        rows: Vec<Order>,
+        rows: SnapshotBuilder<String, Order>,
         repairs: Vec<crate::trading::Repair>,
-        invalid: bool,
+        /// A working order on a catalogue-malformed market keeps the last snapshot.
+        hold: bool,
         revision: u64,
         next: Next,
     },
@@ -63,6 +67,10 @@ pub struct Account {
     execution_order: VecDeque<String>,
     /// Trigger orders labelled before any price existed; relabelled at the seed.
     pub unpriced_triggers: HashSet<String>,
+    /// Symbols (empty when unidentified) whose skipped position row was already logged.
+    position_skips: HashSet<String>,
+    /// Order ids (empty when unidentified) whose skipped row was already logged.
+    order_skips: HashSet<String>,
 }
 impl Default for Account {
     fn default() -> Self {
@@ -84,10 +92,35 @@ impl Default for Account {
             executions: HashSet::new(),
             execution_order: VecDeque::new(),
             unpriced_triggers: HashSet::new(),
+            position_skips: HashSet::new(),
+            order_skips: HashSet::new(),
         }
     }
 }
 
+/// A skipped row is an error only when the store has no copy for it to keep.
+fn skip_level(stored: bool) -> LogLevel {
+    if stored {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.log(level, message);
+    }
+}
 pub fn side(text: &str) -> OrderSide {
     if text == "Bid" {
         OrderSide::Buy
@@ -345,8 +378,8 @@ impl Backpack {
             Params::new(),
             None,
             Pending::Account(Request::Positions {
-                rows: vec![],
-                invalid: false,
+                rows: SnapshotBuilder::default(),
+                hold: false,
                 revision: self.account.positions_revision,
                 next,
             }),
@@ -378,9 +411,9 @@ impl Backpack {
             Params::new(),
             None,
             Pending::Account(Request::Orders {
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 repairs: vec![],
-                invalid: false,
+                hold: false,
                 revision: self.account.orders_revision,
                 next,
             }),
@@ -426,70 +459,128 @@ impl Backpack {
         pending: &mut Request,
         item: &str,
     ) {
-        let result = match pending {
-            Request::Positions { rows, invalid, .. } => {
-                let result = serde_json::from_str::<PositionRow<'_>>(item).map(|r| {
-                    if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
-                        // A malformed catalogue row holds the snapshot; a filtered market is skipped.
-                        if self.report_skipped_market(cx, &r.symbol) {
-                            *invalid = true;
-                        } else {
-                            self.report_unlisted_market(cx, &r.symbol);
-                        }
-                    } else if r.net_quantity != 0.0 {
-                        rows.push(position(
-                            r.symbol.into_owned(),
-                            r.net_quantity,
-                            r.entry_price,
-                            r.net_exposure_notional,
-                            r.pnl_unrealized,
-                            r.est_liquidation_price,
-                            self.account.leverage,
-                            cx.now,
-                        ));
+        match pending {
+            Request::Positions { rows, hold, .. } => {
+                let Ok(r) = serde_json::from_str::<PositionRow<'_>>(item) else {
+                    self.reject_position(cx, rows, item);
+                    return;
+                };
+                self.account.position_skips.remove(r.symbol.as_ref());
+                if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
+                    // A malformed catalogue row holds the snapshot; a filtered market is skipped.
+                    if self.report_skipped_market(cx, &r.symbol) {
+                        *hold = true;
+                    } else {
+                        self.report_unlisted_market(cx, &r.symbol);
                     }
-                });
-                if result.is_err() {
-                    *invalid = true;
+                } else if r.net_quantity != 0.0 {
+                    rows.push(position(
+                        r.symbol.into_owned(),
+                        r.net_quantity,
+                        r.entry_price,
+                        r.net_exposure_notional,
+                        r.pnl_unrealized,
+                        r.est_liquidation_price,
+                        self.account.leverage,
+                        cx.now,
+                    ));
                 }
-                result
             }
             Request::Orders {
                 rows,
                 repairs,
-                invalid,
+                hold,
                 ..
             } => {
-                let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
-                    if cx.store.market(&r.symbol).is_none() {
-                        // Only a working order on a malformed market holds the snapshot.
-                        if self.report_skipped_market(cx, &r.symbol) {
-                            *invalid |= status(&r.status) == OrderStatus::Open;
-                        } else {
-                            self.report_unlisted_market(cx, &r.symbol);
-                        }
+                let Ok(r) = serde_json::from_str::<OrderRow<'_>>(item) else {
+                    self.reject_order(cx, rows, item);
+                    return;
+                };
+                self.account.order_skips.remove(r.id.as_ref());
+                if cx.store.market(&r.symbol).is_none() {
+                    // Only a working order on a malformed market holds the snapshot.
+                    if self.report_skipped_market(cx, &r.symbol) {
+                        *hold |= status(&r.status) == OrderStatus::Open;
                     } else {
-                        if r.trigger_price.is_some()
-                            && r.trigger_by.is_none()
-                            && let Ok(repair) = self.trigger_repair(cx, &r)
-                        {
-                            repairs.push(repair);
-                        }
-                        let mapped = order(r, cx.store);
-                        self.note_unpriced_trigger(cx.store, &mapped);
-                        rows.push(mapped);
+                        self.report_unlisted_market(cx, &r.symbol);
                     }
-                });
-                if result.is_err() {
-                    *invalid = true;
+                } else {
+                    if r.trigger_price.is_some()
+                        && r.trigger_by.is_none()
+                        && let Ok(repair) = self.trigger_repair(cx, &r)
+                    {
+                        repairs.push(repair);
+                    }
+                    let mapped = order(r, cx.store);
+                    self.note_unpriced_trigger(cx.store, &mapped);
+                    rows.push(mapped);
                 }
-                result
             }
-            _ => Ok(()),
-        };
-        if let Err(e) = result {
-            cx.log(LogLevel::Error, format!("Backpack account decode: {e}"));
+            _ => {}
         }
+    }
+    /// A malformed position row keeps its symbol's stored legs, or every leg when unnamed.
+    fn reject_position(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &mut SnapshotBuilder<String, Position>,
+        item: &str,
+    ) {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow, default)]
+            symbol: Str<'a>,
+        }
+        let symbol = serde_json::from_str::<Identity<'_>>(item)
+            .map(|r| r.symbol.into_owned())
+            .unwrap_or_default();
+        if symbol.is_empty() {
+            let level = skip_level(!cx.store.positions().is_empty());
+            let message = "Backpack skipped malformed position row without a symbol";
+            log_skip(cx, &mut self.account.position_skips, "", level, message);
+            rows.reject(None);
+            return;
+        }
+        let ids = ["long", "short"].map(|side| format!("{symbol}-{side}"));
+        let level = skip_level(ids.iter().any(|id| cx.store.position(id).is_some()));
+        let message = format!("Backpack skipped malformed position row {symbol}");
+        log_skip(
+            cx,
+            &mut self.account.position_skips,
+            &symbol,
+            level,
+            message,
+        );
+        for id in ids {
+            rows.reject(Some(id));
+        }
+    }
+    /// A malformed order row keeps its stored copy, or every stored order when it has no id.
+    fn reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &mut SnapshotBuilder<String, Order>,
+        item: &str,
+    ) {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow, default)]
+            id: Str<'a>,
+        }
+        let id = serde_json::from_str::<Identity<'_>>(item)
+            .map(|r| r.id.into_owned())
+            .unwrap_or_default();
+        if id.is_empty() {
+            let level = skip_level(!cx.store.orders().is_empty());
+            let message = "Backpack skipped malformed order row without an id";
+            log_skip(cx, &mut self.account.order_skips, "", level, message);
+            rows.reject(None);
+            return;
+        }
+        let level = skip_level(cx.store.order(&id).is_some());
+        let message = format!("Backpack skipped malformed order row {id}");
+        log_skip(cx, &mut self.account.order_skips, &id, level, message);
+        rows.reject(Some(id));
     }
     pub(crate) fn account_response(
         &mut self,
@@ -528,14 +619,20 @@ impl Backpack {
                 }
                 Request::Positions {
                     rows,
-                    invalid,
+                    hold,
                     revision,
                     next,
                 } => {
-                    if invalid {
+                    if hold {
                         return Err("Backpack invalid positions".into());
                     }
                     if revision == self.account.positions_revision {
+                        if rows.rejected() == 0 {
+                            self.account.position_skips.clear();
+                        }
+                        // A rejected row cannot prove its position flat; keep the stored copy.
+                        let rows =
+                            rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                         cx.store.set_positions(rows);
                     }
                     self.next_account(cx, next);
@@ -572,14 +669,18 @@ impl Backpack {
                 Request::Orders {
                     rows,
                     repairs,
-                    invalid,
+                    hold,
                     revision,
                     next,
                 } => {
-                    if invalid {
+                    if hold {
                         return Err("Backpack invalid orders".into());
                     }
                     if revision == self.account.orders_revision {
+                        if rows.rejected() == 0 {
+                            self.account.order_skips.clear();
+                        }
+                        let rows = rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         cx.store.set_orders(rows);
                         for repair in repairs {
                             self.start_repair(cx, repair);

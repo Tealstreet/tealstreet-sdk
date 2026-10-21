@@ -1612,3 +1612,115 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     assert_eq!(rereads, 5);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
 }
+
+/// Fires the account poll at `at`, answers its reads, and returns their logs.
+fn poll(h: &mut Harness, at: f64, positions: &str, orders: &str) -> Vec<String> {
+    h.actions.clear();
+    h.e.handle(at, Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.tick = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == at + 10_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("next poll");
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{positions}]}}"#),
+    );
+    if h.pending.iter().any(|r| r.url.contains("balances")) {
+        h.reply(
+            "balances",
+            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+        );
+    }
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{orders}]}}"#),
+    );
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        if h.pending.iter().any(|r| r.url.contains(path)) {
+            h.reply(path, r#"{"code":"0","data":[]}"#);
+        }
+    }
+    h.actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let instruments = INSTRUMENT.replace(
+        "]}",
+        &format!(
+            ",{}]}}",
+            INSTRUMENT[INSTRUMENT.find("[{").unwrap() + 1..INSTRUMENT.rfind("}]").unwrap() + 1]
+                .replace("BTC", "ETH")
+        ),
+    );
+    let mut h = Harness::with_instruments(&instruments);
+    h.seed();
+    let eth = POSITION.replace("BTC-USDT", "ETH-USDT");
+    let order = |id: &str, price: &str| {
+        format!(
+            r#"{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","side":"buy","size":"1","price":"{price}","state":"live"}}"#
+        )
+    };
+    poll(
+        &mut h,
+        10_000.0,
+        &format!("{POSITION},{eth}"),
+        &format!("{},{}", order("a", "60000"), order("b", "61000")),
+    );
+    let stored_position = h.e.store().position("ETHUSDT").unwrap().clone();
+    let stored_order = h.e.store().order("b").unwrap().clone();
+    let balance = h.e.store().balance().clone();
+
+    let btc = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"5\"");
+    let bad_eth = eth.replace("\"positions\":\"4\"", "\"positions\":null");
+    let bad_order = order("b", "61000").replace("\"size\":\"1\"", "\"size\":null");
+    for round in 0..2 {
+        let logs = poll(
+            &mut h,
+            20_000.0 + 10_000.0 * f64::from(round),
+            &format!("{btc},{bad_eth}"),
+            &format!("{},{bad_order}", order("a", "60001")),
+        );
+        let store = h.e.store();
+        assert_eq!(store.position("BTCUSDT").unwrap().contracts, 0.005);
+        assert_eq!(store.position("ETHUSDT"), Some(&stored_position));
+        assert_eq!(store.order("a").unwrap().price, 60001.0);
+        assert_eq!(store.order("b"), Some(&stored_order));
+        // Used margin and UPnL sum the rows: the balance waits for a clean read.
+        assert_eq!(*store.balance(), balance);
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &[
+                "BloFin skipped malformed position row ETH-USDT",
+                "BloFin skipped malformed order row b",
+            ]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("null") || l.contains('{')));
+    }
+
+    poll(&mut h, 40_000.0, &btc, &order("a", "60001"));
+    let store = h.e.store();
+    assert!(store.position("ETHUSDT").is_none());
+    assert_eq!(store.positions().len(), 1);
+    assert!(store.order("b").is_none());
+    assert_eq!(store.orders().len(), 1);
+}

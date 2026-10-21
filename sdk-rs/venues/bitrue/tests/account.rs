@@ -368,14 +368,115 @@ fn progress_time_and_amount_survive_an_empty_authoritative_snapshot() {
     assert_eq!(order.remaining, 60.0);
     assert_eq!(h.fills(), vec![(111.0, 40.0)]);
 }
+impl Harness {
+    /// Reopens the private stream, which re-reads the account and open orders; returns its logs.
+    fn reread(&mut self, account: Option<&str>, orders: Option<&str>) -> Vec<String> {
+        self.actions.clear();
+        self.e.handle(
+            self.now,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
+        if let Some(body) = account {
+            self.reply("/account", body);
+        }
+        if let Some(body) = orders {
+            self.reply("/openOrders", body);
+        }
+        self.actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Log { message, .. }) => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+}
 #[test]
-fn malformed_order_snapshot_retains_the_complete_symbol() {
+fn one_malformed_order_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let order = |id: &str, side: &str, price: u32| {
+        format!(
+            r#"{{"orderId":"{id}","type":"LIMIT","side":"{side}","status":"NEW","action":"OPEN","price":{price},"origQty":100,"executedQty":0,"transactTime":1}}"#
+        )
+    };
+    let list = |rows: &[String]| format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(","));
     let mut h = Harness::new();
-    h.seed();
-    h.order(1, "PART_FILLED", "LIMIT", 111);
-    h.reply("/openOrders",r#"{"code":"0","data":[{"orderId":"bad","type":"LIMIT","side":"BUY","status":"NEW","origQty":100}]}"#);
-    assert_eq!(h.e.store().orders().len(), 1);
-    assert_eq!(h.e.store().orders()[0].filled, 10.0);
+    h.reply("/account", EMPTY);
+    h.reply(
+        "/openOrders",
+        &list(&[order("a", "BUY", 100), order("b", "SELL", 120)]),
+    );
+    let stored = h.e.store().order("b").unwrap().clone();
+    let snapshot = list(&[order("a", "BUY", 101), order("b", "HOLD", 999)]);
+    for round in 0..2 {
+        let logs = h.reread(None, Some(&snapshot));
+        assert_eq!(h.e.store().order("a").unwrap().price, 101.0);
+        assert_eq!(h.e.store().order("b"), Some(&stored));
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &["Bitrue skipped malformed order row b"]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("HOLD") || l.contains("999")));
+    }
+    h.reread(None, Some(&list(&[order("a", "BUY", 101)])));
+    let ids: Vec<_> = h.e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["a"]);
+}
+#[test]
+fn one_malformed_position_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let group = |contract: &str, side: &str, volume: u32| {
+        format!(
+            r#"{{"contractName":"{contract}","positions":[{{"side":"{side}","volume":{volume},"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200}}]}}"#
+        )
+    };
+    let account = |groups: &[String]| {
+        format!(
+            r#"{{"code":"0","data":{{"account":[{{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[{}]}}]}}}}"#,
+            groups.join(",")
+        )
+    };
+    let mut h = Harness::with_market(&markets);
+    h.reply(
+        "/account",
+        &account(&[
+            group("E-BTC-USDT", "BUY", 2),
+            group("E-ETH-USDT", "SELL", 3),
+        ]),
+    );
+    let eth = h.e.store().position("E-ETH-USDT").unwrap().clone();
+    let snapshot = account(&[
+        group("E-BTC-USDT", "BUY", 4),
+        group("E-ETH-USDT", "HOLD", 9),
+    ]);
+    for round in 0..2 {
+        let logs = h.reread(Some(&snapshot), None);
+        assert_eq!(h.e.store().position("E-BTC-USDT").unwrap().contracts, 4.0);
+        assert_eq!(h.e.store().position("E-ETH-USDT"), Some(&eth));
+        assert_eq!(h.e.store().balance().total, 100.0);
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &["Bitrue skipped malformed position row E-ETH-USDT"]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("HOLD")));
+    }
+    h.reread(Some(&account(&[group("E-BTC-USDT", "BUY", 4)])), None);
+    let ids: Vec<_> =
+        h.e.store()
+            .positions()
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect();
+    assert_eq!(ids, ["E-BTC-USDT"]);
 }
 #[test]
 fn conditional_type_and_atomic_attached_children_preserve_native_identity() {

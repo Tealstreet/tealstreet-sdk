@@ -257,7 +257,7 @@ fn rejected_login_closes_and_reconnects() {
 }
 
 #[test]
-fn malformed_known_position_is_a_failed_snapshot() {
+fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     let (mut e, _, _, pending) = startup();
     for a in pending {
         if is_get(&a, "/api/v5/account/positions?instType=SWAP") {
@@ -276,7 +276,100 @@ fn malformed_known_position_is_a_failed_snapshot() {
             );
         }
     }
-    assert!(!e.store().loaded().positions && !e.store().loaded().balance);
+    assert!(e.store().loaded().positions && e.store().loaded().balance);
+    assert!(e.store().positions().is_empty());
+}
+
+/// Starts a second account sweep after `complete` and answers it with these bodies.
+fn resweep(
+    e: &mut Engine<Okx>,
+    private: safe_cex_engine::SocketId,
+    risk: &str,
+    position: &str,
+    orders: &str,
+) {
+    ws(e, private, r#"{"event":"login","code":"0"}"#);
+    let mut requests: Vec<_> = actions(e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else { continue };
+        let body = if r.url.contains("account-position-risk") {
+            envelope(risk)
+        } else if r.url.contains("/positions?") {
+            envelope(position)
+        } else if r.url.contains("orders-pending") {
+            envelope(orders)
+        } else {
+            envelope("")
+        };
+        reply(e, &a, &body, 6.0);
+        requests.extend(
+            actions(e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+}
+
+#[test]
+fn bad_position_row_keeps_its_stored_copy_while_the_balance_commits() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER);
+    let bad = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"bad\"");
+    resweep(
+        &mut e,
+        private,
+        r#"{"balData":[{"ccy":"USDT","eq":"6000"}]}"#,
+        &bad,
+        ORDER,
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].contracts, 0.05);
+    assert_eq!(e.store().balance().total, 5950.0);
+}
+
+#[test]
+fn bad_balance_currency_row_keeps_its_equity_while_positions_commit() {
+    for risk in [
+        r#"{"balData":[{"ccy":"USDT","eq":"bad"}]}"#,
+        r#"{"balData":[{"ccy":"","eq":"6000"}]}"#,
+    ] {
+        let (mut e, private, _, pending) = startup();
+        complete(&mut e, pending, ORDER);
+        let grown = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"");
+        resweep(&mut e, private, risk, &grown, ORDER);
+        assert_eq!(e.store().positions()[0].contracts, 0.06, "{risk}");
+        assert_eq!(e.store().balance().total, 4950.0, "{risk}");
+    }
+}
+
+#[test]
+fn bad_order_row_keeps_its_stored_copy_and_new_orders_commit() {
+    let fresh = ORDER
+        .replace("\"ordId\":\"123\"", "\"ordId\":\"456\"")
+        .replace("caller123", "caller456");
+    for bad in [
+        ORDER.replace("\"side\":\"buy\"", "\"side\":\"up\""),
+        r#"{"instId":"BTC-USDT-SWAP","ordId":"123","sz":4}"#.to_string(),
+        r#"{"ordId":123}"#.to_string(),
+    ] {
+        let (mut e, private, _, pending) = startup();
+        complete(&mut e, pending, ORDER);
+        let balance = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
+        resweep(
+            &mut e,
+            private,
+            balance,
+            POSITION,
+            &format!("{bad},{fresh}"),
+        );
+        let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["123", "456"], "{bad}");
+        assert_eq!(e.store().order("123").unwrap().amount, 4.0);
+    }
 }
 
 fn complete_fresh(e: &mut Engine<Okx>, mut requests: Vec<Action>, position: &str) {
@@ -465,7 +558,6 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
         envelope("{}"),
         envelope(r#"{"balData":null}"#),
         envelope(r#"{"balData":[]},{"balData":[]}"#),
-        envelope(r#"{"balData":[{"ccy":"","eq":"5000"}]}"#),
     ] {
         let (mut e, _, _, pending) = startup();
         complete(&mut e, pending, ORDER);

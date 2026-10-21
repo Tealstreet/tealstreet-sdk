@@ -1,12 +1,49 @@
 use crate::sign::Params;
 use crate::wire::{Envelope, Message};
 use crate::{Cryptocom, Pending, Skipped, quoted};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, TimerId, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+
+const SKIP_LOG_LIMIT: usize = 4_096;
+
+/// A skipped row is an error only when the store has no copy for it to keep.
+fn skip_level(stored: bool) -> LogLevel {
+    if stored {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.log(level, message);
+    }
+}
+/// Commits a builder and splits off the stored copies its rejections kept.
+fn commit_split(
+    rows: SnapshotBuilder<String, Order>,
+    current: &[Order],
+) -> (Vec<Order>, Vec<Order>) {
+    let accepted = rows.rows().len();
+    let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
+    let kept = rows.split_off(accepted);
+    (rows, kept)
+}
 
 #[derive(Clone, Copy)]
 pub enum Read {
@@ -27,18 +64,18 @@ impl Read {
 }
 
 pub enum Rows {
-    Positions(Vec<Position>),
+    Positions(SnapshotBuilder<String, Position>),
     Balance(Option<(Balance, Option<Vec<CurrencyBalance>>)>),
-    Orders(Vec<Order>),
+    Orders(SnapshotBuilder<String, Order>),
 }
 pub struct Request {
     pub read: Read,
     pub revision: u64,
     pub rows: Rows,
+    /// An unreadable balance summary, or owned exposure on a catalogue-malformed market.
     pub invalid: bool,
+    /// Unreadable balance rows after the summary.
     pub skipped: Skipped,
-    /// Identities of unmappable snapshot rows; their known state is kept.
-    pub kept: Vec<String>,
     pub retries: u8,
 }
 
@@ -48,7 +85,7 @@ pub struct Account {
     pub busy: bool,
     pub revision: u64,
     pub count: u32,
-    pub order_rows: Option<Vec<Order>>,
+    pub order_rows: Option<SnapshotBuilder<String, Order>>,
     pub order_revision: u64,
     order_versions: HashMap<String, u64>,
     position_versions: HashMap<String, u64>,
@@ -59,6 +96,10 @@ pub struct Account {
     balance_revision: u64,
     executions: HashSet<String>,
     execution_queue: VecDeque<String>,
+    /// Instruments (empty when unidentified) whose skipped position row was already logged.
+    position_skips: HashSet<String>,
+    /// Order ids (empty when unidentified) whose skipped row was already logged.
+    order_skips: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -425,9 +466,9 @@ impl Cryptocom {
     }
     fn read_account(&self, cx: &mut Cx<'_, Pending>, read: Read, retries: u8) {
         let rows = match read {
-            Read::Positions => Rows::Positions(vec![]),
+            Read::Positions => Rows::Positions(SnapshotBuilder::default()),
             Read::Balance => Rows::Balance(None),
-            _ => Rows::Orders(vec![]),
+            _ => Rows::Orders(SnapshotBuilder::default()),
         };
         self.signed(
             cx,
@@ -439,7 +480,6 @@ impl Cryptocom {
                 rows,
                 invalid: false,
                 skipped: Skipped::default(),
-                kept: vec![],
                 retries,
             }),
             true,
@@ -469,9 +509,15 @@ impl Cryptocom {
         cx.log(LogLevel::Error, error);
         self.schedule_reconcile(cx);
     }
-    pub(crate) fn account_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+    pub(crate) fn account_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
         let result = match &mut request.rows {
             Rows::Positions(rows) => serde_json::from_str::<PositionRow>(item).map(|row| {
+                self.account.position_skips.remove(row.instrument_name);
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.position(cx.now));
                 } else if num::parse(row.quantity) != 0.0 {
@@ -487,6 +533,7 @@ impl Cryptocom {
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
+                self.account.order_skips.remove(&id(row.order_id));
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.order(cx.now, cx.store.order(&id(row.order_id))));
                 } else if status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open {
@@ -514,22 +561,44 @@ impl Cryptocom {
         if foreign(cx, key.as_ref()) {
             return;
         }
-        // A row without its identity cannot be kept, so the read fails as a whole.
-        let identity = match &request.rows {
-            Rows::Positions(_) => key.and_then(|k| k.instrument_name.map(str::to_owned)),
-            Rows::Orders(_) => key.and_then(|k| k.order_id.map(id)),
-            Rows::Balance(Some(_)) => {
-                request.skipped.add(None);
-                return;
+        match &mut request.rows {
+            Rows::Positions(rows) => {
+                let symbol = key.and_then(|k| k.instrument_name);
+                let skips = &mut self.account.position_skips;
+                let Some(symbol) = symbol else {
+                    let level = skip_level(!cx.store.positions().is_empty());
+                    let message =
+                        "Crypto.com skipped unmappable position row without an instrument";
+                    log_skip(cx, skips, "", level, message);
+                    rows.reject(None);
+                    return;
+                };
+                let ids = ["long", "short"].map(|side| format!("{symbol}:{side}"));
+                let level = skip_level(ids.iter().any(|id| cx.store.position(id).is_some()));
+                let message = format!("Crypto.com skipped unmappable position row {symbol}");
+                log_skip(cx, skips, symbol, level, message);
+                for id in ids {
+                    rows.reject(Some(id));
+                }
             }
-            Rows::Balance(None) => None,
-        };
-        let Some(identity) = identity else {
-            request.invalid = true;
-            return;
-        };
-        request.skipped.add(Some(&identity));
-        request.kept.push(identity);
+            Rows::Orders(rows) => {
+                let skips = &mut self.account.order_skips;
+                let Some(order_id) = key.and_then(|k| k.order_id.map(id)) else {
+                    let level = skip_level(!cx.store.orders().is_empty());
+                    let message = "Crypto.com skipped unmappable order row without an id";
+                    log_skip(cx, skips, "", level, message);
+                    rows.reject(None);
+                    return;
+                };
+                let level = skip_level(cx.store.order(&order_id).is_some());
+                let message = format!("Crypto.com skipped unmappable order row {order_id}");
+                log_skip(cx, skips, &order_id, level, message);
+                rows.reject(Some(order_id));
+            }
+            Rows::Balance(Some(_)) => request.skipped.add(None),
+            // The summary row itself is unreadable.
+            Rows::Balance(None) => request.invalid = true,
+        }
     }
     pub(crate) fn account_response(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if request.invalid {
@@ -537,28 +606,14 @@ impl Cryptocom {
             return;
         }
         let fresh_balance = request.revision >= self.account.balance_revision;
-        request.skipped.report(
-            cx,
-            match request.rows {
-                Rows::Positions(_) => "position",
-                Rows::Balance(_) => "balance",
-                Rows::Orders(_) => "order",
-            },
-        );
-        let skipped = request.kept;
+        request.skipped.report(cx, "balance");
         match request.rows {
             Rows::Positions(rows) => {
-                let mut rows = rows;
-                rows.extend(
-                    cx.store
-                        .positions()
-                        .iter()
-                        .filter(|p| {
-                            skipped.contains(&p.symbol) && !rows.iter().any(|row| row.id == p.id)
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                );
+                if rows.rejected() == 0 {
+                    self.account.position_skips.clear();
+                }
+                // A rejected row cannot prove its position flat; keep the stored copy.
+                let mut rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                 // Resolve cached rows before applying closure fences: a newer live
                 // reopen must survive an old snapshot row from before the closure.
                 for row in &mut rows {
@@ -669,21 +724,25 @@ impl Cryptocom {
                     self.schedule_reconcile(cx);
                 }
             }
-            Rows::Orders(mut rows) => {
-                rows.extend(
-                    cx.store
-                        .orders()
-                        .iter()
-                        .filter(|o| skipped.contains(&o.id))
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                );
+            Rows::Orders(rows) => {
                 if matches!(request.read, Read::Orders) {
                     self.account.order_rows = Some(rows);
                     self.read_account(cx, Read::AdvancedOrders, 0);
                 } else {
-                    if let Some(mut regular) = self.account.order_rows.take() {
-                        regular.extend(rows);
+                    if let Some(regular) = self.account.order_rows.take() {
+                        if regular.rejected() == 0 && rows.rejected() == 0 {
+                            self.account.order_skips.clear();
+                        }
+                        // Each list keeps the stored copies its own rejections protect.
+                        let current = cx.store.orders().to_vec();
+                        let (mut regular, kept) = commit_split(regular, &current);
+                        let (advanced, advanced_kept) = commit_split(rows, &current);
+                        regular.extend(advanced);
+                        for order in kept.into_iter().chain(advanced_kept) {
+                            if !regular.iter().any(|row| row.id == order.id) {
+                                regular.push(order);
+                            }
+                        }
                         regular.retain(|o| {
                             !self.account.terminal.contains(&o.id)
                                 && self

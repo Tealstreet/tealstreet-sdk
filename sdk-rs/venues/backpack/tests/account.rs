@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Event, Notice};
+use safe_cex_engine::{Action, Event, Notice, SocketId};
 use support::*;
 
 #[test]
@@ -628,4 +628,82 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
         e.store().order("tp").unwrap().kind,
         safe_cex_engine::model::OrderType::TakeProfit
     );
+}
+
+/// Answers one position and order re-read and returns its logs.
+fn reread(e: &mut Driver, socket: SocketId, positions: &str, orders: &str) -> Vec<String> {
+    e.handle(1000.0, Event::WsOpened { socket });
+    for r in requests(e) {
+        if r.url.ends_with("/position") {
+            reply(e, &r, 200, positions);
+        } else if r.url.ends_with("/orders") {
+            reply(e, &r, 200, orders);
+        }
+    }
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) => Some(message),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let row = |list: &str| list[1..list.len() - 1].to_owned();
+    let btc_position = row(&POSITIONS
+        .replace("SOL_USDC_PERP", "BTC_USDC_PERP")
+        .replace("\"5\"", "\"3\""));
+    let btc_order = ORDER
+        .replace("SOL_USDC_PERP", "BTC_USDC_PERP")
+        .replace("\"123\"", "\"456\"");
+    let positions =
+        |sol: &str, btc: &str| format!("[{},{btc}]", row(POSITIONS).replace("\"5\"", sol));
+    let orders = |price: &str, btc: &str| format!("[{},{btc}]", ORDER.replace("\"140\"", price));
+    let (mut e, socket, _, _) = ready_catalogue(
+        MARKETS,
+        &positions("\"5\"", &btc_position),
+        &orders("\"140\"", &btc_order),
+    );
+    let stored_position = e.store().position("BTC_USDC_PERP-long").unwrap().clone();
+    let stored_order = e.store().order("456").unwrap().clone();
+    e.drain_actions().for_each(drop);
+
+    let bad_position = btc_position.replace(r#""entryPrice":"140","#, "");
+    let bad_order = btc_order.replace(r#""side":"Bid","#, "");
+    for round in 0..2 {
+        let logs = reread(
+            &mut e,
+            socket,
+            &positions("\"7\"", &bad_position),
+            &orders("\"141\"", &bad_order),
+        );
+        let store = e.store();
+        assert_eq!(store.position("SOL_USDC_PERP-long").unwrap().contracts, 7.0);
+        assert_eq!(store.position("BTC_USDC_PERP-long"), Some(&stored_position));
+        assert_eq!(store.order("123").unwrap().price, 141.0);
+        assert_eq!(store.order("456"), Some(&stored_order));
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        if round == 0 {
+            assert_eq!(
+                skips,
+                [
+                    "Backpack skipped malformed order row 456",
+                    "Backpack skipped malformed position row BTC_USDC_PERP"
+                ],
+                "{logs:?}"
+            );
+        } else {
+            assert!(skips.is_empty(), "logged once: {logs:?}");
+        }
+        assert!(!logs.iter().any(|l| l.contains('{') || l.contains("140")));
+    }
+
+    let sol_only = POSITIONS.replace("\"5\"", "\"7\"");
+    reread(&mut e, socket, &sol_only, &format!("[{ORDER}]"));
+    let store = e.store();
+    assert_eq!(store.positions().len(), 1);
+    assert!(store.position("BTC_USDC_PERP-long").is_none());
+    assert_eq!(store.orders().len(), 1);
+    assert!(store.order("456").is_none());
 }
