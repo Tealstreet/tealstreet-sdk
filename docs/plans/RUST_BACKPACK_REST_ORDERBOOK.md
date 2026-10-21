@@ -39,3 +39,25 @@ Plan audit refinement before implementation:
   separately and keep its venue activation out of the Backpack behavior batch.
 - Keep zero quantities, raw lexical price IDs and unsorted/duplicate levels as
   TS does. Public errors must remain typed and owned, never account auth.
+
+Verification progress:
+- All six initial native regression groups failed on original source (including
+  actual standalone JSON ingress); all pass after implementation. A live WS
+  regression also proves query success/failure and subscription-generation
+  replacement cannot mutate or fence each other's state.
+- Review identified refusal metadata that could erase an explicit native error
+  and return empty success, plus a shortened rate hint. Two additional groups
+  failed before those corrections and pass after them; malformed 2xx envelopes
+  now fail closed, code/message refusals precede book acceptance, HTTP status
+  retains precedence, and a native 120-second hint is retained (shared hour cap).
+- MEXC standalone decoder repair is explicitly assigned next as its own PR;
+  the other already-advertised families are AsterDEX/Polymarket, whose existing
+  feature activation remains intact. Future new book families need precise
+  standalone decoder admission too.
+
+Final local gates: 367 Backpack+Binance native tests, the default combined-host
+capability fixture, 21 SDK capability/bridge tests, package typecheck and focused
+SDK ESLint pass. Strict engine/Backpack all-target Clippy, format and bans pass.
+Dedicated engine command tests cover the precise book feature and legacy
+AsterDEX/Polymarket admission. Two final independent implementation reviews are
+clear after the proven-red refusal fixes. Full exact-head CI remains required.

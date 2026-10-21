@@ -440,6 +440,16 @@ Same algorithm as `formatPrice` but uses `market.precision.amount`.
 
 ### Orderbook
 
+Rust `fetchOrderBook` is an independent unsigned `GET /api/v1/depth` query.
+It needs neither cached markets nor a live book subscription. It preserves native
+side order, raw price strings as IDs, parsed price/amount and `total: 0`; optional
+limits are ignored as in TS, and no `lastUpdateId` is returned. Empty and one-sided
+books remain valid; malformed shapes/nonfinite values reject the whole query.
+Query responses never publish or repair a stream book. Public refusals have owned
+typed failures without account-auth evidence or automatic retry; native error
+code/message and usable rate-limit hints are retained. Standalone builds opt into
+only the shared order-book JSON command decoder.
+
 Snapshot-then-delta approach (`listenOrderBook` in `backpack.ws-public.ts`):
 
 1. Subscribe to `depth.<symbol>` WebSocket stream
