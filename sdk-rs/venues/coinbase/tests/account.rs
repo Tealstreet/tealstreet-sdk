@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId,
 };
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
@@ -29,7 +29,7 @@ struct Session {
     orders: Option<String>,
     breakdown: Option<String>,
     logs: Vec<String>,
-    /// Logs at `LogLevel::Error`, also present in `logs`.
+    /// Logs at `Level::Error`, also present in `logs`.
     errors: Vec<String>,
     sends: Vec<(SocketId, String)>,
     // Private sockets only; the unopened public feed has its own supervisor.
@@ -92,12 +92,6 @@ impl Session {
                 Action::WsConnect { socket, url, .. } if url.contains("ws-user") => {
                     self.private = Some(socket);
                     self.privates.push(socket)
-                }
-                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
-                    if level == LogLevel::Error {
-                        self.errors.push(message.clone());
-                    }
-                    self.logs.push(message)
                 }
                 Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                     if event.level == safe_cex_engine::Level::Error {

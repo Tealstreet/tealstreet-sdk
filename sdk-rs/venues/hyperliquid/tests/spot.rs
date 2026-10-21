@@ -1052,7 +1052,7 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
         );
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("wallet address pair"))));
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("wallet address pair"))));
         assert!(
             !actions
                 .iter()

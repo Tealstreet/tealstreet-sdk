@@ -74,8 +74,7 @@ fn inexact_candle_intervals_are_rejected_not_served_from_a_smaller_one() {
     let errors: Vec<_> = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),

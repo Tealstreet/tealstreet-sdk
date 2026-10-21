@@ -114,12 +114,6 @@ impl H {
                     ..
                 } => self.public = Some(socket),
                 Action::WsSend { text, .. } => self.sends.push(text),
-                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
-                    if level == safe_cex_engine::LogLevel::Error {
-                        self.errors.push(message.clone());
-                    }
-                    self.logs.push(message)
-                }
                 Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                     if event.level == safe_cex_engine::Level::Error {
                         self.errors.push(event.message.clone());

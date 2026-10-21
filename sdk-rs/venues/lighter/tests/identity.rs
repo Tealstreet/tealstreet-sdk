@@ -63,10 +63,10 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
                 assert!(done.is_empty());
                 errors += 1;
             }
-            Action::Notice(Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
+            Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Error,
                 ..
-            }) => panic!("identity error must remain scoped"),
+            })) => panic!("identity error must remain scoped"),
             Action::Http(_)
             | Action::SignPayload { .. }
             | Action::WsConnect { .. }
