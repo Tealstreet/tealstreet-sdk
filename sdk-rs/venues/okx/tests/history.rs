@@ -392,7 +392,7 @@ fn repeating_cursor_stops_with_warning_without_refetching_forever() {
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if serde_json::from_str::<Vec<HistoricalOrder>>(s).unwrap().len() == 100)));
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("cursor did not advance"))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains("cursor did not advance"))));
 }
 
 #[test]

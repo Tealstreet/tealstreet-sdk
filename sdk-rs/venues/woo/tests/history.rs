@@ -412,7 +412,7 @@ fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: LogLevel::Warning, message })
+        Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO fills history: skipped 1")
     )));
     let json = actions

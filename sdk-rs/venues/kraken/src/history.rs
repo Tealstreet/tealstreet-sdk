@@ -890,8 +890,18 @@ impl Kraken {
                 {
                     None
                 } else if !request.ascending || request.oldest == request.newest {
-                    self.history_failed(cx, request, "INCOMPLETE: saturated ledger page cannot be traversed using the measured since/count contract");
-                    return;
+                    // Only `since` reaches the venue, so a full page that cannot advance leaves
+                    // rows unread. Like TS, return what was read and say it is truncated.
+                    if request.rows.len() < request.limit {
+                        cx.notice(
+                            safe_cex_engine::Level::Warn,
+                            safe_cex_engine::log::code::HISTORY_INCOMPLETE,
+                            format!(
+                                "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; some rows in the window are missing and any total is a lower bound."
+                            ),
+                        );
+                    }
+                    None
                 } else if request.newest > request.to {
                     None
                 } else {

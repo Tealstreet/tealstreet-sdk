@@ -1556,8 +1556,9 @@ fn margin_warned(h: &Harness) -> bool {
     h.actions.iter().any(|a| {
         matches!(
             a,
-            Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message })
-                if message.starts_with("Changing margin type with open positions / orders")
+            Action::Notice(Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Error
+                    && event.message.starts_with("Changing margin type with open positions / orders")
         )
     })
 }

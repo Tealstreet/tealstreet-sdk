@@ -1,9 +1,11 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -1021,8 +1023,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
             );
             r.finish(cx);
@@ -1041,8 +1044,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 "OKX history cursor did not advance; older rows were not fetched",
             );
             r.finish(cx);

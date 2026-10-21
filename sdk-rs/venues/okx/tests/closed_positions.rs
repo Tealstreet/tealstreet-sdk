@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 mod support;
 
-use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice, VenueAction};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice, VenueAction};
 use safe_cex_venue_okx::{Okx, Options};
 use support::*;
 
@@ -175,7 +175,7 @@ fn the_page_cap_warns_and_keeps_rows() {
         10_000
     );
     assert!(out.iter().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: LogLevel::Warning, message }) if message.contains("100-page cap"))));
+        Action::Notice(Notice::Event(event)) if event.level == safe_cex_engine::Level::Warn && event.message.contains("100-page cap"))));
 }
 
 #[test]

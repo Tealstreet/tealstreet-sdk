@@ -6,13 +6,14 @@ mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use sign::Credentials;
 use std::collections::{HashMap, HashSet};
@@ -777,7 +778,7 @@ impl Venue for Okx {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
             cx.startup_failed(
                 safe_cex_engine::VenueError::new(error)
@@ -822,8 +823,9 @@ impl Venue for Okx {
                 cx.close(socket);
                 self.on_close(cx, socket, 1008);
             }
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
                 format!("OKX {}: {}", message.code, message.msg),
             );
             return;
@@ -1225,8 +1227,9 @@ impl Venue for Okx {
                     return;
                 }
                 if seeded > 0 {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("OKX seeded {seeded} malformed ticker rows as zero"),
                     );
                 }
@@ -1399,7 +1402,11 @@ impl Venue for Okx {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 let Some(bar) = bar(interval) else {
-                    cx.log(LogLevel::Error, interval.unsupported("OKX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("OKX"),
+                    );
                     return;
                 };
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();

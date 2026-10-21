@@ -1,10 +1,12 @@
 //! Route-specific history walkers; query rows never enter the live store.
 use crate::wire::{Envelope, Str, number, optional_number};
 use crate::{Pending, Woo, compact, native};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -768,8 +770,9 @@ impl Woo {
                 cx.fail(r.command, "Malformed WOO history page");
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "WOO {}: skipped {} unmappable row(s)",
                     r.route.label(),

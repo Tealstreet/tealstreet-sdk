@@ -3,7 +3,9 @@
 use crate::history::windows;
 use crate::sign::Query;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Response};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
+use safe_cex_engine::{CommandId, Cx, Response};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -152,8 +154,7 @@ impl BybitLinear {
             cursor => {
                 if cursor.is_some() {
                     // Newest first, so the cap drops the oldest rows of this window.
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                         format!(
                             "Closed-PnL paging hit the {MAX_PAGES}-page cap; older rows in this window were not fetched"
                         ),

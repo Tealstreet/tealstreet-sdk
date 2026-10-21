@@ -36407,22 +36407,6 @@
       ]
     },
     {
-      "venue": "krakenspot",
-      "tapeSha256": "087a10d1f34d1ac3bf1d81a0e5d3166b070e2f7b97da04da683f19c309da953b",
-      "tape": "sdk-rs/harness/tapes/krakenspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
-          "keys": [
-            "checkpoint 10 account.orders[0].status",
-            "checkpoint 11 account.orders[0].status",
-            "checkpoint 12 account.orders[0].status",
-            "checkpoint 13 account.orders[0].status"
-          ]
-        }
-      ]
-    },
-    {
       "venue": "kucoin",
       "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",

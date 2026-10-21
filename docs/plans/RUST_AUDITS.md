@@ -702,9 +702,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 Verdict: reads and streaming match; writes and lifecycle do not yet. Blocks
 further cutover and warrants re-checking coinbase, Orderly, txflow.
 
-- High: cancel sends ids only and venues drop ids not yet in their store, so a
+- High: ~~cancel sends ids only and venues drop ids not yet in their store, so a
   chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
-  `bybit/src/trading.rs:422`); ~~`setLeverage` drops side (see Bitget)~~; ~~a wasm
+  `bybit/src/trading.rs:422`)~~ (unknown ids fail explicitly, RUST_UNKNOWN_CANCEL;
+  a cancel or amend naming an acknowledged placement waits in the engine until
+  the store has it, `engine/src/placement_acks.rs`); ~~`setLeverage` drops side (see Bitget)~~; ~~a wasm
   panic freezes the account silently — no containment in `host.mjs:131,175`~~
   (a trap disposes the host, settles pending commands with unknown write
   outcomes and rejects with `ENGINE_DEAD`, `kind: 'internal'`);
@@ -712,7 +714,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `PublicExchangeFactory` caches it (`rust.exchange.ts:856`)~~ (reads start the
   engine and wait for native data, #1375; the factory throws on an empty list;
   the engine store never applies an empty catalogue and warns instead); book/candle
-  subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
+  ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
+  (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
@@ -725,8 +728,10 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   (typed `Interval` refuses it);
   ~~`num::adjust` with step ≤ 0~~ (a market without two positive finite steps is
   a malformed catalogue row on every venue; the guard stays as defence in depth);
-  no command deadline, `execute` drops the batch tail
-  on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
+  ~~no command deadline, `execute` drops the batch tail
+  on an unknown action~~ (wasm host: 120 s deadline with unknown write outcome,
+  `hostcommand.test.mjs`; batch tail kept, "unknown actions preserve batch tail
+  completions"; the undeployed native host has no command deadline); candles drop `lastSide`, orders lack generic `triggerType`.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
@@ -741,9 +746,15 @@ Futures matches TS on nearly every input; no high regression.
 - ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
   the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
   rejection names the unsupported take-profit/stop-loss legs before any write.
-- Low: income over 500 rows errors (TS partial); one bad row rejects
-  catalogue/tickers/open orders and blocks private start (startup lane);
-  missing funding field set to 0; raw error text; spot 3m candles.
+- Low: ~~income over 500 rows errors (TS partial)~~ (known limit: the newest
+  page returns with a `history.incomplete` warning, as TS; `account-log` honours
+  only `since`, so a complete walk awaits the cursor probe in
+  [RUST_LIVE_GATE.md](RUST_LIVE_GATE.md)); one bad row ~~rejects
+  catalogue/tickers~~ (skipped since the startup lane) and still rejects open
+  orders (row isolation: SnapshotBuilder batch 3, claude-nfncln); missing
+  funding field set to 0 (decided: Kraken omits a zero rate; b778fa3); ~~raw error
+  text~~ (non-2xx failures carry the body's error code); spot 3m candles
+  (decided: typed `Interval` refuses rather than serving 1m bars as 3m).
 - Confirm (TS bugs Rust fixed): index trigger signal; full_fill not canceled;
   live % change/volume/OI; stop amend racing a fill; spot fills over-reported
   and mislabelled XBT/BTC.

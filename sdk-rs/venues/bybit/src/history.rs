@@ -5,9 +5,11 @@ use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Query as Read, Response};
+use safe_cex_engine::{CommandId, Cx, Query as Read, Response};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -573,8 +575,7 @@ impl BybitLinear {
                 .as_ref()
                 .is_some_and(|c| walk.cursor.as_ref() != Some(c));
         if capped_orders {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                 "Bybit order history reached its page limit; older orders in this window are omitted",
             );
             walk.pages = 0;

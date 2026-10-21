@@ -78,13 +78,13 @@ cutover, so each item below must be handled in the same change set (or before).
 
 **Inputs.** tealstreet-next `origin/master` `41e538d78d` (2026-10-20), read with
 `git grep`/`git show` only; Tealstreet/tealstreet-mobile `master` through the
-GitHub API. SDK `origin/feat/rust-rewrite` `5cd8cf2f9d` (2026-10-21), which has
+GitHub API. SDK `origin/feat/rust-rewrite` `1fa06c93b5` (2026-10-21), which has
 the merged contract PRs #1375, #1377, #1383, #1386, #1394, #1400, #1411, #1424,
 #1401, #1439, #1441, #1443, #1445, #1447, #1451, #1453, #1462, #1467 and #1469 (venue construction and the Polymarket, Orderly, BreakoutProp and AsterDEX construction rules moved into the shared `safe-cex-venues` crate; messages and the `start()` rejection point unchanged) and the per-venue classified-error PRs (#1403, #1404,
 #1417, #1425, #1429, #1432, #1434, #1436, #1437, #1438, #1442, #1444, #1446,
 #1452, #1455, #1457, #1458, #1460, #1463, #1468, #1470, #1471, #1473, #1478,
 #1479, #1475, and the B9 SDK PRs #1482, #1483, #1484), plus #1388 (engine log
-events, `getHealth`), #1450 (B5) and #1510 (payload-signer routing). No contract PR is open. Line numbers are tealstreet-next
+events, `getHealth`), #1450 (B5), #1510 and #1531 (payload-signer routing, narrowed to Bybit/Binance). No contract PR is open. Line numbers are tealstreet-next
 `origin/master` unless an SDK path is named.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves

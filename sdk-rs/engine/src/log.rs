@@ -163,10 +163,25 @@ pub mod code {
     pub const COMMAND_UNSUPPORTED: &str = "command.unsupported";
     /// Account options are invalid, so the venue cannot start as configured.
     pub const CONFIG_INVALID: &str = "config.invalid";
+    /// A setting change was applied, but may behave unexpectedly as the user asked it.
+    pub const SETTING_CAUTION: &str = "setting.caution";
     /// Startup progress, such as markets loaded.
     pub const STARTUP_PROGRESS: &str = "startup.progress";
     /// A routine account summary, logged at Debug.
     pub const BALANCE_SUMMARY: &str = "balance.summary";
+
+    /// The code for a startup refusal, from the error's kind: only a
+    /// credential rejection is `auth.rejected`.
+    pub fn for_startup_error(error: &crate::error::VenueError) -> &'static str {
+        use crate::error::ErrorKind;
+        match error.kind {
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission) => {
+                AUTH_REJECTED
+            }
+            Some(ErrorKind::InvalidInput | ErrorKind::Unsupported) => CONFIG_INVALID,
+            _ => REQUEST_FAILED,
+        }
+    }
 }
 
 /// Counters since engine construction, read by hosts through `getHealth()`.

@@ -104,7 +104,12 @@ impl Session {
                 Action::Notice(safe_cex_engine::Notice::Log {
                     level: safe_cex_engine::LogLevel::Warning,
                     message,
-                }) => self.warnings.push(message.to_string()),
+                })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Warn,
+                    message,
+                    ..
+                })) => self.warnings.push(message.to_string()),
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());

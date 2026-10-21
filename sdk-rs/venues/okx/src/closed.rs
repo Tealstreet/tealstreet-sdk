@@ -2,8 +2,10 @@
 //! rows, which the host maps with the TS mappers. `begin`/`end` are ignored by
 //! this endpoint; `before`/`after` are close-time bounds, paged by oldest `uTime`.
 use crate::{Okx, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, LogLevel, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, TimerId, num};
 use serde::Deserialize;
 
 const PAGE: usize = 100;
@@ -113,8 +115,7 @@ impl Okx {
             return Self::finish_closed(cx, request);
         }
         if request.pages >= MAX_PAGES {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                 format!(
                     "OKX closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"
                 ),

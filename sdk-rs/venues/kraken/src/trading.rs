@@ -723,9 +723,17 @@ impl Kraken {
         });
         let result = reply.and_then(|r| {
             if !ok {
+                // Keep the venue's own error code, as TS does with `responseData.error`.
+                let detail = r
+                    .error
+                    .as_deref()
+                    .filter(|code| !code.is_empty())
+                    .or_else(|| r.errors.first().map(|e| e.message.as_str()))
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default();
                 return Err(http_failure(
                     response.status,
-                    format!("Kraken HTTP {}", response.status),
+                    format!("Kraken HTTP {}{detail}", response.status),
                 ));
             }
             if r.result != "success"

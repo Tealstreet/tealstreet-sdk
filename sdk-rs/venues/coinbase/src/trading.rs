@@ -1,7 +1,9 @@
 use crate::{Coinbase, Pending, account::Editable};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -789,8 +791,7 @@ impl Coinbase {
                 .sum();
             if reserved > left {
                 let ids: Vec<_> = resting.iter().map(|o| o.id.as_str()).collect();
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::ORDERS_REPLACED,
                     format!(
                         "Coinbase close of {} leaves reduce-only orders {} exceeding the remaining position; Coinbase cannot enforce reduce-only, so cancel them or they may open a new position",
                         close.symbol,

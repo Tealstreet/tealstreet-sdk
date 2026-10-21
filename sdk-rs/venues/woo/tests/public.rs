@@ -716,7 +716,11 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log { message, .. }) => Some(message.as_str()),
+            Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message.as_str()),
             _ => None,
         })
         .collect();

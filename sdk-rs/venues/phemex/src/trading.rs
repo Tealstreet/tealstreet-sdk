@@ -1,14 +1,14 @@
 //! Sequenced g-API writes. The complete command is validated before dispatch;
 //! ambiguous transport failures never cause a mutation to be retried.
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 pub(crate) use safe_cex_engine::url::encode;
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Response, VenueError, num,
-};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Response, VenueError, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -977,7 +977,11 @@ impl PhemexPerpetuals {
             other => return Some(other),
         };
         if self.trading.jobs.contains_key(&id) {
-            cx.log(LogLevel::Error, "Phemex command ID is already in flight");
+            cx.notice(
+                Level::Error,
+                code::ORDER_REJECTED,
+                "Phemex command ID is already in flight",
+            );
             return None;
         }
         if self.trading.jobs.len() >= 32 {
@@ -1407,8 +1411,9 @@ impl PhemexPerpetuals {
                     (Some(command), _) => self.trade_next(cx, command),
                     (None, call) => {
                         if let Call::Cancel { ids, .. } = call {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ORDERS_REPLACED,
                                 format!(
                                     "Phemex canceled late-landing order {} after cancel-all",
                                     ids.join(", ")
@@ -1459,8 +1464,9 @@ impl PhemexPerpetuals {
                 Call::Cancel { ids, .. } => ids.join(", "),
                 _ => String::new(),
             };
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex could not cancel late-landing order {ids} after cancel-all: {}; \
                      cancel it manually",
@@ -1499,8 +1505,7 @@ impl PhemexPerpetuals {
 
     /// Cancels orders an unknown-outcome placement left open after a cancel-all.
     pub(crate) fn cancel_late(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, ids: Vec<String>) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(Level::Warn, code::ORDERS_REPLACED,
             format!(
                 "Phemex order {} from an unknown-outcome placement landed after cancel-all on {symbol}; canceling it",
                 ids.join(", ")
@@ -1511,8 +1516,7 @@ impl PhemexPerpetuals {
                 self.trading.late.extend(steps);
                 self.late_next(cx);
             }
-            Err(error) => cx.log(
-                LogLevel::Error,
+            Err(error) => cx.notice(Level::Error, code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex could not cancel late-landing orders on {symbol}: {error}; cancel them manually"
                 ),

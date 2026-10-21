@@ -7,13 +7,14 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -113,11 +114,11 @@ fn signature_rejected(body: &str) -> bool {
 
 /// Logs a read's skipped rows once, by identity only.
 pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) {
-    log_skipped_at(cx, LogLevel::Warning, kind, ids, "");
+    log_skipped_at(cx, Level::Warn, kind, ids, "");
 }
 pub(crate) fn log_skipped_at(
     cx: &mut Cx<'_, Pending>,
-    level: LogLevel,
+    level: Level,
     kind: &str,
     ids: &[String],
     note: &str,
@@ -131,8 +132,9 @@ pub(crate) fn log_skipped_at(
         .map(|id| if id.is_empty() { "unidentified" } else { id })
         .collect::<Vec<_>>();
     let more = ids.len().saturating_sub(shown.len());
-    cx.log(
+    cx.notice(
         level,
+        code::ROW_SKIPPED,
         format!(
             "BingX skipped {} malformed {kind} row(s): {}{}{note}",
             ids.len(),
@@ -302,8 +304,9 @@ impl Bingx {
     }
 
     fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             "BingX rejected a request signature; re-signing it once",
         );
         let Signed {
@@ -530,7 +533,11 @@ impl Bingx {
                 },
             );
             if result.is_err() {
-                cx.log(LogLevel::Warning, "invalid BingX ticker frame")
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "invalid BingX ticker frame",
+                )
             }
             return;
         }
@@ -650,6 +657,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -657,7 +668,7 @@ impl Venue for Bingx {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.read(
@@ -1058,8 +1069,9 @@ impl Venue for Bingx {
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
             Pending::Premium { .. } => {
                 if !self.tickers_committed {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "BingX funding read failed; starting without funding rates",
                     );
                     self.commit_tickers(cx, true);
@@ -1067,12 +1079,9 @@ impl Venue for Bingx {
                 self.retry_list(cx, List::Premium)
             }
         }
-        cx.log(
-            if discovery {
-                LogLevel::Warning
-            } else {
-                LogLevel::Error
-            },
+        cx.notice(
+            if discovery { Level::Warn } else { Level::Error },
+            code::REQUEST_FAILED,
             error,
         );
     }
@@ -1151,7 +1160,11 @@ impl Venue for Bingx {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if stream_interval(interval).is_none() {
-                    cx.log(LogLevel::Error, interval.unsupported("BingX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("BingX"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
@@ -1223,7 +1236,11 @@ impl Venue for Bingx {
                 self.account.bump_orders();
                 self.account.bump_positions();
                 if !self.trading.command(cx, self.credentials.as_ref(), other) {
-                    cx.log(LogLevel::Warning, "unsupported BingX command");
+                    cx.notice(
+                        Level::Warn,
+                        code::COMMAND_UNSUPPORTED,
+                        "unsupported BingX command",
+                    );
                 }
             }
         }
@@ -1280,8 +1297,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("BingX stops re-reading a catalogue with {after} malformed markets"),
         );
     }
