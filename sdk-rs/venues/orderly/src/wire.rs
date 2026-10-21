@@ -186,6 +186,72 @@ impl Kline {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "s")]
+enum CandleHistory {
+    #[serde(rename = "ok")]
+    Ok {
+        t: Vec<N>,
+        o: Vec<N>,
+        h: Vec<N>,
+        l: Vec<N>,
+        c: Vec<N>,
+        v: Vec<N>,
+    },
+    #[serde(rename = "no_data")]
+    NoData,
+}
+
+pub fn candle_history(
+    response: safe_cex_engine::Response<'_>,
+    from: Option<f64>,
+    to: Option<f64>,
+    limit: usize,
+) -> Result<String, String> {
+    if !(200..300).contains(&response.status) {
+        return Err(format!("Orderly candle history HTTP {}", response.status));
+    }
+    let response: CandleHistory = serde_json::from_str(response.body)
+        .map_err(|_| "Orderly invalid candle history response".to_owned())?;
+    let CandleHistory::Ok { t, o, h, l, c, v } = response else {
+        return Ok("[]".into());
+    };
+    if t.len() > 1000
+        || [o.len(), h.len(), l.len(), c.len(), v.len()]
+            .iter()
+            .any(|len| *len != t.len())
+    {
+        return Err("Orderly inconsistent candle history columns".into());
+    }
+    let mut rows = Vec::with_capacity(t.len());
+    for i in 0..t.len() {
+        rows.push(
+            Kline {
+                start_time: t[i].0 * 1000.0,
+                open: o[i].0,
+                high: h[i].0,
+                low: l[i].0,
+                close: c[i].0,
+                volume: v[i].0,
+            }
+            .candle()?,
+        );
+    }
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    if rows
+        .windows(2)
+        .any(|pair| pair[0].timestamp == pair[1].timestamp)
+    {
+        return Err("Orderly duplicate candle history timestamp".into());
+    }
+    rows.retain(|row| {
+        from.is_none_or(|t| row.timestamp * 1000.0 >= t)
+            && to.is_none_or(|t| row.timestamp * 1000.0 <= t)
+    });
+    rows.drain(..rows.len().saturating_sub(limit));
+    serde_json::to_string(&rows).map_err(|e| e.to_string())
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct Id(pub String);
 impl<'de> Deserialize<'de> for Id {
@@ -321,6 +387,14 @@ pub struct OrderRow<'a> {
     pub time_in_force: Cow<'a, str>,
     #[serde(alias = "triggerPrice", default)]
     pub trigger_price: Option<N>,
+    #[serde(alias = "extremePrice", default)]
+    pub extreme_price: Option<N>,
+    #[serde(alias = "callbackValue", default)]
+    pub callback_value: Option<N>,
+    #[serde(alias = "callbackRate", default)]
+    pub callback_rate: Option<N>,
+    #[serde(alias = "isActivated", default)]
+    pub is_activated: Option<bool>,
     #[serde(alias = "triggerPriceType", default, borrow)]
     pub trigger_price_type: Cow<'a, str>,
     #[serde(alias = "childOrders", default, borrow)]
@@ -333,6 +407,44 @@ pub struct OrderRow<'a> {
     pub seq: Option<u64>,
     #[serde(default)]
     pub timestamp: Option<u64>,
+}
+impl OrderRow<'_> {
+    pub fn display_price(&self, side: safe_cex_engine::model::OrderSide) -> f64 {
+        if self.algo_type != "TRAILING_STOP" {
+            return self.trigger_price.map_or(self.price, |n| n.0);
+        }
+        if let Some(price) = self.trigger_price.filter(|n| n.0 > 0.0) {
+            return price.0;
+        }
+        if self.is_activated == Some(false) {
+            return 0.0;
+        }
+        let Some(extreme) = self.extreme_price.filter(|n| n.0 > 0.0) else {
+            return 0.0;
+        };
+        let callback = self
+            .callback_value
+            .filter(|n| n.0 > 0.0)
+            .map(|n| n.0)
+            .or_else(|| {
+                self.callback_rate
+                    .filter(|n| n.0 > 0.0 && n.0 < 1.0)
+                    .map(|n| extreme.0 * n.0)
+            });
+        let Some(callback) = callback else {
+            return 0.0;
+        };
+        // Order side, not position side: a BUY trails above the low watermark.
+        let price = match side {
+            safe_cex_engine::model::OrderSide::Buy => extreme.0 + callback,
+            safe_cex_engine::model::OrderSide::Sell => extreme.0 - callback,
+        };
+        if price.is_finite() && price > 0.0 {
+            price
+        } else {
+            0.0
+        }
+    }
 }
 #[derive(Deserialize)]
 pub struct RestProof<'a> {

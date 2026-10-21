@@ -79,6 +79,12 @@ pub enum Pending {
         from: Option<f64>,
         to: Option<f64>,
     },
+    CandleHistory {
+        command: CommandId,
+        from: Option<f64>,
+        to: Option<f64>,
+        limit: usize,
+    },
 }
 struct Connection {
     socket: Option<SocketId>,
@@ -712,7 +718,10 @@ impl Venue for Orderly {
         }
         let result: Result<(), String> = (|| {
             match pending {
-                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
+                Pending::Account(_)
+                | Pending::Trade(_)
+                | Pending::History(_)
+                | Pending::CandleHistory { .. } => unreachable!(),
                 Pending::Markets { rows, .. } => {
                     let r: MarketRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     let Some((base, settlement)) = native_parts(&r.symbol) else {
@@ -823,7 +832,10 @@ impl Venue for Orderly {
                     return;
                 }
                 Pending::Candles { invalid, .. } => *invalid = true,
-                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
+                Pending::Account(_)
+                | Pending::Trade(_)
+                | Pending::History(_)
+                | Pending::CandleHistory { .. } => unreachable!(),
             }
             cx.log(LogLevel::Error, e);
         }
@@ -840,6 +852,16 @@ impl Venue for Orderly {
         }
         if let Pending::History(request) = pending {
             self.history_response(cx, request, response);
+            return;
+        }
+        if let Pending::CandleHistory {
+            command,
+            from,
+            to,
+            limit,
+        } = pending
+        {
+            cx.done(command, candle_history(response, from, to, limit));
             return;
         }
         if let Err(e) = checked(response) {
@@ -923,7 +945,9 @@ impl Venue for Orderly {
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } | Pending::CandleHistory { command, .. } => {
+                cx.done(command, Err(error.into()))
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1096,6 +1120,37 @@ impl Venue for Orderly {
                     || from_ms.zip(to_ms).is_some_and(|(a, b)| a > b)
                 {
                     cx.done(command, Err("Orderly invalid candle parameters".into()));
+                    return;
+                }
+                if from_ms.is_some() || to_ms.is_some() {
+                    let limit = limit.unwrap_or(500).min(1000) as usize;
+                    let from = from_ms.unwrap_or(0.0);
+                    let to = to_ms.unwrap_or(cx.now);
+                    if from > to {
+                        cx.done(command, Ok("[]".into()));
+                        return;
+                    }
+                    // Both bounds are mandatory on the native history endpoint.
+                    let mut path = format!(
+                        "/v1/tv/kline_history?symbol={native}&resolution={interval}&limit={limit}"
+                    );
+                    path.push_str(&format!(
+                        "&from={:.0}&to={:.0}",
+                        (from / 1000.0).floor(),
+                        (to / 1000.0).floor()
+                    ));
+                    cx.request(
+                        Method::Get,
+                        format!("{}{path}", self.rest()),
+                        vec![],
+                        None,
+                        Pending::CandleHistory {
+                            command,
+                            from: from_ms,
+                            to: to_ms,
+                            limit,
+                        },
+                    );
                     return;
                 }
                 let path = format!(
