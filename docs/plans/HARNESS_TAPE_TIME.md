@@ -131,3 +131,19 @@ historical tape entries and public declarations.
 Require the existing matching-branch five-pair CI mode, fresh full-suite
 verification, independent review, green head CI, a separate landing guard
 and audited merge receipt before reporting and moving to Polymarket.
+
+## Polymarket phase
+
+Enable the virtual private clock in Polymarket's separate harness config,
+using the fixture's existing fixed epoch and preserving all wire records.
+Keep both standard and negative-risk signing-domain validation, holdings
+availability, trade-status deduplication and command acknowledgements intact.
+Use a fingerprint-matching CI engine for focused private iteration; compare
+five complete nonmetric outputs per implementation, including IDs and times.
+Only remove exact unobserved tape-bound declarations after inspecting raw
+outputs; any new difference needs an exact key and a specific reason.
+
+Require the existing matching-branch five-pair CI mode, fresh mandatory
+public/private suite verification, independent review, full green head CI,
+a separate landing guard and an audited merge receipt before reporting the
+merge and moving to KuCoin Spot.

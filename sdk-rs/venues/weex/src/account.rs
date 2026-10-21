@@ -1078,14 +1078,15 @@ impl WeexFutures {
             }
             return None;
         }
-        if !(200..300).contains(&response.status) || pending.invalid {
+        if !(200..300).contains(&response.status) {
             return None;
         }
-        let valid = match r.kind {
-            Kind::Metadata => serde_json::from_str::<AccountConfig>(response.body).is_ok(),
-            _ => serde_json::from_str::<Vec<&RawValue>>(response.body).is_ok(),
-        };
-        valid.then_some(Accepted)
+        match r.kind {
+            Kind::Metadata => serde_json::from_str::<AccountConfig>(response.body)
+                .is_ok()
+                .then_some(Accepted),
+            _ => safe_cex_engine::AuthOutcome::accepted_list(response, ArrayAt::Root),
+        }
     }
 }
 
@@ -1114,5 +1115,69 @@ mod tests {
             .normal()
             .unwrap();
         assert!(state.snapshot_order(terminal).is_none());
+    }
+}
+
+#[cfg(test)]
+mod auth_envelopes {
+    use super::*;
+    use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+
+    fn pending(venue: &WeexFutures, kind: Kind) -> Pending {
+        Pending {
+            task: Task::Account(Request {
+                cycle: venue.account.cycle,
+                kind,
+                revision: 0,
+                page: 0,
+                page_rows: 0,
+                orders: vec![],
+                positions: vec![],
+                balance: None,
+                configs: vec![],
+                skipped_rows: 0,
+                skipped: Skipped::default(),
+            }),
+            invalid: false,
+            skipped: vec![],
+            seed_generation: 0,
+        }
+    }
+
+    fn response(body: &str) -> Response<'_> {
+        Response {
+            status: 200,
+            headers: "",
+            body,
+        }
+    }
+
+    #[test]
+    fn malformed_success_cannot_clear_grouped_orders_or_settings_evidence() {
+        for (kind, sibling, success, sibling_success) in [
+            (Kind::Algo, Kind::Normal, "[]", "[]"),
+            (
+                Kind::Config,
+                Kind::Metadata,
+                "[]",
+                r#"{"dualSidePosition":false,"canTrade":true}"#,
+            ),
+        ] {
+            for bad in ["{}", "null", "false", "[false"] {
+                let venue = WeexFutures::new(crate::Options::default());
+                let p = pending(&venue, kind);
+                let sibling = pending(&venue, sibling);
+                assert_eq!(
+                    venue.account_auth(&p, &response(r#"{"code":40014}"#)),
+                    Some(Rejected)
+                );
+                assert_eq!(venue.account_auth(&p, &response(bad)), None);
+                assert_eq!(
+                    venue.account_auth(&sibling, &response(sibling_success)),
+                    None
+                );
+                assert_eq!(venue.account_auth(&p, &response(success)), Some(Accepted));
+            }
+        }
     }
 }

@@ -58,6 +58,7 @@ function verify({method,url,headers={},body=''}) {
 }
 export const polymarket = {
   rust:'polymarket',
+  virtualPrivateClock: true,
   // Only the selected venue loads its independent crypto oracle; do it before
   // replay takes the memory baseline, symmetrically for TS and Rust.
   initializeReplay: initializeCrypto,

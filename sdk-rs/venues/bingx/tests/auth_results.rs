@@ -132,7 +132,6 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
         (200, r#"{"code":109400,"msg":"100001"}"#),
         (429, r#"{"code":100410}"#),
         (200, r#"{"code":0}"#),
-        (200, r#"{"code":0,"data":[false]}"#),
         (401, r#"<html>unauthorized</html>"#),
     ] {
         let (mut e, a) = started(true);
@@ -142,4 +141,95 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
             "{status} {body}"
         );
     }
+}
+
+fn with_account_lists(read: bool) -> (Engine<Bingx>, Vec<Action>) {
+    let (mut e, mut all) = started(read);
+    let mode = http(&all, "positionSide/dual");
+    all.extend(reply(
+        &mut e,
+        &mode,
+        200,
+        r#"{"code":0,"data":{"dualSidePosition":false}}"#,
+    ));
+    (e, all)
+}
+
+#[test]
+fn row_failures_do_not_withhold_successful_envelope_evidence() {
+    for read in [false, true] {
+        for (path, scope, data) in [
+            ("/user/balance", AccountReadScope::Balance, "[false]"),
+            ("/user/positions", AccountReadScope::Positions, "[false]"),
+            ("/trade/openOrders", AccountReadScope::Orders, "[false]"),
+            (
+                "/trade/openOrders",
+                AccountReadScope::Orders,
+                r#"{"orders":[false]}"#,
+            ),
+        ] {
+            let (mut e, all) = with_account_lists(read);
+            let r = http(&all, path);
+            let a = reply(&mut e, &r, 200, &format!(r#"{{"code":0,"data":{data}}}"#));
+            assert_eq!(
+                auth(&a),
+                [(
+                    if read {
+                        CredentialSlot::Secondary
+                    } else {
+                        CredentialSlot::Primary
+                    },
+                    scope,
+                    AuthOutcome::Accepted
+                )],
+                "{path} {data}"
+            );
+        }
+    }
+}
+
+#[test]
+fn missing_or_malformed_required_lists_never_accept_credentials() {
+    for path in ["/user/balance", "/user/positions", "/trade/openOrders"] {
+        for body in [
+            r#"{"code":0}"#,
+            r#"{"code":0,"data":null}"#,
+            r#"{"code":0,"data":{}}"#,
+            r#"{"code":0,"data":{"orders":null}}"#,
+            r#"{"code":0,"data":[false],"#,
+        ] {
+            let (mut e, all) = with_account_lists(true);
+            let r = http(&all, path);
+            assert!(
+                auth(&reply(&mut e, &r, 200, body)).is_empty(),
+                "{path} {body}"
+            );
+        }
+    }
+}
+
+#[test]
+fn accepted_credentials_do_not_change_the_existing_bad_balance_snapshot_policy() {
+    let (mut e, all) = with_account_lists(true);
+    e.store_mut().set_balance(safe_cex_engine::model::Balance {
+        total: 17.0,
+        ..Default::default()
+    });
+    let r = http(&all, "/user/balance");
+    let a = reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":0,"data":[false,{"asset":"USDT","balance":42,"availableMargin":40,"usedMargin":2,"unrealizedProfit":0}]}"#,
+    );
+    assert_eq!(
+        auth(&a),
+        [(
+            CredentialSlot::Secondary,
+            AccountReadScope::Balance,
+            AuthOutcome::Accepted
+        )]
+    );
+    assert_eq!(e.store().balance().total, 17.0);
+    assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED)));
 }
