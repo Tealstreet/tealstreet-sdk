@@ -75,16 +75,11 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         'cutover-session',
       );
       const startup = worker.start();
-      if (name === 'hyperliquid') {
-        // Paced catalog discovery finishes before this venue creates its socket.
+      if (name === 'polymarket') {
+        // Polymarket deliberately opens its market channel only when a real
+        // consumer subscribes to a book; startup itself is a REST-only read.
         expect(await startup).toBe(true);
-      }
-      if (name === 'polymarket' || name === 'paradex') {
-        // Subscribe the books represented by the captured input. Polymarket
-        // opens its socket lazily; Paradex must match the taped book ACKs.
-        expect(await startup).toBe(true);
-        if (name === 'polymarket') expect(input.connectedSocketUrls).toEqual([]);
-        else expect(input.publicBookSymbols).toEqual(['BTC-USD-PERP', 'ETH-USD-PERP']);
+        expect(input.connectedSocketUrls).toEqual([]);
         expect(input.publicBookSymbols.length).toBeGreaterThan(0);
         for (const symbol of input.publicBookSymbols)
           worker.handlePayload({ op: 'subscribeOrderBook', data: { symbol, subId: `cutover-${symbol}` } });

@@ -12,24 +12,13 @@ fn public_engine() -> Engine<Kucoin> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    // Reads are paced by a request budget whose window timer must also fire.
-    let mut timers = Vec::new();
-    let catalogue = |actions: &mut Vec<Action>,
-                     timers: &mut Vec<(safe_cex_engine::TimerId, f64)>| {
-        for action in actions.iter() {
-            if let Action::SetTimer { timer, at_ms } = action {
-                timers.push((*timer, *at_ms));
-            }
-        }
-        actions.iter().find_map(|action| match action {
-            Action::Http(request) if request.url.contains("contracts/active") => {
-                Some(request.clone())
-            }
+    let mut request = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("contracts/active") => Some(request),
             _ => None,
         })
-    };
-    let mut actions = engine.drain_actions().collect::<Vec<_>>();
-    let mut request = catalogue(&mut actions, &mut timers).expect("catalogue request");
+        .expect("catalogue request");
     let mut now = 0.0;
     for delay in [1000.0, 2000.0, 4000.0] {
         engine.handle(
@@ -46,11 +35,6 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 .any(|action| matches!(action, Action::Http(_))),
             "no immediate retry"
         );
-        for action in &actions {
-            if let Action::SetTimer { timer, at_ms } = action {
-                timers.push((*timer, *at_ms));
-            }
-        }
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
@@ -59,21 +43,14 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             })
             .expect("shared exponential retry timer");
         now += delay;
-        timers.retain(|(pending, _)| *pending != timer);
         engine.handle(now, Event::TimerFired { timer });
-        let mut actions = engine.drain_actions().collect::<Vec<_>>();
-        request = loop {
-            if let Some(request) = catalogue(&mut actions, &mut timers) {
-                break request;
-            }
-            let due = timers
-                .iter()
-                .position(|(_, at)| *at <= now)
-                .expect("fresh catalogue request");
-            let (budget, _) = timers.remove(due);
-            engine.handle(now, Event::TimerFired { timer: budget });
-            actions = engine.drain_actions().collect();
-        };
+        request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.contains("contracts/active") => Some(request),
+                _ => None,
+            })
+            .expect("fresh catalogue request");
     }
     engine.handle(
         now,

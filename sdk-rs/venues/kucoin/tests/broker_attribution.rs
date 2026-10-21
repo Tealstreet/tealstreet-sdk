@@ -104,21 +104,13 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
     assert_headers: impl Fn(&HttpRequest),
 ) {
     engine.start(1700000000123.0);
-    let mut timers = Vec::new();
-    let http = |engine: &mut Engine<V>, timers: &mut Vec<(safe_cex_engine::TimerId, f64)>| {
-        engine
-            .drain_actions()
-            .filter_map(|a| match a {
-                Action::Http(request) => Some(request),
-                Action::SetTimer { timer, at_ms } => {
-                    timers.push((timer, at_ms));
-                    None
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
-    let initial = http(&mut engine, &mut timers);
+    let initial: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
     assert!(!initial.is_empty());
     for request in initial {
         assert_headers(&request);
@@ -144,7 +136,13 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             },
         );
     }
-    let requests = http(&mut engine, &mut timers);
+    let requests: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
     let mut saw_public_bullet = false;
     let mut saw_tickers = false;
     for request in requests {
@@ -180,21 +178,11 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             );
         }
     }
-    // Startup reads fill the paced budget; tokens lead the next window.
-    for _ in 0..8 {
-        for request in http(&mut engine, &mut timers) {
+    for action in engine.drain_actions() {
+        if let Action::Http(request) = action {
             assert_headers(&request);
             saw_public_bullet |= request.url.ends_with("/bullet-public");
         }
-        if saw_public_bullet {
-            break;
-        }
-        let next = (0..timers.len())
-            .min_by(|&a, &b| timers[a].1.total_cmp(&timers[b].1))
-            .expect("budget window timer");
-        // Fire on the fixed clock the signature assertions are anchored to.
-        let (timer, _) = timers.remove(next);
-        engine.handle(1700000000123.0, Event::TimerFired { timer });
     }
     assert!(saw_public_bullet);
     assert!(saw_tickers);

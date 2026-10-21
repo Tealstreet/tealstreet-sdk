@@ -970,43 +970,21 @@ mod tests {
                 assert!(!done(&actions).is_empty());
                 break;
             }
-            // Page pacing and the shared read budget both set timers; fire
-            // them in deadline order until the next page is dispatched.
-            let mut timers: Vec<_> = actions
+            let (timer, at) = actions
                 .iter()
-                .filter_map(|a| match a {
+                .find_map(|a| match a {
                     Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
                     _ => None,
                 })
-                .collect();
-            let ready = actions.iter().find_map(|a| match a {
-                Action::Http(r) => Some(r.clone()),
-                _ => None,
-            });
-            r = ready.unwrap_or_else(|| {
-                loop {
-                    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
-                    // A page queued behind the read budget waits for its reset.
-                    let (timer, at) = if timers.is_empty() {
-                        let budget = e.venue().budget_timer().expect("queued page timer");
-                        (budget, 0.0)
-                    } else {
-                        timers.remove(0)
-                    };
-                    e.handle(at.max(2_000_000_000_000.0), Event::TimerFired { timer });
-                    let mut next = None;
-                    for action in e.drain_actions() {
-                        match action {
-                            Action::Http(r) => next = Some(r),
-                            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
-                            _ => {}
-                        }
-                    }
-                    if let Some(r) = next {
-                        break r;
-                    }
-                }
-            });
+                .unwrap();
+            e.handle(at, Event::TimerFired { timer });
+            r = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .unwrap();
         }
         assert_eq!(
             sent,

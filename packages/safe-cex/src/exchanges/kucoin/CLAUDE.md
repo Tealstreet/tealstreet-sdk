@@ -772,7 +772,7 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
 17. **Ticker percentage from WS**: WS ticker `priceChangePercent` is multiplied by 100 to convert from decimal to percentage (`kucoin.ws-public.ts:174`).
 18. **No Bitget product artifacts**: KuCoin code uses KuCoin response shapes and contract ids only; the old `00000`, `_UMCBL`, `umcbl`/`sumcbl`, and commented leverage-port remnants were removed.
 19. **Order fetch is two books with preserve-on-failure**: `fetchOrders` = `/api/v1/orders` (normal) + `/api/v1/stopOrders` (TP/SL + trailing). A failed book preserves the existing store orders of that category so the tick's full-replace can't wipe TP/SL lines — see "Order Fetch — two books, partial-failure preservation". (The old duplicate `fetchTrailingStopOrders`, which re-hit `/api/v1/stopOrders`, was removed.)
-20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book. If a gap appears while replaying buffered updates, stop that replay and retain its entire remaining suffix for the next snapshot; continuing through the suffix replaces the buffer repeatedly and loses the bridge sequence. Build recovery snapshots into a fresh candidate book and publish it only after the full replay is contiguous. Workers retain callback arguments in trailing throttles, so mutating a previously emitted book would leak stale or partially replayed state even when no new callback fires.
+20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book. If a gap appears while replaying buffered updates, stop that replay and retain its entire remaining suffix for the next snapshot; continuing through the suffix replaces the buffer repeatedly and loses the bridge sequence.
 21. **Broker attribution**: `X-CHANNEL-API-CODE: '3zexp'` is still sent as a
     default REST header for legacy attribution. The current official KuCoin
     Broker docs additionally require signed partner headers
@@ -908,11 +908,11 @@ endpoints, base-unit sizing, supplied depth50 snapshots, native alteration,
 trade-account holdings, open-only non-definitive client-ID lookup, and fixed
 leverage-one/isolated/one-way settings. Its inherited unsupported history
 capabilities stay branded; see `docs/plans/venue-ports/KUCOIN_SPOT.md`. Both futures and
-Spot honor secondary private GET credentials/egress. Configured futures public
-reads and public bullet-token requests retain primary signing and broker headers;
-Spot public requests and public-data-only requests stay unsigned with the channel
-header. Queued futures requests select credentials and sign at actual dispatch.
-Private bullet-token POSTs, writes and socket authentication retain the primary identity.
+Spot honor secondary credentials/egress for private GETs. Futures public requests
+use primary signatures when credentials are configured; public-data-only requests
+carry attribution headers without authentication. Spot public requests remain
+unsigned. Bullet-token POSTs, writes and socket authentication retain the primary
+identity.
 Secondary passphrases inherit the primary passphrase only when omitted;
 incomplete configured read identities reject before startup I/O. Malformed
 private quantities/execution prices and incomplete REST trade-account numbers

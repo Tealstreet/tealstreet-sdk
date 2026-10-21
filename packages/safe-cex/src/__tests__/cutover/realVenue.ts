@@ -116,7 +116,7 @@ export const realVenue = (name: ExchangeName) => {
     );
 
   const venue = venueOf(name === 'binancepm' ? 'binance' : name);
-  if (name === 'kraken') venue.initializeReplay('rust');
+  if (name === 'kraken' || name === 'krakenspot') venue.initializeReplay('rust');
   const options: ExchangeOptions = {
     key: '',
     secret: '',
@@ -166,16 +166,7 @@ export const realVenue = (name: ExchangeName) => {
               : 'www.okx.com';
       return { ...record, url: url.toString() };
     });
-  // The captured Paradex stream includes book subscription acknowledgements.
-  // Reproduce those consumer requests so each acknowledgement still requires
-  // a matching real subscription, rather than treating it as ticker traffic.
-  const paradexBooks = name === 'paradex' ? [...new Set(records.flatMap((record) => {
-    if (record.type !== 'ws' || typeof record.text !== 'string') return [];
-    const channel = JSON.parse(record.text)?.result?.channel;
-    const match = typeof channel === 'string' && /^order_book\.(.+)\.deltas$/.exec(channel);
-    return match ? [match[1]] : [];
-  }))] : [];
-  const tape = new Tape(records, venue, false, 2000, 'rust', paradexBooks, options);
+  const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
   const polling = venue.polling === true;
   let pollingEpoch: number | undefined;
   const publicPollResponses: Array<{ status: number; quotes: BreakoutQuote[] }> = [];
@@ -304,7 +295,7 @@ export const realVenue = (name: ExchangeName) => {
         /* The fixture also contains plain PONG heartbeats. */
       }
     }
-  const publicBookSymbols = name === 'paradex' ? paradexBooks : predictionMarkets
+  const publicBookSymbols = predictionMarkets
     .filter((market) => bookTokens.has(market.id))
     .map((market) => market.symbol);
   const requests: string[] = [];
@@ -395,15 +386,8 @@ export const realVenue = (name: ExchangeName) => {
       }
       await new Promise<void>((resolve) => setImmediate(resolve));
       let delivered = 0;
-      // Paradex control replies are validated waits, never replayed against
-      // a fresh request's unrelated ID. Keep their original stream positions.
-      const replayRecords: RecordRow[] = name === 'paradex' ? tape.frames : records;
-      for (const record of replayRecords.filter((row) => row.type === 'ws' || row.type === 'wait').slice(0, limit)) {
-        if (record.type === 'wait') {
-          venue.validateWait?.(record, tape);
-          continue;
-        }
-        // Orderly's case subscribes tickers, not books. A taped response to an
+      for (const record of records.filter((row) => row.type === 'ws').slice(0, limit)) {
+        // This suite subscribes tickers, not books. A taped response to an
         // unissued Orderly orderbook RPC must not be correlated to a new ID.
         if (orderlyAliases.has(name) && record.text && JSON.parse(record.text).event === 'request') continue;
         const key = canonicalUrl(record.url!, tape.callerIds, venue);

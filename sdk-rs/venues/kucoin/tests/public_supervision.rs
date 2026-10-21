@@ -131,24 +131,18 @@ fn suppressed_public_feed_is_not_supervised() {
         },
     );
     assert_eq!(sim.e.store().markets().len(), 1, "public startup completed");
-    // Startup reads open the paced REST budget window; settle it before counting.
-    let window = sim.now + 1_000.0;
-    sim.run(window);
-    let paced = sim.fired;
-    assert!(paced <= 1, "only the budget window resets");
     let until = sim.now + 600_000.0;
     sim.run(until);
     assert_eq!(sim.public_bullets, 0, "no public bullet POSTs");
     assert!(sim.connects.is_empty(), "no connects: {:?}", sim.connects);
     assert!(sim.closed.is_empty(), "no closes: {:?}", sim.closed);
-    assert_eq!(sim.fired, paced, "no supervision timers fire");
+    assert_eq!(sim.fired, 0, "no supervision timers fire");
 }
 
 #[test]
 fn private_socket_stays_supervised_under_shared_public_feed() {
     let mut sim = futures(PublicFeedPolicy::Shared, credentials());
-    // Startup reads fill the paced REST budget; the bullet takes the next window.
-    let until = sim.now + 1_000.0;
+    let until = sim.now + 1.0;
     sim.run(until);
     assert_eq!(sim.public_bullets, 0, "no public bullet POSTs");
     assert_eq!(sim.private_bullets, 1);
@@ -191,17 +185,12 @@ mod spot {
             },
         );
         assert_eq!(sim.e.store().markets().len(), 1, "public startup completed");
-        // Startup reads open the paced REST budget window; settle it before counting.
-        let window = sim.now + 1_000.0;
-        sim.run(window);
-        let paced = sim.fired;
-        assert!(paced <= 1, "only the budget window resets");
         let until = sim.now + 600_000.0;
         sim.run(until);
         assert_eq!(sim.public_bullets, 0, "no public bullet POSTs");
         assert!(sim.connects.is_empty(), "no connects: {:?}", sim.connects);
         assert!(sim.closed.is_empty(), "no closes: {:?}", sim.closed);
-        assert_eq!(sim.fired, paced, "no supervision timers fire");
+        assert_eq!(sim.fired, 0, "no supervision timers fire");
     }
 
     #[test]

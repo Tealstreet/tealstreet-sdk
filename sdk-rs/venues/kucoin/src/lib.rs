@@ -2,7 +2,6 @@
 mod account;
 mod funding;
 mod history;
-mod http;
 pub mod sign;
 #[cfg(feature = "spot")]
 pub mod spot;
@@ -144,7 +143,6 @@ pub struct Kucoin {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
-    http_budget: http::Budget,
     funding: funding::Funding,
     connections: Vec<Connection>,
     books: HashMap<String, BookState>,
@@ -235,7 +233,6 @@ impl Kucoin {
             account: Default::default(),
             trading: Default::default(),
             history: Default::default(),
-            http_budget: Default::default(),
             funding: Default::default(),
             connections: vec![],
             books: HashMap::new(),
@@ -246,27 +243,44 @@ impl Kucoin {
         }
     }
     pub(crate) fn signed(
-        &mut self,
+        &self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         body: Option<String>,
         pending: Pending,
     ) {
-        self.http(
-            cx,
-            http::Request {
-                method,
-                path: path.into(),
-                body,
-                pending,
-                stream: None,
-                authenticated: self.credentials.is_some(),
-            },
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get && self.credentials.is_some())
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.options.passphrase.clone())
+                    .unwrap_or_default(),
+                broker: self.options.broker.clone(),
+            });
+        let headers = read_credentials
+            .as_ref()
+            .or(self.credentials.as_ref())
+            .map_or_else(sign::public_headers, |c| {
+                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
+            });
+        cx.request(
+            method,
+            format!("{REST}{}", encoded_path(path)),
+            headers,
+            body,
+            pending,
         );
     }
     pub(crate) fn signed_streamed(
-        &mut self,
+        &self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -274,36 +288,47 @@ impl Kucoin {
         at: ArrayAt,
         pending: Pending,
     ) {
-        self.http(
-            cx,
-            http::Request {
-                method,
-                path: path.into(),
-                body,
-                pending,
-                stream: Some(at),
-                authenticated: self.credentials.is_some(),
-            },
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get && self.credentials.is_some())
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.options.passphrase.clone())
+                    .unwrap_or_default(),
+                broker: self.options.broker.clone(),
+            });
+        let headers = read_credentials
+            .as_ref()
+            .or(self.credentials.as_ref())
+            .map_or_else(sign::public_headers, |c| {
+                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
+            });
+        let request = cx.request(
+            method,
+            format!("{REST}{}", encoded_path(path)),
+            headers,
+            body,
+            pending,
         );
+        cx.stream_response(request, at);
     }
-    fn public(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        at: Option<ArrayAt>,
-        pending: Pending,
-    ) {
-        self.http(
-            cx,
-            http::Request {
-                method: Method::Get,
-                path: path.into(),
-                body: None,
-                pending,
-                stream: at,
-                authenticated: false,
-            },
+    fn public(&self, cx: &mut Cx<'_, Pending>, path: &str, at: Option<ArrayAt>, pending: Pending) {
+        let request = cx.request(
+            Method::Get,
+            format!("{REST}{}", encoded_path(path)),
+            sign::public_request_headers(self.credentials.as_ref(), Method::Get, path, cx.now),
+            None,
+            pending,
         );
+        if let Some(at) = at {
+            cx.stream_response(request, at);
+        }
     }
     fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.connections[channel];
@@ -323,20 +348,21 @@ impl Kucoin {
         if matches!(self.connections[channel].role, Role::Private) {
             self.signed(cx, Method::Post, "/api/v1/bullet-private", None, pending);
         } else {
-            self.http(
-                cx,
-                http::Request {
-                    method: Method::Post,
-                    path: "/api/v1/bullet-public".into(),
-                    body: None,
-                    pending,
-                    stream: None,
-                    authenticated: false,
-                },
+            cx.request(
+                Method::Post,
+                format!("{REST}/api/v1/bullet-public"),
+                sign::public_request_headers(
+                    self.credentials.as_ref(),
+                    Method::Post,
+                    "/api/v1/bullet-public",
+                    cx.now,
+                ),
+                None,
+                pending,
             );
         }
     }
-    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
         self.public(
             cx,
             if tickers {
@@ -370,6 +396,8 @@ impl Kucoin {
         }
         if self.credentials.is_some() {
             self.connections.push(Connection::new(Role::Private));
+            // REST reconciliation must not depend on the private socket connecting.
+            self.account_start(cx);
         } else {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
@@ -377,11 +405,6 @@ impl Kucoin {
         }
         for channel in 0..self.connections.len() {
             self.token(cx, channel);
-        }
-        // REST reconciliation must not depend on the private socket connecting;
-        // it queues after the bullet tokens so sockets keep the first budget slots.
-        if self.credentials.is_some() {
-            self.account_start(cx);
         }
     }
     fn subscription(
@@ -1075,8 +1098,7 @@ impl Venue for Kucoin {
             self.discovery_read(cx, tickers);
             return;
         }
-        if self.http_timer(cx, timer)
-            || self.account_timer(cx, timer)
+        if self.account_timer(cx, timer)
             || self.trading_timer(cx, timer)
             || self.history_timer(cx, timer)
             || self.funding_timer(cx, timer)

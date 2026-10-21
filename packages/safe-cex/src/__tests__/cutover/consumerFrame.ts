@@ -195,12 +195,10 @@ export function consumerFrame(
     const currencies = Object.entries(balance.currencies ?? {});
     const coinData = align8(36 + coins.length * 4);
     const currencyTail = coinData + coins.length * 16;
-    const currencyData = align8(currencyTail + 4 + currencies.length * 4);
-    const currencyEnd = currencyData + currencies.length * 32;
-    const currencyOnly = balance.currencies !== undefined && balance.coins === undefined;
+    const currencyData = align8(currencyTail + 8 + currencies.length * 4);
     const size =
       balance.currencies !== undefined
-        ? currencyEnd + (currencyOnly ? 8 : 0)
+        ? currencyData + currencies.length * 32
         : balance.coins !== undefined
           ? currencyTail
           : 32;
@@ -218,17 +216,13 @@ export function consumerFrame(
       });
       if (balance.currencies !== undefined) {
         view.setUint32(currencyTail, currencies.length, true);
+        view.setUint32(currencyTail + 4, Number(balance.coins === undefined), true);
         currencies.forEach(([name, value], i) => {
-          view.setUint32(currencyTail + 4 + i * 4, ref(name), true);
-          [value.used, value.free, value.total, value.upnl].forEach((amount, col) =>
+          view.setUint32(currencyTail + 8 + i * 4, ref(name), true);
+          [value.total, value.free, value.used, value.upnl].forEach((amount, col) =>
             view.setFloat64(currencyData + (col * currencies.length + i) * 8, amount, true),
           );
         });
-        // BCM1 is an explicit footer; legacy references and columns stay fixed.
-        if (currencyOnly) {
-          view.setUint32(currencyEnd, 0x314d4342, true);
-          view.setUint32(currencyEnd + 4, 1, true);
-        }
       }
     }
     sections.push({ kind: 9, bytes });

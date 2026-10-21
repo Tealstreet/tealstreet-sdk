@@ -1,6 +1,5 @@
 //! Oracles: KuCoin Classic Futures Add Order, Add TP/SL Order, Cancel Order,
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
-mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_kucoin::{Kucoin, Options};
@@ -10,7 +9,6 @@ struct Harness {
     actions: Vec<Action>,
     failures: Vec<safe_cex_engine::VenueError>,
     now: f64,
-    known_mode: Option<bool>,
 }
 /// Records a failure and renders it as the plain text the host shows.
 fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Action {
@@ -68,7 +66,6 @@ impl Harness {
             actions: vec![],
             failures: vec![],
             now: 1_700_000_000_000.0,
-            known_mode: None,
         }
     }
     fn event(&mut self, event: Event<'_>) {
@@ -110,43 +107,22 @@ impl Harness {
         self.event(Event::Command(command));
     }
     fn take(&mut self, path: &str) -> HttpRequest {
-        support::wait_for_http(
-            &mut self.engine,
-            &mut self.actions,
-            &mut self.now,
-            Some(path),
-            (path == "/api/v1/orders").then_some(Method::Post),
-        );
         let index = self
             .actions
             .iter()
-            .position(|a| matches!(a,Action::Http(r) if r.url.contains(path) && (path != "/api/v1/orders" || r.method == Method::Post)))
+            .position(|a| matches!(a,Action::Http(r) if r.url.contains(path)))
             .unwrap_or_else(|| panic!("missing {path}: {:?}", self.actions));
         let Action::Http(request) = self.actions.remove(index) else {
             unreachable!()
         };
         request
     }
-    fn has_write(&self, path: &str) -> bool {
+    fn has(&self, path: &str) -> bool {
         self.actions
             .iter()
-            .any(|a| matches!(a,Action::Http(r) if r.method != Method::Get && r.url.contains(path)))
+            .any(|a| matches!(a,Action::Http(r) if r.url.contains(path)))
     }
     fn response(&mut self, request: &HttpRequest, status: u16, body: &str) {
-        if status == 200 && request.url.contains("getPositionMode") {
-            #[derive(serde::Deserialize)]
-            struct Mode {
-                #[serde(rename = "positionMode")]
-                value: u8,
-            }
-            #[derive(serde::Deserialize)]
-            struct Envelope {
-                data: Mode,
-            }
-            let mode: Envelope = serde_json::from_str(body).unwrap();
-            assert!(mode.data.value <= 1);
-            self.known_mode = Some(mode.data.value == 1);
-        }
         self.event(Event::HttpResponse {
             request: request.id,
             response: Response {
@@ -164,50 +140,31 @@ impl Harness {
         self.advance(20.0);
     }
     fn advance(&mut self, delay: f64) {
-        let target = self.now + delay;
-        let mut fired = false;
-        loop {
-            let next = self.actions.iter().enumerate().filter_map(|(index, action)| {
-                if let Action::SetTimer { timer, at_ms } = action
-                    && *at_ms <= target
-                    && !self.actions.iter().any(|a| matches!(a, Action::ClearTimer { timer: cancelled } if cancelled == timer)) {
-                    Some((index, *at_ms))
-                } else { None }
-            }).min_by(|a, b| a.1.total_cmp(&b.1));
-            let Some((index, _)) = next else {
-                break;
-            };
-            let Action::SetTimer { timer, at_ms } = self.actions.remove(index) else {
-                unreachable!()
-            };
-            self.now = self.now.max(at_ms);
-            self.event(Event::TimerFired { timer });
-            fired = true;
-        }
-        assert!(fired, "missing pacing timer: {:?}", self.actions);
-        self.now = target;
+        let index = self
+            .actions
+            .iter()
+            .position(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==self.now+delay))
+            .unwrap_or_else(|| panic!("missing pacing timer: {:?}", self.actions));
+        let Action::SetTimer { timer, at_ms } = self.actions.remove(index) else {
+            unreachable!()
+        };
+        self.now = at_ms;
+        self.event(Event::TimerFired { timer });
     }
     fn metadata(&mut self, hedged: bool, margin: &str) {
-        assert!(!self.has_write("/api/v1/orders"));
+        assert!(!self.has("/api/v1/orders"));
         self.reply(
             "getMarginMode",
             &format!(r#"{{"code":"200000","data":{{"marginMode":"{margin}"}}}}"#),
         );
-        if let Some(mode) = self.known_mode {
-            assert_eq!(
-                mode, hedged,
-                "fixture must not skip a different position mode"
-            );
-        } else {
-            self.reply(
-                "getPositionMode",
-                if hedged {
-                    r#"{"code":"200000","data":{"positionMode":1}}"#
-                } else {
-                    r#"{"code":"200000","data":{"positionMode":0}}"#
-                },
-            );
-        }
+        self.reply(
+            "getPositionMode",
+            if hedged {
+                r#"{"code":"200000","data":{"positionMode":1}}"#
+            } else {
+                r#"{"code":"200000","data":{"positionMode":0}}"#
+            },
+        );
         if margin == "CROSS" {
             self.reply(
                 "getCrossUserLeverage",
@@ -401,7 +358,7 @@ fn late_batch_format_failure_sends_no_writes() {
     second.amount = 2000.0;
     place(&mut h, vec![order(), second]);
     h.metadata(false, "CROSS");
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
 #[test]
@@ -478,7 +435,7 @@ fn ambiguous_order_response_is_not_retried_and_fails_the_job() {
         error: "connection reset after acceptance",
     });
     h.pace();
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
 #[test]
@@ -502,7 +459,7 @@ fn explicit_signature_rejection_retries_only_once() {
         r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
     );
     h.pace();
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
 #[test]
@@ -518,7 +475,7 @@ fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     h.metadata(false, "CROSS");
     let cancel = h.take("/api/v1/orders/old");
     assert_eq!(cancel.method, Method::Delete);
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     h.response(
         &cancel,
         200,
@@ -549,7 +506,7 @@ fn ambiguous_cancel_prevents_replacement() {
         error: "lost cancel response",
     });
     h.pace();
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
 #[test]
@@ -601,7 +558,7 @@ fn virtual_cancel_deduplicates_parent_and_falls_back_only_on_404() {
     );
     h.pace();
     assert_eq!(h.done(1), &Ok("[]".into()));
-    assert!(!h.has_write("/orders/parent"));
+    assert!(!h.has("/orders/parent"));
 }
 #[test]
 fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
@@ -614,9 +571,7 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert!(!h.actions.iter().any(
-        |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/stopOrders"))
-    ));
+    assert!(!h.has("/api/v1/stopOrders"));
     assert_eq!(h.done(1), &Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -646,7 +601,7 @@ fn account_cancel_cannot_report_success_when_the_stop_family_rejects() {
     );
     h.pace();
     assert!(h.done(1).is_err());
-    assert!(!h.has_write("/api/v1/stopOrders"));
+    assert!(!h.has("/api/v1/stopOrders"));
 }
 #[test]
 fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
@@ -677,7 +632,7 @@ fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
         side: None,
     });
     h.metadata(false, "ISOLATED");
-    assert!(!h.has_write("changeCrossUserLeverage"));
+    assert!(!h.has("changeCrossUserLeverage"));
     assert!(h.done(1).is_err());
 }
 #[test]
@@ -689,7 +644,7 @@ fn margin_requires_symbol_and_updates_only_after_success() {
         isolated: true,
     });
     assert!(h.done(1).is_err());
-    assert!(!h.has_write("changeMarginMode"));
+    assert!(!h.has("changeMarginMode"));
     h.command(Command::SetMarginType {
         command: 2,
         symbol: "BTCUSDT".into(),
@@ -722,7 +677,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
             &format!(r#"{{"code":"200000","data":[{{"currentQty":{quantity}}}]}}"#),
         );
         h.pace();
-        assert!(!h.has_write("switchPositionMode"));
+        assert!(!h.has("switchPositionMode"));
         assert!(h.done(1).is_err());
     }
     let mut h = Harness::new();
@@ -809,7 +764,7 @@ fn replacement_rejects_a_trigger_rounded_to_zero_before_cancelling() {
     });
     h.metadata(false, "CROSS");
     assert!(h.done(1).is_err());
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
 }
 
 #[test]
@@ -879,9 +834,9 @@ fn cancel_replace_waits_for_terminal_proof_and_subtracts_intervening_fills() {
         h.pace();
         let pending = h.take("/orders/old");
         assert_eq!(pending.method, Method::Get);
-        assert!(!h.has_write("/api/v1/orders"));
+        assert!(!h.has("/api/v1/orders"));
         h.response(&pending, 200, r#"{"code":"200000","data":{"id":"old","isActive":true,"cancelExist":false,"status":"open","size":10,"filledSize":6}}"#);
-        assert!(!h.has_write("/api/v1/orders"));
+        assert!(!h.has("/api/v1/orders"));
         h.advance(100.0);
         h.confirm_cancel("old", 10.0, 8.0);
         let request = h.take("/api/v1/orders");
@@ -913,7 +868,7 @@ fn fully_filled_order_during_cancel_is_not_replaced_by_price_only_amend() {
     );
     h.pace();
     h.confirm_cancel("old", 10.0, 10.0);
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     assert_eq!(h.done(1), &Ok("[]".into()));
 }
 
@@ -940,7 +895,7 @@ fn failed_confirmation_reads_retry_without_sending_a_replacement() {
             request: request.id,
             error: "read failed",
         });
-        assert!(!h.has_write("/api/v1/orders"));
+        assert!(!h.has("/api/v1/orders"));
         if attempt < 2 {
             h.advance(100.0);
         } else {
@@ -974,7 +929,7 @@ fn active_cancellation_proof_has_a_bounded_poll_count() {
             200,
             r#"{"code":"200000","data":{"id":"old","isActive":true,"size":10,"filledSize":4}}"#,
         );
-        assert!(!h.has_write("/api/v1/orders"));
+        assert!(!h.has("/api/v1/orders"));
         if attempt < 32 {
             h.advance(100.0);
         } else {
@@ -1002,7 +957,7 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
     h.pace();
     let request = h.take("/orders/old");
     h.response(&request, 200, r#"{"code":"200000","data":{"id":"old","status":"canceled","isActive":true,"cancelExist":true,"size":10,"filledSize":4}}"#);
-    assert!(!h.has_write("/api/v1/orders"));
+    assert!(!h.has("/api/v1/orders"));
     h.advance(100.0);
     h.confirm_cancel("old", 10.0, 4.0);
     let body = h.take("/api/v1/orders").body.unwrap();
@@ -1059,9 +1014,7 @@ fn uncached_cancel_ids_send_directly_and_do_not_block_known_ids_after_rejection(
         );
         h.pace();
         assert_eq!(h.done(1).is_err(), reject_unknown);
-        assert!(!h.actions.iter().any(
-            |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/orders/unknown"))
-        ));
+        assert!(!h.has("/api/v1/orders/unknown"));
     }
 }
 
@@ -1073,9 +1026,7 @@ fn an_empty_native_cancel_id_never_becomes_a_bulk_delete() {
             command: 1,
             ids: vec![id.into()],
         });
-        assert!(!h.actions.iter().any(
-            |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/orders"))
-        ));
+        assert!(!h.has("/api/v1/orders"));
         assert!(h.done(1).is_err());
     }
 }
