@@ -63,13 +63,13 @@ impl Skipped {
 }
 /// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped ids.
 fn rearm_skips<'a>(
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     prefix: &str,
     skipped: &Skipped,
     mapped: impl Iterator<Item = &'a str>,
 ) {
     if skipped.is_empty() {
-        logged.retain(|key| !key.starts_with(prefix));
+        logged.retain(|key, _| !key.starts_with(prefix));
     } else {
         for id in mapped {
             logged.remove(&format!("{prefix}{id}"));
@@ -181,7 +181,7 @@ pub struct State {
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
     /// `order:` or `position:` plus the ID (empty if none) of skipped rows already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: HashMap<String, bool>,
 }
 impl State {
     pub fn new() -> Self {
@@ -633,8 +633,8 @@ impl WeexFutures {
         }
         self.account_finished(cx, false);
     }
-    /// Logs each skipped order or position row once until it maps again. A position, or a
-    /// row without an ID, whose skip keeps no stored copy is an error: it reads as absent.
+    /// Logs skipped rows once, allowing one Error upgrade if a kept copy is lost.
+    /// A skip without a retained copy is an error: the row reads as absent.
     fn log_skipped_rows(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
         let positions = matches!(request.kind, Kind::Positions);
         let (prefix, kind) = match request.kind {
@@ -651,6 +651,7 @@ impl WeexFutures {
                 cx.store.orders().iter().any(|o| {
                     !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
                         && id.is_none_or(|id| o.id.split("__").next() == Some(id))
+                        && self.account.snapshot_order(o.clone()).is_some()
                 })
             }
         };
@@ -659,7 +660,7 @@ impl WeexFutures {
             .ids
             .iter()
             .map(|id| {
-                let error = positions && !stored(Some(id));
+                let error = !stored(Some(id));
                 (
                     id.as_str(),
                     error,
@@ -676,10 +677,13 @@ impl WeexFutures {
             if logged.len() >= SKIP_LOG_LIMIT {
                 logged.clear();
             }
-            if logged.insert(format!("{prefix}{id}")) {
-                let level = if error { Level::Error } else { Level::Warn };
-                cx.notice(level, code::ROW_SKIPPED, message);
+            let key = format!("{prefix}{id}");
+            if logged.get(&key).is_some_and(|&errored| errored || !error) {
+                continue;
             }
+            logged.insert(key, error);
+            let level = if error { Level::Error } else { Level::Warn };
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
     pub(crate) fn account_failed(

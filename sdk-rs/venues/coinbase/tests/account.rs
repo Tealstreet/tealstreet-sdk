@@ -1723,3 +1723,156 @@ fn intx_upnl_sums_committed_positions_including_retained_copies_across_a_balance
     s.poll_until(|s| reads(s) > seen);
     assert_eq!(s.e.store().balance().upnl, 40.0);
 }
+
+#[test]
+fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
+    let mut s = Session::new("INTX", false).ready();
+    let orders = |rows: &[String]| {
+        Some(format!(
+            r#"{{"orders":[{}],"has_next":false}}"#,
+            rows.join(",")
+        ))
+    };
+    let a = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let b = user_order("order-b", "BTC-PERP-INTX", "OPEN", "0", "2");
+    let unmappable = |row: &str| row.replace(r#""order_type":"Limit""#, r#""order_type":"Odd""#);
+    s.orders = orders(std::slice::from_ref(&a));
+    s.poll_until(|s| s.e.store().order("order-a").is_some());
+    s.errors.clear();
+
+    // order-a keeps its stored copy; order-b has none and drops out.
+    s.orders = orders(&[unmappable(&a), unmappable(&b)]);
+    s.poll_until(|s| {
+        s.logs
+            .iter()
+            .any(|l| l.starts_with("Coinbase skipped unmappable order order-b"))
+    });
+    s.poll_until(|s| {
+        s.logs
+            .iter()
+            .any(|l| l.starts_with("Coinbase skipped unmappable order order-a"))
+    });
+    assert!(s.e.store().order("order-a").is_some());
+    assert!(s.e.store().order("order-b").is_none());
+    assert_eq!(s.errors.len(), 1);
+    assert!(s.errors[0].starts_with("Coinbase skipped unmappable order order-b"));
+}
+
+#[test]
+fn a_skipped_spot_holding_is_an_error_only_when_no_stored_copy_is_kept() {
+    let holding = |asset: &str, total: &str, free: &str| {
+        format!(
+            r#"{{"asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
+        )
+    };
+    let breakdown = |rows: &[String]| {
+        Some(format!(
+            r#"{{"breakdown":{{"spot_positions":[{}]}}}}"#,
+            rows.join(",")
+        ))
+    };
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = breakdown(&[holding("BTC", "1.5", "1")]);
+    let mut s = s.ready();
+    s.errors.clear();
+
+    // BTC keeps its stored copy; SOL has none and drops out.
+    s.breakdown = breakdown(&[holding("BTC", "1", "2"), holding("SOL", "1", "2")]);
+    s.poll_until(|s| {
+        ["BTC", "SOL"].iter().all(|asset| {
+            s.logs
+                .contains(&format!("Coinbase skipped invalid spot holding {asset}"))
+        })
+    });
+    assert_eq!(s.errors, ["Coinbase skipped invalid spot holding SOL"]);
+    s.e.store_mut().set_currency_balances(vec![]);
+    s.poll_until(|s| s.errors.len() == 2);
+    assert_eq!(s.errors[1], "Coinbase skipped invalid spot holding BTC");
+    s.breakdown = breakdown(&[holding("BTC", "1", "1"), holding("SOL", "1", "1")]);
+    s.poll_until(|s| {
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .any(|c| c.currency == "SOL")
+    });
+    s.breakdown = breakdown(&[holding("BTC", "1", "2"), holding("SOL", "1", "2")]);
+    s.e.store_mut().set_currency_balances(vec![]);
+    s.poll_until(|s| s.errors.len() == 4);
+    assert_eq!(s.errors.iter().filter(|m| m.ends_with("BTC")).count(), 2);
+    assert_eq!(s.errors.iter().filter(|m| m.ends_with("SOL")).count(), 2);
+}
+
+#[test]
+fn user_snapshot_skip_errors_escalate_once_and_rearm_after_mapping() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let bad = row.replace(r#""order_type":"Limit""#, r#""order_type":"Odd""#);
+    let report = |s: &mut Session, seq, row: &str| {
+        s.message(seq, "snapshot", &format!("[{row}]"));
+        s.collect();
+    };
+    report(&mut s, 0, &row);
+    s.errors.clear();
+    s.logs.clear();
+    report(&mut s, 1, &bad);
+    assert_eq!(s.logs.len(), 1);
+    assert!(s.errors.is_empty());
+    report(&mut s, 2, &bad);
+    assert_eq!(s.logs.len(), 1);
+    s.e.store_mut().set_orders(vec![]);
+    report(&mut s, 3, &bad);
+    assert_eq!(
+        s.errors.len(),
+        1,
+        "a warned row losing its copy upgrades once"
+    );
+    report(&mut s, 4, &bad);
+    assert_eq!(s.errors.len(), 1);
+    report(&mut s, 5, &row);
+    s.e.store_mut().set_orders(vec![]);
+    report(&mut s, 6, &bad);
+    assert_eq!(s.errors.len(), 2, "mapping re-arms the missing-copy error");
+}
+
+#[test]
+fn deferred_snapshot_rejections_report_coded_errors_once() {
+    use safe_cex_engine::{Level, log::code};
+    for wrong_product in [false, true] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        let row = user_order("pending-size", "BTC-USD", "OPEN", "0", "1");
+        let detail = if wrong_product {
+            size_detail(
+                "pending-size",
+                r#"{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}"#,
+            )
+            .replace("BTC-USD", "ETH-USD")
+        } else {
+            size_detail("pending-size", "{}")
+        };
+        for seq in 0..2 {
+            s.message(seq, "snapshot", &format!("[{row}]"));
+            let request = next_read(&mut s, "/orders/historical/pending-size");
+            s.reply(request, 200, &detail);
+            let events =
+                s.e.drain_actions()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED => {
+                            Some(event)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            assert_eq!(events.len(), usize::from(seq == 0));
+            if let Some(event) = events.first() {
+                assert_eq!(event.level, Level::Error);
+                assert!(
+                    event
+                        .message
+                        .starts_with("Coinbase skipped unmappable order pending-size")
+                );
+            }
+            assert!(s.e.store().order("pending-size").is_none());
+        }
+    }
+}
