@@ -591,25 +591,6 @@ fn entire_batch_is_preflighted_before_any_write() {
 }
 
 #[test]
-fn caller_ids_reject_control_characters_and_ecmascript_bom_before_batch_writes() {
-    let mut s = Session::new("DEFAULT", true).ready();
-    let good = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
-    for (index, character) in ['\0', '\u{7f}', '\u{85}', '\u{feff}']
-        .into_iter()
-        .enumerate()
-    {
-        let mut bad = good.clone();
-        bad.client_order_id = Some(format!("caller{character}id"));
-        let command = 140 + index as u32;
-        s.command(Command::PlaceOrders {
-            command,
-            orders: vec![good.clone(), bad],
-        });
-        assert!(s.done(command).is_err());
-    }
-}
-
-#[test]
 fn caller_ids_allow_exactly_one_hundred_twenty_eight_unicode_characters() {
     let mut s = Session::new("DEFAULT", true).ready();
     let caller = "é".repeat(128);

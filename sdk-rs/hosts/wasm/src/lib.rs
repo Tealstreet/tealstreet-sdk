@@ -856,13 +856,6 @@ impl WasmEngine {
         {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
-        #[cfg(feature = "blofin")]
-        if venue == "blofin"
-            && !options.public_data_only
-            && options.passphrase.as_deref().is_none_or(str::is_empty)
-        {
-            return Err(JsError::new("BloFin requires a passphrase"));
-        }
         #[cfg(feature = "kraken")]
         if matches!(venue, "kraken" | "krakenspot")
             && !options.public_data_only

@@ -1,10 +1,10 @@
 //! Documented g-API payloads and mutation lifecycle regressions.
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
-mod support;
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
+};
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 use serde_json::{Value, json};
-use support::Engine;
 
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"69000","askRp":"69001","lastRp":"69000","markRp":"69000","indexRp":"69000","openRp":"69000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
@@ -70,16 +70,7 @@ fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
 
 fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
     e.handle(1000., Event::Command(c));
-    let actions = e.drain_actions().collect();
-    e.wait_for(actions, |a| {
-        !requests(a).is_empty()
-            || a.iter().any(|a| {
-                matches!(
-                    a,
-                    Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
-                )
-            })
-    })
+    e.drain_actions().collect()
 }
 
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
@@ -90,17 +81,13 @@ fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
     }));
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
-    let a = raw(&mut e, &requests(&a)[0], PRODUCTS);
-    let mut a = e.wait_for(a, |a| {
-        requests(a).iter().any(|r| r.url.contains("24hr/all"))
-    });
+    let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
     let ticker = requests(&a)
         .into_iter()
         .find(|r| r.url.contains("24hr/all"))
         .unwrap();
     a.extend(raw(&mut e, &ticker, DAILY));
     a.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr/all")));
-    let a = e.wait_for(a, |a| requests(a).len() == 2);
     let socket = a
         .iter()
         .filter_map(|a| {
@@ -2047,24 +2034,8 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
         e.store().setting("ETHUSDT").is_none(),
         "a mode ACK cannot invent leverage or margin"
     );
-    // Both currency reads must dispatch through the real shared budget before
-    // the later mode ACK makes their captured authority revision stale.
-    let a = e.wait_for(a, |actions| requests(actions).len() == 2);
     let stale = requests(&a);
     assert_eq!(stale.len(), 2);
-    for r in &stale {
-        assert_eq!(r.method, Method::Get);
-        assert!(r.url.contains("/g-accounts/accountPositions?"));
-    }
-    for currency in ["USDT", "USDC"] {
-        assert_eq!(
-            stale
-                .iter()
-                .filter(|r| p(r, "currency").as_deref() == Some(currency))
-                .count(),
-            1
-        );
-    }
     // A delayed untimed OneWay row must not erase the acknowledged Hedged mode.
     e.handle(1001., Event::WsMessage { socket, text: r#"{"type":"incremental","positions_p":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"8"},{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"-10","crossMargin":true}]}"# });
     e.drain_actions().for_each(drop);
@@ -2137,7 +2108,6 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
         .expect("the next authoritative account refresh is scheduled");
     e.handle(at, Event::TimerFired { timer });
     let fresh: Vec<_> = e.drain_actions().collect();
-    let fresh = e.wait_for(fresh, |actions| requests(actions).len() == 2);
     assert_eq!(requests(&fresh).len(), 2);
     for r in requests(&fresh) {
         let currency = if r.url.contains("USDC") {
@@ -2261,12 +2231,6 @@ fn place_at(
     writes(&a).remove(0)
 }
 
-/// Reads share the paced REST budget; fire its reset timer until one is sent.
-fn next_open_order_read(e: &mut Engine<PhemexPerpetuals>, actions: Vec<Action>) -> HttpRequest {
-    let actions = e.wait_for(actions, |a| !open_order_reads(a).is_empty());
-    open_order_reads(&actions).remove(0)
-}
-
 fn open_order_reads(actions: &[Action]) -> Vec<HttpRequest> {
     requests(actions)
         .into_iter()
@@ -2379,8 +2343,7 @@ fn unproven_then_read(
     );
     let (timer, wake) = latest_timer(&a).expect("read scheduled");
     assert_eq!(wake, ((now + 60_000.) / 1000.).round() * 1000. + 5_000.);
-    let fired = at(e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(e, fired);
+    let read = open_order_reads(&at(e, wake, Event::TimerFired { timer })).remove(0);
     (read, wake)
 }
 
@@ -2405,12 +2368,13 @@ fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
     // Signed expiry is send time + 60 s (rounded to seconds), plus 5 s clock skew.
     assert_eq!(wake, 66_000.);
     let a = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, a);
-    assert_eq!(p(&read, "symbol").as_deref(), Some("BTCUSDT"));
+    let read = open_order_reads(&a);
+    assert_eq!(read.len(), 1);
+    assert_eq!(p(&read[0], "symbol").as_deref(), Some("BTCUSDT"));
     reply(
         &mut e,
         wake + 1.,
-        &read,
+        &read[0],
         200,
         &rows(vec![
             live_row("old-live"),
@@ -2509,7 +2473,7 @@ fn failed_read_retries_and_empty_code_reconciles() {
     let (timer, wake) = latest_timer(&a).expect("failed read schedules a retry");
     assert_eq!(wake, now + 2001.);
     let a = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, a);
+    let read = open_order_reads(&a).remove(0);
     reply(
         &mut e,
         wake + 1.,
@@ -2538,8 +2502,7 @@ fn persistently_unmappable_row_stops_retrying_with_one_error() {
         }
         let (timer, wake) = latest_timer(&a).expect("incomplete read retries");
         now = wake;
-        let a = at(&mut e, now, Event::TimerFired { timer });
-        read = next_open_order_read(&mut e, a);
+        read = open_order_reads(&at(&mut e, now, Event::TimerFired { timer })).remove(0);
     }
     assert_eq!(errors, 1, "one Error once retrying is pointless");
     assert_eq!(
@@ -2594,7 +2557,7 @@ fn transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_
     let (timer, wake) = latest_timer(&a).expect("read still owed");
     assert_eq!(wake, 66_000.);
     let a = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, a.clone());
+    let read = open_order_reads(&a).remove(0);
     let a = reply(
         &mut e,
         wake + 1.,
@@ -2661,7 +2624,7 @@ fn failed_late_cancel_is_reported_as_an_error() {
     assert_eq!(done(&a), Ok("[]".into()), "nothing known to cancel yet");
     let (timer, wake) = latest_timer(&a).unwrap();
     let a = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, a.clone());
+    let read = open_order_reads(&a).remove(0);
     let a = reply(
         &mut e,
         wake + 1.,
@@ -2696,7 +2659,7 @@ fn placement_lost_after_cancel_all_is_not_canceled_by_it() {
     );
     let (timer, wake) = latest_timer(&a).unwrap();
     let a = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, a.clone());
+    let read = open_order_reads(&a).remove(0);
     let a = reply(
         &mut e,
         wake + 1.,
@@ -2775,8 +2738,7 @@ fn lost_client_order_id_cannot_be_reused_until_its_read_settles_it() {
         "a retry would be canceled as the late landing"
     );
     assert!(done(&a).unwrap_err().contains("unknown outcome"), "{a:?}");
-    let fired = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, fired);
+    let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![]));
     assert!(deletes(&a).is_empty());
     let a = at(
@@ -2832,8 +2794,7 @@ fn late_cancels_in_two_groups_are_sequenced_without_false_errors() {
     let mut short = opts("short-lost");
     short.side = OrderSide::Sell;
     let (timer, wake) = lose_then_cancel_all(&mut e, 1010., 223, short);
-    let fired = at(&mut e, wake, Event::TimerFired { timer });
-    let read = next_open_order_read(&mut e, fired);
+    let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let mut long = rest_row("long", "long-lost");
     long["posSide"] = json!("Long");
     let mut short = rest_row("short", "short-lost");

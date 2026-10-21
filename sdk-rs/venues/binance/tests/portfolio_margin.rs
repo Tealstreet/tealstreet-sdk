@@ -306,16 +306,6 @@ fn margin_type_is_refused_on_a_cross_only_account() {
 }
 
 #[test]
-fn cancel_all_preserves_completed_fills_before_and_during_the_command() {
-    support::assert_cancel_all_preserves_filled_orders(ready(), true, false);
-}
-
-#[test]
-fn cancel_all_preserves_completed_fills_when_the_order_is_unknown() {
-    support::assert_cancel_all_preserves_filled_orders(ready(), true, true);
-}
-
-#[test]
 fn an_invalid_open_order_row_names_the_order_and_fails_the_snapshot() {
     let overfilled = OPEN_ORDERS.replace(r#""executedQty":"0""#, r#""executedQty":"0.50""#);
     let h = ready_with(&overfilled);

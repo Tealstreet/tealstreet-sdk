@@ -46,16 +46,13 @@ impl Harness {
             .iter()
             .find_map(|a| match a {
                 Action::WsConnect {
-                    binary,
                     socket,
                     url,
                     channel,
-                    context,
+                    ..
                 } if url.contains("fapiws.bitrue.com") => {
-                    assert!(!binary, "Bitrue private feed uses the text protocol");
-                    assert_eq!(*channel, Some(SocketChannel::Private));
-                    assert!(context.is_none());
                     assert_eq!(url, "wss://fapiws.bitrue.com/stream?listenKey=futures-key");
+                    assert_eq!(channel.as_ref(), Some(&SocketChannel::Private));
                     Some(*socket)
                 }
                 _ => None,

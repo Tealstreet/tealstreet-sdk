@@ -44,24 +44,17 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
     this.subscriptionsSuspended = false;
     this.trackLastReceived();
     if (this.api) {
-      const tickers = [...this.store.markets].sort((a, b) => Number(a.id) - Number(b.id));
-      for (const market of tickers) this.subscription('subscribe', { type: 'ticker', coin: market.base, instrumentId: Number(market.id) });
-      const candles = [...this.candleListeners.keys()].flatMap((key) => {
+      for (const market of this.store.markets) this.subscription('subscribe', { type: 'ticker', coin: market.base, instrumentId: Number(market.id) });
+      for (const key of this.candleListeners.keys()) {
         const [symbol, interval] = key.split('|');
         const market = this.store.marketsBySymbol[symbol];
-        return market ? [{ coin: market.id, interval }] : [];
-      }).sort((a, b) => Number(a.coin) - Number(b.coin) || (a.interval < b.interval ? -1 : a.interval > b.interval ? 1 : 0));
-      for (const { coin, interval } of candles) {
-        this.subscription('subscribe', { type: 'candle', coin, interval });
+        if (market) this.subscription('subscribe', { type: 'candle', coin: market.id, interval });
       }
     } else {
       this.subscription('subscribe', { type: 'allAssetCtxs' });
-      const books = [...this.bookListeners.keys()].flatMap((symbol) => {
+      for (const symbol of this.bookListeners.keys()) {
         const market = this.store.marketsBySymbol[symbol];
-        return market ? [market] : [];
-      }).sort((a, b) => Number(a.id) - Number(b.id));
-      for (const market of books) {
-        this.subscription('subscribe', { type: 'l2Book', coin: market.id });
+        if (market) this.subscription('subscribe', { type: 'l2Book', coin: market.id });
       }
       if (!this.parent.options.publicDataOnly) {
         for (const type of ['orderUpdates', 'clearinghouseState', 'userAssetData']) this.subscription('subscribe', { type, user: this.parent.wallet() });

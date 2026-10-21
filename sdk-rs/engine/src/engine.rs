@@ -1732,7 +1732,8 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
-                if let Some(body) = splitter.error_envelope() {
+                let body = splitter.envelope();
+                if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
                     self.venue.on_stream_error(
                         &mut cx,
                         pending,
@@ -1750,14 +1751,14 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
-            // `finished` validates the complete document and every streamed item.
-            let Ok(body) = std::str::from_utf8(outside) else {
-                self.venue.on_request_failed(
-                    &mut cx,
-                    pending,
-                    "invalid streamed response envelope",
-                );
-                return;
+            // Every selector retains the fully validated envelope, with its array emptied.
+            let body = match std::str::from_utf8(outside) {
+                Ok(body) => body,
+                Err(_) => {
+                    self.venue
+                        .on_request_failed(&mut cx, pending, "stream envelope is not UTF-8");
+                    return;
+                }
             };
             let response = Response {
                 status: incoming.status,
@@ -2061,133 +2062,6 @@ fn apply_signature(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod streamed_metadata_tests {
-    use super::*;
-
-    struct Capture {
-        at: ArrayAt,
-        body: Option<String>,
-        binary: Option<(SocketId, Vec<u8>)>,
-        failed: bool,
-    }
-
-    impl Venue for Capture {
-        type Pending = ();
-        fn start(&mut self, cx: &mut Cx<'_, ()>) {
-            cx.request_streamed(
-                Method::Get,
-                "https://example.test".into(),
-                vec![],
-                self.at,
-                (),
-            );
-        }
-        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, text: &str) {
-            self.body = Some(text.into());
-        }
-        fn on_binary(&mut self, _: &mut Cx<'_, ()>, socket: SocketId, data: &[u8]) {
-            self.binary = Some((socket, data.to_vec()));
-        }
-        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
-        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), response: Response<'_>) {
-            self.body = Some(response.body.into());
-        }
-        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {
-            self.failed = true;
-        }
-        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
-        fn book(&self, _: &str) -> Option<&Book> {
-            None
-        }
-        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-            Box::new(std::iter::empty())
-        }
-    }
-
-    #[test]
-    fn binary_ingress_preserves_raw_bytes_and_text_control_remains_independent() {
-        let mut engine = Engine::new(Capture {
-            at: ArrayAt::Root,
-            body: None,
-            binary: None,
-            failed: false,
-        });
-        let socket = SocketId(7);
-        let bytes = [0, 255, 192, 128]; // Includes NUL and invalid UTF-8.
-        engine.handle(
-            1.0,
-            Event::WsBinary {
-                socket,
-                data: &bytes,
-            },
-        );
-        assert_eq!(engine.venue().binary, Some((socket, bytes.to_vec())));
-        assert_eq!(engine.venue().body, None);
-        engine.handle(
-            2.0,
-            Event::WsMessage {
-                socket,
-                text: r#"{"result":{}}"#,
-            },
-        );
-        assert_eq!(engine.venue().body.as_deref(), Some(r#"{"result":{}}"#));
-        assert_eq!(engine.venue().binary, Some((socket, bytes.to_vec())));
-    }
-
-    #[test]
-    fn every_metadata_mode_rejects_truncated_envelopes_and_delivers_complete_status() {
-        for (at, body, expected) in [
-            (
-                ArrayAt::EnvelopeField("data"),
-                r#"{"data":[1],"code":10001}"#,
-                r#"{"data":[],"code":10001}"#,
-            ),
-            (
-                ArrayAt::Path(&["result", "list"]),
-                r#"{"result":{"list":[1],"cursor":"next"},"retCode":10001}"#,
-                r#"{"result":{"list":[],"cursor":"next"},"retCode":10001}"#,
-            ),
-            (
-                ArrayAt::AnyFieldEnvelope(&["list"]),
-                r#"{"data":{"list":[1]},"code":10001}"#,
-                r#"{"data":{"list":[]},"code":10001}"#,
-            ),
-        ] {
-            for complete in [false, true] {
-                let mut engine = Engine::new(Capture {
-                    at,
-                    body: None,
-                    binary: None,
-                    failed: false,
-                });
-                engine.start(0.0);
-                let request = engine
-                    .drain_actions()
-                    .find_map(|action| match action {
-                        Action::Http(request) => Some(request.id),
-                        _ => None,
-                    })
-                    .unwrap();
-                engine.http_start(0.0, request, 200, "");
-                let body = if complete {
-                    body
-                } else {
-                    &body[..body.len() - 1]
-                };
-                for byte in body.as_bytes().chunks(1) {
-                    engine.http_chunk(0.0, request, byte);
-                }
-                engine.http_end(0.0, request);
-                assert_eq!(engine.venue().failed, !complete, "{at:?}");
-                assert_eq!(engine.venue().body.as_deref(), complete.then_some(expected));
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -3652,61 +3526,6 @@ mod streaming_tests {
 #[cfg(test)]
 mod request_route_tests {
     use super::*;
-    #[test]
-    fn binary_encoding_is_opt_in_and_preserves_roles_and_owned_feed_context() {
-        let mut store = Store::default();
-        let mut io = Io::<()>::default();
-        let mut cx = Cx {
-            now: 0.0,
-            store: &mut store,
-            io: &mut io,
-        };
-        let url = "wss://venue.test/feed";
-        let legacy = cx.connect(url);
-        let public = cx.connect_channel(url, SocketChannel::Public);
-        let feed = cx.connect_feed(url, SocketChannel::Private, String::from("private-0"), true);
-        let binary_public = cx.connect_binary_channel(url, SocketChannel::Public);
-        let binary_private = cx.connect_binary_channel(url, SocketChannel::Private);
-        let connections: Vec<_> = io
-            .actions
-            .into_iter()
-            .map(|action| match action {
-                Action::WsConnect {
-                    binary,
-                    socket,
-                    url: actual,
-                    channel,
-                    context,
-                } => {
-                    assert_eq!(actual, url);
-                    (socket, binary, channel, context)
-                }
-                _ => panic!("unexpected connection action"),
-            })
-            .collect();
-        assert_eq!(
-            connections,
-            vec![
-                (legacy, false, None, None),
-                (public, false, Some(SocketChannel::Public), None),
-                (
-                    feed,
-                    false,
-                    Some(SocketChannel::Private),
-                    Some(SocketContext {
-                        feed: "private-0".into(),
-                        recover: true
-                    })
-                ),
-                (binary_public, true, Some(SocketChannel::Public), None),
-                (binary_private, true, Some(SocketChannel::Private), None),
-            ]
-        );
-        let unique: std::collections::HashSet<_> =
-            connections.iter().map(|(socket, ..)| socket).collect();
-        assert_eq!(unique.len(), 5);
-    }
-
     #[test]
     fn route_hints_mark_only_the_requested_outbound_action() {
         let mut store = Store::default();

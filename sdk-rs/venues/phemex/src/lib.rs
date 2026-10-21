@@ -2,7 +2,6 @@
 mod account;
 mod account_wire;
 mod history;
-mod http;
 mod income;
 mod sign;
 mod trading;
@@ -99,7 +98,6 @@ pub struct PhemexPerpetuals {
     account: account::State,
     trading: trading::State,
     history: history::State,
-    http_budget: http::Budget,
     income: income::State,
 }
 impl PhemexPerpetuals {
@@ -143,11 +141,10 @@ impl PhemexPerpetuals {
             account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
-            http_budget: http::Budget::default(),
             income: income::State::default(),
         }
     }
-    fn discovery_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
+    fn discovery_tickers(&self, cx: &mut Cx<'_, Pending>) {
         self.request(
             cx,
             Method::Get,
@@ -176,6 +173,46 @@ impl PhemexPerpetuals {
             "wss://testnet-api.phemex.com/ws"
         } else {
             "wss://ws.phemex.com"
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn request(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        query: &str,
+        body: Option<String>,
+        pending: Pending,
+        stream: Option<ArrayAt>,
+    ) {
+        // A definitive lookup must query the account that placed the order.
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup())
+            || matches!(&pending, Pending::Orders(_));
+        let credentials = if matches!(method, Method::Get) && !primary {
+            self.read_credentials.as_ref().or(self.credentials.as_ref())
+        } else {
+            self.credentials.as_ref()
+        };
+        let headers = credentials
+            .map(|c| c.headers(path, query, body.as_deref().unwrap_or(""), cx.now))
+            .unwrap_or_default();
+        let url = format!(
+            "{}{path}{}",
+            self.rest(),
+            if query.is_empty() {
+                String::new()
+            } else {
+                format!("?{query}")
+            }
+        );
+        let id = if let Some(at) = stream {
+            cx.request_streamed_body(method, url, headers, body, at, pending)
+        } else {
+            cx.request(method, url, headers, body, pending)
+        };
+        if primary {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -658,8 +695,7 @@ impl Venue for PhemexPerpetuals {
             }
             return;
         }
-        if self.http_timer(cx, timer)
-            || self.account_timer(cx, timer)
+        if self.account_timer(cx, timer)
             || self.history_timer(cx, timer)
             || self.income_timer(cx, timer)
         {

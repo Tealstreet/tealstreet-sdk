@@ -10,18 +10,6 @@ import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
 import { directTransport } from '../../transport/direct';
 
-it('rejects a private BloFin engine without a passphrase before startup', async () => {
-  const { WasmEngine } = await loadNodeEngine();
-  const credentials = { key: 'replay-key', secret: 'replay-secret' };
-  expect(() => new WasmEngine('blofin', JSON.stringify({ ...credentials, passphrase: 'replay-passphrase' })))
-    .not.toThrow();
-  for (const passphrase of [undefined, '']) {
-    expect(() => new WasmEngine('blofin', JSON.stringify({ ...credentials, passphrase })))
-      .toThrow('BloFin requires a passphrase');
-  }
-  expect(() => new WasmEngine('blofin', JSON.stringify({ publicDataOnly: true }))).not.toThrow();
-});
-
 it.each([false, true])('preserves BloFin broker gate, range units, flat leverage, margin and caller IDs through wasm with proxy=%s', async (tealstreetProxy) => {
   let hedged = false;
   const requests: Array<{ method: string; url: string; body?: string }> = [];

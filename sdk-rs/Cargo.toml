@@ -89,23 +89,8 @@ opt-level = 3
 [profile.release.package.safe-cex-wasm]
 opt-level = 3
 
-[profile.release.package.safe-cex-venue-backpack]
-opt-level = "z"
-
-[profile.release.package.safe-cex-venue-cryptocom]
-opt-level = 3
-
 [profile.release.package.safe-cex-venue-bitunix]
 opt-level = 3
-
-[profile.release.package.safe-cex-venue-blofin]
-opt-level = "z"
-
-[profile.release.package.safe-cex-venue-mexc]
-opt-level = "z"
-
-[profile.release.package.safe-cex-venue-okx]
-opt-level = "z"
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"

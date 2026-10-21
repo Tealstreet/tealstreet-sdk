@@ -576,7 +576,6 @@ ported. The linked inventory records exact callers and product constraints.
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
 | `bitunix` | Opt-in USDT futures; streamed discovery/ticker seeds, full-snapshot depth, signed private reconciliation, guarded trading and native history queries. `realizedPNL` is already net of fees and funding and remains verbatim. Live public and documented private replay are separate evidence; default cutover and credentialed lifecycle proof remain later gates. Preserve [port scope and gate evidence](RUST_BITUNIX.md). |
 
-
 #### Known consumer blockers and replacement order
 
 The source audit found additional gates that must stay visible before default
@@ -807,21 +806,11 @@ order amount/filled and display remaining; their position notional is the native
 contract quantity. The worker adapter retains these native quantities in the
 existing TS `extra` fields alongside coin balances.
 
-After the optional coin columns, a `BALANCE` payload may append full per-currency
-balances: `u32 count`, `u32 currency[count]` string references, 8-byte padding,
-then f64 columns `used[count]`, `free[count]`, `total[count]`, `upnl[count]`.
-Currency-only frames first emit the empty coin extension. An absent currency tail
-leaves currencies unspecified; an appended zero count explicitly clears them.
-These headers, offsets and columns retain the legacy layout.
-
-A writer may explicitly opt in to preserving unspecified collateral while
-supplying currencies (Coinbase does). Only when collateral is unspecified, it
-appends an 8-byte footer after all currency columns: little-endian `u32` magic
-`0x314D4342` (bytes `BCM1`), then `u32` flags with bit 0 meaning collateral is
-unspecified. An explicitly supplied coin table, including an empty one, retains
-its legacy bytes and clear semantics. Other writers emit no footer by default.
-A reader accepts the exact legacy end or exactly eight additional bytes with
-this marker and known flags; bit 0 requires an empty placeholder coin table.
-Truncated columns, unknown markers/flags and other trailing bytes are invalid.
-Legacy readers can still read the unchanged currency values and ignore the
-footer; preserving the new collateral-absence mode requires an updated reader.
+The collateral tail may itself append a spot currency table: `u32 count`, `u32 flags`,
+`u32 currency[count]` string references, 8-byte padding, then f64 columns
+`total`, `free`, `used`, `upnl`. The optional table preserves reserved quantities;
+an absent table leaves currencies unspecified, while an appended zero count
+clears them. Flag bit 0 leaves collateral unspecified, preserving its independent
+absent-versus-empty contract. Writers without collateral insert an empty collateral table before
+this extension. Existing collateral-only and 32-byte balance frames retain their
+layout.

@@ -79,16 +79,9 @@ venue code; hosts select proxy/tunnel policy.
   timers/watchdogs and role-tagged sockets. Reconnect restores subscriptions
   and invalidates stale books.
 - Pace subscription frames on each socket by 150 ms, with a bounded FIFO and
-  independent heartbeat. On every API socket open, enqueue ticker subscriptions
-  by ascending numeric native instrument ID, independently of metadata/display
-  order or map iteration. Restored book intents use the same numeric order;
-  restored candles sort by native ID, then ASCII interval text. Node sockets
-  send `allAssetCtxs`, books, then wallet channels; API sockets send tickers
-  before candles. This ordering applies on socket open and reconnect; new
-  subscriptions on an already-open socket retain caller order. The gateway drops
-  burst frames without identifying which subscription was lost.
-  `RISK_RATE_LIMITED` restarts that socket through its normal recovery path and
-  rebuilds current intents; discard old queued
+  independent heartbeat. The gateway drops burst frames without identifying
+  which subscription was lost. `RISK_RATE_LIMITED` restarts that socket through
+  its normal recovery path and rebuilds current intents; discard old queued
   frames/timers. The live fixture confirms all 78 ticker acknowledgements.
 - Keep all supplied book levels, discard older snapshots, and retain subscription
   intents made before metadata arrives. Candles use `/api-ws`; historical

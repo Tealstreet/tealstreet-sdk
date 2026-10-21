@@ -112,8 +112,6 @@ pub enum ArrayAt {
     /// Like `Path`, validating but omitting every other array in the envelope.
     /// Use when product catalogs carry large unrelated lists beside the target.
     PathOmitLists(&'static [&'static str]),
-    /// First matching array field at any depth in a versioned envelope.
-    AnyFieldEnvelope(&'static [&'static str]),
     /// Stream the first matching path, retaining metadata from any native
     /// response shape. An empty path selects a root array.
     Envelope(&'static [&'static [&'static str]]),
@@ -121,6 +119,8 @@ pub enum ArrayAt {
     EnvelopeFieldOrNested(&'static str, &'static str),
     /// A direct array or one of several accepted nested array names.
     EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
+    /// First matching array field at any depth in a versioned envelope.
+    AnyFieldEnvelope(&'static [&'static str]),
 }
 
 /// Who rejects a malformed array element.
@@ -212,19 +212,10 @@ impl ArraySplitter {
             && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
     }
 
-    /// Validated response metadata with the selected array emptied.
-    pub fn envelope(&self) -> Option<&[u8]> {
-        self.finished().then_some(self.outside.as_slice())
-    }
-
-    /// Complete, bounded response without the selected list, for business errors.
-    pub fn error_envelope(&self) -> Option<&str> {
-        if self.phase != Phase::Seeking || self.invalid {
-            return None;
-        }
-        let body = std::str::from_utf8(&self.envelope).ok()?;
-        serde_json::from_str::<IgnoredAny>(body).ok()?;
-        Some(body)
+    /// Response metadata with streamed rows replaced by null.
+    /// Callers must check [`Self::finished`] before treating it as valid JSON.
+    pub fn envelope(&self) -> &str {
+        std::str::from_utf8(&self.envelope).unwrap_or("")
     }
 
     /// Response metadata with the selected array emptied (`"list":[]`).
@@ -326,29 +317,26 @@ impl ArraySplitter {
                                 .zip(&self.keys)
                                 .all(|(name, key)| name.as_bytes() == key)
                     };
-                    let object_path = self.containers.iter().all(|&kind| kind == b'{');
                     self.armed = match self.at {
-                        ArrayAt::Root => false,
+                        // Versioned envelopes may wrap the target in arrays.
                         ArrayAt::AnyFieldEnvelope(names) => {
                             self.containers.last() == Some(&b'{')
                                 && names.iter().any(|name| name.as_bytes() == self.key)
                         }
+                        _ => self.containers.iter().all(|&kind| kind == b'{'),
+                    } && match self.at {
+                        ArrayAt::Root => false,
+                        ArrayAt::AnyFieldEnvelope(_) => true,
                         ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
-                            object_path && self.depth == 1 && name.as_bytes() == self.key
+                            self.depth == 1 && name.as_bytes() == self.key
                         }
-                        ArrayAt::Path(path) | ArrayAt::PathOmitLists(path) => {
-                            object_path && matches(path)
-                        }
-                        ArrayAt::Envelope(paths) => {
-                            object_path && paths.iter().any(|path| matches(path))
-                        }
+                        ArrayAt::Path(path) | ArrayAt::PathOmitLists(path) => matches(path),
+                        ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
                         ArrayAt::EnvelopeFieldOrNested(field, nested) => {
-                            object_path && (matches(&[field]) || matches(&[field, nested]))
+                            matches(&[field]) || matches(&[field, nested])
                         }
                         ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
-                            object_path
-                                && (matches(&[field])
-                                    || nested.iter().any(|name| matches(&[field, name])))
+                            matches(&[field]) || nested.iter().any(|name| matches(&[field, name]))
                         }
                     };
                     continue;
@@ -361,7 +349,6 @@ impl ArraySplitter {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                ArrayAt::AnyFieldEnvelope(_) => self.armed,
                                 ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
                                     self.armed && self.depth == 2
                                 }
@@ -373,7 +360,8 @@ impl ArraySplitter {
                                         || (self.depth == 1 && paths.iter().any(|p| p.is_empty()))
                                 }
                                 ArrayAt::EnvelopeFieldOrNested(..)
-                                | ArrayAt::EnvelopeFieldOrNestedAny(..) => self.armed,
+                                | ArrayAt::EnvelopeFieldOrNestedAny(..)
+                                | ArrayAt::AnyFieldEnvelope(_) => self.armed,
                             };
                         self.armed = false;
                         if found {
@@ -709,7 +697,7 @@ mod tests {
                 std::str::from_utf8(splitter.outside()).unwrap(),
                 r#"{"currencies":[],"data":{"before":[],"catalog":[],"after":[],"cursor":{"page":"next"}},"tail":[],"msg":"[]","code":0}"#
             );
-            assert!(serde_json::from_slice::<IgnoredAny>(splitter.envelope().unwrap()).is_ok());
+            assert!(serde_json::from_str::<IgnoredAny>(splitter.envelope()).is_ok());
         }
         // Existing modes retain those lists exactly as before.
         let mut splitter = ArraySplitter::new(ArrayAt::Path(&["data", "catalog"]));
@@ -865,14 +853,10 @@ mod tests {
         struct Key {
             id: String,
         }
-        let metadata: Metadata = serde_json::from_slice(splitter.envelope().unwrap()).unwrap();
+        let metadata: Metadata = serde_json::from_str(splitter.envelope()).unwrap();
         assert!(metadata.has_next_page);
         assert_eq!(metadata.next_key.unwrap().id, "3");
-        assert!(
-            !std::str::from_utf8(splitter.envelope().unwrap())
-                .unwrap()
-                .contains("\"id\":1")
-        );
+        assert!(!splitter.envelope().contains("\"id\":1"));
     }
 
     #[test]
@@ -1015,39 +999,7 @@ mod tests {
         splitter.feed(b"2]", |_| {});
         assert!(splitter.finished());
         assert_eq!(splitter.outside(), b"[]");
-        assert!(splitter.envelope.len() < 32);
-    }
-
-    #[test]
-    fn streams_validated_envelopes_across_chunks() {
-        for body in [
-            r#"{"code":0,"data":[{"a":"b"}],"msg":"ok"}"#,
-            r#"{"data":[],"code":0}"#,
-        ] {
-            for chunk in 1..=body.len() {
-                let mut s = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
-                for bytes in body.as_bytes().chunks(chunk) {
-                    s.feed(bytes, |_| {});
-                }
-                assert!(s.finished());
-                assert!(s.envelope().is_some());
-            }
-        }
-        for body in [
-            r#"{"code":0,"data":[,]}"#,
-            r#"{"code":0,"data":[{},]}"#,
-            r#"{"code":0,"data":[]"#,
-        ] {
-            let mut s = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
-            s.feed(body.as_bytes(), |_| {});
-            assert!(s.envelope().is_none());
-        }
-        let mut s = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
-        s.feed(
-            format!(r#"{{"msg":"{}","data":[]}}"#, "x".repeat(METADATA_LIMIT)).as_bytes(),
-            |_| {},
-        );
-        assert!(s.envelope().is_none());
+        assert!(splitter.envelope().len() < 32);
     }
 
     #[test]
@@ -1145,6 +1097,24 @@ mod tests {
     }
 
     #[test]
+    fn any_field_selector_preserves_array_wrapped_versioned_envelopes() {
+        let body = br#"{"version":[{"rows":[1,2],"cursor":"next"}],"code":0}"#;
+        for size in [1, 2, 9, 1024] {
+            let mut splitter = ArraySplitter::new(ArrayAt::AnyFieldEnvelope(&["rows"]));
+            let mut items = Vec::new();
+            for chunk in body.chunks(size) {
+                splitter.feed(chunk, |item| items.push(item.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, ["1", "2"]);
+            assert_eq!(
+                splitter.outside(),
+                br#"{"version":[{"rows":[],"cursor":"next"}],"code":0}"#
+            );
+        }
+    }
+
+    #[test]
     fn empty_nested_list_keeps_its_pagination_cursor() {
         let body = br#"{"retCode":0,"result":{"list":[],"nextPageCursor":"next"}}"#;
         let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
@@ -1205,24 +1175,6 @@ mod envelope_tests {
     use super::*;
 
     #[test]
-    fn any_field_selector_preserves_array_wrapped_versioned_envelopes() {
-        let body = br#"{"version":[{"rows":[1,2],"cursor":"next"}],"code":0}"#;
-        for size in [1, 2, 9, 1024] {
-            let mut splitter = ArraySplitter::new(ArrayAt::AnyFieldEnvelope(&["rows"]));
-            let mut items = Vec::new();
-            for chunk in body.chunks(size) {
-                splitter.feed(chunk, |item| items.push(item.to_owned()));
-            }
-            assert!(splitter.finished());
-            assert_eq!(items, ["1", "2"]);
-            assert_eq!(
-                splitter.envelope(),
-                Some(br#"{"version":[{"rows":[],"cursor":"next"}],"code":0}"#.as_slice())
-            );
-        }
-    }
-
-    #[test]
     fn named_paths_require_object_parents_not_array_string_elements() {
         for (at, body) in [
             (
@@ -1274,81 +1226,6 @@ mod envelope_tests {
             assert!(splitter.finished(), "{at:?}");
             assert_eq!(items, [r#""result""#, r#"{"list":[1]}"#]);
             assert_eq!(splitter.outside(), b"[]");
-        }
-    }
-
-    #[test]
-    fn merged_selectors_preserve_nested_metadata_and_validate_the_whole_envelope() {
-        let body = br#"{"code":0,"data":{"result":{"list":[{"s":"a b"},{"s":"\u00e9"}],"cursor":"next"}},"after":true}"#;
-        for at in [
-            ArrayAt::Path(&["data", "result", "list"]),
-            ArrayAt::AnyFieldEnvelope(&["data", "list"]),
-        ] {
-            for size in 1..=body.len() {
-                let mut splitter = ArraySplitter::new(at);
-                let mut items = Vec::new();
-                for bytes in body.chunks(size) {
-                    splitter.feed(bytes, |item| items.push(item.to_owned()));
-                }
-                assert_eq!(items, [r#"{"s":"a b"}"#, r#"{"s":"\u00e9"}"#]);
-                assert_eq!(
-                    splitter.envelope().unwrap(),
-                    br#"{"code":0,"data":{"result":{"list":[],"cursor":"next"}},"after":true}"#,
-                );
-            }
-        }
-        for (at, body) in [
-            (
-                ArrayAt::EnvelopeField("data"),
-                br#"{"data":[],"code":0"#.as_slice(),
-            ),
-            (
-                ArrayAt::Path(&["result", "list"]),
-                br#"{"result":{"list":[]},"retCode":0"#,
-            ),
-            (
-                ArrayAt::AnyFieldEnvelope(&["list"]),
-                br#"{"data":{"list":[]},"code":0"#,
-            ),
-        ] {
-            let mut splitter = ArraySplitter::new(at);
-            for bytes in body.chunks(1) {
-                splitter.feed(bytes, |_| {});
-            }
-            assert!(splitter.envelope().is_none(), "truncated envelope: {at:?}");
-        }
-    }
-
-    #[test]
-    fn selectors_do_not_follow_unrelated_siblings_or_lose_primitive_whitespace() {
-        for at in [
-            ArrayAt::Path(&["data", "list"]),
-            ArrayAt::AnyFieldEnvelope(&["list"]),
-        ] {
-            let body = br#"{"data":{"list":0,"other":[9]},"other":{"list":[8]}}"#;
-            let mut splitter = ArraySplitter::new(at);
-            let mut items = Vec::new();
-            for bytes in body.chunks(1) {
-                splitter.feed(bytes, |item| items.push(item.to_owned()));
-            }
-            if matches!(at, ArrayAt::Path(_)) {
-                assert!(!splitter.finished());
-                assert!(items.is_empty());
-            } else {
-                assert_eq!(items, ["8"]);
-                assert!(splitter.envelope().is_some());
-            }
-        }
-        for at in [
-            ArrayAt::EnvelopeField("list"),
-            ArrayAt::AnyFieldEnvelope(&["list"]),
-        ] {
-            let mut splitter = ArraySplitter::new(at);
-            let mut items = Vec::new();
-            splitter.feed(br#"{"list":[1 2]}"#, |item| items.push(item.to_owned()));
-            assert!(items.is_empty());
-            assert!(!splitter.finished());
-            assert!(splitter.envelope().is_none());
         }
     }
 
@@ -1418,7 +1295,7 @@ mod envelope_tests {
                     std::str::from_utf8(splitter.outside()).unwrap(),
                     body.replace(r#"[{"id":"a"},{"id":"b"}]"#, "[]")
                 );
-                assert!(serde_json::from_slice::<IgnoredAny>(splitter.envelope().unwrap()).is_ok());
+                assert!(serde_json::from_str::<IgnoredAny>(splitter.envelope()).is_ok());
             }
         }
         let mut root = ArraySplitter::new(ArrayAt::Envelope(&[&["data"], &[]]));
@@ -1689,33 +1566,5 @@ mod merged_stream_tests {
         splitter.feed(body.as_bytes(), |_| {});
         assert!(!splitter.finished());
         assert_eq!(splitter.outside().len(), METADATA_LIMIT);
-    }
-}
-
-#[cfg(test)]
-mod missing_list_tests {
-    use super::*;
-
-    #[test]
-    fn only_complete_bounded_missing_lists_reach_business_error_handling() {
-        for body in [r#"{"code":"40808","data":null}"#, r#"{"code":"40808"}"#] {
-            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data"]]));
-            splitter.feed(body.as_bytes(), |_| panic!("no list"));
-            assert!(!splitter.finished());
-            assert_eq!(splitter.error_envelope(), Some(body));
-        }
-        for body in [
-            r#"{"code":"40808","data":null"#.to_owned(),
-            format!(
-                r#"{{"code":"40808","data":null}}{}garbage"#,
-                " ".repeat(METADATA_LIMIT)
-            ),
-            r#"{"data":[1,]}"#.to_owned(),
-        ] {
-            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data"]]));
-            splitter.feed(body.as_bytes(), |_| {});
-            assert!(!splitter.finished());
-            assert!(splitter.error_envelope().is_none());
-        }
     }
 }

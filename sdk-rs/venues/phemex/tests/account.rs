@@ -1,11 +1,9 @@
 //! Documented PerpetualV2 envelopes and aop_p execution/position payloads.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode};
 use safe_cex_engine::{
-    Action, Command, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
 };
-mod support;
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
-use support::Engine;
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"},{"symbol":"ETHUSDC","type":"PerpetualV2","settleCurrency":"USDC","baseCurrency":"ETH","quoteCurrency":"USDC","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"result":[{"symbol":"BTCUSDT","bidRp":"69999","askRp":"70001","lastRp":"70000","markRp":"70000","indexRp":"70000","openRp":"69000","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"},{"symbol":"ETHUSDC","bidRp":"1999","askRp":"2001","lastRp":"2000","markRp":"2000","indexRp":"2000","openRp":"1900","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"}]}"#;
@@ -77,14 +75,9 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
-    let a: Vec<_> = e.drain_actions().collect();
-    let mut a = e.wait_for(a, |a| {
-        requests(a).iter().any(|r| r.url.contains("24hr/all"))
-    });
+    let mut a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
     a.extend(e.drain_actions());
-    a.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr/all")));
-    let a = e.wait_for(a, |a| requests(a).len() == 2);
     let socket = a
         .iter()
         .filter_map(|a| {
@@ -883,8 +876,7 @@ fn refresh(e: &mut Engine<PhemexPerpetuals>, at: f64) -> Vec<Action> {
             timer: timer(&actions, at),
         },
     );
-    let actions = e.drain_actions().collect();
-    e.wait_for(actions, |a| requests(a).len() == 2)
+    e.drain_actions().collect()
 }
 
 #[test]

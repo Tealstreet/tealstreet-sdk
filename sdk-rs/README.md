@@ -63,8 +63,8 @@ emits one chunk per family. Any browser or Metro bundle that includes safe-cex
 resolves all 28 family imports, so run `--families` before bundling. A family
 package is about a tenth of the combined engine's bytes and cold-load CPU
 (`docs/plans/RUST_WASM_FAMILIES.md`).
-`--venue bitunix` (or any venue name) builds that venue's family in place
-of the combined bindings, for replay gates. CI applies the 1,258,291-byte budget to
+`--venue hyperliquid` (or any venue name) builds that venue's family in place
+of the combined bindings, for replay gates. CI applies the 1.2 MB budget to
 every family package.
 ## Replay tapes
 

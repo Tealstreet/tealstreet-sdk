@@ -793,19 +793,16 @@ This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeO
 
 ## Rust engine
 
-`engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and the
-separate `lighter-robinhood` perpetuals deployment, with deployment-local hosts,
-quote currency and signing chain. Their default registries
-continue loading the TS adapters. The Rust host forwards Application ID,
-normalized API key index, integrator index (as exact decimal text),
-`extra.lighterStopSlippagePct`, remote-signer presence and the legacy provider
-selection. Explicit public-only mode remains authoritative. With no API key
-index, or with neither a local secret nor a remote signer, startup is public.
-Remote-only credentials preserve unsigned private account reads without enabling
-private socket authentication or transaction signing; a payload-only callback
-starts public. Mixed local/callback credentials retain local signing. Caller
-client order IDs are refused on every shape and across the entire batch before
-any engine command/write.
+`engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and
+`lighter-robinhood` perpetuals, with deployment-local hosts, quote currency and
+signing chain. The Rust host forwards Application ID, API key index, integrator
+index (as exact decimal text), `remoteSigner`, `extra.lighterSignerProvider`,
+and `extra.lighterStopSlippagePct`. Missing API key index, or neither a local
+secret nor `remoteSigner`, starts public-only data. A remote signer without a
+local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Remote-only native writes fail
+when the signer is unavailable. Caller client order IDs are refused on every
+shape and across the entire batch before any engine command/write.
 
 Both sockets use engine timers for handshake, idle and reconnect watchdogs.
 Private fills come exclusively from execution records, deduplicated by native

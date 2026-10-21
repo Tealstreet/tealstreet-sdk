@@ -195,11 +195,7 @@ fn live(order: &Order) -> bool {
     )
 }
 fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 1024
-        && !id
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || c == '\u{feff}')
+    !id.is_empty() && id.len() <= 1024 && !id.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 fn decimal(text: &str) -> Option<String> {
     let (whole, fraction) = text

@@ -100,7 +100,6 @@ pub enum Pending {
         rows: HashMap<String, f64>,
         initial: bool,
         single: bool,
-        repeated_bulk: bool,
     },
     Klines {
         command: CommandId,
@@ -157,7 +156,6 @@ pub struct AsterDex {
     startup: safe_cex_engine::startup::Backoff<bool>,
     interest_cursor: usize,
     interest_fallback: VecDeque<String>,
-    interest_rows: HashMap<String, f64>,
 }
 
 fn nonempty(value: Option<&str>) -> Option<&str> {
@@ -242,7 +240,6 @@ impl AsterDex {
             startup: Default::default(),
             interest_cursor: 0,
             interest_fallback: VecDeque::new(),
-            interest_rows: HashMap::new(),
         }
     }
 
@@ -340,13 +337,7 @@ impl AsterDex {
         );
     }
 
-    fn request_interest(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        initial: bool,
-        symbol: Option<&str>,
-        repeated_bulk: bool,
-    ) {
+    fn request_interest(&mut self, cx: &mut Cx<'_, Pending>, initial: bool, symbol: Option<&str>) {
         let mut path = self.path("openInterest");
         if let Some(symbol) = symbol {
             path.push_str(&format!("?symbol={symbol}"));
@@ -355,7 +346,6 @@ impl AsterDex {
             rows: HashMap::new(),
             initial,
             single: symbol.is_some(),
-            repeated_bulk,
         };
         if symbol.is_some() {
             self.get(cx, &path, pending);
@@ -370,7 +360,6 @@ impl AsterDex {
         mut rows: HashMap<String, f64>,
         initial: bool,
         single: bool,
-        repeated_bulk: bool,
         response: Option<Response<'_>>,
     ) {
         if !response.is_some_and(|response| response.status == 200) {
@@ -381,15 +370,15 @@ impl AsterDex {
         {
             collect_interest(response.body, &mut rows);
         }
+        for (symbol, value) in &rows {
+            cx.store
+                .update_ticker(symbol, |ticker| ticker.open_interest = *value);
+        }
         if initial {
-            for (symbol, value) in rows {
-                cx.store
-                    .update_ticker(&symbol, |ticker| ticker.open_interest = value);
-            }
             self.public_ready(cx);
             self.interest_timer = Some(cx.set_timer(250.0));
             return;
-        } else if rows.is_empty() && !single && !repeated_bulk {
+        } else if rows.is_empty() && !single {
             let tickers = cx.store.tickers();
             let length = tickers.len();
             let count = length.min(25);
@@ -403,20 +392,10 @@ impl AsterDex {
             if length > 0 {
                 self.interest_cursor = (self.interest_cursor + count) % length;
             }
-            self.request_interest(cx, false, None, true);
-            return;
-        } else if !single && !rows.is_empty() {
-            self.interest_fallback.clear();
         }
-        // A fallback poll publishes its collected map only after every attempt.
-        self.interest_rows.extend(rows);
         if let Some(symbol) = self.interest_fallback.pop_front() {
-            self.request_interest(cx, false, Some(&symbol), false);
+            self.request_interest(cx, false, Some(&symbol));
         } else {
-            for (symbol, value) in std::mem::take(&mut self.interest_rows) {
-                cx.store
-                    .update_ticker(&symbol, |ticker| ticker.open_interest = value);
-            }
             self.interest_timer = Some(cx.set_timer(INTEREST_MS));
         }
     }
@@ -870,14 +849,13 @@ impl Venue for AsterDex {
                 }
                 self.startup.succeeded(cx, &false);
                 cx.store.set_tickers(rows);
-                self.request_interest(cx, true, None, false);
+                self.request_interest(cx, true, None);
             }
             Pending::OpenInterest {
                 rows,
                 initial,
                 single,
-                repeated_bulk,
-            } => self.finish_interest(cx, rows, initial, single, repeated_bulk, Some(response)),
+            } => self.finish_interest(cx, rows, initial, single, Some(response)),
             Pending::Klines {
                 command,
                 rows,
@@ -995,10 +973,9 @@ impl Venue for AsterDex {
             rows,
             initial,
             single,
-            repeated_bulk,
         } = pending
         {
-            self.finish_interest(cx, rows, initial, single, repeated_bulk, Some(response));
+            self.finish_interest(cx, rows, initial, single, Some(response));
         } else {
             self.on_request_failed(cx, pending, "missing expected response list");
         }
@@ -1014,11 +991,8 @@ impl Venue for AsterDex {
             Pending::Trade(req) => self.on_trade_response(cx, req, Err(error)),
             Pending::History(req) => self.on_history_response(cx, req, Err(error)),
             Pending::OpenInterest {
-                initial,
-                single,
-                repeated_bulk,
-                ..
-            } => self.finish_interest(cx, HashMap::new(), initial, single, repeated_bulk, None),
+                initial, single, ..
+            } => self.finish_interest(cx, HashMap::new(), initial, single, None),
             Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
             Pending::ExchangeInfo { .. } => self.startup.failed(cx, true),
             Pending::Daily { .. } => self.startup.failed(cx, false),
@@ -1057,7 +1031,7 @@ impl Venue for AsterDex {
         }
         if self.interest_timer == Some(timer) {
             self.interest_timer = None;
-            self.request_interest(cx, false, None, false);
+            self.request_interest(cx, false, None);
         }
     }
 

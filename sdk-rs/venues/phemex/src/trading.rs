@@ -1027,13 +1027,6 @@ impl PhemexPerpetuals {
         None
     }
 
-    pub(crate) fn trade_request_current(&self, request: &Request) -> bool {
-        // Venue-initiated writes (no command) stay live; command writes end with their job.
-        request
-            .command
-            .is_none_or(|command| self.trading.jobs.contains_key(&command))
-    }
-
     fn trade_next(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;

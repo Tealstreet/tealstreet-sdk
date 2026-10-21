@@ -183,12 +183,7 @@ fn decode_message(bytes: &[u8]) -> std::io::Result<String> {
     let mut decoded = Vec::new();
     let mut reader: Box<dyn Read + '_> = if bytes.starts_with(&[0x1f, 0x8b]) {
         Box::new(flate2::read::GzDecoder::new(bytes))
-    } else if bytes.first() == Some(&0x78)
-        && bytes
-            .get(1)
-            .is_some_and(|b| (0x7800 + u16::from(*b)).is_multiple_of(31))
-    {
-        // A zlib header carries a checksum; plain text starting 'x' is not zlib.
+    } else if bytes.first() == Some(&0x78) {
         Box::new(flate2::read::ZlibDecoder::new(bytes))
     } else {
         Box::new(bytes)
@@ -361,7 +356,6 @@ impl Transport for NetworkTransport {
                                 let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                             }
                             Some(Ok(Message::Binary(bytes))) if binary => {
-                                if bytes.len() > MAX_DECOMPRESSED_BYTES { break 1009; }
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
@@ -555,41 +549,5 @@ mod security_tests {
             assert!(decode_message(&compressed).is_err());
         }
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
-    }
-
-    fn gzip(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    fn zlib(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    #[test]
-    fn binary_frames_decode_plain_gzip_and_zlib_utf8() {
-        let text = "{\"book\":\"€\"}";
-        for bytes in [
-            text.as_bytes().to_vec(),
-            gzip(text.as_bytes()),
-            zlib(text.as_bytes()),
-        ] {
-            assert_eq!(decode_message(&bytes).unwrap(), text);
-        }
-        // Plain text that merely starts with 'x' is not a zlib stream.
-        assert_eq!(decode_message(b"xyz").unwrap(), "xyz");
-    }
-
-    #[test]
-    fn corrupt_compressed_frames_and_invalid_utf8_are_rejected_whole() {
-        let mut corrupted = gzip(b"{\"book\":1}");
-        let crc = corrupted.len() - 8;
-        corrupted[crc] ^= 1;
-        for bytes in [corrupted, vec![0x1f, 0x8b, 0], vec![0xff], zlib(&[0xff])] {
-            assert!(decode_message(&bytes).is_err());
-        }
     }
 }

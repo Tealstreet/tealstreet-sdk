@@ -710,7 +710,7 @@ impl Venue for TxFlow {
             if cx.public_feed_policy() != PublicFeedPolicy::Direct {
                 return;
             }
-            let mut tickers = self
+            let tickers = self
                 .assets
                 .iter()
                 .map(|(symbol, asset)| {
@@ -722,7 +722,6 @@ impl Venue for TxFlow {
                     (base, *asset)
                 })
                 .collect::<Vec<_>>();
-            tickers.sort_unstable_by_key(|(_, asset)| *asset);
             for (base, asset) in tickers {
                 self.subscribe(
                     cx,
@@ -737,14 +736,13 @@ impl Venue for TxFlow {
                     },
                 );
             }
-            let mut candles = self
+            let candles = self
                 .candles
                 .keys()
                 .filter_map(|(symbol, interval)| {
                     self.assets.get(symbol).map(|asset| (*asset, *interval))
                 })
                 .collect::<Vec<_>>();
-            candles.sort_unstable();
             for (asset, interval) in candles {
                 self.subscribe(
                     cx,
@@ -782,12 +780,11 @@ impl Venue for TxFlow {
                         cx.book_changed(symbol);
                     }
                 }
-                let mut books = self
+                let books = self
                     .books
                     .keys()
                     .filter_map(|symbol| self.assets.get(symbol).copied())
                     .collect::<Vec<_>>();
-                books.sort_unstable();
                 for asset in books {
                     self.subscribe(
                         cx,

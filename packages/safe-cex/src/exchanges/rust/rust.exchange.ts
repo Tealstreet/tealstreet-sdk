@@ -170,7 +170,9 @@ const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode'
 const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
-const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^[^\s\p{Cc}\p{Cs}]{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
+const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
+  mint: () => `tealstreet-${uuid()}`,
+});
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   coinbase: coinbaseClientOrderIdRule,
   coinbasespot: coinbaseClientOrderIdRule,
@@ -229,6 +231,9 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   kucoin: patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/),
   kucoinspot: patternClientOrderIdRule('KuCoin Spot', /^[A-Za-z0-9_-]{1,40}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
+  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
+    mint: () => `ts${uuid()}`.slice(0, 36),
+  }),
   bybit: bybitClientOrderIdRule,
   bybitinverse: bybitClientOrderIdRule,
   bybitspot: bybitClientOrderIdRule,
@@ -237,9 +242,6 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,
   okxeudemo: okxClientOrderIdRule,
-  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
-    mint: () => `ts${uuid()}`.slice(0, 36),
-  }),
 };
 
 export type WasmEngineModule = {

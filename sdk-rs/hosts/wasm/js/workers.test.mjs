@@ -3,7 +3,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { deflateSync, gzipSync } from 'node:zlib';
 
 import { createEngineObject, workersTransport, WorkersWebSocket } from './workers.mjs';
 import { Frame } from './wire.mjs';
@@ -115,86 +114,6 @@ test('the transport opens client sockets with an https upgrade', async () => {
   socket.dispatch('message', { data: 'hello' });
   socket.close(1001);
   assert.deepEqual(events, ['open', 'hello', 1001]);
-});
-
-test('Worker binary gzip, zlib, ArrayBuffer and text messages precede closure', async () => {
-  const events = [];
-  workersTransport().connect('wss://example.test/public/', {
-    onOpen: () => events.push('open'),
-    onMessage: (text) => events.push(text),
-    onClose: (code) => events.push(code),
-  });
-  await until(() => events[0] === 'open');
-  const { socket } = upgrades.at(-1);
-  socket.dispatch('message', { data: new Blob([gzipSync('{"book":1}')]) });
-  socket.dispatch('message', { data: deflateSync('{"book":2}') });
-  socket.dispatch('message', { data: new TextEncoder().encode('{"book":3}').buffer });
-  socket.dispatch('message', { data: '{"book":4}' });
-  socket.close(1001);
-  socket.dispatch('error', {});
-  await until(() => events.at(-1) === 1001);
-  assert.deepEqual(events, ['open', '{"book":1}', '{"book":2}', '{"book":3}', '{"book":4}', 1001]);
-});
-
-test('disposing a Worker socket while binary decode waits suppresses pending callbacks', async () => {
-  let release;
-  let started;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const decoding = new Promise((resolve) => { started = resolve; });
-  class DelayedBlob extends Blob {
-    async arrayBuffer() { started(); await gate; return super.arrayBuffer(); }
-  }
-  const events = [];
-  const connection = workersTransport().connect('wss://example.test/public/', {
-    onOpen: () => events.push('open'),
-    onMessage: (text) => events.push(text),
-    onClose: (code) => events.push(code),
-  });
-  await until(() => events[0] === 'open');
-  const { socket } = upgrades.at(-1);
-  socket.dispatch('message', { data: new DelayedBlob([gzipSync('stale book')]) });
-  socket.dispatch('message', { data: 'stale ticker' });
-  await decoding;
-  connection.close();
-  release();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(events, ['open']);
-});
-
-test('closing before a Worker upgrade resolves closes the acquired socket without callbacks', async (t) => {
-  let resolveUpgrade;
-  const upgrading = new Promise((resolve) => { resolveUpgrade = resolve; });
-  t.mock.method(globalThis, 'fetch', () => upgrading);
-  const events = [];
-  const connection = workersTransport().connect('wss://example.test/public/', {
-    onOpen: () => events.push('open'),
-    onMessage: (text) => events.push(text),
-    onClose: (code) => events.push(code),
-  });
-  connection.close();
-  const socket = new FakeSocket();
-  let closes = 0;
-  socket.addEventListener('close', () => closes++);
-  resolveUpgrade({ webSocket: socket });
-  await until(() => closes === 1);
-  socket.dispatch('message', { data: 'too late' });
-  assert.deepEqual(events, []);
-});
-
-test('a failed Worker upgrade cannot notify a disposed connection', async (t) => {
-  let rejectUpgrade;
-  const upgrading = new Promise((_, reject) => { rejectUpgrade = reject; });
-  t.mock.method(globalThis, 'fetch', () => upgrading);
-  const events = [];
-  const connection = workersTransport().connect('wss://example.test/public/', {
-    onOpen: () => events.push('open'),
-    onMessage: (text) => events.push(text),
-    onClose: (code) => events.push(code),
-  });
-  connection.close();
-  rejectUpgrade(new Error('upgrade failed'));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(events, []);
 });
 
 test('the Durable Object runs an engine and streams frames to its clients', async () => {
@@ -420,24 +339,6 @@ test('standalone Workers reject unconfigured CORS before fetching or allocating 
   }), /Public CORS request routing is not configured/);
   assert.equal(fetch.mock.callCount(), 0);
   assert.equal(timeout.mock.callCount(), 0);
-});
-
-test('Worker raw binary frames preserve protocol bytes, controls and closure ordering', async () => {
-  const events = [];
-  workersTransport().connect('wss://example.test/sbe', {
-    binary: true,
-    onOpen: () => events.push('open'),
-    onBinary: (data) => events.push([...data]),
-    onMessage: (text) => events.push(text),
-    onClose: (code) => events.push(code),
-  });
-  await until(() => events[0] === 'open');
-  const { socket } = upgrades.at(-1);
-  socket.dispatch('message', { data: new Blob([Uint8Array.of(0x78, 0xff)]) });
-  socket.dispatch('message', { data: 'control' });
-  socket.close(1001);
-  await until(() => events.at(-1) === 1001);
-  assert.deepEqual(events, ['open', [0x78, 0xff], 'control', 1001]);
 });
 
 test('Workers upgrades fail closed without deployment auth and cannot select another account token', async () => {

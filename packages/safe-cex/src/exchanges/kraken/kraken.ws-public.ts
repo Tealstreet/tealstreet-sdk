@@ -5,19 +5,10 @@ import { v } from '../../utils/get-key';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL } from './kraken.types';
 
-const bookNumber = (value: unknown): number =>
-  typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
-
 export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
   private ohlcvHandlers: { [key: string]: Array<(c: Candle) => void> } = {};
   private orderBookHandlers: { [symbol: string]: Array<(o: OrderBook) => void> } = {};
   private orderBookCache: { [symbol: string]: { bids: Map<number, number>; asks: Map<number, number> } } = {};
-  private orderBookSequences: { [symbol: string]: number | undefined } = {};
-
-  private invalidateOrderBooks = () => {
-    this.orderBookCache = {};
-    this.orderBookSequences = {};
-  };
 
   private getTickerProductIds = () => {
     const productIds = this.parent.store.markets.map((m) => m.symbol);
@@ -36,7 +27,6 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
       this.ws = this.createWebsocket(url);
 
       const handleClose = () => {
-        this.invalidateOrderBooks();
         this.onClose();
       };
 
@@ -56,7 +46,6 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
-      this.invalidateOrderBooks();
       // Subscribe to ticker for the active products when the host supplies them.
       const product_ids = this.getTickerProductIds();
       // Kraken expects batches; keep payload size modest
@@ -245,10 +234,6 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
     return () => {
       this.orderBookHandlers[symbol] = (this.orderBookHandlers[symbol] || []).filter((cb) => cb !== callback);
-      if (this.orderBookHandlers[symbol].length === 0) {
-        delete this.orderBookCache[symbol];
-        delete this.orderBookSequences[symbol];
-      }
       this.clearFeedStatsIfIdle('book', this.orderBookHandlers);
     };
   };
@@ -264,26 +249,33 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
     this.recordMessageHandlerStats('book');
 
-    const sequence = v(msg, 'seq');
-    const previous = this.orderBookSequences[symbol];
-    if (!Number.isSafeInteger(sequence) || sequence < 0 || (previous !== undefined && sequence <= previous)) return;
-    const rawBids = v(msg, 'bids');
-    const rawAsks = v(msg, 'asks');
-    if (!Array.isArray(rawBids) || !Array.isArray(rawAsks)) return;
+    // Log the raw data to debug quantity parsing
+    const rawBids = v(msg, 'bids') || [];
+    const rawAsks = v(msg, 'asks') || [];
 
-    // Validate the complete candidate before replacing any published state.
-    const cache = { bids: new Map<number, number>(), asks: new Map<number, number>() };
-    for (const [side, levels] of [[cache.bids, rawBids], [cache.asks, rawAsks]] as const) {
-      for (const level of levels) {
-        const price = bookNumber(level?.price);
-        const quantity = bookNumber(level?.qty);
-        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity < 0) return;
-        if (quantity === 0) side.delete(price);
-        else side.set(price, quantity);
+    // Initialize or clear the cache for this symbol
+    this.orderBookCache[symbol] = {
+      bids: new Map(),
+      asks: new Map(),
+    };
+
+    // Process bids (they come as objects with price and qty)
+    for (const bid of rawBids) {
+      const price = parseFloat(bid.price);
+      const qty = parseFloat(bid.qty);
+      if (qty > 0) {
+        this.orderBookCache[symbol].bids.set(price, qty);
       }
     }
-    this.orderBookCache[symbol] = cache;
-    this.orderBookSequences[symbol] = sequence;
+
+    // Process asks
+    for (const ask of rawAsks) {
+      const price = parseFloat(ask.price);
+      const qty = parseFloat(ask.qty);
+      if (qty > 0) {
+        this.orderBookCache[symbol].asks.set(price, qty);
+      }
+    }
 
     // Emit the orderbook
     this.emitOrderBook(symbol);
@@ -300,33 +292,25 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
     this.recordMessageHandlerStats('book');
 
-    const sequence = v(msg, 'seq');
-    const previous = this.orderBookSequences[symbol];
-    const cache = this.orderBookCache[symbol];
-    if (!cache || previous === undefined || !Number.isSafeInteger(sequence) || sequence < 0 || sequence <= previous) return;
-    if (sequence !== previous + 1) {
-      delete this.orderBookSequences[symbol];
-      delete this.orderBookCache[symbol];
-      // Keep the consumer's last valid snapshot while the subscription recovers.
-      if (this.isConnected) {
-        try {
-          this.send(JSON.stringify({ event: 'unsubscribe', feed: 'book', product_ids: [symbol] }));
-          this.send(JSON.stringify({ event: 'subscribe', feed: 'book', product_ids: [symbol] }));
-        } catch (error) {
-          console.error('[Kraken WS] Failed to recover book for', symbol, error);
-        }
-      }
+    // Make sure we have a cache for this symbol
+    if (!this.orderBookCache[symbol]) {
       return;
     }
 
     const side = v(msg, 'side');
-    const price = bookNumber(v(msg, 'price'));
-    const quantity = bookNumber(v(msg, 'qty'));
-    if ((side !== 'buy' && side !== 'sell') || !Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity < 0) return;
-    const bookSide = side === 'buy' ? cache.bids : cache.asks;
-    if (quantity === 0) bookSide.delete(price);
-    else bookSide.set(price, quantity);
-    this.orderBookSequences[symbol] = sequence;
+    const price = parseFloat(v(msg, 'price'));
+    const qty = parseFloat(v(msg, 'qty'));
+
+    // Update the appropriate side
+    const bookSide = side === 'buy' ? this.orderBookCache[symbol].bids : this.orderBookCache[symbol].asks;
+
+    if (qty === 0) {
+      // Remove the price level
+      bookSide.delete(price);
+    } else {
+      // Update the price level
+      bookSide.set(price, qty);
+    }
 
     // Emit the updated orderbook
     this.emitOrderBook(symbol);
@@ -346,6 +330,7 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
     // Convert maps to sorted arrays and multiply quantities by contract size
     const bids: OrderBook['bids'] = Array.from(cache.bids.entries())
       .sort((a, b) => b[0] - a[0]) // Sort descending by price
+      .slice(0, 100) // Limit depth
       .map(([price, amount]) => ({
         price,
         amount: amount * contractSize, // Multiply by contract size
@@ -354,6 +339,7 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
 
     const asks: OrderBook['asks'] = Array.from(cache.asks.entries())
       .sort((a, b) => a[0] - b[0]) // Sort ascending by price
+      .slice(0, 100) // Limit depth
       .map(([price, amount]) => ({
         price,
         amount: amount * contractSize, // Multiply by contract size

@@ -59,9 +59,7 @@ otherwise the read key is refused with an error and reads use the trading key
 on the primary route; a later 401 on a read-key request does the same instead
 of deactivating the account. Writes and the user stream keep the trading key.
 Caller IDs are nonempty strings of at most 128 characters without whitespace
-or control characters. The SDK rejects unpaired UTF-16 surrogates before the
-engine boundary and counts well-formed Unicode code points toward the 128-character limit.
-IDs are preserved verbatim for one plain Limit/Market order.
+or control characters, preserved verbatim for one plain Limit/Market order.
 Spot edits require exact current zero-fill LIMIT decimal provenance. INTX
 replacement requires authoritative zero-fill cancellation before a new client ID
 is placed. Cancel acknowledgements mean initiation, and per-ID failures remain

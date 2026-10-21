@@ -333,13 +333,6 @@ The `fetchOHLCV` method constructs the full URL directly, bypassing the base URL
 - `feed: 'book'` -> `handleBookDelta()`: incremental update (single price level)
 - `feed: 'ohlc'` -> no-op handler (not supported by Kraken Futures)
 
-Book snapshots publish every level with contract-size scaling. A subscription must receive a
-complete snapshot before deltas; duplicate/older sequences are ignored. A sequence gap
-invalidates only that symbol's internal state and sends unsubscribe/subscribe, while consumers
-retain their last valid published snapshot until a new snapshot arrives. Reconnect and the last
-listener leaving also invalidate sequence state. Validate both snapshot sides atomically;
-malformed levels or deltas never replace valid state or advance its cursor.
-
 **Ticker Updates** (`kraken.ws-public.ts`):
 
 - Extracts fields using multiple fallback key names (e.g., `bid` or `best_bid`)

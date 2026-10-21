@@ -6,7 +6,7 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 import { AxiosHeaders } from 'axios';
 
 import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { bindSocketMessages } from '@tealstreet/safe-cex-wasm/host';
+import { socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
@@ -619,7 +619,6 @@ export const createEngineTransport = (
       if (connection?.kind !== 'relay')
         return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
       let socket: { send(text: string): void; close(): void } | undefined;
-      let disposeMessages: (() => void) | undefined;
       let closed = false;
       let opened = false;
       const pending: string[] = [];
@@ -644,29 +643,32 @@ export const createEngineTransport = (
               handlers.onOpen();
             }
           });
-          disposeMessages = bindSocketMessages({
-            addEventListener: (type, listener) => {
-              relay.addEventListener(type, (event) => listener(event as MessageEvent | CloseEvent));
+          const decode = socketMessages(
+            (data) => {
+              if (!closed) {
+                if (typeof data === 'string') receive(data);
+                else receiveBinary(data);
+              }
             },
-            close: () => relay.close(),
-          }, {
-            binary: handlers.binary,
-            onMessage: (text) => { if (!closed) receive(text); },
-            onBinary: (data) => { if (!closed) receiveBinary(data); },
-            onError: () => {
+            () => {
               if (!closed) {
                 closed = true;
                 pending.length = 0;
-                // The shared decoder closes the socket after reporting failure.
+                // Browser close() forbids protocol error codes.
+                relay.close();
                 handlers.onClose(1007);
               }
             },
-            onClose: (code) => {
-              if (!closed) {
-                closed = true;
-                handlers.onClose(code);
-              }
-            },
+            handlers.binary,
+          );
+          relay.addEventListener('message', (event) => {
+            if (!closed) decode((event as MessageEvent).data);
+          });
+          relay.addEventListener('close', (event) => {
+            if (!closed) {
+              closed = true;
+              handlers.onClose((event as CloseEvent).code);
+            }
           });
         })
         .catch(() => {
@@ -691,7 +693,6 @@ export const createEngineTransport = (
         close: () => {
           closed = true;
           pending.length = 0;
-          disposeMessages?.();
           socket?.close();
         },
       };

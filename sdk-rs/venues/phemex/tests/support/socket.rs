@@ -1,5 +1,4 @@
-use crate::support::Engine;
-use safe_cex_engine::{Action, Event, SocketId, TimerId, Venue};
+use safe_cex_engine::{Action, Engine, Event, SocketId, TimerId, Venue};
 
 fn scheduled(actions: &[Action], now: f64, low: f64, high: f64) -> (TimerId, f64) {
     let timers: Vec<_> = actions

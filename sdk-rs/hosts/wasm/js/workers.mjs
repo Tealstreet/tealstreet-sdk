@@ -9,7 +9,7 @@
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
 // Credentials arrive with 'start' and live only in the object's memory.
-import { EngineHost, bindSocketMessages } from './host.mjs';
+import { EngineHost, socketMessages } from './host.mjs';
 
 /** Header-capable WebSocket constructor for HOW/relay in Workers. */
 export class WorkersWebSocket extends EventTarget {
@@ -122,18 +122,18 @@ export const workersTransport = () => ({
       closed = true;
       onClose(code);
     };
-    const disposeMessages = bindSocketMessages(socket, {
+    const receive = socketMessages(
+      (data) => { if (!closed) { if (typeof data === 'string') onMessage(data); else onBinary?.(data); } },
+      () => { if (!closed) { finish(1007); socket.close(); } },
       binary,
-      onBinary: (data) => { if (!closed) onBinary?.(data); },
-      onMessage: (text) => { if (!closed) onMessage(text); },
-      onClose: finish,
-    });
+    );
     socket.onopen = () => { if (!closed) onOpen(); };
+    socket.onmessage = (event) => { if (!closed) receive(event.data); };
+    socket.onclose = (event) => finish(event.code);
     return {
       send: (text) => { if (!closed) socket.send(text); },
       close: () => {
         closed = true;
-        disposeMessages();
         socket.close();
       },
     };

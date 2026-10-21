@@ -147,8 +147,7 @@ describe('MEXC incremental futures depth', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(books).toHaveLength(1);
     expect(books[0].bids[0].price).toBe(103);
-    expect(books[0].bids.find((row) => row.price === 101)?.amount).toBe(99 * 0.0001);
-    depth(15, [[104, 20, 1]]);
+    depth(14, [[104, 20, 1]]);
     expect(books.at(-1)?.bids[0].price).toBe(104);
   });
 
@@ -167,109 +166,6 @@ describe('MEXC incremental futures depth', () => {
     await settle();
     expect(books).toHaveLength(1);
     expect(books[0].bids[0].price).toBe(100);
-  });
-
-  it('bridges a lagging REST anchor with same-socket updates received during retry backoff', async () => {
-    const { exchange, ws, books, listener, depth } = setup();
-    const first = deferred<Snapshot>();
-    const second = deferred<Snapshot>();
-    const fetch = vi.spyOn(exchange, 'fetchOrderBook')
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
-    ws.listenOrderBook('BTCUSDT', listener);
-    for (let version = 40; version <= 45; version++) depth(version, [[100, version]]);
-    first.resolve(snapshot('10', [[100, 0.001], [99, 0.002]]));
-    await settle();
-    expect(books).toHaveLength(0);
-    for (let version = 46; version <= 55; version++) {
-      const bids = [[100, version]];
-      if (version === 51) bids.push([99, 0]);
-      if (version === 53) bids.push([98, 100]);
-      depth(version, bids);
-    }
-    await vi.advanceTimersByTimeAsync(499);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(books).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    depth(56, [[100, 56]]);
-    second.resolve(snapshot('49', [[100, 0.0049], [99, 0.002]]));
-    await settle();
-    expect(books).toHaveLength(1);
-    expect(books[0].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 56 * 0.0001], [98, 0.01]]);
-    expect(books[0].asks[0].amount).toBe(0.002);
-    depth(56, [[100, 999]]);
-    expect(books).toHaveLength(1);
-    expect(books[0].bids[0].amount).toBe(56 * 0.0001);
-  });
-
-  it('keeps a genuine hole unpublished until a later anchor bridges the complete retained buffer', async () => {
-    const { exchange, ws, books, listener, depth } = setup();
-    const first = deferred<Snapshot>();
-    const second = deferred<Snapshot>();
-    const third = deferred<Snapshot>();
-    const fetch = vi.spyOn(exchange, 'fetchOrderBook')
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise)
-      .mockReturnValueOnce(third.promise);
-    ws.listenOrderBook('BTCUSDT', listener);
-    depth(11, [[100, 999]]);
-    depth(13, [[100, 13]]);
-    first.resolve(snapshot('10'));
-    await settle();
-    expect(books).toHaveLength(0);
-    depth(14, [[99, 20]]);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    second.resolve(snapshot('11'));
-    await settle();
-    expect(books).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(999);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(fetch).toHaveBeenCalledTimes(3);
-    third.resolve(snapshot('12', [[100, 0.0012]]));
-    await settle();
-    expect(books).toHaveLength(1);
-    expect(books[0].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 13 * 0.0001], [99, 0.002]]);
-  });
-
-  it('arms the depth retry before a throwing listener sees the cleared book', async () => {
-    const { exchange, ws, depth } = setup();
-    const fetch = vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue(snapshot('10'));
-    ws.listenOrderBook('BTCUSDT', (book) => {
-      if (!book.bids.length) throw new Error('consumer assumes a best bid');
-    });
-    await settle();
-    try {
-      depth(12, [[100, 12]]);
-    } catch {
-      // The listener's error may surface here; recovery must not depend on it.
-    }
-    await vi.advanceTimersByTimeAsync(500);
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('retains the live gap-triggering update and resumes after its immediate predecessor anchor', async () => {
-    const { exchange, ws, books, listener, depth } = setup();
-    const retry = deferred<Snapshot>();
-    const fetch = vi.spyOn(exchange, 'fetchOrderBook')
-      .mockResolvedValueOnce(snapshot('10'))
-      .mockReturnValueOnce(retry.promise);
-    ws.listenOrderBook('BTCUSDT', listener);
-    await settle();
-    expect(books).toHaveLength(1);
-    depth(12, [[100, 12]]);
-    depth(13, [[99, 20]]);
-    // The lost sequence clears the visible book once; no partial book is published.
-    expect(books).toHaveLength(2);
-    expect(books[1]).toEqual({ bids: [], asks: [] });
-    await vi.advanceTimersByTimeAsync(500);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    retry.resolve(snapshot('11'));
-    await settle();
-    expect(books).toHaveLength(3);
-    expect(books[2].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 12 * 0.0001], [99, 0.002]]);
   });
 
   it('invalidates in-flight snapshots on close and resubscribes before the reconnect snapshot', async () => {
@@ -335,9 +231,8 @@ describe('MEXC incremental futures depth', () => {
       ws.listenOrderBook('BTCUSDT', listener);
       await settle();
       depth(11, [[100, volume, 1]]);
-      expect(books).toHaveLength(2);
+      expect(books).toHaveLength(1);
       expect(books[0].bids[0].amount).toBe(0.001);
-      expect(books[1]).toEqual({ bids: [], asks: [] });
       await vi.advanceTimersByTimeAsync(500);
       expect(fetch).toHaveBeenCalledTimes(2);
     },

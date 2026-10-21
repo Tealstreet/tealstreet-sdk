@@ -375,7 +375,7 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     let lastSequence = 0;
     let bufferedUpdates: Data[] = [];
 
-    let orderBook: OrderBook = { bids: [], asks: [] };
+    const orderBook: OrderBook = { bids: [], asks: [] };
     const apiSymbol = this.parent.toApiSymbol(symbol);
     const topic = `orderBook_${symbol}`;
     const recoverFromGap = (message: Data) => {
@@ -389,20 +389,16 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     };
 
     const applySnapshot = (snapshot: Record<string, any>) => {
-      // Recovery may still fail to bridge buffered deltas. Keep this candidate
-      // separate from the last book retained by consumers and trailing throttles.
-      orderBook = {
-        bids: (snapshot.bids || []).map(([price, amount]: [string | number, string | number]) => ({
-          price: parseFloat(`${price}`),
-          amount: parseFloat(`${amount}`),
-          total: 0,
-        })),
-        asks: (snapshot.asks || []).map(([price, amount]: [string | number, string | number]) => ({
-          price: parseFloat(`${price}`),
-          amount: parseFloat(`${amount}`),
-          total: 0,
-        })),
-      };
+      orderBook.bids = (snapshot.bids || []).map(([price, amount]: [string | number, string | number]) => ({
+        price: parseFloat(`${price}`),
+        amount: parseFloat(`${amount}`),
+        total: 0,
+      }));
+      orderBook.asks = (snapshot.asks || []).map(([price, amount]: [string | number, string | number]) => ({
+        price: parseFloat(`${price}`),
+        amount: parseFloat(`${amount}`),
+        total: 0,
+      }));
       lastSequence = parseInt(snapshot.sequence || snapshot.sn || '0', 10) || lastSequence;
     };
 

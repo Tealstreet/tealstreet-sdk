@@ -678,9 +678,6 @@ regular endpoint does not claim that coverage. Both requests are attempted even
 when one fails. Local regular and algo rows are marked canceled independently
 only after their corresponding request succeeds, and any partial failure is
 re-thrown so the caller cannot mistake a partial cancel for full success.
-Only IDs captured when cancellation begins may be marked canceled. A fill
-completed before the command or racing its acknowledgement remains closed;
-later placements and unrelated symbols retain their current state.
 
 **Portfolio Margin** (`binancepm.exchange.ts:626-673`):
 
@@ -688,13 +685,6 @@ later placements and unrelated symbols retain their current state.
 - Conditional orders (SL/TP/trailing): `DELETE /papi/v1/um/conditional/order` with `newClientStrategyId`.
 - Regular orders: `DELETE /papi/v1/um/order` with `origClientOrderId`.
 - No `-2011` silent error handling.
-
-PM symbol-wide cancellation attempts both `/papi/v1/um/allOpenOrders` and
-`/papi/v1/um/conditional/allOpenOrders`, even if one family fails. Each successful
-request marks only its own captured family canceled; failed families remain live
-and the method rejects. A racing fill stays closed, and orders added after the
-operation began are not marked canceled from an earlier request's acknowledgement.
-The inherited `cancelAllOrders` calls this complete pair for each known symbol.
 
 **Spot** (`binancespot.exchange.ts:380-406`):
 

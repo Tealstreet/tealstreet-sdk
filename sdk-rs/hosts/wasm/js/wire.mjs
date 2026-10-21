@@ -473,53 +473,37 @@ export class Frame {
   balance() {
     const section = this.first(SECTION.BALANCE);
     if (!section) return undefined;
-    const { buffer } = this;
-    const end = section.offset + section.length;
-    const requireBytes = (at, bytes) => {
-      if (at < section.offset || bytes < 0 || at + bytes > end || end > buffer.byteLength)
-        throw new RangeError('Malformed balance section');
-    };
-    requireBytes(section.offset, 32);
-    const [used, free, total, upnl] = new Float64Array(buffer, section.offset, 4);
-    if (section.length === 32) return { used, free, total, upnl };
-    requireBytes(section.offset + 32, 4);
-    const count = this.view.getUint32(section.offset + 32, true);
-    requireBytes(section.offset + 36, count * 4);
-    const refs = new Uint32Array(buffer, section.offset + 36, count);
-    const at = Math.ceil((section.offset + 36 + count * 4) / 8) * 8;
-    requireBytes(at, count * 16);
-    const amounts = new Float64Array(buffer, at, count);
-    const notionals = new Float64Array(buffer, at + count * 8, count);
+    requireEnd(section, section.offset + 32);
+    const [used, free, total, upnl] = new Float64Array(this.buffer, section.offset, 4);
+    if (section.length <= 32) return { used, free, total, upnl };
+    requireEnd(section, section.offset + 36);
+    const count = new Uint32Array(this.buffer, section.offset + 32, 1)[0];
+    requireEnd(section, align8(section.offset + 36 + count * 4) + count * 16);
+    const refs = new Uint32Array(this.buffer, section.offset + 36, count);
+    const at = align8(section.offset + 36 + count * 4);
+    const amounts = new Float64Array(this.buffer, at, count);
+    const notionals = new Float64Array(this.buffer, at + count * 8, count);
     const coins = {};
     for (let i = 0; i < count; i++) {
       const base = requiredString(this, refs[i]);
       Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
     }
     const tail = at + count * 16;
-    if (tail === end) return { used, free, total, upnl, coins };
-    requireBytes(tail, 4);
-    const n = this.view.getUint32(tail, true);
-    requireBytes(tail + 4, n * 4);
-    const names = new Uint32Array(buffer, tail + 4, n);
-    const data = Math.ceil((tail + 4 + n * 4) / 8) * 8;
-    requireBytes(data, n * 32);
-    const currencyEnd = data + n * 32;
-    let flags = 0;
-    if (currencyEnd !== end) {
-      requireBytes(currencyEnd, 8);
-      flags = this.view.getUint32(currencyEnd + 4, true);
-      if (currencyEnd + 8 !== end || this.view.getUint32(currencyEnd, true) !== 0x314d4342
-        || (flags & ~1) || ((flags & 1) && count !== 0))
-        throw new RangeError('Malformed balance currency mode footer');
-    }
-    const held = new Float64Array(buffer, data, n);
-    const available = new Float64Array(buffer, data + n * 8, n);
-    const totals = new Float64Array(buffer, data + n * 16, n);
-    const unrealized = new Float64Array(buffer, data + n * 24, n);
+    if (tail >= section.offset + section.length) return { used, free, total, upnl, coins };
+    requireEnd(section, tail + 8);
+    const n = new Uint32Array(this.buffer, tail, 1)[0];
+    requireEnd(section, align8(tail + 8 + n * 4) + n * 32);
+    const flags = new Uint32Array(this.buffer, tail + 4, 1)[0];
+    const names = new Uint32Array(this.buffer, tail + 8, n);
+    const data = align8(tail + 8 + n * 4);
+    const totals = new Float64Array(this.buffer, data, n);
+    const available = new Float64Array(this.buffer, data + n * 8, n);
+    const held = new Float64Array(this.buffer, data + n * 16, n);
+    const unrealized = new Float64Array(this.buffer, data + n * 24, n);
     const currencies = {};
     for (let i = 0; i < n; i++) {
       Object.defineProperty(currencies, requiredString(this, names[i]), {
-        value: { used: held[i], free: available[i], total: totals[i], upnl: unrealized[i] },
+        value: { total: totals[i], free: available[i], used: held[i], upnl: unrealized[i] },
         enumerable: true, configurable: true,
       });
     }

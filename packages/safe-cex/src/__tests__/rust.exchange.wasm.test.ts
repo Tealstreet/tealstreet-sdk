@@ -683,28 +683,6 @@ describe('RustEngineExchange', () => {
     expect(tape.requests).toEqual([]);
   });
 
-  it.each(['bitget', 'bitgetusdc'] as const)('honors %s caller IDs through inherited SDK helpers', async (venue) => {
-    const store = new DefaultStore();
-    store.update({ markets: [{
-      id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
-      precision: { amount: 0.001, price: 0.1 },
-      limits: { amount: { min: 0.001, max: 120 }, leverage: { min: 1, max: 100 } },
-    }] });
-    exchange = new RustEngineExchange(venue, { key: '', secret: '' }, store);
-    const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['native-order']);
-    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 60000 };
-    expect(exchange.mintClientOrderId(opts)).toMatch(/^[.A-Z:/a-z0-9_-]{1,32}$/);
-    const clientOrderId = '.AZ:/az09_-';
-    await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId })).resolves.toEqual({
-      orderIds: ['native-order'], clientOrderId,
-    });
-    expect(place).toHaveBeenCalledWith({ ...opts, clientOrderId });
-    for (const invalid of ['', 'has space', 'é', 'a'.repeat(33)]) {
-      await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow('clientOrderId');
-    }
-    expect(place).toHaveBeenCalledTimes(1);
-  });
-
   it('keeps all three real Bitget public feeds direct on their first connection', async () => {
     const opened: Array<{ url: string; channel?: string; context?: { feed: string; recover: boolean } }> = [];
     const raw: Transport = {

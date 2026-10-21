@@ -329,201 +329,6 @@ fn aggregate_and_raw_events_preserve_partial_fields_and_funding_zero() {
 }
 
 #[test]
-fn empty_poll_rechecks_bulk_before_single_fallback_and_advances_the_slice() {
-    let mut h = Harness::ready();
-    h.engine.store_mut().set_tickers(
-        (0..26)
-            .map(|index| safe_cex_engine::model::Ticker {
-                id: format!("T{index}"),
-                symbol: format!("T{index}"),
-                open_interest: 10.0,
-                ..Default::default()
-            })
-            .collect(),
-    );
-    h.advance(250.0);
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1102,"msg":"symbol required"}"#,
-    );
-    assert!(
-        h.requests.iter().any(|r| r.url.ends_with("/openInterest")),
-        "fallback must recheck the bulk endpoint first"
-    );
-    assert!(
-        !h.requests
-            .iter()
-            .any(|r| r.url.contains("openInterest?symbol="))
-    );
-    h.reply(
-        "/openInterest",
-        200,
-        r#"{"symbol":"T25","openInterest":"55"}"#,
-    );
-    assert_eq!(
-        h.engine.store().ticker("T25").unwrap().open_interest,
-        55.0,
-        "second bulk can return symbols outside the selected slice"
-    );
-    assert_eq!(h.engine.store().ticker("T0").unwrap().open_interest, 10.0);
-    h.advance(15_000.0);
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1102,"msg":"symbol required"}"#,
-    );
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1102,"msg":"symbol required"}"#,
-    );
-    assert!(
-        h.requests
-            .iter()
-            .any(|r| r.url.ends_with("openInterest?symbol=T25")),
-        "slice cursor advances even when the second bulk succeeds"
-    );
-}
-
-#[test]
-fn fallback_interest_keeps_old_values_until_every_symbol_attempt_finishes() {
-    let mut h = Harness::ready();
-    h.engine.store_mut().set_tickers(
-        [("BTCUSDT", 1.0), ("ETHUSDT", 2.0), ("SOLUSDT", 3.0)]
-            .into_iter()
-            .map(|(symbol, open_interest)| safe_cex_engine::model::Ticker {
-                id: symbol.into(),
-                symbol: symbol.into(),
-                open_interest,
-                ..Default::default()
-            })
-            .collect(),
-    );
-    h.advance(250.0);
-    for _ in 0..2 {
-        h.reply(
-            "/openInterest",
-            400,
-            r#"{"code":-1102,"msg":"symbol required"}"#,
-        );
-    }
-    h.reply(
-        "/openInterest",
-        200,
-        r#"{"symbol":"BTCUSDT","openInterest":"5"}"#,
-    );
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        1.0
-    );
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1121,"msg":"unknown symbol"}"#,
-    );
-    h.reply(
-        "/openInterest",
-        500,
-        r#"{"symbol":"SOLUSDT","openInterest":"0"}"#,
-    );
-    h.advance(1000.0);
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        1.0
-    );
-    assert_eq!(
-        h.engine.store().ticker("ETHUSDT").unwrap().open_interest,
-        2.0
-    );
-    h.reply(
-        "/openInterest",
-        200,
-        r#"{"symbol":"SOLUSDT","openInterest":"9"}"#,
-    );
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        5.0
-    );
-    assert_eq!(
-        h.engine.store().ticker("ETHUSDT").unwrap().open_interest,
-        2.0,
-        "a failed symbol preserves its previous value"
-    );
-    assert_eq!(
-        h.engine.store().ticker("SOLUSDT").unwrap().open_interest,
-        9.0
-    );
-    h.advance(14_999.0);
-    assert!(
-        !h.requests
-            .iter()
-            .any(|request| request.url.contains("/openInterest"))
-    );
-    h.advance(1.0);
-    assert!(
-        h.requests
-            .iter()
-            .any(|request| request.url.ends_with("/openInterest")),
-        "next poll is fifteen seconds after the whole batch completes"
-    );
-}
-
-#[test]
-fn malformed_interest_stream_does_not_publish_prefix_rows_and_retries_cleanly() {
-    let mut h = Harness::ready();
-    h.advance(250.0);
-    let index = h
-        .requests
-        .iter()
-        .position(|request| request.url.ends_with("/openInterest"))
-        .unwrap();
-    let request = h.requests.remove(index);
-    h.event(Event::HttpStart {
-        request: request.id,
-        status: 200,
-        headers: "",
-    });
-    h.event(Event::HttpChunk {
-        request: request.id,
-        data: br#"[{"symbol":"BTCUSDT","openInterest":"999"}]garbage"#,
-    });
-    h.event(Event::HttpEnd {
-        request: request.id,
-    });
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        123.45
-    );
-    assert!(
-        !h.requests
-            .iter()
-            .any(|request| request.url.contains("/openInterest"))
-    );
-    h.advance(1000.0);
-    h.reply("/openInterest", 200, "[]");
-    assert!(
-        h.requests
-            .iter()
-            .any(|request| request.url.ends_with("/openInterest")),
-        "a clean empty retry must take the fallback path, not retain the failed prefix"
-    );
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        123.45
-    );
-    h.reply(
-        "/openInterest",
-        200,
-        r#"{"data":{"symbol":"BTCUSDT","openInterest":"7"}}"#,
-    );
-    assert_eq!(
-        h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
-        7.0
-    );
-}
-
-#[test]
 fn single_and_wrapped_interest_payloads_and_failure_retain_values() {
     let mut h = Harness::ready();
     h.advance(15_000.0);
@@ -558,16 +363,6 @@ fn single_and_wrapped_interest_payloads_and_failure_retain_values() {
         "/openInterest",
         500,
         r#"[{"symbol":"BTCUSDT","openInterest":"0"}]"#,
-    );
-    assert!(
-        h.requests
-            .iter()
-            .any(|request| request.url.ends_with("/openInterest"))
-    );
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1102,"msg":"symbol required"}"#,
     );
     assert!(
         h.requests
@@ -695,16 +490,6 @@ fn failed_optional_interest_does_not_block_public_start() {
     assert!(
         h.requests
             .iter()
-            .any(|request| request.url.ends_with("/openInterest"))
-    );
-    h.reply(
-        "/openInterest",
-        400,
-        r#"{"code":-1102,"msg":"symbol required"}"#,
-    );
-    assert!(
-        h.requests
-            .iter()
             .any(|request| request.url.ends_with("openInterest?symbol=BTCUSDT"))
     );
 }
@@ -761,13 +546,6 @@ fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
     assert!(h.requests.iter().any(|r| r.url.contains("/account")));
     assert!(!h.engine.store().loaded().tickers);
     h.reply("/leverageBracket", 200, "[]");
-    // The account reads started first share the paced request window.
-    while !h.requests.iter().any(|r| r.url.contains("/ticker/24hr")) {
-        h.timers.sort_by(|a, b| a.1.total_cmp(&b.1));
-        let (timer, at) = h.timers.remove(0);
-        h.now = h.now.max(at);
-        h.event(Event::TimerFired { timer });
-    }
     h.reply("/ticker/24hr", 503, "unavailable");
     let (timer, at) = h
         .timers
@@ -777,12 +555,6 @@ fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
         .unwrap();
     h.now = at;
     h.event(Event::TimerFired { timer });
-    while !h.requests.iter().any(|r| r.url.contains("/ticker/24hr")) {
-        h.timers.sort_by(|a, b| a.1.total_cmp(&b.1));
-        let (timer, at) = h.timers.remove(0);
-        h.now = h.now.max(at);
-        h.event(Event::TimerFired { timer });
-    }
     h.reply("/ticker/24hr", 200, &DAILY.replacen("[", "[{},", 1));
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].last, 4.000002);
@@ -930,8 +702,8 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert_eq!(
-        h.fired, 3,
-        "only the bootstrap public request-budget window and the unanswered interest and clock refreshes fire"
+        h.fired, 2,
+        "only the unanswered interest and clock refreshes fire"
     );
 }
 

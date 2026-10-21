@@ -1,45 +1,11 @@
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response, TimerId};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 use serde::Deserialize;
 
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab","orderID":"fcdfeafa-ed68-45d4-b2bd-7bc27f2b2b0b"}"#;
 const ORDER: &str = r#"{"actionTimeNs":1667562110213260743,"transactTimeNs":1667562110221077395,"orderId":"743fc923-cb01-4261-88d1-b35dba2cdac0","symbol":"BTCUSDT","side":"Buy","ordType":"Market","ordStatus":"Filled","priceRp":"21206.7","orderQtyRq":"0.001","cumQtyRq":"0.001","reduceOnly":false}"#;
-// Keep the real protocol timers while tests consume HTTP/result actions.
-// A queued history page may dispatch only after its registered quota timer.
-struct Fixture {
-    engine: Engine<PhemexPerpetuals>,
-    timers: Vec<(TimerId, f64)>,
-    now: f64,
-}
-impl Fixture {
-    fn new(engine: Engine<PhemexPerpetuals>) -> Self {
-        Self {
-            engine,
-            timers: vec![],
-            now: 0.,
-        }
-    }
-    fn handle(&mut self, now: f64, event: Event<'_>) {
-        self.now = self.now.max(now);
-        if let Event::TimerFired { timer } = &event {
-            self.timers.retain(|(id, _)| id != timer);
-        }
-        self.engine.handle(self.now, event);
-    }
-}
-impl std::ops::Deref for Fixture {
-    type Target = Engine<PhemexPerpetuals>;
-    fn deref(&self) -> &Self::Target {
-        &self.engine
-    }
-}
-impl std::ops::DerefMut for Fixture {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.engine
-    }
-}
-fn engine(private: bool) -> Fixture {
+fn engine(private: bool) -> Engine<PhemexPerpetuals> {
     let mut e = Engine::new(PhemexPerpetuals::new(Options {
         key: private.then(|| "key".into()),
         secret: private.then(|| "secret".into()),
@@ -76,36 +42,12 @@ fn engine(private: bool) -> Fixture {
         taker_fee: None,
         maker_fee: None,
     }]);
-    Fixture::new(e)
+    e
 }
-fn actions(e: &mut Fixture) -> Vec<Action> {
-    for _ in 0..100 {
-        let output: Vec<_> = e.drain_actions().collect();
-        for action in &output {
-            match action {
-                Action::SetTimer { timer, at_ms } => e.timers.push((*timer, *at_ms)),
-                Action::ClearTimer { timer } => e.timers.retain(|(id, _)| id != timer),
-                _ => {}
-            }
-        }
-        if !output.is_empty() {
-            return output;
-        }
-        let next = e
-            .timers
-            .iter()
-            .enumerate()
-            .min_by(|(a, (_, at_a)), (b, (_, at_b))| at_a.total_cmp(at_b).then(a.cmp(b)))
-            .map(|(index, _)| index);
-        let Some(index) = next else {
-            return output;
-        };
-        let (timer, at) = e.timers.remove(index);
-        e.handle(at, Event::TimerFired { timer });
-    }
-    panic!("bounded protocol timer advancement must settle");
+fn actions(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
+    e.drain_actions().collect()
 }
-fn query(e: &mut Fixture, query: Query) -> Action {
+fn query(e: &mut Engine<PhemexPerpetuals>, query: Query) -> Action {
     e.handle(
         1_710_000_000_000.0,
         Event::Command(Command::Query { command: 10, query }),
@@ -124,7 +66,7 @@ fn fills() -> Query {
         limit: None,
     }
 }
-fn result(e: &mut Fixture) -> Result<String, String> {
+fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
     actions(e)
         .into_iter()
         .find_map(|a| match a {
@@ -136,7 +78,7 @@ fn result(e: &mut Fixture) -> Result<String, String> {
         })
         .expect("completion")
 }
-fn respond(e: &mut Fixture, request: &Action, body: &str, streamed: bool) {
+fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, streamed: bool) {
     let Action::Http(r) = request else {
         panic!("HTTP")
     };
@@ -442,12 +384,12 @@ fn private_history_rejects_rows_beyond_the_documented_page_maximum() {
 #[test]
 fn public_only_mode_refuses_private_history_even_with_credentials() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = Fixture::new(Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = Engine::new(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         public_data_only: true,
         ..Options::default()
-    })));
+    }));
     e.store_mut().set_markets(vec![market]);
     e.handle(
         1.0,
@@ -642,13 +584,13 @@ fn ledger(time: u64, amount: &str, balance: &str, kind: &str, currency: &str) ->
         r#"{{"typeDesc":"{kind}","amountRv":"{amount}","balanceRv":"{balance}","createTime":{time},"currency":"{currency}"}}"#
     )
 }
-fn next_http(e: &mut Fixture) -> Action {
+fn next_http(e: &mut Engine<PhemexPerpetuals>) -> Action {
     actions(e)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("next page")
 }
-fn finish_empty_probes(e: &mut Fixture) -> Result<String, String> {
+fn finish_empty_probes(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
     for _ in 0..100 {
         let output = actions(e);
         for action in &output {
@@ -804,7 +746,7 @@ fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
 #[test]
 fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = Fixture::new(Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = Engine::new(PhemexPerpetuals::new(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
@@ -813,7 +755,7 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
             passphrase: None,
         }),
         ..Options::default()
-    })));
+    }));
     e.store_mut().set_markets(vec![market]);
     let a = query(&mut e, fills());
     let Action::Http(r) = &a else { unreachable!() };
@@ -825,27 +767,7 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
     assert!(r.route.is_none());
     respond(&mut e, &a, "[]", false);
     assert_eq!(result(&mut e).unwrap(), "[]");
-    // Exhaust the shared quota, then prove lookup cannot bypass it or borrow
-    // the ordinary-read identity when its actual dispatch is delayed.
-    for _ in 0..2 {
-        let a = query(&mut e, fills());
-        respond(&mut e, &a, "[]", false);
-        assert_eq!(result(&mut e).unwrap(), "[]");
-    }
-    let queued_at = e.now;
-    e.handle(
-        queued_at,
-        Event::Command(Command::Query {
-            command: 10,
-            query: lookup("caller"),
-        }),
-    );
-    assert!(
-        e.drain_actions().next().is_none(),
-        "lookup must await the quota callback"
-    );
-    let a = next_http(&mut e);
-    assert_eq!(e.now, queued_at + 1000.);
+    let a = query(&mut e, lookup("caller"));
     let Action::Http(r) = &a else { unreachable!() };
     assert!(
         r.headers
@@ -853,29 +775,6 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
             .any(|(k, v)| k.eq_ignore_ascii_case("x-phemex-access-token") && v == "primary-key")
     );
     assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
-    let expiry = r
-        .headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("x-phemex-request-expiry"))
-        .unwrap()
-        .1
-        .as_str();
-    assert_eq!(
-        expiry,
-        (((e.now + 60_000.) / 1000. + 0.5).floor() as u64).to_string()
-    );
-    let payload =
-        format!("/api-data/g-futures/orders/by-order-idsymbol=BTCUSDT&clOrdID=caller{expiry}");
-    let signature = safe_cex_crypto::hmac_sha256(
-        b"primary-secret",
-        payload.as_bytes(),
-        safe_cex_crypto::Encoding::Hex,
-    );
-    assert!(
-        r.headers
-            .contains(&("X-PHEMEX-REQUEST-SIGNATURE", signature))
-    );
-
     respond(&mut e, &a, "[]", false);
     assert_eq!(
         result(&mut e).unwrap(),

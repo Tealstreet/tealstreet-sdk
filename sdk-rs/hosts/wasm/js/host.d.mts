@@ -256,11 +256,6 @@ export class EngineHost {
 
 export function nativeTransport(): Transport;
 
-/** Bind binary/text message decoding and ordered closure to a runtime socket. */
-export function bindSocketMessages(socket: {
-  addEventListener(type: string, listener: (event: { data?: unknown; code?: number }) => void): void;
-  close(): void;
-}, handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; onMessage(text: string): void; onClose(code?: number): void; onError?(error: unknown): void }): () => void;
 /** Ordered text and gzip/deflate binary WebSocket message decoding. */
 export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
 

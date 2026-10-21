@@ -125,7 +125,6 @@ impl Venue for Coinbase {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        cx.store.preserve_unspecified_collateral();
         if self.credentials.is_some() {
             self.private_start(cx);
         } else {

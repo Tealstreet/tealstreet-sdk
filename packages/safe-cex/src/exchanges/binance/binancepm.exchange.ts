@@ -803,23 +803,12 @@ export class BinancePMExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
-      const conditionalTypes = [OrderType.StopLoss, OrderType.TakeProfit, OrderType.TrailingStopLoss];
       const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
-      const regularOrders = symbolOrders.filter((order) => !conditionalTypes.includes(order.type));
-      const conditionalOrders = symbolOrders.filter((order) => conditionalTypes.includes(order.type));
-      const [regularResult, conditionalResult] = await Promise.allSettled([
-        this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } }),
-        this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_CONDITIONAL_ORDERS, { params: { symbol } }),
-      ]);
+      await this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
+        params: { symbol },
+      });
 
-      if (regularResult.status === 'fulfilled') {
-        markBinanceOrdersCanceled(this.store, regularOrders);
-      }
-      if (conditionalResult.status === 'fulfilled') {
-        markBinanceOrdersCanceled(this.store, conditionalOrders);
-      }
-      if (regularResult.status === 'rejected') throw regularResult.reason;
-      if (conditionalResult.status === 'rejected') throw conditionalResult.reason;
+      markBinanceOrdersCanceled(this.store, symbolOrders);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;

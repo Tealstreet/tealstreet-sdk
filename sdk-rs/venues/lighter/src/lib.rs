@@ -17,20 +17,6 @@ use safe_cex_engine::{
 use std::collections::{HashMap, HashSet};
 use wire::*;
 
-// Match the TS snapshot's safe-math.add without quantizing prices or sizes to
-// market metadata. REST snapshots contain individual orders at repeated prices.
-fn add_snapshot_amount(left: f64, right: f64) -> f64 {
-    let sum = left + right;
-    let decimals = safe_cex_engine::num::decimals(left).max(safe_cex_engine::num::decimals(right));
-    let factor = 10_f64.powi(decimals as i32);
-    let scaled = sum * factor;
-    if scaled.is_finite() {
-        scaled.round() / factor
-    } else {
-        sum
-    }
-}
-
 fn revalue_position(position: &mut Position, price: f64) {
     if position.contracts != 0.0 {
         let sign = if position.side == PositionSide::Long {
@@ -559,14 +545,14 @@ impl Lighter {
                     .map(Level::pair)
                     .filter(|(p, n)| *p > 0.0 && *n > 0.0)
                     .collect();
-                pairs.sort_by(|a, b| match side {
+                pairs.sort_unstable_by(|a, b| match side {
                     BookSide::Bids => b.0.total_cmp(&a.0),
                     BookSide::Asks => a.0.total_cmp(&b.0),
                 });
                 let mut count = 0;
                 for i in 0..pairs.len() {
                     if count > 0 && pairs[count - 1].0 == pairs[i].0 {
-                        pairs[count - 1].1 = add_snapshot_amount(pairs[count - 1].1, pairs[i].1);
+                        pairs[count - 1].1 += pairs[i].1;
                     } else {
                         pairs[count] = pairs[i];
                         count += 1;
