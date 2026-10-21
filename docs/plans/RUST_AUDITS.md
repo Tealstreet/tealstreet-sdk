@@ -544,6 +544,9 @@ Remaining resilience and completeness findings are independent of request parity
   position under the documented conditional-order contract.
 
 ### Hyperliquid
+- ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
+  actual query command before completion. A native 2,000-row regression checks
+  retained financial rows, Warn ownership/order and Error-only delivery.
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
@@ -961,16 +964,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
-  ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
-  actual query command before completion. A native 2,000-row regression checks
-  retained financial rows, Warn ownership/order and Error-only delivery.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
