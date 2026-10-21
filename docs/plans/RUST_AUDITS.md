@@ -599,6 +599,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+- ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
+  and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
+  their headers; reset and Retry-After hints extend all waiting category retries
+  without changing attempt counts, bounded by the shared one-hour cap. HTTP403
+  keeps its ten-minute floor; success headers do not manufacture a pause.
 - ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
@@ -882,8 +887,12 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   (tickers/markets retry through shared discovery backoff since #1342). Reverified: mode and plan-list failures
   retry every 2 s and a failed plan read publishes no normal-only list; a refused
   key (602/401/402/406/70x or HTTP 401/403) now fails startup instead of retrying.
-- Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
-  refused by the adapter.
+- Low: ~~every plan order marked reduce-only~~ (explicit native flag or closing
+  side; dedicated position stops stay reduce-only); ~~`fetchOrderBook` refused
+  by the adapter~~ (independent public depth snapshot with captured contract
+  scaling, cumulative base totals and exact version string).
+  **RISKY — retained:** signed fill fee. Taking absolute value without verified
+  debit/rebate conventions can turn rebates into charges; keep native sign.
 
 ### Cross-venue: rows and subscriptions
 - One unmappable row discarding a whole snapshot/frame recurs (Bitget, Phemex,
