@@ -307,12 +307,16 @@ impl KrakenSpot {
         self.private_connect(cx);
         self.balance_read(cx, None);
         self.orders_read(cx);
-        self.account.poll = Some(cx.set_timer(10_000.));
+        self.account.poll = Some(cx.set_poll_timer(10_000.));
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket =
-            Some(cx.connect_channel("wss://ws-auth.kraken.com/v2", SocketChannel::Private));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://ws-auth.kraken.com/v2")
+                    .channel(SocketChannel::Private),
+            ),
+        );
     }
     fn spot_settings(&self, cx: &mut Cx<'_, Pending>) {
         let settings: Vec<_> = cx
@@ -815,7 +819,7 @@ impl KrakenSpot {
             return true;
         }
         if self.account.poll == Some(timer) {
-            self.account.poll = Some(cx.set_timer(10_000.));
+            self.account.poll = Some(cx.set_poll_timer(10_000.));
             self.balance_read(cx, None);
             self.orders_read(cx);
             return true;

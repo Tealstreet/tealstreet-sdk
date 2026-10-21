@@ -520,7 +520,13 @@ impl Account {
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
-            self.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Private));
+            self.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(self.ws())
+                        .channel(SocketChannel::Private)
+                        .binary(),
+                ),
+            );
             self.supervisor.connecting(cx);
         }
     }
@@ -985,7 +991,7 @@ impl Account {
     fn positions(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
         if self.positions_busy {
             if cycle && self.poll.is_none() {
-                self.poll = Some(cx.set_timer(POLL_MS));
+                self.poll = Some(cx.set_poll_timer(POLL_MS));
             }
             return;
         }
@@ -1253,7 +1259,7 @@ impl Account {
                 if boot {
                     self.positions(cx, true);
                 } else if self.poll.is_none() {
-                    self.poll = Some(cx.set_timer(POLL_MS));
+                    self.poll = Some(cx.set_poll_timer(POLL_MS));
                 }
             }
             Request::Positions {
@@ -1402,7 +1408,7 @@ impl Account {
                 if boot {
                     self.positions(cx, true);
                 } else if self.poll.is_none() {
-                    self.poll = Some(cx.set_timer(POLL_MS));
+                    self.poll = Some(cx.set_poll_timer(POLL_MS));
                 }
             }
             Request::Positions { cycle, .. } => {

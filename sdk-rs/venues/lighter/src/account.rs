@@ -699,7 +699,7 @@ impl Lighter {
         }
         self.refresh_account(cx);
         self.refresh_orders(cx);
-        self.account.sync = Some(cx.set_timer(2_000.0));
+        self.account.sync = Some(cx.set_poll_timer(2_000.0));
     }
 
     pub(crate) fn account_auth(&self, now: f64) -> Result<String, String> {
@@ -819,8 +819,12 @@ impl Lighter {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.open = false;
         self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket =
-            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Private));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws_url())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
     }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
@@ -944,7 +948,7 @@ impl Lighter {
             Tick::Handled => return true,
         }
         if self.account.sync == Some(timer) {
-            self.account.sync = Some(cx.set_timer(2_000.0));
+            self.account.sync = Some(cx.set_poll_timer(2_000.0));
             self.refresh_account(cx);
             self.refresh_orders(cx);
             self.refresh_limits(cx);

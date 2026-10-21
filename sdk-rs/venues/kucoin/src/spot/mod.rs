@@ -987,7 +987,7 @@ impl Venue for KucoinSpot {
                 if self.credentials.is_some() {
                     self.balance(cx);
                     self.orders(cx);
-                    self.poll = Some(cx.set_timer(5000.0));
+                    self.poll = Some(cx.set_poll_timer(5000.0));
                 } else {
                     cx.store.set_orders(vec![]);
                     cx.store.set_balance(Balance::default());
@@ -1044,14 +1044,13 @@ impl Venue for KucoinSpot {
                             cx.now as u64,
                             channel,
                         );
-                        c.socket = Some(cx.connect_channel(
-                            url,
+                        c.socket = Some(cx.connect(safe_cex_engine::SocketSpec::new(url).channel(
                             if channel == 1 {
                                 SocketChannel::Private
                             } else {
                                 SocketChannel::Public
                             },
-                        ));
+                        )));
                     }
                     _ => {
                         cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
@@ -1377,7 +1376,7 @@ impl Venue for KucoinSpot {
         } else if self.poll == Some(timer) {
             self.orders(cx);
             self.balance(cx);
-            self.poll = Some(cx.set_timer(5000.0));
+            self.poll = Some(cx.set_poll_timer(5000.0));
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

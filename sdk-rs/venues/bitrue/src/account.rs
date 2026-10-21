@@ -530,7 +530,7 @@ impl Bitrue {
             .map(|m| m.symbol.clone())
             .collect();
         self.refresh_orders(cx, vec![]);
-        self.account.tick = Some(cx.set_timer(2_000.0));
+        self.account.tick = Some(cx.set_poll_timer(2_000.0));
     }
     fn acquire_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.listen_pending {
@@ -827,7 +827,7 @@ impl Bitrue {
                 );
             }
         } else if self.account.tick == Some(timer) {
-            self.account.tick = Some(cx.set_timer(2_000.0));
+            self.account.tick = Some(cx.set_poll_timer(2_000.0));
             self.refresh_account(cx);
         } else if self.account.fast == Some(timer) {
             self.account.fast = None;
@@ -1722,10 +1722,14 @@ impl Bitrue {
                         return;
                     }
                     self.account.listen_key = Some(key.to_owned());
-                    self.account.socket = Some(cx.connect_channel(
-                        format!("{PRIVATE_URL}?listenKey={key}"),
-                        SocketChannel::Private,
-                    ));
+                    self.account.socket = Some(
+                        cx.connect(
+                            safe_cex_engine::SocketSpec::new(format!(
+                                "{PRIVATE_URL}?listenKey={key}"
+                            ))
+                            .channel(SocketChannel::Private),
+                        ),
+                    );
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
                 } else {
                     self.listen_failed(cx, None, true);

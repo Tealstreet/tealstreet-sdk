@@ -199,6 +199,21 @@ allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
 
+## Rust socket health
+
+Engine venues own their sockets and reconnect policy; the wasm host only
+observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
+private) open/first-frame/close state, at one property write per frame.
+`RustEngineExchange` exposes one `RustSocketHandle` per channel through the
+`BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
+`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
+changes and every 5 s, never through the TS watchdog. A private socket is healthy
+for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
+`auth.rejected` events raise `authFailureStreak`; a private stream delivering
+again resets it.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native
@@ -367,6 +382,15 @@ part of the venue contract. Never turn a transport/auth/rate-limit failure into
 documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
+
+The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
+for typed engine errors (`classifiedError`), and
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
+specific kinds (auth, rate limit, venue unavailable, network/timeout) win over
+text; catch-all kinds (`rejected`, `invalidInput`, `internal`, `unsupported`)
+only replace the `unknown` fallback, because text patterns know venue auth codes
+the engine leaves generic. Hosts must pass `opts.classified` from their `'error'`
+listener into `processMessage` for this to apply.
 
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
@@ -1107,6 +1131,19 @@ number.
 The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
+
+Every Rust SDK account sends `setPollScale` before native startup and when the
+multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
+over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
+(Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
+cadences rather than replacing them with the metadata tick. The resolved tick also
+travels as `ceiling`, so a server multiplier or the auth-backoff cap bounds the
+slowed cadence as before unless a venue's native cadence is already slower. Effective option
+changes are checked at the existing store flush cadence. Infinity is the explicit
+scale `null`; venue constructor options do not carry a second polling policy. Unchanged values are suppressed, failed delivery stays
+eligible for retry, and disposal removes the multiplier listener. These controls
+govern periodic reconciliation, not socket supervision or explicit reads. Base
+auth-streak propagation alone does not prove classified native auth feedback.
 
 ## Debugging exchange REST traffic
 

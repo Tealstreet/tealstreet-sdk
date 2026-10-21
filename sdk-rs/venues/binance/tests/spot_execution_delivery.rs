@@ -618,3 +618,41 @@ fn one_unmappable_spot_order_row_keeps_its_stored_copy_while_valid_peers_commit(
         .collect();
     assert_eq!(ids, ["a"]);
 }
+
+#[test]
+fn a_rejected_row_keeps_only_a_stored_order_on_its_own_symbol() {
+    let order = |symbol: &str, client: &str, native: u64, kind: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","orderId":{native},"clientOrderId":"{client}","price":"9000","origQty":"7","executedQty":"0","type":"{kind}","side":"BUY","timeInForce":"GTC"}}"#
+        )
+    };
+    let mut h = ready(&format!(
+        "[{},{}]",
+        order("BTCUSDT", "a", 10, "LIMIT"),
+        order("ETHUSDT", "x", 20, "LIMIT")
+    ));
+    assert_eq!(h.engine.store().order("x").unwrap().symbol, "ETHUSDT");
+    h.message(
+        "ws-api/v3",
+        &event((97, "BTCUSDT", "poke97"), "NEW", "NEW", "0", "0", None),
+    );
+    h.advance(10_000.0);
+    // A BTCUSDT row reusing client id x says nothing about the ETHUSDT order x.
+    h.respond(
+        "/api/v3/openOrders",
+        200,
+        &format!(
+            "[{},{}]",
+            order("BTCUSDT", "a", 10, "LIMIT"),
+            order("BTCUSDT", "x", 30, "FUTURE_KIND")
+        ),
+    );
+    let ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["a"]);
+}

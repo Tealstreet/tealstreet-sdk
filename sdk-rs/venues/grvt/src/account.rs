@@ -873,15 +873,15 @@ impl Grvt {
             "wss://trades.grvt.io/ws"
         };
         let socket = if self.options.session_proxy {
-            cx.connect_channel(url, SocketChannel::Private)
+            cx.connect(safe_cex_engine::SocketSpec::new(url).channel(SocketChannel::Private))
         } else {
-            cx.connect_with_headers_channel(
-                url,
-                vec![
-                    ("Cookie", format!("rm=true; gravity={}", session.cookie)),
-                    ("X-Grvt-Account-Id", session.account_id.clone()),
-                ],
-                SocketChannel::Private,
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .headers(vec![
+                        ("Cookie", format!("rm=true; gravity={}", session.cookie)),
+                        ("X-Grvt-Account-Id", session.account_id.clone()),
+                    ])
+                    .channel(SocketChannel::Private),
             )
         };
         self.account.socket = Some(socket);
@@ -1479,7 +1479,7 @@ impl Grvt {
                     self.sync_balance_upnl(cx);
                 }
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions {
@@ -1829,7 +1829,7 @@ impl Grvt {
                 cx.store.set_balance(cx.store.balance().clone());
                 self.start_private_account(cx);
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions { .. } => {
