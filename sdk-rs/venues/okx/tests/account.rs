@@ -777,3 +777,19 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
             .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 3002.0))
     );
 }
+
+#[test]
+fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
+    for kind in ["mmp", "mmp_and_post_only", "elp"] {
+        let (mut e, _, _, pending) = startup();
+        complete(
+            &mut e,
+            pending,
+            &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+        );
+        let o = &e.store().orders()[0];
+        assert_eq!(o.id, "123", "{kind}");
+        assert_eq!(o.filled, 0.01, "{kind}");
+        assert_eq!(o.client_order_id.as_deref(), Some("caller123"), "{kind}");
+    }
+}

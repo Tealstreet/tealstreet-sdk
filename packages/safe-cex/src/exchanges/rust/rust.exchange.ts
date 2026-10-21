@@ -136,6 +136,7 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
   'mexc',
   'woo',
   'bingx',
+  'bitunix',
   'bybit',
   'bybitinverse',
   'bybitspot',
@@ -259,6 +260,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be 1-40 characters with no uppercase letters',
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
+  bitunix: patternClientOrderIdRule('Bitunix', /^\S+$/),
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   grvt: {
     label: 'GRVT',
