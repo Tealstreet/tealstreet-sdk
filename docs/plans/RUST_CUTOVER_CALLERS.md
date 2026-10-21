@@ -126,6 +126,8 @@ tealstreet-next edits, shipped with the cutover (listed in [tealstreet-next call
 3. `callMethodInWorkerFireAndForget.ts:3-7` also accepts `code === 'COMMAND_TIMEOUT'`.
 4. Root `CLAUDE.md:662` names `isBaseCapabilityFallback` as the brand check; point it at `exchange.capabilities`.
 
+Owner item, one-off at cutover: `historical_data` already holds BloFin order rows that TS wrote in contract units. Rust writes base units, so the table would mix both. Backfill BloFin order rows written before the cutover date by **multiplying** `amount`/`filled` by the instrument's `contractValue` (base = contracts × contractValue, e.g. 1000 × 0.001 = 1 BTC). The owner runs it; there is no SQL in this repo.
+
 Deployment order: exchange-server before web (B4 forwarding, `fetchEngineCapabilities`); once #1388's events are emitted, safe-cex-server with the new notice validator before any venue emits Info+ events (an older validator closes the session on `type: "event"`).
 
 Not blockers but required edits are listed per area below.
