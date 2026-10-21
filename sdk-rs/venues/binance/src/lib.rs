@@ -1464,7 +1464,13 @@ impl Venue for BinanceFutures {
                             && matches!(&*m.margin_asset, "USDT" | "USDC")
                     }
                 {
-                    markets.push(market_from_wire(&m, self.options.variant));
+                    let market = market_from_wire(&m, self.options.variant);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Pending::Daily => {

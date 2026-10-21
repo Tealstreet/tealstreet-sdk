@@ -306,6 +306,15 @@ pub struct Precision {
     pub price: f64,
 }
 
+impl Precision {
+    /// Orders round to these steps; a market without two positive finite steps is malformed.
+    pub fn is_tradable(&self) -> bool {
+        [self.amount, self.price]
+            .iter()
+            .all(|step| step.is_finite() && *step > 0.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Limits {
     pub amount: MinMax,

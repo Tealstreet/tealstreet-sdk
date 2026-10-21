@@ -1223,3 +1223,27 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         read = h.take(MODE);
     }
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let markets = PARTIAL_MARKETS.replace(
+        r#"{"symbol":"ETH-USDT","asset":"ETH"}"#,
+        r#"{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":400,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100}"#,
+    );
+    let mut h = with_markets(&markets);
+    assert!(h.engine.store().market("ETHUSDT").is_none());
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    h.fire_at(3000.0);
+    let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
+    h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
+}
