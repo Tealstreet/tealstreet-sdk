@@ -685,6 +685,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   PartiallyFilledCanceled, inverse units, failed position read zeroing, create
   network errors, live candle volume units.
 
+- ~~A leverage ACK can be overwritten by an older in-flight positions read~~:
+  acknowledged writes (including native not-modified ACKs) advance the existing
+  positions revision and coalesce fresh read metadata. Regression proves the
+  20x→10x stale overwrite, fresh repair and refused-write admission; no writes
+  are resent.
+
 ### BloFin
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
