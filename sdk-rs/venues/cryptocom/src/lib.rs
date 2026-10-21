@@ -1,5 +1,6 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
 mod account;
+mod depth_query;
 mod history;
 mod identity;
 pub mod sign;
@@ -39,6 +40,9 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    BookQuery {
+        command: CommandId,
+    },
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -434,6 +438,7 @@ impl Venue for Cryptocom {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
+            order_book_query: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -551,7 +556,7 @@ impl Venue for Cryptocom {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Trade(_) | Pending::Identity(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
                 rows,
@@ -618,6 +623,10 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::BookQuery { command } = pending {
+            self.book_query_response(cx, command, response);
+            return;
+        }
         if let Pending::Identity(request) = pending {
             self.identity_response(cx, request, response);
             return;
@@ -655,7 +664,7 @@ impl Venue for Cryptocom {
             return;
         }
         match pending {
-            Pending::Trade(_) | Pending::Identity(_) => unreachable!(),
+            Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => unreachable!(),
             Pending::History(request) => self.history_response(cx, request),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
@@ -753,6 +762,10 @@ impl Venue for Cryptocom {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::BookQuery { command } => cx.fail(
+                command,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
@@ -815,6 +828,21 @@ impl Venue for Cryptocom {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchOrderBook {
+                command, symbol, ..
+            } => {
+                cx.request(
+                    Method::Get,
+                    format!(
+                        "{}/public/get-book?instrument_name={}&depth=50",
+                        self.rest,
+                        encode(&symbol)
+                    ),
+                    vec![],
+                    None,
+                    Pending::BookQuery { command },
+                );
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let state = self
                     .books

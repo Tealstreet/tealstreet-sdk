@@ -69,7 +69,10 @@ not a deployed-runtime or npm-publication claim.
   ~~Backpack REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
   snapshot query, native price IDs/order/zero totals and a standalone JSON decoder;
   malformed snapshots/refusals reject without mutating subscription books.
-  **Still SDK-owned:** REST `fetchOrderBook` for Crypto.com/GRVT/Paradex/WEEX;
+  ~~Crypto.com REST `fetchOrderBook` parity~~ now uses unsigned live/UAT GET
+  with fixed depth50 and a request-owned typed first-book snapshot; raw IDs,
+  order and zero totals survive without touching streaming books.
+  **Still SDK-owned:** REST `fetchOrderBook` for GRVT/Paradex/WEEX;
   Hyperliquid `scheduleCancel`.
   ~~Typed GRVT builder rejection~~ now preserves definitive code/reason/caps
   through the engine, host and worker/hosted command replies; failed checks stay
@@ -98,9 +101,14 @@ not a deployed-runtime or npm-publication claim.
 - ~~Combined WASM has no budget; combined versus family layout undecided.~~
   #1393 selects families for browser/Workers and combined for Node/MCP. CI
   enforces 1,343,488 B family / 14,155,776 B combined ceilings; #1644/#1656/
-  #1661 recover size without raising them. **Still open:** actual browser
-  cold-start measurement. Existing fresh-process metrics measure Node load,
-  not browser startup.
+  #1661 recover size without raising them. ~~Actual browser cold-start
+  measurement is missing.~~ [The Chrome worker measurement](RUST_BROWSER_COLD_START.md)
+  loads the production family loader for all 28 families plus a combined-web
+  diagnostic, with three fresh process/profile samples each. Separate CI runs
+  on landing pushes and manual dispatch only; missing assets/errors/incomplete
+  samples fail, with no timing threshold pending several landing baselines.
+  Loopback module readiness is not device/network or account-startup evidence;
+  existing fresh-process metrics still describe Node load separately.
 - Replay gates still execute TS venues and frozen references. ~~Drop
   `__tests__/reference`.~~ **Owner decision:** keep executable TS references as
   the CPU/memory oracle through cutover; no venue or reference deletion until
