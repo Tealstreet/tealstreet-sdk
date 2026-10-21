@@ -469,3 +469,14 @@ tests validate the aliases and explicit unsupported decoding. The ApeX standalon
 secret guard is included. No engine, native, JS/Workers transport or crypto
 primitive changes arrive with this landing. Independent review and fresh final
 gates/CI remain required; their proof is posted on PR #1320.
+
+### Port-review lows revalidation plan (Codex, 2026-10-21)
+
+1. Recheck order-row isolation, leverage-zero config admission and closed-position
+   UPnL against current native source and existing deterministic regressions.
+2. Strike stale findings precisely, without claiming a dedicated zero-config test
+   where only source plus adjacent invalid-config regressions exist.
+3. Retain explicit zero TP/SL refusal and strict financial-history errors as
+   intentional safeguards. Docs-only scope unless a real safe gap is found.
+4. Run the relevant existing focused regressions, independent review and docs CI;
+   merge under the exact revert guard and report the result.
