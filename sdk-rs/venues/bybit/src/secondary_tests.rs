@@ -77,8 +77,9 @@ fn invalid_secondary_identity_stops_startup_before_io() {
     opts.read_credentials.as_mut().unwrap().secret.clear();
     let mut engine = Engine::new(BybitLinear::new(opts));
     engine.start(1700000000000.0);
-    assert!(!engine.drain_actions().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-    )));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
 }

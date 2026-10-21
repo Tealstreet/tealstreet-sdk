@@ -772,10 +772,15 @@ impl Account {
                     return;
                 };
                 self.key = Some(key.into());
-                self.socket = Some(cx.connect_channel(
-                    format!("{}?listenKey={key}", crate::paths::PRIVATE_WS),
-                    safe_cex_engine::SocketChannel::Private,
-                ));
+                self.socket = Some(
+                    cx.connect(
+                        safe_cex_engine::SocketSpec::new(format!(
+                            "{}?listenKey={key}",
+                            crate::paths::PRIVATE_WS
+                        ))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                    ),
+                );
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {

@@ -87,3 +87,51 @@ fn wholly_malformed_required_trading_catalogue_retries_and_never_replaces_prior_
         assert!(h.engine.store().market("BTCUSDT").is_some());
     }
 }
+
+fn reply_with_headers(h: &mut Harness, path: &str, status: u16, headers: &str) {
+    let request = h.take(path).id;
+    h.event(Event::HttpResponse {
+        request,
+        response: safe_cex_engine::Response {
+            status,
+            headers,
+            body: "",
+        },
+    });
+}
+
+/// No retry of `path` until `wait_ms` has passed, then exactly on time.
+fn assert_retry_waits(h: &mut Harness, path: &str, wait_ms: f64) {
+    h.advance(wait_ms - 1.0);
+    assert!(!h.has_request(path), "{path} retried inside the ban window");
+    h.advance(1.0);
+    assert!(h.has_request(path), "{path} retried once the window passed");
+}
+
+#[test]
+fn catalogue_rate_limit_retry_waits_for_retry_after() {
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.respond("status=PreLaunch", 200, PRELAUNCH);
+    reply_with_headers(
+        &mut h,
+        "/v5/market/instruments-info",
+        429,
+        "Retry-After: 120",
+    );
+    assert_retry_waits(&mut h, "/v5/market/instruments-info", 120_000.0);
+}
+
+#[test]
+fn ticker_ip_ban_retry_waits_ten_minutes() {
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.respond("status=PreLaunch", 200, PRELAUNCH);
+    h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
+    reply_with_headers(&mut h, "/v5/market/tickers", 403, "");
+    assert_retry_waits(&mut h, "/v5/market/tickers", 600_000.0);
+}

@@ -1287,8 +1287,12 @@ impl Orderly {
         self.account.authenticated = false;
         self.account.socket.open = false;
         self.account.socket.supervisor.connecting(cx);
-        self.account.socket.socket =
-            Some(cx.connect_channel(self.private_url(), safe_cex_engine::SocketChannel::Private));
+        self.account.socket.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.private_url())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) || self.account.socket.open {

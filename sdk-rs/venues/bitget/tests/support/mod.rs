@@ -89,12 +89,6 @@ impl Harness {
                     url,
                     context,
                     ..
-                }
-                | Action::WsConnectWithHeaders {
-                    socket,
-                    url,
-                    context,
-                    ..
                 } => {
                     self.socket_contexts.push((socket, url.clone(), context));
                     self.sockets.push((socket, url))

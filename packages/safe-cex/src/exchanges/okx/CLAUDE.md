@@ -1195,7 +1195,8 @@ cross `leverage-info` for one symbol (flat symbols have no position row to
 carry it). Account config is guarded by an in-flight flag. Until the first
 config read succeeds, any failure (429, 5xx, transport, non-JSON, malformed or
 unknown-code envelope) retries through `startup::Backoff` (1 s doubling to 30 s,
-forever). Only documented key refusals end startup with one `StartupFailed`:
+forever); a 418/429 waits at least its `Retry-After`, else 10 s (the discovery
+default), before the retry. Only documented key refusals end startup with one `StartupFailed`:
 REST 50101/50103/50104/50105/50111/50114/50119 (`AuthInvalid`), 50100/50110/50120
 (`AuthPermission`), and 50113 after one re-signed resend; timestamp codes
 50102/50112 stay transient. Before the account is ready, a private/business

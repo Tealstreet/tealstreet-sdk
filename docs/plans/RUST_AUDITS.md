@@ -694,10 +694,14 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
   `bybit/src/trading.rs:422`)~~ (unknown ids fail explicitly, RUST_UNKNOWN_CANCEL;
   a cancel or amend naming an acknowledged placement waits in the engine until
-  the store has it, `engine/src/placement_acks.rs`); ~~`setLeverage` drops side (see Bitget)~~; a wasm
-  panic freezes the account silently — no containment in `host.mjs:131,175`;
-  `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
-  `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
+  the store has it, `engine/src/placement_acks.rs`); ~~`setLeverage` drops side (see Bitget)~~; ~~a wasm
+  panic freezes the account silently — no containment in `host.mjs:131,175`~~
+  (a trap disposes the host, settles pending commands with unknown write
+  outcomes and rejects with `ENGINE_DEAD`, `kind: 'internal'`);
+  ~~`fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
+  `PublicExchangeFactory` caches it (`rust.exchange.ts:856`)~~ (reads start the
+  engine and wait for native data, #1375; the factory throws on an empty list;
+  the engine store never applies an empty catalogue and warns instead); book/candle
   ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
   (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex

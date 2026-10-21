@@ -486,7 +486,9 @@ impl MexcFutures {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Public),
+        ));
     }
     // The account already started when markets loaded, independent of tickers.
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
