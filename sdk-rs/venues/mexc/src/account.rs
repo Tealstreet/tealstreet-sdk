@@ -823,9 +823,7 @@ impl MexcFutures {
             amount,
             filled,
             remaining: (amount - filled).max(0.0),
-            reduce_only: raw.reduce_only
-                || scope != Scope::Regular
-                || matches!(raw.side, 2.0 | 4.0),
+            reduce_only: raw.reduce_only || scope == Scope::Stop || matches!(raw.side, 2.0 | 4.0),
             close: None,
             client_order_id: None,
             time_in_force: Some(match raw.order_type {
