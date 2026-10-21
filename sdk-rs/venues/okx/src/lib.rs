@@ -397,6 +397,9 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if channel != PUBLIC && self.account.startup_rejected {
+            return;
+        }
         // Suppressed public feeds get a placeholder socket that never opens.
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
@@ -739,6 +742,11 @@ impl Venue for Okx {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
@@ -771,6 +779,9 @@ impl Venue for Okx {
             return;
         };
         if message.event == "error" {
+            if channel != PUBLIC && self.login_rejected(cx, channel, message.code, message.msg) {
+                return;
+            }
             if channel != PUBLIC && !self.connections[channel].authenticated {
                 cx.close(socket);
                 self.on_close(cx, socket, 1008);
@@ -1062,6 +1073,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(account::Request::Config { .. }) = &pending
+            && self.config_rejected(cx, response.body)
+        {
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
