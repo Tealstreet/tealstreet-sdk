@@ -5,16 +5,18 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Precision, PredictionMarket, Ticker,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -29,7 +31,7 @@ const SOCKETS: [&str; 2] = [
     "wss://ws-subscriptions-clob.polymarket.com/ws/user",
 ];
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PolymarketOptions {
     pub api_key: Option<String>,
@@ -40,12 +42,30 @@ pub struct PolymarketOptions {
     pub funder_address: Option<String>,
     pub market_slugs: Option<Vec<String>>,
 }
-#[derive(Clone, Debug, Default)]
+safe_cex_crypto::redacted_debug!(PolymarketOptions);
+impl safe_cex_crypto::secrets::EraseSecrets for PolymarketOptions {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.api_key);
+        safe_cex_crypto::secrets::erase(&mut self.api_secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_passphrase);
+    }
+}
+#[derive(Clone, Default)]
 pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub polymarket: Option<PolymarketOptions>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        if let Some(options) = self.polymarket.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(options);
+        }
+    }
+}
+
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
@@ -105,7 +125,7 @@ struct CandleSubscription {
     last: f64,
 }
 pub struct Polymarket {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
     pub(crate) credentials: Option<sign::Credentials>,
@@ -149,6 +169,7 @@ fn tick_supported(tick: f64) -> bool {
 }
 impl Polymarket {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let address = options
             .key
             .as_deref()
@@ -199,8 +220,9 @@ impl Polymarket {
                 || slugs.iter().any(|s| s.trim().is_empty())
                 || slugs.iter().collect::<HashSet<_>>().len() != slugs.len()
             {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::CONFIG_INVALID,
                     "Polymarket marketSlugs must contain1..100 unique nonempty slugs",
                 );
                 return;
@@ -226,7 +248,7 @@ impl Polymarket {
         );
     }
     fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         self.public_retry.failed(cx, None);
     }
     /// Whether an unlisted owned token could belong to a skipped catalogue row.
@@ -234,6 +256,13 @@ impl Polymarket {
         self.skipped_slugs.contains(slug)
             || self.skipped_slugs.contains("unknown")
             || (slug.is_empty() && !self.skipped_slugs.is_empty())
+    }
+    /// Every catalogue and midpoint seed read has succeeded and none awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        self.public_retry.idle()
+            && self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty()
     }
     fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
         let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
@@ -326,16 +355,17 @@ impl Polymarket {
         if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
-        c.socket = Some(cx.connect_feed(
-            SOCKETS[index],
-            if index == 0 {
-                SocketChannel::Public
-            } else {
-                SocketChannel::Private
-            },
-            if index == 0 { "market" } else { "user" },
-            true,
-        ));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(SOCKETS[index])
+                    .channel(if index == 0 {
+                        SocketChannel::Public
+                    } else {
+                        SocketChannel::Private
+                    })
+                    .feed(if index == 0 { "market" } else { "user" }, true),
+            ),
+        );
     }
     fn subscription(&self, cx: &mut Cx<'_, Pending>, ids: Vec<String>, operation: Option<&str>) {
         if ids.is_empty() {
@@ -381,8 +411,9 @@ impl Polymarket {
             }
         } else if cx.store.loaded().markets {
             self.books.remove(&symbol);
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
                 format!("Unknown Polymarket symbol: {symbol}"),
             );
         }
@@ -625,9 +656,9 @@ impl Polymarket {
             }
             Err(e) => {
                 if let Some(command) = command {
-                    cx.done(command, Err(e));
+                    cx.fail(command, e);
                 } else {
-                    cx.log(LogLevel::Error, e);
+                    cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e);
                 }
             }
         }
@@ -748,8 +779,9 @@ impl Venue for Polymarket {
                 skipped,
             } => {
                 if !skipped.is_empty() {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!(
                             "Skipped {} malformed Polymarket market rows: {}",
                             skipped.len(),
@@ -792,7 +824,11 @@ impl Venue for Polymarket {
                     return;
                 }
                 if rows.is_empty() {
-                    cx.log(LogLevel::Warning, "No supported Polymarket market rows");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "No supported Polymarket market rows",
+                    );
                     self.public_retry.failed(cx, None);
                     return;
                 }
@@ -888,8 +924,9 @@ impl Venue for Polymarket {
                 // CLOB omits tokens without a book: an omitted token is unseeded, not a
                 // failed batch, even when every token is omitted. Only rejected rows retry.
                 if rejected {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Incomplete Polymarket midpoint rows; preserving prior quotes",
                     );
                     self.midpoint_failed.insert(offset);
@@ -913,7 +950,7 @@ impl Venue for Polymarket {
             } => {
                 if invalid {
                     if let Some(c) = command {
-                        cx.done(c, Err("Invalid Polymarket price history".into()));
+                        cx.fail(c, "Invalid Polymarket price history");
                     }
                     return;
                 }
@@ -934,7 +971,14 @@ impl Venue for Polymarket {
                     rows.drain(..rows.len() - limit);
                 }
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     for row in rows {
                         if row.timestamp > sub.last {
@@ -989,6 +1033,12 @@ impl Venue for Polymarket {
                     return;
                 }
                 let tick = gm.order_price_min_tick_size.map_or(0.01, |n| n.0);
+                // Precision holds the tick's decimal count, so the tick itself is checked.
+                if !tick.is_finite() || tick <= 0.0 {
+                    skipped.push(gm.slug.to_string());
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                }
                 for (id, outcome) in ids.into_iter().zip(outcomes) {
                     if id.is_empty()
                         || !id.bytes().all(|b| b.is_ascii_digit())
@@ -1079,14 +1129,18 @@ impl Venue for Polymarket {
             | Pending::Candles {
                 command: Some(c), ..
             } => {
-                cx.done(c, Err(error.into()));
+                cx.fail(c, error);
                 return;
             }
             Pending::Markets { .. } => Some(None),
             Pending::Midpoints { offset } => {
                 self.midpoint_inflight.remove(&offset);
                 self.midpoint_failed.insert(offset);
-                cx.log(LogLevel::Warning, "Polymarket midpoint read failed");
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "Polymarket midpoint read failed",
+                );
                 self.public_retry.failed(cx, Some(offset));
                 self.advance_midpoints(cx, offset);
                 self.flush_midpoints(cx);
@@ -1094,12 +1148,13 @@ impl Venue for Polymarket {
             }
             _ => None,
         };
-        cx.log(
+        cx.notice(
             if retry.is_some() {
-                LogLevel::Warning
+                Level::Warn
             } else {
-                LogLevel::Error
+                Level::Error
             },
+            code::REQUEST_FAILED,
             error,
         );
         if let Some(offset) = retry {
@@ -1174,10 +1229,7 @@ impl Venue for Polymarket {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1205,7 +1257,11 @@ impl Venue for Polymarket {
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
             Command::SubscribeCandles { symbol, interval } => {
                 if fidelity(interval).is_none() {
-                    cx.log(LogLevel::Error, interval.unsupported("Polymarket"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Polymarket"),
+                    );
                     return;
                 }
                 let sub =
@@ -1253,10 +1309,7 @@ impl Venue for Polymarket {
                 },
             ),
             Command::AmendOrderWithSymbol { command, .. } => {
-                cx.done(
-                    command,
-                    Err("Symbol-scoped amendment is unsupported".into()),
-                );
+                cx.fail(command, "Symbol-scoped amendment is unsupported");
             }
             command @ (Command::PlaceOrders { .. }
             | Command::CancelOrders { .. }

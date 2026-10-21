@@ -57,7 +57,8 @@ fn ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str, status: &str) {
 fn done(e: &mut Engine<Kraken>) -> Result<String, String> {
     e.drain_plain()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
         .expect("command completion")
@@ -148,10 +149,10 @@ fn batch_prevalidates_every_caller_id_before_writes() {
         place(&mut e, vec![limit(), bad]);
         let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(all.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            all.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -204,10 +205,10 @@ fn missing_or_rejected_semantic_ack_never_sends_bracket() {
         reply(&mut e, &r, 200, body);
         let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(all.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            all.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -391,13 +392,10 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
         },
     );
     let all = e.drain_plain().collect::<Vec<_>>();
-    assert!(all.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        all.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
     assert_eq!(
         all.iter().filter(|a| matches!(a, Action::Http(_))).count(),
         1
@@ -631,10 +629,10 @@ fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
         cancel_ack(&mut e, &r, "old");
         let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(all.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            all.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -676,13 +674,10 @@ fn queued_protective_amend_rejects_changed_order_before_cancelling() {
     ack(&mut e, &r, "entry", "placed");
     let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(all.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        all.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+    );
 }
 #[test]
 fn fetch_leverage_missing_preferences_is_a_failure() {
@@ -918,8 +913,8 @@ fn batch_rejects_bybit_controls_before_any_write() {
         let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error.contains("Bybit execution controls")
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.legacy_text().contains("Bybit execution controls")
         )));
     }
 }
@@ -933,8 +928,8 @@ fn batch_rejects_foreign_stp_controls_before_writes() {
     let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(a,
-        Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error.contains("self-trade prevention")
+        Action::Notice(Notice::CommandFailed { error, .. })
+            if error.legacy_text().contains("self-trade prevention")
     )));
 }
 
@@ -963,7 +958,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = e.drain_plain().collect::<Vec<_>>();
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
 }
 #[test]
@@ -981,7 +976,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error: m }) if m.legacy_text().contains("take-profit/stop-loss legs on a market entry"))));
 }
 #[test]
 fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
@@ -1015,10 +1010,10 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     place(&mut e, vec![app("stop_market", 90.5, Some(90.0))]);
     let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(all.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        all.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 #[test]
 fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
@@ -1044,10 +1039,9 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
             .count();
         assert_eq!(writes, 1, "{kind}: only the entry is sent");
         assert!(
-            !actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandDone { result: Err(_), .. })
-            )),
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. }))),
             "{kind}"
         );
     }
@@ -1079,6 +1073,12 @@ fn write_failures_are_classified_without_changing_their_text() {
             r#"{"result":"error"}"#.to_owned(),
             rejected(ErrorKind::RateLimited),
             "Kraken HTTP 429",
+        ),
+        (
+            400,
+            r#"{"result":"error","error":"invalidArgument"}"#.to_owned(),
+            rejected(ErrorKind::Rejected),
+            "Kraken HTTP 400: invalidArgument",
         ),
         (
             200,

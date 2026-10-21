@@ -5,13 +5,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -19,7 +21,7 @@ use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -28,6 +30,14 @@ pub struct Options {
     pub application_id: Option<String>,
     pub vault: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         if !self.testnet {
@@ -47,6 +57,8 @@ pub enum Pending {
     Meta {
         rows: Vec<Instrument>,
         valid: bool,
+        /// A malformed row was skipped, so an unknown asset may be listed.
+        skipped: bool,
     },
     Ticker {
         asset: u32,
@@ -106,7 +118,7 @@ struct Sub<'a> {
     instrument_id: Option<u32>,
 }
 pub struct TxFlow {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::AccountState,
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
@@ -124,9 +136,11 @@ pub struct TxFlow {
     ticker_timer: Option<TimerId>,
     discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
+    catalogue_partial: bool,
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: Default::default(),
@@ -146,6 +160,7 @@ impl TxFlow {
             ticker_timer: None,
             discovery: Default::default(),
             live_tickers: Default::default(),
+            catalogue_partial: false,
         }
     }
     pub(crate) fn rest(&self) -> &'static str {
@@ -153,6 +168,10 @@ impl TxFlow {
     }
     pub(crate) fn asset(&self, _cx: &Cx<'_, Pending>, symbol: &str) -> Option<u32> {
         self.assets.get(symbol).copied()
+    }
+    /// The catalogue is complete and its read awaits no retry; ticker seeds do not list assets.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && !self.discovery.waiting(&None)
     }
     pub(crate) fn symbol(&self, asset: u32) -> Option<&str> {
         self.instruments.get(&asset).map(|row| row.name.as_str())
@@ -208,6 +227,7 @@ impl TxFlow {
             Pending::Meta {
                 rows: Vec::new(),
                 valid: true,
+                skipped: false,
             },
         );
     }
@@ -263,14 +283,16 @@ impl TxFlow {
         if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             conn.supervisor.connecting(cx);
         }
-        conn.socket = Some(cx.connect_channel(
-            format!(
-                "{}/{}",
-                REST_URL.replacen("https:", "wss:", 1),
-                if api { "api-ws" } else { "ws" }
+        conn.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{}/{}",
+                    REST_URL.replacen("https:", "wss:", 1),
+                    if api { "api-ws" } else { "ws" }
+                ))
+                .channel(channel),
             ),
-            channel,
-        ));
+        );
     }
     fn subscribe(
         &mut self,
@@ -292,7 +314,11 @@ impl TxFlow {
         }
         if conn.subscriptions.len() >= 4096 {
             if let Some(socket) = conn.socket {
-                cx.log(LogLevel::Warning, "TxFlow subscription backlog exhausted");
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "TxFlow subscription backlog exhausted",
+                );
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);
             }
@@ -562,7 +588,11 @@ impl TxFlow {
     ) {
         if !supported(interval) {
             if add {
-                cx.log(LogLevel::Error, interval.unsupported("TxFlow"));
+                cx.notice(
+                    Level::Error,
+                    code::COMMAND_UNSUPPORTED,
+                    interval.unsupported("TxFlow"),
+                );
             }
             return;
         }
@@ -610,11 +640,11 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if !supported(interval) {
-            cx.done(command, Err(interval.unsupported("TxFlow")));
+            cx.fail(command, interval.unsupported("TxFlow"));
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -628,7 +658,7 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.done(command, Err("Invalid candle time range".into()));
+            cx.fail(command, "Invalid candle time range");
             return;
         }
         #[derive(Serialize)]
@@ -667,6 +697,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -680,7 +714,7 @@ impl Venue for TxFlow {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.metadata(cx);
@@ -811,8 +845,9 @@ impl Venue for TxFlow {
             return;
         }
         if self.public_frame(cx, text) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::WS_DISCONNECTED,
                 "TxFlow socket rate limited; reconnecting subscriptions",
             );
             cx.close(socket);
@@ -855,11 +890,19 @@ impl Venue for TxFlow {
             return;
         }
         match pending {
-            Pending::Meta { rows, valid } => {
+            Pending::Meta {
+                rows,
+                valid,
+                skipped,
+            } => {
                 if !valid || !Header::valid(response.body) {
                     self.on_request_failed(
                         cx,
-                        Pending::Meta { rows, valid: false },
+                        Pending::Meta {
+                            rows,
+                            valid: false,
+                            skipped,
+                        },
                         "Invalid TxFlow metadata",
                     );
                     return;
@@ -902,6 +945,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "Duplicate or ambiguous TxFlow historical identities",
                     );
@@ -933,6 +977,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "No supported TxFlow markets",
                     );
@@ -945,6 +990,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "Duplicate TxFlow tradable market identities",
                     );
@@ -953,6 +999,7 @@ impl Venue for TxFlow {
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
+                self.catalogue_partial = skipped;
                 self.ticker_queue = ticker_queue;
                 self.ticker_seeded.clear();
                 self.historical_assets = historical_assets;
@@ -1018,14 +1065,17 @@ impl Venue for TxFlow {
                 command,
                 rows,
                 valid,
-            } => cx.done(
-                command,
-                if valid && Header::valid(response.body) {
+            } => {
+                let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
-                },
-            ),
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.history_response(cx, *request, response),
@@ -1033,9 +1083,12 @@ impl Venue for TxFlow {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Meta { rows, valid: _ } => match serde_json::from_str(item) {
+            Pending::Meta { rows, skipped, .. } => match serde_json::from_str(item) {
                 Ok(row) => rows.push(row),
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    *skipped = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
                 Ok(row) => rows.push(row.candle()),
@@ -1049,15 +1102,15 @@ impl Venue for TxFlow {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Meta { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, None);
             }
             Pending::Ticker { asset } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, Some(asset));
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),

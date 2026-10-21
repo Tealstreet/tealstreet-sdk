@@ -9,13 +9,14 @@ mod trading;
 mod wire;
 
 use book::BookState;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -38,6 +39,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub product: Product,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -88,7 +100,7 @@ impl Default for Connection {
 }
 
 pub struct BitgetFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     account: account::Account,
     trading: trading::Trading,
@@ -102,6 +114,7 @@ pub struct BitgetFutures {
 
 impl BitgetFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             discovery: Default::default(),
@@ -199,7 +212,7 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3 && self.account.supervisor.is_waiting() {
+        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
             return;
         }
         let url = if index == 3 {
@@ -217,16 +230,20 @@ impl BitgetFutures {
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        connection.socket = Some(cx.connect_feed(
-            url,
-            if index == 3 {
-                safe_cex_engine::SocketChannel::Private
-            } else {
-                safe_cex_engine::SocketChannel::Public
-            },
-            ["primary", "secondary-1", "secondary-2", "private"][index],
-            recover,
-        ));
+        connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(if index == 3 {
+                        safe_cex_engine::SocketChannel::Private
+                    } else {
+                        safe_cex_engine::SocketChannel::Public
+                    })
+                    .feed(
+                        ["primary", "secondary-1", "secondary-2", "private"][index],
+                        recover,
+                    ),
+            ),
+        );
         connection.open = false;
         if index == 3 {
             self.account.authenticated = false;
@@ -323,7 +340,11 @@ impl BitgetFutures {
             }
         };
         if message.event == "error" {
-            cx.log(LogLevel::Error, format!("Bitget WS: {}", message.msg));
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Bitget WS: {}", message.msg),
+            );
             return;
         }
         match message.data {
@@ -368,7 +389,7 @@ impl BitgetFutures {
                         Ok(false) => {}
                         Err(error) => {
                             state.reset();
-                            cx.log(LogLevel::Warning, error);
+                            cx.notice(Level::Warn, code::STREAM_MALFORMED, error);
                             let topics = [("books".into(), symbol.to_owned())];
                             self.subscribe(cx, "unsubscribe", &topics);
                             self.subscribe(cx, "subscribe", &topics);
@@ -390,7 +411,7 @@ impl BitgetFutures {
                         if row.iter().all(|n| n.0.is_some()) {
                             cx.candle(symbol, *value, candle(&row));
                         } else {
-                            cx.log(LogLevel::Warning, "invalid Bitget candle");
+                            cx.notice(Level::Warn, code::STREAM_MALFORMED, "invalid Bitget candle");
                         }
                     }
                 }
@@ -544,7 +565,12 @@ impl Venue for BitgetFutures {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         self.discovery_read(cx, false);
@@ -764,7 +790,7 @@ impl Venue for BitgetFutures {
                 command,
                 rows,
                 invalid: false,
-            } => cx.done(command, Ok(serde_json::to_string(&rows).expect("candles"))),
+            } => cx.done(command, serde_json::to_string(&rows).expect("candles")),
             pending => self.on_request_failed(cx, pending, "invalid Bitget REST record"),
         }
     }
@@ -795,7 +821,7 @@ impl Venue for BitgetFutures {
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Candles { command, .. } => cx.fail(command, error.to_owned()),
             Pending::Account {
                 generation,
                 request,
@@ -871,7 +897,11 @@ impl Venue for BitgetFutures {
                 interval: value,
             } => {
                 let Some(native) = interval(value) else {
-                    cx.log(LogLevel::Error, value.unsupported("Bitget"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        value.unsupported("Bitget"),
+                    );
                     return;
                 };
                 let count = self.candles.entry((symbol.clone(), value)).or_default();
@@ -908,7 +938,7 @@ impl Venue for BitgetFutures {
                 to_ms,
             } => {
                 let Some(native) = interval(value) else {
-                    cx.done(command, Err(value.unsupported("Bitget")));
+                    cx.fail(command, value.unsupported("Bitget"));
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);

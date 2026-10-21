@@ -1,10 +1,11 @@
 use crate::account::{clean, first, is_algo, is_hedged, margin, plan_type};
 use crate::wire::{Envelope, Identifier, Number, SymbolConfig, UtaSettings};
 use crate::{BitgetFutures, Pending, paths};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, TimerId, VenueError,
-    num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -445,10 +446,7 @@ impl BitgetFutures {
         } else {
             match job.error.take() {
                 Some(error) => self.trade_fail(cx, &job, error),
-                None => cx.done(
-                    job.id,
-                    Ok(serde_json::to_string(&job.ids).expect("order ids")),
-                ),
+                None => cx.done(job.id, serde_json::to_string(&job.ids).expect("order ids")),
             }
             self.resume_trading(cx);
         }
@@ -786,7 +784,7 @@ impl BitgetFutures {
                     .map(|position| format!("{:?}:{}", position.side, position.contracts))
                     .collect::<Vec<_>>()
                     .join(", ");
-                cx.log(LogLevel::Warning, format!(
+                cx.notice(Level::Warn, code::COMMAND_UNSUPPORTED, format!(
                     "Sized {} stop became a full-position stop: no open {:?} position to size requested {} against, positions seen [{}]",
                     order.symbol, protected_position(order.side), order.amount,
                     if positions.is_empty() { "none" } else { &positions },

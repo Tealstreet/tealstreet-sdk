@@ -281,7 +281,7 @@ fn delayed_futures_read_gates_startup_and_failure_preserves_old_union() {
         .unwrap();
     assert!(!e.store().loaded().positions);
     e.handle(7.0,Event::Command(Command::PlaceOrders {command:99,orders:vec![serde_json::from_str(r#"{"symbol":"BTCUSD261225","type":"limit","side":"buy","amount":2,"price":40000}"#).unwrap()]}));
-    assert!(actions(&mut e).iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:99,result:Err(error)}) if error.contains("not ready"))));
+    assert!(actions(&mut e).iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("not ready"))));
     let Action::Http(request) = futures else {
         panic!()
     };
@@ -378,13 +378,7 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
         !out.iter()
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
     );
-    let timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1002.0 => Some(*timer),
-            _ => None,
-        })
-        .expect("startup retry timer");
+    let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1002.0, Event::TimerFired { timer });
     let a = actions(&mut e).remove(0);
     assert!(is_get(&a, "/api/v5/public/instruments?instType=SWAP"));
@@ -622,7 +616,7 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         );
         let out = actions(&mut e);
         assert!(out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
     }
 }
 
@@ -1017,7 +1011,7 @@ mod product_semantics {
         actions(e)
             .into_iter()
             .find_map(|a| match a {
-                Action::Notice(Notice::CommandDone { result: Ok(s), .. }) => {
+                Action::Notice(Notice::CommandDone { result: s, .. }) => {
                     Some(serde_json::from_str(&s).unwrap())
                 }
                 _ => None,
@@ -1464,10 +1458,10 @@ mod product_semantics {
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &page, 106.0);
         let out = actions(&mut e);
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(s), .. }) if s.contains("incomplete source"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: s, .. }) if s.legacy_text().contains("incomplete source"))));
         assert!(
             !out.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(_), .. })))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
         );
     }
 
@@ -1580,11 +1574,7 @@ mod product_semantics {
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
         assert!(!e.store().loaded().markets);
-        assert!(
-            actions(&mut e)
-                .iter()
-                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1001.0))
-        );
+        assert!(retry_timer(&actions(&mut e), 1.0, 1_000.0).is_some());
     }
 
     #[test]
@@ -2348,6 +2338,7 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
             match out {
                 Action::Http(_) => pending.push(out),
                 Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => logs.push(event.message),
                 _ => {}
             }
         }

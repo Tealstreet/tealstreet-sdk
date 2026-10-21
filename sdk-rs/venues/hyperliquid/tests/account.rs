@@ -557,9 +557,11 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         })
         .collect();
     assert_eq!(stale.len(), 1, "one recurring account registration");
-    let mut obsolete = stale;
+    let obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    // The 120s native cadence is both the venue minimum and the host policy cap,
+    // so every finite policy resolves to 120s: only resuming from pause re-arms.
+    for interval in [1_500_f64, 100_000.] {
         e.handle(
             now,
             Event::PollScaleChanged {
@@ -575,11 +577,13 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 _ => None,
             })
             .collect();
-        assert_eq!(timers.len(), 1);
-        assert_eq!(timers[0].1, now + interval.max(120000.0));
-        if let Some((timer, _)) = current.replace(timers[0]) {
-            obsolete.push(timer);
+        if current.is_some() {
+            assert!(timers.is_empty(), "unchanged 120s cadence keeps its timer");
+            continue;
         }
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + 120_000.0);
+        current = Some(timers[0]);
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
@@ -721,4 +725,246 @@ fn close_fill_missing_financial_fields_remain_absent_instead_of_becoming_zero() 
             assert_eq!(f64::from_le_bytes(payload[48..56].try_into().unwrap()), 0.);
         }
     }
+}
+
+/// Reconnects and answers each account read by kind; returns the warnings logged.
+fn resync(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_hyperliquid::Hyperliquid>,
+    s: safe_cex_engine::SocketId,
+    now: f64,
+    state: &str,
+    orders: &str,
+) -> Vec<String> {
+    e.handle(now, Event::WsOpened { socket: s });
+    let requests = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for r in requests {
+        let body = match kind(&r).as_str() {
+            "clearinghouseState" => state,
+            "frontendOpenOrders" => orders,
+            _ => "[]",
+        };
+        reply(e, &r, 200, body);
+    }
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn bad_order_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
+    let (mut e, s) = ready("disabled");
+    let row = |oid: u32, coin: &str, px: &str| {
+        format!(
+            r#"{{"coin":"{coin}","oid":{oid},"side":"B","limitPx":"{px}","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
+        )
+    };
+    let seeded = format!(
+        "[{},{},{}]",
+        row(8, "BTC", "80"),
+        row(9, "BTC", "90"),
+        row(10, "BTC", "70")
+    );
+    resync(&mut e, s, 2000.0, STATE, &seeded);
+    assert_eq!(e.store().orders().len(), 3);
+    let malformed = row(9, "BTC", "91").replace(r#""sz":"1""#, r#""sz":"bad""#);
+    let logs = resync(
+        &mut e,
+        s,
+        3000.0,
+        STATE,
+        &format!(
+            "[{},{malformed},{}]",
+            row(8, "BTC", "81"),
+            row(11, "@107", "1")
+        ),
+    );
+    assert_eq!(e.store().order("8").unwrap().price, 81.0);
+    assert_eq!(e.store().order("9").unwrap().price, 90.0);
+    assert!(e.store().order("10").is_none());
+    assert!(e.store().order("11").is_none());
+    assert!(logs.contains(&"Hyperliquid skipped malformed order 9".to_owned()));
+    assert!(
+        !logs
+            .iter()
+            .any(|m| m.contains("bad") || m.contains("@107") || m.contains("11"))
+    );
+    resync(
+        &mut e,
+        s,
+        4000.0,
+        STATE,
+        &format!("[{}]", row(8, "BTC", "81")),
+    );
+    assert!(e.store().order("9").is_none());
+    assert_eq!(e.store().orders().len(), 1);
+}
+
+#[test]
+fn malformed_order_row_without_an_id_keeps_every_stored_order() {
+    let (mut e, s) = ready("disabled");
+    let row = |oid: u32, px: &str| {
+        format!(
+            r#"{{"coin":"BTC","oid":{oid},"side":"B","limitPx":"{px}","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
+        )
+    };
+    resync(
+        &mut e,
+        s,
+        2000.0,
+        STATE,
+        &format!("[{},{}]", row(8, "80"), row(9, "90")),
+    );
+    let logs = resync(
+        &mut e,
+        s,
+        3000.0,
+        STATE,
+        &format!(r#"[{},{{"coin":"BTC","oid":"bad"}}]"#, row(8, "81")),
+    );
+    assert_eq!(e.store().order("8").unwrap().price, 81.0);
+    assert_eq!(e.store().order("9").unwrap().price, 90.0);
+    assert!(logs.contains(&"Hyperliquid skipped malformed order without an id".to_owned()));
+}
+
+#[test]
+fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
+    let (mut e, s) = ready("disabled");
+    let position = |coin: &str, szi: &str| {
+        format!(
+            r#"{{"position":{{"coin":"{coin}","szi":"{szi}","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{{"type":"cross","value":10}}}}}}"#
+        )
+    };
+    let state = |time: u32, used: u32, rows: &[String]| {
+        format!(
+            r#"{{"assetPositions":[{}],"marginSummary":{{"accountValue":"1000","totalMarginUsed":"{used}"}},"time":{time}}}"#,
+            rows.join(",")
+        )
+    };
+    resync(
+        &mut e,
+        s,
+        2000.0,
+        &state(2000, 20, &[position("BTC", "2"), position("ETH", "1")]),
+        "[]",
+    );
+    assert_eq!(e.store().positions().len(), 2);
+    let logs = resync(
+        &mut e,
+        s,
+        3000.0,
+        &state(3000, 40, &[position("BTC", "3"), position("ETH", "bad")]),
+        "[]",
+    );
+    let contracts = |e: &safe_cex_engine::Engine<_>, symbol: &str| {
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == symbol)
+            .map(|p| p.contracts)
+    };
+    assert_eq!(contracts(&e, "BTC-PERP"), Some(3.0));
+    assert_eq!(contracts(&e, "ETH-PERP"), Some(1.0));
+    assert!(logs.contains(&"Hyperliquid skipped malformed position eth".to_owned()));
+    assert!(!logs.iter().any(|m| m.contains("bad")));
+    assert_eq!(e.store().balance().used, 40.0);
+    resync(
+        &mut e,
+        s,
+        4000.0,
+        &state(4000, 20, &[position("BTC", "3")]),
+        "[]",
+    );
+    assert_eq!(contracts(&e, "ETH-PERP"), None);
+    assert_eq!(e.store().positions().len(), 1);
+}
+
+#[test]
+fn owned_position_on_a_market_gone_from_the_catalogue_keeps_its_stored_copy() {
+    use safe_cex_engine::model::{MarginType, Position, PositionMode, PositionSide};
+    let (mut e, s) = ready("disabled");
+    let mut positions = e.store().positions().to_vec();
+    positions.push(Position {
+        id: "SOL-PERP".into(),
+        symbol: "SOL-PERP".into(),
+        side: PositionSide::Long,
+        entry_price: 20.0,
+        notional: 60.0,
+        leverage: 10.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 50.0,
+        realized_pnl: None,
+        contracts: 3.0,
+        liquidation_price: 0.0,
+        margin_size: Some(6.0),
+        last_update: None,
+    });
+    e.store_mut().set_positions(positions);
+    let state = r#"{"assetPositions":[{"position":{"coin":"SOL","szi":"3","entryPx":"20","positionValue":"90","unrealizedPnl":"10","marginUsed":"6","leverage":{"type":"cross","value":10}}},{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"26"},"time":2000}"#;
+    let logs = resync(&mut e, s, 2000.0, state, "[]");
+    assert!(logs.contains(&"Hyperliquid skipped position sol on an unknown market".to_owned()));
+    assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
+    assert_eq!(e.store().position("BTC-PERP").unwrap().contracts, 2.0);
+    // The wallet total nets the native row PnL (10), not the stale stored copy (50).
+    assert_eq!(e.store().balance().total, 990.0);
+    let logs = resync(&mut e, s, 3000.0, &state.replace("2000}", "3000}"), "[]");
+    assert!(!logs.iter().any(|m| m.contains("unknown market")));
+    assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
+}
+
+#[test]
+fn malformed_position_row_holds_the_wallet_total() {
+    let (mut e, s) = ready("disabled");
+    assert_eq!(e.store().balance().total, 1000.0);
+    resync(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"260","unrealizedPnl":"30","marginUsed":"20","leverage":{"type":"cross","value":10}}},{"position":{"coin":"ETH","szi":"bad"}}],"marginSummary":{"accountValue":"1100","totalMarginUsed":"40"},"time":2000}"#,
+        "[]",
+    );
+    assert_eq!(e.store().position("BTC-PERP").unwrap().notional, 260.0);
+    assert_eq!(e.store().balance().total, 1000.0);
+    assert_eq!(e.store().balance().used, 40.0);
+}
+
+#[test]
+fn unified_spot_state_publishes_spot_holdings_as_coins() {
+    let (mut e, s) = ready("unifiedAccount");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"110"}}}"#,
+    );
+    message(
+        &mut e,
+        s,
+        3000.0,
+        r#"{"channel":"spotState","data":{"user":"x","spotState":{"balances":[{"coin":"USDC","token":0,"hold":"0","total":"900"},{"coin":"BTC","token":1,"hold":"0","total":"0.5"},{"coin":"PURR","token":2,"hold":"0","total":"0"}],"tokenToAvailableAfterMaintenance":[[0,"800"]]}}}"#,
+    );
+    let coins = e.store().coin_balances().expect("coins published");
+    assert_eq!(coins.len(), 2, "zero holdings are left out");
+    let usdc = coins.iter().find(|c| c.base == "USDC").unwrap();
+    assert_eq!((usdc.amount, usdc.notional), (900.0, 900.0));
+    let btc = coins.iter().find(|c| c.base == "BTC").unwrap();
+    assert_eq!(btc.amount, 0.5);
+    // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
+    assert_eq!(btc.notional, 50.0);
 }

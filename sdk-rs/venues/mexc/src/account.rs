@@ -1,11 +1,13 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
@@ -125,7 +127,7 @@ impl MexcFutures {
         let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let headers = c.headers(cx.now, &payload);
+        let headers = c.headers_window(cx.now, &payload, self.options.recv_window);
         let url = if method == Method::Get && !payload.is_empty() {
             format!("{}{path}?{payload}", crate::REST)
         } else {
@@ -167,15 +169,15 @@ impl MexcFutures {
     }
     pub fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: u32, symbol: String) {
         if cx.now < self.account.paused_until {
-            cx.done(command, Err("MEXC account reads are rate limited".into()));
+            cx.fail(command, "MEXC account reads are rate limited");
             return;
         }
         let Some(m) = cx.store.market(&symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if self.credentials.is_none() {
-            cx.done(command, Err("MEXC leverage requires credentials".into()));
+            cx.fail(command, "MEXC leverage requires credentials");
             return;
         }
         let query = sign::query([("symbol", m.id.clone())]);
@@ -300,8 +302,9 @@ impl MexcFutures {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.private.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.account.private.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
+        ));
     }
     pub fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let c = self.credentials.as_ref().unwrap();
@@ -355,8 +358,9 @@ impl MexcFutures {
                     self.refresh_account(cx, true);
                 }
             } else {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
                     "MEXC private ws login failed, double check your key and secret",
                 );
                 if let Some(socket) = self.account.private.socket {
@@ -407,8 +411,9 @@ impl MexcFutures {
                 let error = raw.error_code;
                 if let Some(order) = self.map_order(cx, &raw, scope) {
                     if order.status == OrderStatus::Canceled && error > 0.0 && order.filled == 0.0 {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::ORDER_REJECTED,
                             format!("MEXC canceled order {}: errorCode {error}", order.id),
                         );
                     }
@@ -882,22 +887,29 @@ impl MexcFutures {
                 }
                 Err(_) => snapshot.bad = true,
             },
-            Scope::Positions => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(r) => {
-                        if r.hold_vol != 0.0 && cx.store.market(&compact(&r.symbol)).is_none() {
+            Scope::Positions => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(r) => {
+                    let symbol = compact(&r.symbol);
+                    if r.hold_vol != 0.0 && cx.store.market(&symbol).is_none() {
+                        if self.malformed_markets.contains(&symbol) {
                             snapshot.bad = true;
-                            cx.log(LogLevel::Warning, "MEXC owned position market unavailable; preserving previous snapshot");
-                        } else if let Some(p) = Self::map_position(cx, &r) {
-                            snapshot
-                                .native_ids
-                                .push((p.id.clone(), r.position_id.to_string()));
-                            snapshot.positions.push(p);
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "MEXC owned position market unavailable; preserving previous snapshot");
+                        } else {
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!("Skipping MEXC position on uncatalogued market {symbol}"),
+                            );
                         }
+                    } else if let Some(p) = Self::map_position(cx, &r) {
+                        snapshot
+                            .native_ids
+                            .push((p.id.clone(), r.position_id.to_string()));
+                        snapshot.positions.push(p);
                     }
-                    Err(_) => snapshot.bad = true,
                 }
-            }
+                Err(_) => snapshot.bad = true,
+            },
             scope => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(r) => {
                     if let Some(o) = self.map_order(cx, &r, scope) {
@@ -928,8 +940,9 @@ impl MexcFutures {
                             snapshot.bad = true;
                             return;
                         }
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Skipping unmappable MEXC order {id} on {}", r.symbol),
                         );
                         // A typed but unmappable row is not proof that a known
@@ -964,7 +977,7 @@ impl MexcFutures {
             if let Some(timer) = self.account.poll.take() {
                 cx.clear_timer(timer);
             }
-            cx.log(LogLevel::Error, &error.message);
+            cx.notice(Level::Error, code::AUTH_REJECTED, &error.message);
             let refused = error.kind == Some(ErrorKind::AuthInvalid);
             cx.startup_failed(error);
             // As Bybit: a refused trading key also stops the private socket's login loop.
@@ -994,7 +1007,7 @@ impl MexcFutures {
                 bad,
             } => {
                 if bad || rows.is_empty() {
-                    cx.done(command, Err("Invalid MEXC leverage response".into()));
+                    cx.fail(command, "Invalid MEXC leverage response");
                     return;
                 }
                 let mut rails = self
@@ -1066,7 +1079,7 @@ impl MexcFutures {
                 }
                 cx.done(
                     command,
-                    Ok(serde_json::to_string(&ResultRails {
+                    serde_json::to_string(&ResultRails {
                         buy_leverage: rails.long,
                         sell_leverage: rails.short,
                         margin_type: if rails.isolated {
@@ -1080,7 +1093,7 @@ impl MexcFutures {
                             PositionMode::Oneway
                         },
                     })
-                    .unwrap()),
+                    .unwrap(),
                 );
             }
             Request::Mode => {
@@ -1339,9 +1352,9 @@ impl MexcFutures {
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Request::Leverage { command, .. } = &request {
             cx.command_error(*command, error);
-            cx.done(*command, Err(error.into()));
+            cx.fail(*command, error);
         } else {
-            cx.log(LogLevel::Error, error);
+            cx.retried_failure("mexc.account:1339", error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);

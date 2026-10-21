@@ -111,7 +111,9 @@ fn private_socket(actions: &[Action]) -> SocketId {
     actions
         .iter()
         .find_map(|action| match action {
-            Action::WsConnectWithHeaders { socket, .. } => Some(*socket),
+            Action::WsConnect {
+                socket, headers, ..
+            } if !headers.is_empty() => Some(*socket),
             _ => None,
         })
         .unwrap()
@@ -123,7 +125,7 @@ fn documented_private_snapshots_and_browser_rest_fallback() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnectWithHeaders { .. }))
+            .any(|a| matches!(a, Action::WsConnect { headers, .. } if !headers.is_empty()))
     );
     for request in requests(&actions) {
         assert!(
@@ -242,8 +244,8 @@ fn fills_are_per_execution_and_duplicates_are_suppressed() {
             text: fills,
         },
     );
-    assert!(e.take_market_frame(NOW).is_none());
-    let frame = e.take_frame(NOW).unwrap();
+    // Fills travel with their orders: the book-cadence flush carries both.
+    let frame = e.take_market_frame(NOW).unwrap();
     let mut at = 16;
     let mut found = false;
     for _ in 0..u16::from_le_bytes([frame[6], frame[7]]) {
@@ -289,11 +291,15 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         .windows(2)
         .find_map(|pair| match (&pair[0], &pair[1]) {
             (
-                Action::WsConnectWithHeaders {
-                    socket: private, ..
+                Action::WsConnect {
+                    socket: private,
+                    headers,
+                    ..
                 },
                 Action::SetTimer { timer, at_ms },
-            ) if *private == socket && *at_ms == NOW + 5000.0 => Some(*timer),
+            ) if !headers.is_empty() && *private == socket && *at_ms == NOW + 5000.0 => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("private socket watchdog");
@@ -312,7 +318,7 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         })
         .unwrap();
     e.handle(NOW + 32_000.0, Event::TimerFired { timer });
-    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnectWithHeaders {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
+    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnect {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
 }
 
 #[test]
@@ -533,11 +539,16 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     e.handle(NOW + 22_000.0, Event::TimerFired { timer: deadline });
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(e.store().orders(), expected);
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 26_000.0 => Some(*timer),
+            // The first failure's 4 s backoff, jittered into [3 s, 4 s].
+            Action::SetTimer { timer, at_ms }
+                if (NOW + 25_000.0..=NOW + 26_000.0).contains(at_ms) =>
+            {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("read-only retry after deadline");
@@ -801,7 +812,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                     .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
             );
             e.handle(NOW + 32_000.0, Event::TimerFired { timer: extended });
-            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
         } else {
             assert!(e.store().loaded().positions);
             assert!(
@@ -841,7 +852,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -852,7 +863,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -866,12 +877,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -882,9 +893,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -900,7 +911,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -993,17 +1004,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     engine.handle(
         now,
         Event::PollScaleChanged {
-            scale: 100.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
-    engine.handle(now + 100.0, Event::TimerFired { timer });
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let reads: Vec<_> = output
         .iter()
@@ -1016,7 +1027,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     // Keep any next periodic timer for a loop that rearms before HTTP completes.
     for r in reads {
         engine.handle(
-            now + 100.0,
+            now + 1_500.0,
             Event::HttpFailed {
                 request: r.id,
                 error: "account unavailable",
@@ -1024,9 +1035,11 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         );
     }
     engine.drain_actions().for_each(drop);
-    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+    // The jittered failure floor is fixed once and must survive every policy change.
+    let mut floor = None;
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
-            now + 100.0 + offset,
+            now + 1_500.0 + offset,
             Event::PollScaleChanged {
                 scale: interval_ms / POLL_MS,
             },
@@ -1041,7 +1054,14 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 4100.0]);
+            let at = *times.first().expect("one rearmed poll");
+            assert_eq!(times, vec![at]);
+            let delay = at - (now + 1_500.0);
+            assert!(
+                (0.75 * 4_000.0..=4_000.0).contains(&delay),
+                "jittered failure backoff {delay}"
+            );
+            assert_eq!(*floor.get_or_insert(at), at);
         }
     }
 }
@@ -1054,11 +1074,10 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     for _ in 0..2 {
         e.handle(NOW, Event::WsMessage { socket, text });
     }
-    assert!(
-        e.take_market_frame(NOW).is_none(),
-        "pending catalog identity fences market-only emission"
-    );
-    let frame = e.take_frame(NOW).unwrap();
+    // A pending fill promotes the market flush to a full frame (MARKETS first).
+    let frame = e
+        .take_market_frame(NOW)
+        .expect("a pending fill promotes the flush to a full frame");
     let payload = safe_cex_engine::wire::sections(frame)
         .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
         .unwrap()
@@ -1098,6 +1117,11 @@ fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
         .filter_map(|a| match a {
             Action::Notice(Notice::Log { level: l, message }) if *l == level => {
                 Some(message.clone())
+            }
+            Action::Notice(Notice::Event(event))
+                if event.level == safe_cex_engine::Level::from(level) =>
+            {
+                Some(event.message.clone())
             }
             _ => None,
         })
@@ -1337,4 +1361,165 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
     );
     assert!(e.store().order("702345678901234600").is_none());
     assert_eq!(e.store().orders().len(), 3);
+}
+/// Takes this cycle's warnings, then starts the next account cycle.
+fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (
+        logs(&drained, LogLevel::Warning),
+        e.drain_actions().collect(),
+    )
+}
+#[test]
+fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let stored = ["812345678901234500", "812345678901234500__tp"]
+        .map(|id| e.store().order(id).unwrap().clone());
+    let actions = next_cycle(&mut e);
+    let moved = NORMAL.replace(r#""price":"69500""#, r#""price":"69600""#);
+    let normal = moved.replace(
+        "}]",
+        r#"},{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#,
+    );
+    complete(&mut e, &actions, &normal, "[]");
+    let store = e.store();
+    assert_eq!(store.order("702345678901234600").unwrap().price, 69600.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped malformed order row without an ID".to_owned()),
+        "{warnings:?}"
+    );
+    assert!(!warnings.iter().any(|w| w.contains("12345")));
+
+    complete(&mut e, &actions, &moved, "[]");
+    let ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["702345678901234600"]);
+}
+#[test]
+fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit() {
+    let leg = |side: &str, size: &str| {
+        POSITIONS
+            .trim_matches(['[', ']'])
+            .replace(r#""side":"LONG""#, &format!(r#""side":"{side}""#))
+            .replace(
+                r#""separatedMode":"COMBINED""#,
+                r#""separatedMode":"SEPARATED""#,
+            )
+            .replace(r#""size":"0.02""#, &format!(r#""size":"{size}""#))
+    };
+    let (mut e, actions) = started(false);
+    let both = format!("[{},{}]", leg("LONG", "0.02"), leg("SHORT", "0.03"));
+    response(&mut e, request(&actions, "allPosition"), 200, &both);
+    complete_except_positions(&mut e, &actions);
+    let short = e.store().position("BTCUSDT:short").cloned().unwrap();
+    let (_, actions) = warnings_then_next_cycle(&mut e);
+
+    let partial = format!(r#"[{},{{"side":"LONG","size":"7"}}]"#, leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &partial);
+    complete_except_positions(&mut e, &actions);
+    assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 0.05);
+    assert_eq!(e.store().position("BTCUSDT:short"), Some(&short));
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped malformed position row without an ID".to_owned()),
+        "{warnings:?}"
+    );
+
+    let long = format!("[{}]", leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &long);
+    complete_except_positions(&mut e, &actions);
+    assert!(e.store().position("BTCUSDT:short").is_none());
+    assert_eq!(e.store().positions().len(), 1);
+}
+#[test]
+fn plain_limit_order_events_carry_no_trigger_type() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    complete(&mut e, &actions, "[]", "[]");
+    // WEEX order events put CONTRACT_PRICE with triggerPrice 0 on plain limit rows.
+    e.handle(NOW, Event::WsMessage { socket, text: r#"{"e":"orders","d":[{"id":"702345678901234601","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"0.02","price":"69500","triggerPrice":"0","triggerPriceType":"CONTRACT_PRICE","updatedTime":"1773295701000"}]}"# });
+    let order = e.store().order("702345678901234601").unwrap();
+    assert_eq!(order.trigger_type, None);
+}
+#[test]
+fn protective_algo_row_typed_market_keeps_its_working_type() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234502,"symbol":"BTCUSDT","side":"SELL","type":"MARKET","planType":"STOP_LOSS","reduceOnly":true,"algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"68000","workingType":"MARK_PRICE","updateTime":1773295700000}]"#,
+    );
+    let order = e.store().order("812345678901234502").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(
+        order.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
+}
+/// Takes this cycle's actions, then starts the next account cycle.
+fn drain_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<Action>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (drained, e.drain_actions().collect())
+}
+#[test]
+fn startup_position_row_without_identity_is_an_error_logged_once_until_a_clean_snapshot() {
+    let message = "WEEX skipped malformed position row without an ID";
+    let idless = r#"[{"side":"LONG","size":"7"}]"#;
+    let read = |e: &mut Engine<WeexFutures>, actions: &[Action], rows: &str| {
+        response(e, request(actions, "allPosition"), 200, rows);
+        complete_except_positions(e, actions);
+        let (drained, next) = drain_then_next_cycle(e);
+        let errors = logs(&drained, LogLevel::Error);
+        let warnings = logs(&drained, LogLevel::Warning);
+        (
+            errors,
+            warnings.iter().filter(|l| *l == message).count(),
+            next,
+        )
+    };
+    let (mut e, actions) = started(false);
+    let (errors, _, actions) = read(&mut e, &actions, idless);
+    assert!(e.store().loaded().positions);
+    assert_eq!(errors, [message]);
+    // The same skip on the next cycle is not reported again.
+    let (errors, warnings, actions) = read(&mut e, &actions, idless);
+    assert!(errors.is_empty());
+    assert_eq!(warnings, 0);
+
+    let (_, _, actions) = read(&mut e, &actions, "[]");
+    let (errors, _, _) = read(&mut e, &actions, idless);
+    assert_eq!(errors, [message]);
+}
+#[test]
+fn startup_order_row_without_identity_is_an_error_with_no_stored_orders() {
+    let (mut e, actions) = started(false);
+    let idless = r#"[{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#;
+    complete(&mut e, &actions, idless, "[]");
+    assert!(e.store().loaded().orders);
+    let (drained, _) = drain_then_next_cycle(&mut e);
+    assert_eq!(
+        logs(&drained, LogLevel::Error),
+        ["WEEX skipped malformed order row without an ID"]
+    );
 }

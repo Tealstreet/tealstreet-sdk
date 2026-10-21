@@ -148,6 +148,7 @@ fn snapshot_pool_stays_under_session_and_frame_limits() {
                 url,
                 channel,
                 context,
+                ..
             } = a
             {
                 assert!(!binary, "KuCoin sockets use the text protocol");
@@ -369,7 +370,7 @@ fn fetched_candles_use_minutes_and_milliseconds_on_wire() {
         &r,
         r#"{"code":"200000","data":[[3600000,100,110,90,105,7]]}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:7,result:Ok(s)})if s.contains(r#""timestamp":3600.0"#)&&s.contains(r#""volume":7.0"#))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:7,result:s})if s.contains(r#""timestamp":3600.0"#)&&s.contains(r#""volume":7.0"#))));
 }
 #[test]
 fn rejects_sandbox_before_any_request() {
@@ -894,9 +895,7 @@ fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: id, result: Err(error),
-        })] if *id == command && error == "KuCoin leverage query is unsupported")
+            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandFailed { command: id, error })] if *id == command && error.legacy_text() == "KuCoin leverage query is unsupported")
         );
     }
 }
@@ -982,9 +981,7 @@ fn spot_symbol_amend_rejects_once_without_io_or_state_changes_on_futures() {
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: id, result: Err(error),
-        })] if *id == command && error.contains("unsupported"))
+            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandFailed { command: id, error })] if *id == command && error.legacy_text().contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(0.0), before);
     }

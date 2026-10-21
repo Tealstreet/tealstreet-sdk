@@ -1,16 +1,20 @@
 //! Unsigned main-wallet reads. Reads commit only after complete, successful,
 //! generation/revision-matched responses. Order events never invent executions.
 use crate::{Pending, TxFlow};
+use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Response, TimerId, json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const PAGE: usize = 500;
 const FILL_CAP: usize = 100_000;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -35,6 +39,31 @@ pub struct AccountState {
     fills_exhausted: bool,
     settings: HashMap<String, MarketSetting>,
     pub(crate) order_ids: HashMap<String, String>,
+    /// Leg ids, `asset N` or empty (unidentified) whose skipped position was already logged.
+    skip_logged: HashSet<String>,
+}
+enum Skipped {
+    Unidentified,
+    Unlisted { asset: u32, owned: bool },
+    Legs { keys: Vec<String>, owned: bool },
+}
+fn skip_level(harmless: bool) -> Level {
+    if harmless { Level::Warn } else { Level::Error }
+}
+/// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: Level,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.notice(level, code::ROW_SKIPPED, message);
+    }
 }
 #[derive(Clone, Copy)]
 pub struct Fence {
@@ -46,13 +75,14 @@ pub enum Request {
         fence: Fence,
         // A newer asset setting owns account mode even if exposure can reconcile.
         mode_revision: u64,
-        positions: Vec<Position>,
-        valid: bool,
+        positions: SnapshotBuilder<String, Position>,
+        /// An owned row sits on an asset a catalogue still loading may list.
+        hold: bool,
     },
     Orders {
         fence: Fence,
         offset: usize,
-        orders: Vec<Order>,
+        orders: SnapshotBuilder<String, Order>,
         ids: HashSet<String>,
         page_rows: usize,
         valid: bool,
@@ -345,8 +375,8 @@ impl TxFlow {
                     revision: self.account.state_revision,
                 },
                 mode_revision: self.account.settings_revision,
-                positions: Vec::new(),
-                valid: true,
+                positions: SnapshotBuilder::default(),
+                hold: false,
             };
             self.info(
                 cx,
@@ -390,7 +420,7 @@ impl TxFlow {
                 revision: self.account.orders_revision,
             },
             offset: 0,
-            orders: Vec::new(),
+            orders: SnapshotBuilder::default(),
             ids: HashSet::new(),
             page_rows: 0,
             valid: true,
@@ -597,25 +627,106 @@ impl TxFlow {
             }),
         })
     }
+    /// What a malformed position row may cover: its leg when the size is readable,
+    /// else both legs; an unlisted asset matches no stored row. `owned` is false only
+    /// for a readable zero size.
+    fn skipped_position(&self, item: &str) -> Skipped {
+        #[derive(Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow)]
+            position: Leg<'a>,
+        }
+        #[derive(Deserialize)]
+        struct Leg<'a> {
+            asset: std::borrow::Cow<'a, str>,
+            #[serde(default, borrow)]
+            szi: Option<&'a RawValue>,
+        }
+        let Ok(row) = serde_json::from_str::<Identity<'_>>(item) else {
+            return Skipped::Unidentified;
+        };
+        let Ok(asset) = row.position.asset.parse::<u32>() else {
+            return Skipped::Unidentified;
+        };
+        let size = row
+            .position
+            .szi
+            .and_then(|raw| serde_json::from_str::<N>(raw.get()).ok())
+            .map(|n| n.0)
+            .filter(|n| n.is_finite());
+        let owned = size != Some(0.0);
+        let Some(symbol) = self.symbol(asset) else {
+            return Skipped::Unlisted { asset, owned };
+        };
+        let keys = match size.filter(|n| *n != 0.0) {
+            Some(size) if size > 0.0 => vec![format!("{symbol}:long")],
+            Some(_) => vec![format!("{symbol}:short")],
+            None => vec![format!("{symbol}:long"), format!("{symbol}:short")],
+        };
+        Skipped::Legs { keys, owned }
+    }
     pub(crate) fn account_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
         match request {
             Request::State {
-                positions, valid, ..
+                positions, hold, ..
             } => match serde_json::from_str::<AssetPosition>(item)
                 .map_err(|_| "Malformed TxFlow position")
                 .and_then(|p| self.position_row(p))
             {
                 Ok(p) => {
                     if let Some(p) = p {
+                        self.account.skip_logged.remove(&p.id);
                         positions.push(p);
                     }
                 }
-                Err(_) => *valid = false,
+                // A skipped row with nothing stored to keep commits as flat: an error.
+                Err(_) => match self.skipped_position(item) {
+                    Skipped::Unlisted { owned: true, .. } if !self.discovery_settled() => {
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
+                            "TxFlow owned position asset unavailable; preserving previous account state",
+                        );
+                        *hold = true;
+                    }
+                    Skipped::Unlisted { asset, owned } => {
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            format!("asset {asset}"),
+                            skip_level(!owned),
+                            format!("TxFlow skipped position on unlisted asset {asset}"),
+                        );
+                        positions.reject(Some(format!("asset {asset}")));
+                    }
+                    Skipped::Legs { keys, owned } => {
+                        let stored = keys.iter().any(|key| cx.store.position(key).is_some());
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            keys.join(", "),
+                            skip_level(stored || !owned),
+                            format!("TxFlow skipped malformed position {}", keys.join(", ")),
+                        );
+                        for key in keys {
+                            positions.reject(Some(key));
+                        }
+                    }
+                    Skipped::Unidentified => {
+                        let level = skip_level(!cx.store.positions().is_empty());
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            String::new(),
+                            level,
+                            "TxFlow skipped malformed position without an asset",
+                        );
+                        positions.reject(None);
+                    }
+                },
             },
             Request::Orders {
                 orders,
@@ -638,7 +749,33 @@ impl TxFlow {
                         }
                         orders.push(o);
                     }
-                    Err(_) => *valid = false,
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct Identity {
+                            oid: u64,
+                        }
+                        match serde_json::from_str::<Identity>(item) {
+                            Ok(Identity { oid }) => {
+                                if !ids.insert(oid.to_string()) {
+                                    *valid = false;
+                                }
+                                cx.notice(
+                                    Level::Warn,
+                                    code::ROW_SKIPPED,
+                                    format!("TxFlow skipped malformed order {oid}"),
+                                );
+                                orders.reject(Some(oid.to_string()));
+                            }
+                            Err(_) => {
+                                cx.notice(
+                                    Level::Warn,
+                                    code::ROW_SKIPPED,
+                                    "TxFlow skipped malformed order without an id",
+                                );
+                                orders.reject(None);
+                            }
+                        }
+                    }
                 }
             }
             Request::Fills {
@@ -674,7 +811,7 @@ impl TxFlow {
                 fence,
                 mode_revision,
                 positions,
-                valid,
+                hold,
             } => {
                 if fence.generation != self.account.generation {
                     return;
@@ -684,13 +821,14 @@ impl TxFlow {
                     .map_err(|_| "Malformed TxFlow account state")
                     .and_then(Envelope::data)
                 else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Malformed or failed TxFlow account state",
                     );
                     return;
                 };
-                if !valid
+                if hold
                     || fence.revision != self.account.state_revision
                     || state.time.is_some_and(|t| t.0 < self.account.state_time)
                     || state
@@ -725,7 +863,11 @@ impl TxFlow {
                         .is_none()
                 {
                     self.account.inflight.remove("orders");
-                    cx.log(LogLevel::Warning, "Malformed or failed TxFlow open orders");
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
+                        "Malformed or failed TxFlow open orders",
+                    );
                     return;
                 }
                 if fence.revision != self.account.orders_revision {
@@ -735,7 +877,11 @@ impl TxFlow {
                 if page_rows == PAGE {
                     if offset >= 200_000 {
                         self.account.inflight.remove("orders");
-                        cx.log(LogLevel::Error, "TxFlow open-order coverage exhausted");
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
+                            "TxFlow open-order coverage exhausted",
+                        );
                         return;
                     }
                     let next = offset + PAGE;
@@ -755,9 +901,10 @@ impl TxFlow {
                     return;
                 }
                 self.account.inflight.remove("orders");
-                for order in &orders {
+                for order in orders.rows() {
                     self.remember_order(order);
                 }
+                let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                 cx.store.set_orders(
                     orders
                         .into_iter()
@@ -782,23 +929,29 @@ impl TxFlow {
                     .and_then(Envelope::data);
                 let Ok(page) = page else {
                     self.account.inflight.remove("fills");
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
                         "Malformed or failed TxFlow execution reconciliation",
                     );
                     return;
                 };
                 if !valid {
                     self.account.inflight.remove("fills");
-                    cx.log(LogLevel::Warning, "Malformed TxFlow execution");
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        "Malformed TxFlow execution",
+                    );
                     return;
                 }
                 if page.has_more {
                     if offset >= 200_000 || fills.len() > FILL_CAP {
                         self.account.inflight.remove("fills");
                         self.account.fills_exhausted = true;
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::HISTORY_INCOMPLETE,
                             "TxFlow execution coverage exhausted; restart account reconciliation",
                         );
                         return;
@@ -827,7 +980,7 @@ impl TxFlow {
                     > FILL_CAP
                 {
                     self.account.fills_exhausted = true;
-                    cx.log(LogLevel::Error,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
+                    cx.notice(Level::Error, code::HISTORY_INCOMPLETE,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
                     return;
                 }
                 for f in fills.into_iter().rev() {
@@ -873,7 +1026,7 @@ impl TxFlow {
                         self.account.settings.insert(symbol.clone(), setting);
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
-                    Err(e) => cx.log(LogLevel::Warning, e),
+                    Err(e) => cx.notice(Level::Warn, code::STREAM_MALFORMED, e),
                 }
             }
         }
@@ -882,7 +1035,7 @@ impl TxFlow {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         state: State,
-        positions: Vec<Position>,
+        positions: SnapshotBuilder<String, Position>,
         apply_mode: bool,
     ) {
         if let Some(time) = state.time {
@@ -897,10 +1050,15 @@ impl TxFlow {
             total: equity,
             upnl,
         });
-        if apply_mode && let Some(p) = positions.first() {
+        // Only an accepted row proves the account mode; retained copies may predate it.
+        if apply_mode && let Some(p) = positions.rows().first() {
             cx.store
                 .set_hedged(p.position_mode == Some(PositionMode::Hedged));
         }
+        if positions.rejected() == 0 {
+            self.account.skip_logged.clear();
+        }
+        let positions = positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
         cx.store.set_positions(positions);
     }
     fn asset_setting(
@@ -973,7 +1131,7 @@ impl TxFlow {
                 {
                     return;
                 }
-                let mut positions = Vec::new();
+                let mut positions = SnapshotBuilder::default();
                 let mut valid = true;
                 let decoded =
                     json::each_in_field::<AssetPosition>(frame.data.get(), "assetPositions", |p| {
@@ -1104,6 +1262,6 @@ impl TxFlow {
         if key == "setting" {
             self.account.setting_timer = Some(cx.set_timer(100.0));
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }

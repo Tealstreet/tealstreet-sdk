@@ -328,13 +328,11 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 50,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 50, .. })))
+    );
 }
 
 #[test]
@@ -452,7 +450,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]
@@ -467,7 +465,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("invalid secret"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
     assert!(
         !actions
             .iter()
@@ -527,7 +525,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {

@@ -183,10 +183,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, .. })
     )));
 }
 #[test]
@@ -348,7 +345,7 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone {
                 command: 8,
-                result: Ok(s),
+                result: s,
             }) => Some(s),
             _ => None,
         })
@@ -447,7 +444,11 @@ fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message.clone()),
             _ => None,
         })
         .collect();
@@ -498,4 +499,27 @@ fn exchange_info_with_only_malformed_rows_retries_startup() {
         .expect("startup retry");
     e.handle(1_773_295_710_000.0, Event::TimerFired { timer });
     request(e.drain_actions().collect(), "exchangeInfo");
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for bad in [
+        r#""pricePrecision":2,"quantityPrecision":3,"minOrderSize":"0""#,
+        r#""pricePrecision":2,"quantityPrecision":3,"minOrderSize":"-0.001""#,
+        r#""pricePrecision":400,"quantityPrecision":3"#,
+    ] {
+        let mut e = engine();
+        e.start(0.0);
+        let id = request(e.drain_actions().collect(), "exchangeInfo");
+        let info = format!(
+            r#"{{"symbols":[{{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6}},{{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT",{bad}}}]}}"#
+        );
+        response(&mut e, id, &info);
+        assert!(e.store().market("BTCUSDT").is_some());
+        assert!(e.store().market("ETHUSDT").is_none(), "{bad}");
+        assert!(e.drain_actions().any(|a| matches!(a,
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+                if message.contains("ETHUSDT"))));
+    }
 }

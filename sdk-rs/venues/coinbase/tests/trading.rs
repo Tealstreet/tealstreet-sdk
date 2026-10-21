@@ -17,6 +17,9 @@ const CFM_POSITIONS: &str = r#"{"positions":[{"product_id":"BTC-CDE","side":"SHO
 struct Session {
     details: std::collections::HashMap<String, String>,
     results: Vec<(u32, Result<String, String>)>,
+    /// Commands completed with `outcome: Unknown`.
+    unknown: Vec<u32>,
+    outcomes: Vec<(u32, Option<safe_cex_engine::Outcome>)>,
     e: Engine<Coinbase>,
     timers: Vec<(f64, TimerId)>,
     now: f64,
@@ -56,6 +59,8 @@ impl Session {
             private: None,
             urls: vec![],
             results: vec![],
+            unknown: vec![],
+            outcomes: vec![],
             kind,
             open_orders: String::new(),
             requests: vec![],
@@ -86,13 +91,25 @@ impl Session {
         for a in self.e.drain_actions().collect::<Vec<_>>() {
             match a {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
-                    self.results.push((command, result))
+                    self.results.push((command, Ok(result)))
+                }
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                        self.unknown.push(command);
+                    }
+                    self.outcomes.push((command, error.outcome));
+                    self.results.push((command, Err(error.message)))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
                 Action::Notice(safe_cex_engine::Notice::Log {
                     level: safe_cex_engine::LogLevel::Warning,
                     message,
-                }) => self.warnings.push(message.to_string()),
+                })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Warn,
+                    message,
+                    ..
+                })) => self.warnings.push(message.to_string()),
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
@@ -614,6 +631,7 @@ fn missing_create_id_is_ambiguous_and_never_retried_or_followed_by_second_order(
     let r = s.write();
     s.reply(r, 200, r#"{"success":true}"#);
     assert!(s.done(4).unwrap_err().contains("order ID"));
+    assert_eq!(s.unknown, [4]);
 }
 
 #[test]
@@ -631,7 +649,34 @@ fn transport_failure_never_resends_a_write() {
             error: "response lost",
         },
     );
-    assert!(s.done(5).is_err());
+    let error = s.done(5).unwrap_err();
+    assert!(
+        error.starts_with("Coinbase write outcome requires reconciliation"),
+        "{error}"
+    );
+    assert_eq!(s.unknown, [5]);
+}
+
+#[test]
+fn server_errors_are_unknown_but_client_errors_are_rejections() {
+    for (status, unknown) in [(503, true), (408, true), (400, false)] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        s.command(Command::PlaceOrders {
+            command: 9,
+            orders: vec![opts("BTC-USD", OrderType::Market, OrderSide::Buy, 1.0)],
+        });
+        let r = s.write();
+        s.reply(r, status, r#"{"error":"x","message":"failed"}"#);
+        assert!(s.done(9).is_err());
+        assert_eq!(s.unknown == [9], unknown, "{status}");
+        if !unknown {
+            assert_eq!(
+                s.outcomes,
+                [(9, Some(safe_cex_engine::Outcome::Rejected))],
+                "{status}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -647,6 +692,10 @@ fn cancel_checks_every_native_result_and_only_successes_become_canceling() {
     let r = s.write();
     s.reply(r,200,r#"{"results":[{"order_id":"one","success":true},{"order_id":"two","success":false,"failure_reason":"ORDER_NOT_FOUND"}]}"#);
     assert!(s.done(6).unwrap_err().contains("two"));
+    assert!(
+        s.unknown.is_empty(),
+        "an explicit cancel rejection is not unknown"
+    );
     assert_eq!(
         s.e.store().order("one").unwrap().status,
         OrderStatus::Canceling
@@ -866,6 +915,11 @@ fn queued_reduce_only_revalidates_position_before_dispatch() {
     );
     assert!(s.done(17).is_ok());
     assert!(s.done(18).is_err());
+    // Refused at dispatch: Coinbase received nothing.
+    assert!(
+        s.outcomes
+            .contains(&(18, Some(safe_cex_engine::Outcome::NotSent)))
+    );
 }
 
 #[test]
@@ -1663,6 +1717,11 @@ fn rejected_placement_keeps_coinbase_message_and_reason() {
     assert_eq!(
         s.done(309).unwrap_err(),
         "Coinbase placement rejected: Insufficient balance in source account (INSUFFICIENT_FUND)"
+    );
+    // `success: false` is Coinbase's documented refusal.
+    assert_eq!(
+        s.outcomes,
+        [(309, Some(safe_cex_engine::Outcome::Rejected))]
     );
     assert!(s.cancel_symbol(310).is_ok());
 }

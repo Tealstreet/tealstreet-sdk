@@ -1,15 +1,16 @@
 //! Atomic private snapshots, socket healing and execution identity.
 use crate::{ApexOmni, Pending, private_wire as wire, sign};
+use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId,
-};
+use safe_cex_engine::{Command, CommandId, Cx, Fill, Response, SocketChannel, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -20,55 +21,38 @@ pub enum Request {
     Positions {
         generation: Option<u64>,
         revision: u64,
-        rows: Vec<Position>,
-        skipped: Skipped,
+        rows: SnapshotBuilder<String, Position>,
     },
     Orders {
         generation: Option<u64>,
         revision: u64,
-        rows: Vec<Order>,
-        skipped: Skipped,
+        rows: SnapshotBuilder<String, Order>,
     },
     Balance,
 }
 
-/// Rows a snapshot could not map; their last known state is retained.
-#[derive(Default)]
-pub struct Skipped {
-    keys: Vec<String>,
-    unidentified: bool,
-}
-
-impl Skipped {
-    fn note(&mut self, key: &str) {
-        match key.trim() {
-            "" => self.unidentified = true,
-            key => self.keys.push(key.to_owned()),
-        }
-    }
-
-    fn keeps(&self, key: &str) -> bool {
-        self.unidentified || self.keys.iter().any(|kept| kept == key)
-    }
-
-    fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
-        if self.keys.is_empty() && !self.unidentified {
-            return;
-        }
-        let mut labels = self.keys.join(", ");
-        if self.unidentified {
-            labels.push_str(if labels.is_empty() {
-                "unidentified"
-            } else {
-                ", unidentified"
-            });
-        }
-        cx.log(
-            LogLevel::Warning,
-            format!(
-                "ApeX skipped malformed {kind} rows ({labels}); keeping their last known state"
-            ),
+/// Rejects a row the snapshot could not map; its stored copies keep their last known state.
+fn reject<T>(
+    cx: &mut Cx<'_, Pending>,
+    rows: &mut SnapshotBuilder<String, T>,
+    kind: &str,
+    key: &str,
+    ids: Vec<String>,
+) {
+    if key.trim().is_empty() {
+        cx.notice(Level::Warn, code::ROW_SKIPPED,
+            format!("ApeX skipped malformed {kind} row without an identity; keeping the last known state"),
         );
+        rows.reject(None);
+        return;
+    }
+    cx.notice(
+        Level::Warn,
+        code::ROW_SKIPPED,
+        format!("ApeX skipped malformed {kind} row {key}; keeping its last known state"),
+    );
+    for id in ids {
+        rows.reject(Some(id));
     }
 }
 
@@ -96,14 +80,8 @@ mod tests {
 impl Request {
     pub(crate) fn reset(&mut self) {
         match self {
-            Self::Positions { rows, skipped, .. } => {
-                rows.clear();
-                *skipped = Skipped::default();
-            }
-            Self::Orders { rows, skipped, .. } => {
-                rows.clear();
-                *skipped = Skipped::default();
-            }
+            Self::Positions { rows, .. } => *rows = SnapshotBuilder::default(),
+            Self::Orders { rows, .. } => *rows = SnapshotBuilder::default(),
             Self::Balance | Self::Identity { .. } => {}
         }
     }
@@ -578,8 +556,9 @@ impl ApexOmni {
         // A bad seed only blocks order signing; monitoring and cancels still work.
         if let Err(error) = sign::validate_seed(self.options.omni_key_seed.as_deref().unwrap_or(""))
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 format!(
                     "{error}; ApeX order placement is disabled until the OmniKey seed is fixed"
                 ),
@@ -591,8 +570,9 @@ impl ApexOmni {
             .as_ref()
             .is_none_or(String::is_empty)
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "ApeX private account requires an API passphrase",
             );
             return;
@@ -619,13 +599,15 @@ impl ApexOmni {
         self.account.generation += 1;
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            format!(
-                "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                cx.now as u64, self.account.generation
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
+                    cx.now as u64, self.account.generation
+                ))
+                .channel(SocketChannel::Private),
             ),
-            SocketChannel::Private,
-        ));
+        );
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -636,7 +618,7 @@ impl ApexOmni {
         let login = match sign::ws_login(&self.options, cx.now) {
             Ok(login) => login,
             Err(error) => {
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::CONFIG_INVALID, error);
                 cx.close(socket);
                 self.account_close(cx, socket);
                 return true;
@@ -744,8 +726,7 @@ impl ApexOmni {
         let pending = Request::Positions {
             generation,
             revision: self.account.revision,
-            rows: vec![],
-            skipped: Skipped::default(),
+            rows: SnapshotBuilder::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -755,7 +736,7 @@ impl ApexOmni {
         ) {
             self.account.positions_pending = false;
             self.account.snapshot = None;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -764,8 +745,7 @@ impl ApexOmni {
         let pending = Request::Orders {
             generation,
             revision: self.account.revision,
-            rows: vec![],
-            skipped: Skipped::default(),
+            rows: SnapshotBuilder::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -775,7 +755,7 @@ impl ApexOmni {
         ) {
             self.account.orders_pending = false;
             self.account.snapshot = None;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -791,7 +771,7 @@ impl ApexOmni {
             None,
         ) {
             self.account.balance_pending = false;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -809,13 +789,12 @@ impl ApexOmni {
             self.note_unlisted(cx, &wire::row_key(item).symbol, kind);
         }
         match request {
-            Request::Positions { rows, skipped, .. } => {
+            Request::Positions { rows, .. } => {
                 match serde_json::from_str::<wire::PositionRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| {
                         if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                                 "ApeX position PnL unavailable; retaining prior valuation",
                             );
                         }
@@ -829,25 +808,33 @@ impl ApexOmni {
                             .store
                             .market_by_id(&key.symbol)
                             .or_else(|| cx.store.market(&key.symbol))
-                            .map_or(key.symbol.as_str(), |market| market.symbol.as_str());
-                        skipped.note(symbol);
+                            .map_or(key.symbol.as_str(), |market| market.symbol.as_str())
+                            .to_owned();
+                        let legs = [PositionSide::Long, PositionSide::Short]
+                            .map(|side| position_id(&symbol, side))
+                            .into();
+                        reject(cx, rows, "position", &symbol, legs);
                     }
                 }
             }
-            Request::Orders { rows, skipped, .. } => {
+            Request::Orders { rows, .. } => {
                 match serde_json::from_str::<wire::OrderRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| {
                         if cx.store.market_by_id(&raw.symbol)
                             .or_else(|| cx.store.market(&raw.symbol)).is_none() {
-                            cx.log(LogLevel::Warning, "ApeX owned order has unavailable market metadata; preserving previous orders");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
                         map_order(cx.store, &raw, cx.now)
                     })
                 {
-                    Ok(mapped) => rows.extend(mapped),
-                    Err(_) => skipped.note(&wire::row_key(item).id),
+                    Ok(mapped) => mapped.into_iter().for_each(|order| rows.push(order)),
+                    Err(_) => {
+                        let id = wire::row_key(item).id;
+                        let ids = vec![id.clone()];
+                        reject(cx, rows, "order", &id, ids);
+                    }
                 }
             }
             Request::Balance | Request::Identity { .. } => {}
@@ -877,26 +864,25 @@ impl ApexOmni {
                             user_id: String,
                             affiliate_id: Option<String>,
                         }
-                        cx.done(
-                            command,
-                            serde_json::to_string(&Identity {
+                        {
+                            let result: Result<String, String> = serde_json::to_string(&Identity {
                                 user_id: id,
                                 affiliate_id: None,
                             })
-                            .map_err(|e| e.to_string()),
-                        );
+                            .map_err(|e| e.to_string());
+                            match result {
+                                Ok(data) => cx.done(command, data),
+                                Err(error) => cx.fail(command, error),
+                            }
+                        };
                     }
-                    None => cx.done(
-                        command,
-                        Err("ApeX account identity payload missing or invalid".into()),
-                    ),
+                    None => cx.fail(command, "ApeX account identity payload missing or invalid"),
                 }
             }
             Request::Positions {
                 generation,
                 revision,
-                mut rows,
-                skipped,
+                rows,
             } => {
                 self.account.positions_pending = false;
                 let metadata = data
@@ -907,14 +893,7 @@ impl ApexOmni {
                     self.snapshot_failed(cx, generation, "invalid account snapshot");
                     return;
                 };
-                skipped.report(cx, "position");
-                for current in cx.store.positions() {
-                    if skipped.keeps(&current.symbol)
-                        && !rows.iter().any(|row| row.id == current.id)
-                    {
-                        rows.push(current.clone());
-                    }
-                }
+                let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                 let fees = metadata
                     .contract_account
                     .map(|f| (f.maker_fee_rate, f.taker_fee_rate))
@@ -945,8 +924,7 @@ impl ApexOmni {
             Request::Orders {
                 generation,
                 revision,
-                mut rows,
-                skipped,
+                rows,
             } => {
                 self.account.orders_pending = false;
                 if revision < self.account.snapshot_floor {
@@ -961,14 +939,10 @@ impl ApexOmni {
                     self.snapshot_failed(cx, generation, "invalid orders snapshot");
                     return;
                 }
-                skipped.report(cx, "order");
-                for current in cx.store.orders() {
-                    if skipped.keeps(base_id(&current.id))
-                        && !rows.iter().any(|row| row.id == current.id)
-                    {
-                        rows.push(current.clone());
-                    }
-                }
+                // Bracket children share their parent's identity.
+                let rows = rows.commit(cx.store.orders().iter().cloned(), |o| {
+                    base_id(&o.id).to_owned()
+                });
                 if let Some(generation) = generation {
                     if let Some(snapshot) = self
                         .account
@@ -988,8 +962,9 @@ impl ApexOmni {
                 let Some(balance) =
                     data.and_then(|data| serde_json::from_str::<wire::BalanceRow>(data.get()).ok())
                 else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
                         "ApeX balance payload missing or invalid; keeping last balance",
                     );
                     return;
@@ -1014,8 +989,9 @@ impl ApexOmni {
                     value.is_finite().then_some(value)
                 });
                 let Some(upnl) = upnl else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::VALUATION_UNAVAILABLE,
                         "ApeX position PnL invalid; retaining previous balance",
                     );
                     return;
@@ -1039,8 +1015,9 @@ impl ApexOmni {
         }) {
             self.account.snapshot = None;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("ApeX private reconciliation: {error}; retaining last state"),
         );
     }
@@ -1053,7 +1030,7 @@ impl ApexOmni {
     ) {
         let generation = match request {
             Request::Identity { command } => {
-                cx.done(command, Err(error.to_owned()));
+                cx.fail(command, error.to_owned());
                 return;
             }
             Request::Positions { generation, .. } => {
@@ -1083,8 +1060,9 @@ impl ApexOmni {
         }
         let snapshot = self.account.snapshot.take().expect("complete snapshot");
         if snapshot.revision < self.account.snapshot_floor {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "ApeX snapshot predates retired terminal guards; retaining last state",
             );
             return;
@@ -1182,8 +1160,9 @@ impl ApexOmni {
             .iter()
             .filter(|id| rows.iter().any(|row| row.id == **id))
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ORDER_REJECTED,
                 format!("ApeX order {id} is still open after its cancel was accepted"),
             );
         }
@@ -1221,10 +1200,7 @@ impl ApexOmni {
             || self.options.key.as_ref().is_none_or(String::is_empty)
             || self.options.secret.as_ref().is_none_or(String::is_empty)
         {
-            cx.done(
-                command,
-                Err("ApeX account identity requires API credentials".into()),
-            );
+            cx.fail(command, "ApeX account identity requires API credentials");
             return Ok(());
         }
         if let Err(error) = self.signed(
@@ -1233,7 +1209,7 @@ impl ApexOmni {
             Pending::Account(Request::Identity { command }),
             None,
         ) {
-            cx.done(command, Err(error));
+            cx.fail(command, error);
         }
         Ok(())
     }
@@ -1265,8 +1241,14 @@ impl ApexOmni {
                 .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
         }
         if message.success == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            let rejected = if message.op == "login" {
+                code::AUTH_REJECTED
+            } else {
+                code::SUBSCRIPTION_REJECTED
+            };
+            cx.notice(
+                Level::Warn,
+                rejected,
                 format!("ApeX private socket rejected request: {}", message.ret_msg),
             );
             if message.op == "login" {
@@ -1302,8 +1284,9 @@ impl ApexOmni {
             ),
         ] {
             if let Some(skipped) = skipped.filter(|skipped| !skipped.is_empty()) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
                         skipped.join(", ")
@@ -1335,14 +1318,15 @@ impl ApexOmni {
             for raw in positions.rows {
                 self.note_unlisted(cx, &raw.symbol, "position");
                 if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::VALUATION_UNAVAILABLE,
                         "ApeX position PnL unavailable; retaining prior valuation",
                     );
                 }
                 let mapped = self.map_position(cx.store, &raw, cx.now);
                 if let Err(error) = &mapped {
-                    cx.log(LogLevel::Warning, error);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, error);
                 }
                 if let Ok(Some(mut position)) = mapped {
                     if let Some((_, at, leverage)) =
@@ -1555,13 +1539,14 @@ impl ApexOmni {
         let rows = match map_order(cx.store, raw, cx.now) {
             Ok(rows) => rows,
             Err(error) => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::ROW_SKIPPED, error);
                 return;
             }
         };
         let Some(order) = rows.first() else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "ApeX owned order has unavailable market metadata; preserving previous orders",
             );
             return;
@@ -1655,7 +1640,11 @@ impl ApexOmni {
                         "" | "UNKNOWN_ORDER_CANCEL_REASON" | "INTERNAL_FAILED" | "USER_CANCELED"
                     )
                 {
-                    cx.log(LogLevel::Error, raw.cancel_reason.as_ref());
+                    cx.notice(
+                        Level::Error,
+                        code::ORDER_REJECTED,
+                        raw.cancel_reason.as_ref(),
+                    );
                 }
             }
             OrderStatus::Closed => {

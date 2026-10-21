@@ -95,6 +95,11 @@ fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<Strin
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) if command == command_id => {
+                let result: Result<String, String> = Ok(result);
+                done.push(result)
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) if command == command_id => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 done.push(result)
             }
             Action::Notice(Notice::CommandError { command, .. }) if command == command_id => {
@@ -285,7 +290,7 @@ fn identity_failed_login_settles_all_query_waiters_once() {
     h.respond(&login, 403, r#"{"e":{"c":"1001"}}"#, "");
     let actions = std::mem::take(&mut h.actions);
     let for_command = |id| {
-        actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandError { command, .. }) if *command == id)).cloned().collect()
+        actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. } | Notice::CommandError { command, .. }) if *command == id)).cloned().collect()
     };
     result(for_command(42), 42, true).unwrap_err();
     result(for_command(43), 43, true).unwrap_err();
@@ -326,6 +331,7 @@ fn identity_default_subaccount_body_and_missing_authenticated_main_id_are_explic
                 a,
                 Action::Notice(
                     Notice::CommandDone { command: 42, .. }
+                        | Notice::CommandFailed { command: 42, .. }
                         | Notice::CommandError { command: 42, .. }
                 )
             )

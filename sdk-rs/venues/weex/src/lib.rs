@@ -9,12 +9,14 @@ mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::ErrorKind;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
@@ -28,6 +30,17 @@ pub struct Options {
     pub passphrase: Option<String>,
     /// Only a host able to attach authenticated upgrade headers may enable it.
     pub private_ws_headers: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub struct Pending {
@@ -161,17 +174,18 @@ impl WeexFutures {
             .as_deref()
             .filter(|key| !options.public_data_only && !key.is_empty())
             .map(identity::fingerprint);
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let supplied = [&options.key, &options.secret, &options.passphrase]
             .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
         let incomplete_credentials =
             !options.public_data_only && supplied.contains(&true) && supplied.contains(&false);
-        let read_credentials = options.read_credentials.map(|mut read| {
+        let read_credentials = options.read_credentials.clone().map(|mut read| {
             if read.passphrase.is_none() {
                 read.passphrase = options.passphrase.clone();
             }
             read
         });
-        let credentials = match (options.key, options.secret, options.passphrase) {
+        let credentials = match (&options.key, &options.secret, &options.passphrase) {
             (Some(key), Some(secret), Some(passphrase))
                 if !options.public_data_only
                     && !key.is_empty()
@@ -179,9 +193,9 @@ impl WeexFutures {
                     && !passphrase.is_empty() =>
             {
                 Some(sign::Credentials {
-                    key,
-                    secret,
-                    passphrase,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    passphrase: passphrase.clone(),
                 })
             }
             _ => None,
@@ -317,8 +331,12 @@ impl WeexFutures {
         true
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket =
-            Some(cx.connect_channel(paths::PUBLIC_WS, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS)
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -365,8 +383,9 @@ impl WeexFutures {
         }
         for lot in topics.chunks(50) {
             if self.public.operations.len() >= 240 {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
                     "WEEX subscription operation limit reached",
                 );
                 return;
@@ -465,8 +484,8 @@ impl WeexFutures {
             b.last = None;
             b.buffer.clear();
             b.failures += 1;
-            let delay = (1000.0 * 2f64.powi(b.failures.min(6) as i32 - 1))
-                .min(60_000.0)
+            let delay = cx
+                .jittered(Backoff::new(1_000.0, 5, 60_000.0).delay(b.failures.saturating_sub(1)))
                 .max(self.paused_until - cx.now);
             b.retry = Some(cx.set_timer(delay));
         }
@@ -506,7 +525,11 @@ impl WeexFutures {
             self.identity_failed(cx, command, error);
             return;
         }
-        cx.log(LogLevel::Warning, format!("WEEX: {error}"));
+        cx.notice(
+            safe_cex_engine::Level::Warn,
+            code::REQUEST_FAILED,
+            format!("WEEX: {error}"),
+        );
         match task {
             Task::Identity(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
@@ -524,7 +547,7 @@ impl WeexFutures {
                     self.book_failed(cx, &symbol);
                 }
             }
-            Task::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Task::Candles { command, .. } => cx.fail(command, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -597,7 +620,7 @@ impl Venue for WeexFutures {
                 read.validate_passphrase(self.credentials.as_ref().map(|c| c.passphrase.as_str()))
             })
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.get(
@@ -639,8 +662,9 @@ impl Venue for WeexFutures {
             return;
         }
         if message.result == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 format!("WEEX subscription failed: {}", message.msg),
             );
             return;
@@ -726,9 +750,10 @@ impl Venue for WeexFutures {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
             Task::Markets(rows) => {
-                match serde_json::from_str::<Symbol<'_>>(item) {
-                    Ok(r) => rows.extend(r.market()),
-                    Err(_) => {
+                match serde_json::from_str::<Symbol<'_>>(item).map(Symbol::market) {
+                    Ok(Some(market)) if market.precision.is_tradable() => rows.push(market),
+                    Ok(None) => {}
+                    _ => {
                         p.skipped.push(row_symbol(item));
                         safe_cex_engine::startup::skipped_row(cx);
                     }
@@ -809,7 +834,11 @@ impl Venue for WeexFutures {
         if response.status >= 400 {
             if let Task::Trade(request) = p.task {
                 let error = trading::http_failure(response.status, response.body);
-                cx.log(LogLevel::Warning, format!("WEEX: {}", error.message));
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    code::ORDER_REJECTED,
+                    format!("WEEX: {}", error.message),
+                );
                 self.trade_failed(cx, request, error);
                 return;
             }
@@ -830,8 +859,9 @@ impl Venue for WeexFutures {
                 Task::Daily => "24h ticker",
                 _ => "book ticker",
             };
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "WEEX skipped {} malformed {kind} row(s): {}",
                     p.skipped.len(),
@@ -933,7 +963,7 @@ impl Venue for WeexFutures {
             }
             Task::Candles { command, mut rows } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).expect("candles")));
+                cx.done(command, serde_json::to_string(&rows).expect("candles"));
             }
         }
     }
@@ -1019,7 +1049,11 @@ impl Venue for WeexFutures {
                     return;
                 }
                 if self.books.len() + self.candles.len() >= 10 {
-                    cx.log(LogLevel::Warning, "WEEX book/candle capacity reached");
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "WEEX book/candle capacity reached",
+                    );
                     return;
                 }
                 self.books.insert(symbol.clone(), BookState::new());
@@ -1044,12 +1078,20 @@ impl Venue for WeexFutures {
                 interval: i,
             } => {
                 if !interval(i, true) {
-                    cx.log(LogLevel::Error, i.unsupported("WEEX"));
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("WEEX"),
+                    );
                     return;
                 }
                 let key = (symbol, i);
                 if !self.candles.contains_key(&key) && self.books.len() + self.candles.len() >= 10 {
-                    cx.log(LogLevel::Warning, "WEEX book/candle capacity reached");
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "WEEX book/candle capacity reached",
+                    );
                     return;
                 }
                 *self.candles.entry(key).or_default() += 1;
@@ -1074,7 +1116,7 @@ impl Venue for WeexFutures {
                 to_ms,
             } => {
                 if !interval(i, false) {
-                    cx.done(command, Err(i.unsupported("WEEX")));
+                    cx.fail(command, i.unsupported("WEEX"));
                     return;
                 }
                 let historical = from_ms.is_some() || to_ms.is_some();
@@ -1108,7 +1150,11 @@ impl Venue for WeexFutures {
                     Some(ArrayAt::Root),
                 );
             }
-            _ => cx.log(LogLevel::Warning, "WEEX command not implemented yet"),
+            _ => cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::COMMAND_UNSUPPORTED,
+                "WEEX command not implemented yet",
+            ),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
@@ -1124,3 +1170,11 @@ impl Venue for WeexFutures {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for WeexFutures {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

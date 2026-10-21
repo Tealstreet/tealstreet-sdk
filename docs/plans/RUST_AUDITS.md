@@ -101,12 +101,11 @@ Medium:
 - ~~Stale snapshot reopens canceled orders: Binance USD-M/PM (`trading.rs:1463`),
   Bybit Demo/Hyro (`account.rs:1824`).~~ Fixed: write/event revision fences plus native terminal retention cover in-flight and replica-stale reads.
 - ~~REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.~~ Independent execution axes also cover Aster/WOO fallback; startup baselines do not let later REST consume stream fills. See [verification](RUST_ORDER_RACES.md).
-- Binance Spot quantified cancel acknowledgement can advance the execution
-  cursor before its matching TRADE, losing the execution notification. Reverified
-  on `bd94abb524`; tracked for the Binance follow-up after the derivative fixes.
-- Binance PM strategy/regular client-ID reuse on one symbol can let an old
-  strategy terminal replay cancel the newer regular row. Reproduced in PR #1348;
-  inherited from the base, tracked for native-owner fencing in the follow-up.
+- ~~Binance Spot quantified cancel acknowledgement can advance the execution
+  cursor before its matching TRADE, losing the execution notification.~~
+- ~~Binance PM strategy/regular client-ID reuse on one symbol can let an old
+  strategy terminal replay cancel the newer regular row.~~ Both fixed by the
+  Binance/Bybit follow-up (#1354; [follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
 - ~~BloFin replays pre-session fills (`blofin/src/account.rs:1231`).~~ Session cutoff and one-time complete REST baseline preserve live continuation without historical replay. See [verification](RUST_ORDER_RACES.md).
 - ~~Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`, kraken spot ignores checksum, asterdex/lighter keep books while waiting.~~ Explicit invalidation and recovery snapshot clears, WOO continuity and Kraken Spot CRC. Binance/Bybit iterator-contract follow-up was sent to their lane. See [verification](RUST_ORDER_RACES.md).
 - ~~Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).~~ Dropped after reverification: cited local-ACK branch runs only for Demo/Hyro, which cannot enable inverse. Regression preserves coin `remaining` and native `remainingNative`.
@@ -165,7 +164,8 @@ threshold relaxation. Strike findings with the fix PR and its evidence.
 - ~~Never encoded: `conditional_order_price`, bracket trigger types,
   `remaining_notional`, `Ticker.mid_price`.~~
 - Low: ~~two `fetchedLeverage` writers~~; ~~`FORMAT` never bumped and reserved u16 unused~~;
-  fills precede orders by up to 250 ms; ~~`TickerState` views detach on transfer~~.
+  ~~fills precede orders by up to 250 ms~~ (a book-cadence flush carrying fills
+  writes the pending store sections with them); ~~`TickerState` views detach on transfer~~.
 
 Repair evidence: actual Rust-writer → JS decoder → FrameApplier regression,
 actual FILLS frame → GRVT chaser partial/completion regression, native layout
@@ -310,32 +310,73 @@ the existing regression fails before removing the redundant branch flush and
 passes afterwards (58 recovery/contract/leverage tests). Incoming broker/scope
 tests pass 19/19; integrated engine lib tests pass 99/99, SDK typecheck and scoped
 lint pass. Sole leverage ownership and coherent snapshots remain intact.
-Fresh combined gates and exact-head CI are required before merging PR #1345.
+~~Fresh combined gates and exact-head CI are required before merging PR #1345.~~
+PR #1345 merged.
 
 ## Security
 
-- Workers Durable Object has no client auth and serves the first client's account
-  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).
-- Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).
-- Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).
-- live-smoke: no notional cap, no post-only, testnet reads mainnet env names.
-- Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.
-- Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
+Addressed by `feat/rust-security-fixes`; regression and gate receipts are in
+[`RUST_SECURITY_FIXES.md`](RUST_SECURITY_FIXES.md). These findings were reverified
+against current code before fixing. Lifecycle differences alone are not defects.
+
+- ~~Workers Durable Object has no client auth and serves the first client's account
+  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).~~
+  **M1/M2:** deployment-owned per-account token checked before upgrade;
+  conflicting starts rejected, one startup in flight, membership/generation
+  rechecked after loading, malformed JSON handled. Options/start failures are
+  generic; actionable venue command failures remain visible. Network clients
+  cannot inject trusted-provider public feed updates into account valuation.
+- ~~Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).~~
+  **M3:** strip URLs on connection/send errors. Current reqwest body-stream
+  errors already have no URL; that path has a non-disclosure regression rather
+  than a claimed defect fix. New delegated signer callback errors
+  are generic instead of echoing arbitrary credential-bearing exception text.
+  Unstructured custom JS HTTP/body/socket exceptions are sanitized at origin;
+  structured venue responses retain actionable errors. Native direct-proxy and
+  HOW HTTP authorization-provider failures also use fixed diagnostics.
+- ~~Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).~~
+  **M4:** redirects disabled in native HTTP, host fetch and Workers HTTP/upgrade.
+- ~~live-smoke: no notional cap, no post-only, testnet reads mainnet env names.~~
+  **M5:** fixed $100 quote-notional cap before any write, post-only on supported
+  adapters, mode-specific credential variables without fallback. Paired TS USD-M
+  fix preserves GTX through REST/NEW mapping and cancel-replace; no relaxed oracle.
+- ~~Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.~~
+  **M6:** atomic per-signer monotonic reservation across native engine objects or
+  one Wasm module memory, surviving engine recreation and clock regression.
+  Hyperliquid and TxFlow share their underlying signer domain. Separate
+  processes/independent Wasm memories still require deployment coordination.
+- ~~Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
   partial zeroization; Paradex 24 h auth signature; Lighter non-hedged Schnorr
-  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.
+  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.~~
+  Polling is bounded to 1000–120000 ms with explicit pause; decompression is
+  capped at 16 MiB. Credential options/signing diagnostics redact Debug;
+  Polymarket credentials cannot Serialize. Internal owned options and stored
+  credentials scrub on drop, including Kraken Spot, KuCoin/Spot and Orderly. Paradex auth
+  expires in 300 seconds; shorter supported caller receive windows are honored
+  while existing TS-compatible defaults remain. Lighter production Schnorr
+  nonces hedge key/message/entropy; independent explicit-nonce vectors remain.
+  Tape fields/headers are allowlisted, unknown nested payloads scrubbed,
+  Set-Cookie removed from persisted fixtures/recordings, and scanner exemptions
+  require exact reviewed public bytes AND exact paths.
+  Owned-carrier erasure does not claim to erase caller-owned/borrowed JS strings,
+  partially failed serde allocations or upstream cryptography/allocator copies.
 - Clean: no committed secrets; native frame server auth and isolation; TLS; RNG.
 
 ## Architecture
 
-- Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.
+- ~~Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.~~
+  Done: every venue decodes through `engine::de` (RUST_QUALITY helper 1).
 - ~~Socket supervision copied per venue, no jitter, two without backoff →
   `engine::socket::Supervisor`.~~ Fixed: every venue socket runs under the shared supervisor (#1385, #1406, #1423 and the final socket PR).
-- Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
-  `safe-cex-venues` crate shared by both hosts.
+- ~~Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
+  `safe-cex-venues` crate shared by both hosts.~~ Done: `sdk-rs/registry` is shared
+  by the hosts (RUST_QUALITY helper 6).
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
 - Client ids use OS randomness in the deterministic core (`crypto/src/uuid.rs`).
-- ~30 URL encoders in three dialects → `engine::url`.
-- `RangeWalk` used by 6 of 26 venues; three book-stitch designs.
+- ~~~30 URL encoders in three dialects → `engine::url`.~~ Done (RUST_QUALITY helper 2).
+- ~~`RangeWalk` used by 6 of 26 venues~~ (shared `CursorWalk`/`windows`/`OffsetWalk`
+  page 12 venues; the rest stay hand-rolled with reasons in
+  [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md)); three book-stitch designs.
 - Read-key routing re-implemented ~14 times plus 12 copied test files.
 - `docs/plans` 47 files; collapse to this file, `RUST_REWRITE.md`,
   `VENUE_PORT_BRIEF.md`, the cutover docs, and per-venue READMEs. Roster stale.
@@ -409,17 +450,18 @@ per-venue canary holding the formerly circular-evidence venues last.
 Reviewed on `feat/rust-bitunix` at `846f285d13` (PR #1309, not yet merged); paths
 are relative to `sdk-rs/venues/bitunix/src`. REST and WS signing match TS byte for
 byte; positions, aggregate balance and history paging are at parity.
-- High: app stop payloads are rejected. `trading.rs:265` refuses any order with
+- High: ~~app stop payloads are rejected. `trading.rs:265` refuses any order with
   `trigger_price`, including StopLoss/TakeProfit sent with `triggerPrice == price`
   (TS places them from `price`, `bitunix.exchange.ts` `formatTPSLOrder`), so a
   dragged SL/TP leaves the position unprotected. Accept protective kinds whose
-  trigger equals the price (as Orderly does).
-- High: the futures socket (books, candles) is tagged `SocketChannel::Public`
+  trigger equals the price (as Orderly does).~~ (accepted via
+  `redundant_protective_trigger`; distinct triggers still reject)
+- High: ~~the futures socket (books, candles) is tagged `SocketChannel::Public`
   (`lib.rs:127`), so the host applies the public route; its fallback is the public
   proxy, not `bitunixFutures` (`routingTable.ts` `business`). After two silent
   connects or a watchdog recover the socket sticks to an endpoint that ignores
   depth/kline subscriptions while still answering pings: books and live candles go
-  dead with no log. Tag it `SocketChannel::Business`.
+  dead with no log. Tag it `SocketChannel::Business`.~~ (tagged Business)
 - Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
   network speed across futures, private and every ticker shard.
 - Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
@@ -474,8 +516,11 @@ byte; positions, aggregate balance and history paging are at parity.
   bad rows are skipped and counted in a warning; `fetchLeverage` reads
   `leverage-info` (it previously never answered); config is re-read every 30 s
   and a changed mode/level reconciles positions.
-- Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
-  rejected; income limit truncates.
+- Low: ~~`mmp`/`elp` order types get an empty id; conditional `price: 0`
+  rejected~~ (regular types keep their `ordId`; `price: 0` sends `orderPx: -1`,
+  market once triggered, as TS); income limit truncates (kept: Rust returns the
+  newest `limit` whole bills where TS returns up to a page more, and the EEA
+  SWAP+FUTURES merge relies on it).
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
   staying open, X-Perp history SWAP hardcode, market-order amend placing a new
   order, duplicate algo cancels. Shared by both: reduce-only conditional sent
@@ -495,9 +540,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
   doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
-  spot vault signs as vault (TS as master) — confirm; more terminal statuses;
-  `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
-  not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
+  spot vault signs as vault (TS as master) — confirm; ~~more terminal statuses~~
+  (Rust treats every `*Canceled`/`*Rejected` as terminal, a superset of TS);
+  ~~`stopLoss: 0` rejects whole order~~ (0 means no bracket on every market, as
+  TS); ~~signed fees~~ (deliberate: TS `abs` mislabels rebates); ~~unified
+  balance spot slices not populated~~ (spot holdings publish as `coins`;
+  currencies stay unset because TS's `currencies.USDC` is a synthetic sizing
+  slice, not the raw spot row); fills lack execution id, realized PnL and fee
+  (engine `Fill`; claude-i2upd7).
 
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
@@ -507,15 +557,30 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   ~~REST candles with `from`+`limit` return the oldest N instead of newest, no
   1500 cap (`lib.rs:1439`)~~; ~~COIN-M strict batch discards placed ids on a partial
   reject (`trading.rs:397,700`)~~; ~~PM `close: true` with an amount closes the whole
-  position (`trading.rs:1087`)~~; COIN-M unpriced coin excluded from totals
-  (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
+  position (`trading.rs:1087`)~~; ~~COIN-M unpriced coin excluded from totals
+  (TS counts 1:1 — confirm)~~ (deliberate: an unpriced coin waits for a price,
+  then counts $0 with its native amount kept, where TS adds a fabricated $1 per
+  coin; `inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd`); ~~CancelOrders with unknown ids reports success
   without sending (`trading.rs:224`)~~ (explicit errors; see
   [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
   unsupported~~; ~~USD-M journal (`fetchHistoricalPositions`) not wired in the host~~ (folds
   per-symbol fills as TS).
-- Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
-  STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
+- Low: ~~fixed `recvWindow`~~; ~~Binance UI STOP orders amend to stop-market~~
+  (native `STOP`/`TAKE_PROFIT`/`*_LIMIT` stops refuse amend as `unsupported`
+  before any write: re-placing them as `STOP_MARKET` at the old limit price would
+  trigger at a different price).
+- Known risks, kept by decision (overseer, 2026-10-21):
+  - closePosition conflict cancel in batches: `trading.rs` cancels an existing
+    full-position stop for every `PlaceOrders`, batches included, while TS only
+    does so for single `placeOrder` (its batches hit -4130 and keep the old stop).
+    Kept: replacing the stop is what the caller asked for, and parity would change
+    which orders are sent.
+  - PM -2011 plain cancel marks canceled: outside an amendment, a PM -2011 is
+    treated as already gone and silent, where TS shows the error and keeps the
+    row. A cancel on the wrong endpoint or with stale ownership could hide a live
+    order locally until the next snapshot. Kept: changing cancel reconciliation is
+    RISKY without live -2011 evidence; snapshot reconciliation bounds the window.
 - Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
   Native unsupported histories reject; SDK methods expose matching branded Base
   fallbacks. Existing unknown-ID mixed-batch cancellation preflight was reverified.
@@ -581,9 +646,16 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Fixed: a well-formed row of an unsupported type keeps its last known state (or is
   reported as not shown) while other orders commit; malformed rows still preserve
   the whole last-good snapshot. Hyro stays strict.
-- Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
-  breadth; split-lot error handling; classic upnl; inverse reference price;
-  demo key hint, recvWindow, rate limiter; Hyro early pings.
+- Low: ~~OHLCV from+limit~~ (a limit asks for the newest bars up to `to`, as
+  TS); no market refresh (needs an engine refresh command); ~~Hyro market filter;
+  subscription breadth~~ (decided: USDT perpetuals only, Hyro's own rule; foreign
+  categories are dropped by row, bandwidth only); split-lot error handling (RISKY:
+  one unformattable lot rejects the batch before writes, where TS skips
+  that order); ~~classic upnl; inverse reference price~~ (Rust is the
+  same or better: live upnl on every account type, row mark before tickers);
+  demo key hint (open: needs a signed probe of the other host on a 10003);
+  ~~recvWindow~~ (decided: capped at 20 s); rate limiter (RISKY: send timing);
+  Hyro early pings (unproven; check supervisor staleness first).
 - Confirm (TS bugs Rust fixed): spot amount precision, option books socket, spot
   cancel-all groups, spot trailing/full TP/SL endpoint, inverse position-mode
   category, stop with only price, category-filtered private topics,
@@ -605,8 +677,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   one odd instrument row aborts startup
   (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
   (`trading.rs:671`)~~ (explicit error).
-- Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
-  iso/cross warnings; 102143 not translated; history shape.
+- Low: ~~strict leverage fetch~~ (no user impact: the bridge turns a refused
+  read into `null` plus a warning, as TS returns `null`); ~~trigger TP/SL not
+  tick-rounded; missing iso/cross warnings; 102143 not translated; history
+  shape~~ (order history now reports base units like open orders and fills, a
+  deliberate divergence from TS; `BLOFIN_RUST_PORT.md`).
 - Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
   zero-size partial TP/SL rejected; amend checks order-detail (endpoint
   unexercised live); per-row cancel errors; empty snapshot commits; income
@@ -654,13 +729,20 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 Verdict: reads and streaming match; writes and lifecycle do not yet. Blocks
 further cutover and warrants re-checking coinbase, Orderly, txflow.
 
-- High: cancel sends ids only and venues drop ids not yet in their store, so a
+- High: ~~cancel sends ids only and venues drop ids not yet in their store, so a
   chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
-  `bybit/src/trading.rs:422`); ~~`setLeverage` drops side (see Bitget)~~; a wasm
-  panic freezes the account silently — no containment in `host.mjs:131,175`;
-  `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
-  `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
-  subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
+  `bybit/src/trading.rs:422`)~~ (unknown ids fail explicitly, RUST_UNKNOWN_CANCEL;
+  a cancel or amend naming an acknowledged placement waits in the engine until
+  the store has it, `engine/src/placement_acks.rs`); ~~`setLeverage` drops side (see Bitget)~~; ~~a wasm
+  panic freezes the account silently — no containment in `host.mjs:131,175`~~
+  (a trap disposes the host, settles pending commands with unknown write
+  outcomes and rejects with `ENGINE_DEAD`, `kind: 'internal'`);
+  ~~`fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
+  `PublicExchangeFactory` caches it (`rust.exchange.ts:856`)~~ (reads start the
+  engine and wait for native data, #1375; the factory throws on an empty list;
+  the engine store never applies an empty catalogue and warns instead); book/candle
+  ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
+  (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
@@ -669,9 +751,14 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
   engine (needs a resync command); `validateAccount` leaves a started engine.
-- Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
-  `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
-  on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
+- Low: ~~Asterdex unsupported interval mapped to 1h breaks candle matching~~
+  (typed `Interval` refuses it);
+  ~~`num::adjust` with step ≤ 0~~ (a market without two positive finite steps is
+  a malformed catalogue row on every venue; the guard stays as defence in depth);
+  ~~no command deadline, `execute` drops the batch tail
+  on an unknown action~~ (wasm host: 120 s deadline with unknown write outcome,
+  `hostcommand.test.mjs`; batch tail kept, "unknown actions preserve batch tail
+  completions"; the undeployed native host has no command deadline); candles drop `lastSide`, orders lack generic `triggerType`.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
@@ -686,9 +773,15 @@ Futures matches TS on nearly every input; no high regression.
 - ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
   the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
   rejection names the unsupported take-profit/stop-loss legs before any write.
-- Low: income over 500 rows errors (TS partial); one bad row rejects
-  catalogue/tickers/open orders and blocks private start (startup lane);
-  missing funding field set to 0; raw error text; spot 3m candles.
+- Low: ~~income over 500 rows errors (TS partial)~~ (known limit: the newest
+  page returns with a `history.incomplete` warning, as TS; `account-log` honours
+  only `since`, so a complete walk awaits the cursor probe in
+  [RUST_LIVE_GATE.md](RUST_LIVE_GATE.md)); one bad row ~~rejects
+  catalogue/tickers~~ (skipped since the startup lane) and still rejects open
+  orders (row isolation: SnapshotBuilder batch 3, claude-nfncln); missing
+  funding field set to 0 (decided: Kraken omits a zero rate; b778fa3); ~~raw error
+  text~~ (non-2xx failures carry the body's error code); spot 3m candles
+  (decided: typed `Interval` refuses rather than serving 1m bars as 3m).
 - Confirm (TS bugs Rust fixed): index trigger signal; full_fill not canceled;
   live % change/volume/OI; stop amend racing a fill; spot fills over-reported
   and mislabelled XBT/BTC.
@@ -697,9 +790,15 @@ Futures matches TS on nearly every input; no high regression.
 TxFlow loses nothing (master TS was a placeholder).
 - ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
-- Low: one bad market row or unknown order row fails closed (startup lane);
-  trailing-stop display price; cancels skipped for unknown/finished ids;
-  candle `from`/`to` filtering a latest-N fetch.
+- Low: ~~one bad market row or unknown order row fails closed~~ (stale:
+  discovery skips malformed rows; order snapshot coverage retains rejected
+  roots and commits valid peers); ~~trailing-stop display price~~ (maps native
+  extreme/callback value or rate using order side, for REST and WS);
+  ~~cancels skipped for unknown/finished ids~~ (unknown IDs reject explicitly;
+  finished IDs are an intentional no-op. **RISKY** to infer normal/algo endpoint,
+  symbol or sibling repair from an uncached ID; keep reconciled-order preflight);
+  ~~candle `from`/`to` filtering a latest-N fetch~~ (bounded reads use native
+  `/v1/tv/kline_history`, validate parallel arrays and filter exact bounds).
 
 ### KuCoin
 - High: ~~cancel-symbol also deletes the symbol's TP/SL stops
@@ -715,8 +814,12 @@ TxFlow loses nothing (master TS was a placeholder).
   attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
-- Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
-  5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
+- Low: leverage sent as `10.0` (RISKY, `num::whole`); ~~fill without `matchPrice`
+  dropped~~ (fills at the order price, as TS); spot polls 5 s vs 500 ms (kept:
+  10× the REST load needs live rate-limit evidence); ~~per-symbol cancel-all~~
+  (stale: symbol cancels use `?symbol=` and cancel-all is one native call, as
+  TS); ~~partial balance rows ignored~~ (missing `orderMargin`/`unrealisedPNL` read
+  as zero; equity and free stay required).
 - Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
   keeping trigger type and post-only, standalone stop client id, open-order
   paging, spot partial snapshot, swallowed cancel errors.
@@ -736,14 +839,23 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
   its executions still emit, the store keeps its copy; verification: documented
   `Deactivated`/`Expired` rows now cancel instead of leaving the order Open).
-- Medium: one bad public row stops startup; ~~one bad position row freezes a
+- Medium: ~~one bad public row stops startup~~ (stale: malformed product/ticker
+  rows are skipped while valid peers publish); ~~one bad position row freezes a
   currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
   store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.
-- Low: cancel batch refused on one uncached id; index triggers refused; daily
-  candle `to`; no 1 s REST resync after terminal events.
+- Low: cancel batch refused on one uncached id (intentional preflight: native
+  cancel needs symbol and position side; **RISKY** to infer routing or silently
+  change batch execution); ~~index triggers refused~~ (documented ByIndexPrice
+  is encoded for standalone and attached SL/TP, and preserved on readback);
+  ~~daily candle `to`~~ (Rust correctly honors the native cutoff; TS shifts to
+  the previous day and drops valid bars, now pinned by regression). No extra
+  1 s REST resync after terminal events is an accepted lifecycle difference:
+  WS publishes positions/balance immediately, local trade ACKs refresh REST,
+  and external terminal-only events use the policy-controlled 2 s poll. Extra
+  debounce reads would increase REST load and bypass slow/paused polling.
 - Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
   positions removed; amend re-places remainder; hedged margin per side; split
   stops at first failure.
@@ -757,8 +869,8 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   rows are skipped/logged while malformed identities retain prior snapshots.
 - Medium: ~~full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
   single order uses the batch path paced 1.5 s (`trading.rs:451`)~~;
-  startup halts on tickers/markets/~~position-mode/plan-list~~ failures
-  (tickers/markets: public-startup PR). Reverified: mode and plan-list failures
+  startup halts on ~~tickers/markets/position-mode/plan-list~~ failures
+  (tickers/markets retry through shared discovery backoff since #1342). Reverified: mode and plan-list failures
   retry every 2 s and a failed plan read publishes no normal-only list; a refused
   key (602/401/402/406/70x or HTTP 401/403) now fails startup instead of retrying.
 - Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
@@ -799,8 +911,18 @@ Normal inputs send the same requests as TS; the risk is resilience.
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
   accepted, imported TP/SL amend keeps row working types, partial credentials
   deactivate visibly.
-- Low: isolated leverage sets both sides; index triggers rejected; fill without
-  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+- Low: ~~isolated leverage sets both sides~~ (selected isolated rail changes;
+  required opposite payload rail is preserved, including flat symbols; cross
+  leverage is coupled); ~~fetchLeverage returns max~~ (bridge returns cached
+  native buy/sell rails, not market limits).
+  **RISKY — retained:** index-source placement needs a verified native wire
+  contract (TS substitutes mark price for IndexPrice, which changes semantics).
+  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query,
+  while an empty identity string is still skipped. Inventing a fill identity is
+  unsafe; the empty-string handling remains a limitation. Income with neither
+  `asset` nor its `coin` alias rejects the affected page (range walks continue
+  with an explicit incomplete marker); assuming USDT without accounting evidence
+  can mislabel value.
 
 ### Coinbase (already defaults to Rust)
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
@@ -818,8 +940,15 @@ Normal inputs send the same requests as TS; the risk is resilience.
   the snapshot (`account.rs:1246`)~~ (stops and other closes reserve separately;
   spot reduce-only is plain; probe advances unless 408/429/5xx; bad position
   rows skip keeping the store copy, flat side-less rows clear).
-- Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
-  OHLCV honours `from`; ~~placement errors lose Coinbase's message~~.
+- Low: ~~spot `total` source differs~~ (native `total_balance_crypto` includes
+  held funds; TS incorrectly used available-to-trade as total); ~~OHLCV honours
+  `from`~~ (correct: explicit caller lower bounds reach the native start field;
+  TS's defaulted limit made its `from` branch unreachable); ~~placement errors
+  lose Coinbase's message~~.
+  **RISKY — retained:** CFM summary `upnl`/equity aggregation. Native uses the
+  summary unrealized-PnL field while TS returns zero. Changing that value needs
+  verified CFM/spot portfolio accounting and downstream equity-consumer evidence;
+  neither suppressing real PnL nor silently double-counting it is acceptable.
 
 ### Lighter
 
@@ -912,7 +1041,7 @@ Mostly matches TS.
     frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
     reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
     admitted with a warning instead of reconnecting, in initial recovery too, and the
-    next tick reconciles again.
+    next tick reconciles again. Admission uses `engine::fence::StaleGuard`.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
@@ -950,8 +1079,15 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   ~~one malformed SBE frame recycles the public socket (`public.rs:388`)~~ — malformed frames
   now drop without clearing books/socket or refreshing liveness; subsequent valid
   sequence gaps still recover only the affected book (native regressions).
-- Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
-  of 0 rejects order; history fails on one row; stale uPnL after WS close;
+- Low: ~~one unmappable order row discards refresh~~ (row isolation keeps its
+  stored copy while valid peers commit); ~~leverage-0 config row~~ (only positive
+  valid configuration leverage is admitted; bad rows preserve cached settings);
+  ~~stale uPnL after WS close~~ (closing removes the leg and recomputes aggregate
+  UPnL). Existing regressions cover row isolation, invalid configs and REST/WS
+  closure; zero-config behavior is source-verified, not a dedicated test claim.
+  RISKY retained: explicit zero TP/SL rejects before entry dispatch rather than
+  silently dropping requested protection; malformed financial-history rows fail
+  visibly rather than returning a plausible incomplete ledger.
   ~~README says remote signing rejected~~ — corrected to the landed payload
   signing contract exercised by the delegated-signing regressions.
 
@@ -960,8 +1096,8 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   venue (~~Paradex logs at Warning~~; now Error with a native regression;
   verification: a rejected TP no longer drops the queued SL, and wrong-side
   brackets reject before any write instead of placing a bare entry).
-- Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
-  Binance COIN-M, Bitrue cancels).
+- Batches that fail midway must return placed ids with the error (~~Paradex~~,
+  ~~Binance COIN-M~~, ~~Bitrue cancels~~ repaired; see their venue sections).
 - Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;
   check every venue's integer fields.
 
@@ -974,9 +1110,11 @@ Signing and integer scaling exact; no highs.
   "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).~~
   Builder check retried (TS budget) with orders held FIFO; rows skipped keeping
   stored copies; venue code/message surfaced, reconcile advice only when unknown.
-- Low: order history fails on one bad row; signer mismatch blocks trading;
-  1008 loses the proxy-whitelist message; amend may cancel without replacing if
-  cancels are asynchronous (verify live).
+- Low: ~~order history fails on one bad row; signer mismatch blocks trading;
+  1008 loses the proxy-whitelist message~~ (bad history rows skip with a
+  warning, a mismatched configured signer warns at startup as TS does, 1008 keeps
+  TS's whitelist guidance); amend may cancel without replacing if cancels are
+  asynchronous (verify live).
 
 ### Polymarket (development-only)
 CLOB V2 signing and amounts match the official client.

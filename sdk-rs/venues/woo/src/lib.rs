@@ -6,18 +6,20 @@ mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue, num,
 };
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -25,6 +27,16 @@ pub struct Options {
     pub key: Option<String>,
     pub secret: Option<String>,
     pub application_id: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -85,7 +97,7 @@ pub struct Woo {
     trading: trading::Trading,
     history: history::History,
     account: account::Account,
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     public: Connection,
     public_supervisor: Supervisor,
@@ -95,7 +107,10 @@ pub struct Woo {
     funding: Option<TimerId>,
     seed_backoff: safe_cex_engine::startup::Backoff<bool>,
     skipped_markets: std::collections::HashSet<String>,
-    skipped_anonymous: bool,
+    /// Set by the first committed catalogue; later reads only refresh markets.
+    catalogue_committed: bool,
+    malformed_rows: usize,
+    reread_stalls: u8,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -175,6 +190,7 @@ impl Woo {
         Ok(cx.request(method, url, request.headers, request.body, pending))
     }
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             account: account::Account::new(),
             trading: trading::Trading::default(),
@@ -198,7 +214,9 @@ impl Woo {
             funding: None,
             seed_backoff: Default::default(),
             skipped_markets: Default::default(),
-            skipped_anonymous: false,
+            catalogue_committed: false,
+            malformed_rows: 0,
+            reread_stalls: 0,
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -321,10 +339,18 @@ impl Woo {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(
-            format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
-            SocketChannel::Public,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{host}{}",
+                    self.options
+                        .application_id
+                        .as_deref()
+                        .unwrap_or("undefined")
+                ))
+                .channel(SocketChannel::Public),
+            ),
+        );
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
         if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
@@ -533,14 +559,14 @@ impl Woo {
         };
         let symbol = symbol.as_str();
         let Some(m) = cx.store.market(symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if from.is_some_and(|v| !v.is_finite())
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.done(command, Err("Invalid WOO candle range or interval".into()));
+            cx.fail(command, "Invalid WOO candle range or interval");
             return;
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
@@ -590,6 +616,10 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -607,7 +637,7 @@ impl Venue for Woo {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.seed(cx, false);
@@ -669,7 +699,11 @@ impl Venue for Woo {
         };
         if !msg.event.is_empty() {
             if msg.success == Some(false) {
-                cx.log(LogLevel::Error, "WOO public subscription rejected");
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    "WOO public subscription rejected",
+                );
             }
             match msg.event.as_ref() {
                 "ping" => cx.send(socket, r#"{"event":"pong"}"#),
@@ -914,7 +948,7 @@ impl Venue for Woo {
                 skipped,
             } => {
                 if let Some(text) = skipped.summary("markets") {
-                    cx.log(LogLevel::Warning, text);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
                 }
                 if rows.is_empty() {
                     self.on_request_failed(
@@ -928,11 +962,43 @@ impl Venue for Woo {
                     );
                     return;
                 }
-                self.price_ranges = ranges;
-                self.skipped_markets = skipped.ids().iter().cloned().collect();
-                self.skipped_anonymous = skipped.anonymous();
+                let refresh = std::mem::replace(&mut self.catalogue_committed, true);
+                let rows = if refresh {
+                    let mut ranges = ranges;
+                    for (symbol, range) in std::mem::take(&mut self.price_ranges) {
+                        ranges.entry(symbol).or_insert(range);
+                    }
+                    self.price_ranges = ranges;
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    self.price_ranges = ranges;
+                    rows
+                };
                 cx.store.set_markets(rows);
-                self.seed_backoff.succeeded(cx, &false);
+                self.skipped_markets = skipped
+                    .ids()
+                    .iter()
+                    .filter(|id| cx.store.market(&compact(id)).is_none())
+                    .cloned()
+                    .collect();
+                // An unnamed malformed row counts once toward the re-read bound.
+                let before = self.malformed_rows;
+                self.malformed_rows = self.skipped_markets.len() + usize::from(skipped.anonymous());
+                // A partial catalogue commits so private reads start, and is re-read.
+                if reread_partial(
+                    cx,
+                    &mut self.reread_stalls,
+                    refresh,
+                    before,
+                    self.malformed_rows,
+                ) {
+                    self.seed_backoff.failed(cx, false);
+                } else {
+                    self.seed_backoff.succeeded(cx, &false);
+                }
+                if refresh {
+                    return;
+                }
                 if self.options.public_data_only
                     || self.options.key.as_deref().is_none_or(str::is_empty)
                 {
@@ -950,7 +1016,7 @@ impl Venue for Woo {
                 skipped,
             } => {
                 if let Some(text) = skipped.summary("tickers") {
-                    cx.log(LogLevel::Warning, text);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
                 }
                 if rows.is_empty() {
                     self.on_request_failed(
@@ -985,14 +1051,17 @@ impl Venue for Woo {
                 bad,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    if bad {
+                {
+                    let result: Result<String, String> = if bad {
                         Err("Invalid WOO candle page".into())
                     } else {
                         Ok(serde_json::to_string(&rows).unwrap())
-                    },
-                );
+                    };
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
             Pending::Depth { symbol, generation } => {
                 let Some(state) = self
@@ -1057,7 +1126,7 @@ impl Venue for Woo {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.seed_backoff
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
@@ -1070,8 +1139,8 @@ impl Venue for Woo {
                     self.book_retry(cx, &symbol);
                 }
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Funding { .. } => cx.log(LogLevel::Warning, error),
+            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Funding { .. } => cx.notice(Level::Warn, code::REQUEST_FAILED, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1196,6 +1265,59 @@ impl Venue for Woo {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("WOO stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

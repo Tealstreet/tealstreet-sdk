@@ -773,11 +773,6 @@ impl Grvt {
             .as_deref()
             .ok_or("GRVT private key is required for signing")?;
         let signer = sign::signer_address(secret)?;
-        if let Some(expected) = &self.options.signer_address
-            && !signer.eq_ignore_ascii_case(expected)
-        {
-            return Err("GRVT signing key does not match configured signer".into());
-        }
         match self.account.builder {
             BuilderState::Authorized => {}
             BuilderState::CapTooLow(_) => {
@@ -1230,7 +1225,7 @@ impl Grvt {
                     cx.fail(id, error.kind(ErrorKind::Unsupported));
                 } else {
                     cx.store.set_hedged(false);
-                    cx.done(id, Ok("[]".into()));
+                    cx.done(id, "[]".into());
                 }
                 return true;
             }
@@ -1397,7 +1392,7 @@ impl Grvt {
             }
             None => cx.done(
                 plan.command,
-                Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
+                serde_json::to_string(&plan.created).expect("GRVT result IDs"),
             ),
         }
         self.refresh_orders(cx);

@@ -10,7 +10,7 @@ const CLOID: &str = "0x00000000000000000000000000000001";
 fn all_actual_bracket_cloids_are_receipted_before_the_signed_write() {
     let (mut e, _) = ready("disabled");
     e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2,"stopLoss":80,"takeProfit":120,"clientOrderId":"{CLOID}"}}"#))] }));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     let (at, receipts) = actions
         .iter()
         .enumerate()
@@ -49,7 +49,7 @@ fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
 fn write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
+    e.drain_plain()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 (r.url.ends_with("/exchange")).then_some(r)
@@ -99,12 +99,13 @@ fn invalid_or_duplicate_caller_id_rejects_entire_batch_before_a_write() {
                 orders: vec![make(CLOID), make(id)],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -128,15 +129,15 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
                 orders: vec![good, serde_json::from_value(unsupported).unwrap()],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(
             !actions.iter().any(|a| matches!(a, Action::Http(_))),
             "{field} emitted a write"
         );
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -156,9 +157,11 @@ fn full_position_stop_accepts_waiting_without_oid() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
-    assert!(e.drain_actions().any(
-        |a| matches!(a,Action::Notice(Notice::CommandDone{result:Ok(ref ids),..})if ids=="[]")
-    ));
+    assert!(
+        e.drain_plain().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{result:ref ids,..})if ids=="[]")
+        )
+    );
 }
 #[test]
 fn own_bracket_leg_is_inferred_from_cloid_before_rest_returns() {
@@ -201,7 +204,7 @@ fn lost_placement_response_reconciles_and_never_resends_write() {
             error: "response lost",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -238,7 +241,7 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
     let timer = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -261,9 +264,9 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let result = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result: Ok(s), .. }) = a {
+            if let Action::Notice(Notice::CommandDone { result: s, .. }) = a {
                 Some(s)
             } else {
                 None
@@ -299,16 +302,17 @@ fn malformed_cancel_ack_stops_replacement_and_keeps_original() {
         200,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -342,7 +346,7 @@ fn queued_leverage_uses_margin_mode_from_preceding_command() {
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
     let timer = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -423,7 +427,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 },
             );
         }
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut actions = e.drain_plain().collect::<Vec<_>>();
         let mut timers = actions
             .iter()
             .filter_map(|a| match a {
@@ -434,7 +438,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         timers.sort_by(|a, b| a.1.total_cmp(&b.1));
         for (timer, at_ms) in timers {
             e.handle(at_ms, Event::TimerFired { timer });
-            actions.extend(e.drain_actions());
+            actions.extend(e.drain_plain());
         }
         assert!(
             !actions
@@ -444,9 +448,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-            command: 2, result: Err(error),
-        }) if error.contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain")))
         );
         message(
             &mut e,
@@ -463,10 +465,8 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
             }),
         );
         assert!(
-            e.drain_actions()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-            command: 3, result: Err(ref error),
-        }) if error.contains("settings are uncertain")))
+            e.drain_plain()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -524,7 +524,7 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
         },
     );
     let (timer, at_ms) = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -567,7 +567,7 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
     e.start(1000.0);
     for _ in 0..20 {
         let requests = e
-            .drain_actions()
+            .drain_plain()
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -603,15 +603,13 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
             ids: vec!["9".into()],
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 1,
-            result: Err(_),
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -632,7 +630,7 @@ fn reply_at(e: &mut Engine<Hyperliquid>, request: &HttpRequest, now: f64, raw: &
     );
 }
 fn fire_timers(e: &mut Engine<Hyperliquid>) -> Vec<Action> {
-    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let mut actions = e.drain_plain().collect::<Vec<_>>();
     let mut timers = actions
         .iter()
         .filter_map(|a| match a {
@@ -643,7 +641,7 @@ fn fire_timers(e: &mut Engine<Hyperliquid>) -> Vec<Action> {
     timers.sort_by(|a, b| a.1.total_cmp(&b.1));
     for (timer, at_ms) in timers {
         e.handle(at_ms, Event::TimerFired { timer });
-        actions.extend(e.drain_actions());
+        actions.extend(e.drain_plain());
     }
     actions
 }
@@ -706,10 +704,10 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                 amount: None,
             }),
         );
-        let rejected = e.drain_actions().collect::<Vec<_>>();
+        let rejected = e.drain_plain().collect::<Vec<_>>();
         assert!(rejected.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { command: 3, result: Err(error) })
-            if error == "Order amendment or cancellation is already in flight")));
+            Action::Notice(Notice::CommandFailed { command: 3, error })
+            if error.legacy_text() == "Order amendment or cancellation is already in flight")));
         assert!(!rejected.iter().any(|a| matches!(a, Action::Http(_))));
         reply_at(
             &mut e,
@@ -725,8 +723,8 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
-                if error.contains("no longer open"))));
+                Action::Notice(Notice::CommandFailed { command: 2, error })
+                if error.legacy_text().contains("no longer open"))));
         } else {
             let cancel = action_write(&actions);
             assert_eq!(body(cancel)["action"]["cancels"][0]["o"], 9);
@@ -746,7 +744,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                 r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
             );
             assert!(
-                !e.drain_actions()
+                !e.drain_plain()
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
         }
@@ -758,7 +756,7 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
     let (mut e, socket) = ready("disabled");
     e.handle(1900.0, Event::WsOpened { socket });
     let older_orders = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::Http(r) if kind(&r) == "frontendOpenOrders" => Some(r),
             _ => None,
@@ -796,7 +794,7 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
         Some(cloid.as_str())
     );
     assert_eq!(acknowledged.price, 90.0);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         2002.0,
         Event::Command(Command::CancelOrders {
@@ -844,9 +842,7 @@ fn definite_settings_rejection_keeps_next_queued_command_usable() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 1, result: Err(error),
-    }) if error == "Cannot switch margin mode with open orders"))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text() == "Cannot switch margin mode with open orders"))
     );
     let second = action_write(&actions);
     assert_eq!(body(second)["action"]["isCross"], true);
@@ -877,7 +873,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
             error: "lost after execution",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     let asset = actions
         .iter()
         .find_map(|a| match a {
@@ -902,10 +898,8 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
         }),
     );
     assert!(
-        e.drain_actions()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 2, result: Err(ref error),
-    }) if error.contains("settings are uncertain")))
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
     );
     reply_at(
         &mut e,
@@ -932,7 +926,7 @@ fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size
     let (mut e, socket) = ready("disabled");
     e.handle(1900.0, Event::WsOpened { socket });
     let snapshot = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::Http(r) if kind(&r) == "clearinghouseState" => Some(r),
             _ => None,
@@ -1000,7 +994,8 @@ fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 1, result }) if result.is_err() == amend)));
+                Action::Notice(Notice::CommandFailed { command: 1, .. }) if amend)
+                || !amend && matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))));
         }
     }
 }
@@ -1042,8 +1037,8 @@ fn filled_source_aborts_inflight_amend_but_own_cancel_frame_allows_replacement()
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("source was filled"))));
+                Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.legacy_text().contains("source was filled"))));
         } else {
             let replacement = action_write(&actions);
             assert_eq!(body(replacement)["action"]["orders"][0]["p"], "85");
@@ -1090,9 +1085,9 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
     );
     let result = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.unwrap()),
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result),
             _ => None,
         })
         .unwrap();
@@ -1100,6 +1095,32 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
     assert_eq!(result["orderIds"], serde_json::json!(["10"]));
     assert_eq!(result["clientOrderId"], cloid);
     assert!(e.store().order("10").is_some());
+}
+
+#[test]
+fn same_signer_engines_and_vaults_share_one_action_nonce_sequence() {
+    let (mut a, _) = ready("disabled");
+    let (mut b, _) = ready_identity(
+        "disabled",
+        false,
+        None,
+        "30",
+        Some("0x2222222222222222222222222222222222222222".into()),
+    );
+    for e in [&mut a, &mut b] {
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 901,
+                orders: vec![opts(
+                    r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":1,"price":100}"#,
+                )],
+            }),
+        );
+    }
+    let first = body(&write(&mut a))["nonce"].as_u64().unwrap();
+    let second = body(&write(&mut b))["nonce"].as_u64().unwrap();
+    assert!(second > first);
 }
 
 #[test]
@@ -1129,7 +1150,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             stop_loss: None,
             extra: None,
         }]);
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         e.handle(
             2000.0,
             Event::Command(Command::CancelOrders {
@@ -1141,13 +1162,13 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("456") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -1243,10 +1264,145 @@ fn cross_on_an_isolated_only_market_is_rejected_before_signing() {
             isolated: false,
         }),
     );
-    let out: Vec<_> = e.drain_actions().collect();
+    let out: Vec<_> = e.drain_plain().collect();
     assert!(
         !out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(m), .. }) if m.contains("isolated margin only"))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: m, .. }) if m.legacy_text().contains("isolated margin only"))));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = (Some(ErrorKind::Rejected), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    let limit = r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2}"#;
+    for (status, body, classified) in [
+        (
+            200,
+            r#"{"status":"err","response":"Insufficient margin"}"#,
+            rejected,
+        ),
+        (
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
+            rejected,
+        ),
+        (
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":["mystery"]}}}"#,
+            unknown,
+        ),
+        (200, "<html>", unknown),
+        (502, "bad gateway", unknown),
+        (
+            429,
+            "rate limited",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        ),
+    ] {
+        let (mut e, _) = ready("disabled");
+        e.handle(
+            2000.,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts(limit)],
+            }),
+        );
+        let r = write(&mut e);
+        reply(&mut e, &r, status, body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            (error.kind, error.outcome),
+            classified,
+            "{status} {body}: {}",
+            error.message
+        );
+    }
+    // The second order is refused after the first rested: nothing to claim.
+    let (mut e, _) = ready("disabled");
+    e.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts(limit), opts(limit)],
+        }),
+    );
+    let r = write(&mut e);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}}]}}}"#,
+    );
+    let timer = pace_timer(&mut e);
+    e.handle(3000., Event::TimerFired { timer });
+    let r = write(&mut e);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, None);
+    // Transport loss on a write is Unknown.
+    let (mut e, _) = ready("disabled");
+    e.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts(limit)],
+        }),
+    );
+    let r = write(&mut e);
+    e.handle(
+        2100.,
+        Event::HttpFailed {
+            request: r.id,
+            error: "reset",
+        },
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+}
+
+fn pace_timer(e: &mut Engine<Hyperliquid>) -> safe_cex_engine::TimerId {
+    e.drain_plain()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .expect("pacing timer")
+}
+
+#[test]
+fn perp_zero_bracket_prices_disable_only_the_requested_child() {
+    for (stop, take, children) in [
+        ("0", "0", Vec::<&str>::new()),
+        ("0", "120", vec!["tp"]),
+        ("80", "0", vec!["sl"]),
+    ] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2,"stopLoss":{stop},"takeProfit":{take}}}"#))] }));
+        let payload = body(&write(&mut e));
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 1 + children.len(), "sl {stop} tp {take}");
+        assert_eq!(
+            payload["action"]["grouping"],
+            if children.is_empty() {
+                "na"
+            } else {
+                "normalTpsl"
+            }
+        );
+        for (wire, kind) in wires.iter().skip(1).zip(children) {
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+        }
+    }
 }

@@ -11,6 +11,9 @@
  * - Monitor ongoing health in CLI recorders and web app
  */
 
+import type { ClassifiedError } from '../commandOutcome';
+
+import { exchangeErrorCategory } from '../commandOutcome';
 import {
   DEFAULT_ERROR_PATTERNS,
   EXCHANGE_SPECIFIC_PATTERNS,
@@ -21,6 +24,17 @@ import {
 } from './errorPatterns';
 
 export type HealthStatus = 'healthy' | 'degraded' | 'error';
+
+/** Kinds precise enough to override text classification. */
+const SPECIFIC_KINDS: ReadonlySet<string> = new Set([
+  'authInvalid',
+  'authExpired',
+  'authPermission',
+  'rateLimited',
+  'venueUnavailable',
+  'network',
+  'timeout',
+]);
 
 export interface ErrorEntry {
   category: ErrorCategory;
@@ -78,12 +92,19 @@ export class ExchangeHealthMonitor {
    * Process an error or log message and update health state
    * @param message - The message to analyze
    * @param isError - Whether this came from an 'error' event (vs 'log')
+   * @param classified - The 'error' event's typed classification; its kind wins over text
    * @returns The detected category, or null if no pattern matched
    */
-  processMessage(message: string, isError: boolean = false): ErrorCategory | null {
+  processMessage(message: string, isError: boolean = false, classified?: ClassifiedError): ErrorCategory | null {
     if (!message || typeof message !== 'string') {
       return null;
     }
+
+    // Specific kinds win; catch-all kinds (rejected, invalidInput, internal, unsupported)
+    // defer to text patterns, which know venue auth/permission codes the engine leaves generic.
+    const typed = exchangeErrorCategory(classified);
+    const specific = typed && classified?.kind && SPECIFIC_KINDS.has(classified.kind);
+    if (typed && specific) return this.recordTyped(typed, message);
 
     const lowerMessage = message.toLowerCase();
 
@@ -100,6 +121,8 @@ export class ExchangeHealthMonitor {
       }
     }
 
+    if (typed) return this.recordTyped(typed, message);
+
     // If it's explicitly an error but no pattern matched, record as unknown
     if (isError) {
       this.recordError('unknown', message, 'warning');
@@ -107,6 +130,12 @@ export class ExchangeHealthMonitor {
     }
 
     return null;
+  }
+
+  private recordTyped(category: ErrorCategory, message: string): ErrorCategory {
+    const severity = this.patterns.find((pattern) => pattern.category === category)?.severity ?? 'warning';
+    this.recordError(category, message, severity);
+    return category;
   }
 
   /**

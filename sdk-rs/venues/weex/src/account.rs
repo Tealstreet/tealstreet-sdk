@@ -2,13 +2,16 @@
 //! succeed. Private events and acknowledged writes invalidate older snapshots.
 use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::Level;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
-use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -16,6 +19,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const TERMINAL_LIMIT: usize = 20_000;
 const RECONCILIATION_DEADLINE_MS: f64 = 20_000.0;
 const PRIVATE_WS: &str = "wss://ws-contract.weex.com/v3/ws/private";
+const SKIP_LOG_LIMIT: usize = 4_096;
 #[derive(Clone, Copy)]
 pub enum Kind {
     Balance,
@@ -36,10 +40,41 @@ pub struct Request {
     balance: Option<Balance>,
     configs: Vec<(String, Config)>,
     skipped_rows: usize,
-    /// Order or position IDs of malformed rows skipped by this read.
-    skipped: Vec<String>,
-    /// A skipped row had no identity, so the read cannot replace the list.
+    skipped: Skipped,
+}
+/// Order or position IDs of malformed rows a read skipped. A malformed row is
+/// not evidence that its row closed; one without an ID protects every row.
+#[derive(Default)]
+struct Skipped {
+    ids: Vec<String>,
     unidentified: bool,
+}
+impl Skipped {
+    fn covers(&self, id: &str) -> bool {
+        self.unidentified || self.ids.iter().any(|skipped| skipped == id)
+    }
+    fn extend(&mut self, other: Skipped) {
+        self.ids.extend(other.ids);
+        self.unidentified |= other.unidentified;
+    }
+    fn is_empty(&self) -> bool {
+        !self.unidentified && self.ids.is_empty()
+    }
+}
+/// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped ids.
+fn rearm_skips<'a>(
+    logged: &mut HashSet<String>,
+    prefix: &str,
+    skipped: &Skipped,
+    mapped: impl Iterator<Item = &'a str>,
+) {
+    if skipped.is_empty() {
+        logged.retain(|key| !key.starts_with(prefix));
+    } else {
+        for id in mapped {
+            logged.remove(&format!("{prefix}{id}"));
+        }
+    }
 }
 #[derive(Clone)]
 pub struct Config {
@@ -126,9 +161,9 @@ pub struct State {
     orders_revision: u64,
     settings_revision: u64,
     order_stage: Vec<Order>,
-    order_skipped: Vec<String>,
+    order_skipped: Skipped,
     /// Revision, staged rows, and IDs of positions whose rows were malformed.
-    position_stage: Option<(u64, Vec<StagedPosition>, Vec<String>)>,
+    position_stage: Option<(u64, Vec<StagedPosition>, Skipped)>,
     deferred: Vec<(TimerId, Request)>,
     order_parts: u8,
     orders_failed: bool,
@@ -145,6 +180,8 @@ pub struct State {
     unreconciled_fills: bool,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
+    /// `order:` or `position:` plus the ID (empty if none) of skipped rows already logged.
+    skip_logged: HashSet<String>,
 }
 impl State {
     pub fn new() -> Self {
@@ -252,8 +289,9 @@ impl WeexFutures {
         self.account.started = true;
         if self.incomplete_credentials {
             // An empty account would be indistinguishable from a real one.
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "WEEX requires an API key, secret and passphrase; private data is unavailable",
             );
             cx.deactivate();
@@ -269,7 +307,7 @@ impl WeexFutures {
         if self.private_ws_headers {
             self.connect_account(cx);
         } else {
-            cx.log(LogLevel::Warning,"WEEX private WebSocket disabled: transport cannot attach upgrade headers; continuing REST safety loop");
+            cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"WEEX private WebSocket disabled: transport cannot attach upgrade headers; continuing REST safety loop");
         }
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -287,11 +325,13 @@ impl WeexFutures {
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials {
-            self.account.socket = Some(cx.connect_with_headers_channel(
-                PRIVATE_WS,
-                credentials.ws_headers(cx.now),
-                safe_cex_engine::SocketChannel::Private,
-            ));
+            self.account.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(PRIVATE_WS)
+                        .headers(credentials.ws_headers(cx.now))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                ),
+            );
             self.account.supervisor.connecting(cx);
         }
     }
@@ -309,7 +349,7 @@ impl WeexFutures {
         self.account.order_parts = 0;
         self.account.orders_failed = false;
         self.account.order_stage.clear();
-        self.account.order_skipped.clear();
+        self.account.order_skipped = Skipped::default();
         self.account.position_stage = None;
         for kind in [
             Kind::Metadata,
@@ -338,8 +378,7 @@ impl WeexFutures {
                 balance: None,
                 configs: vec![],
                 skipped_rows: 0,
-                skipped: vec![],
-                unidentified: false,
+                skipped: Skipped::default(),
             };
             self.send_account(cx, request);
         }
@@ -454,8 +493,8 @@ impl WeexFutures {
                 row_identity(request.kind, item, &self.account, cx.store),
             ) {
                 (Kind::Balance | Kind::Config, _) => {}
-                (_, Some(key)) => request.skipped.push(key),
-                (_, None) => request.unidentified = true,
+                (_, Some(key)) => request.skipped.ids.push(key),
+                (_, None) => request.skipped.unidentified = true,
             }
             request.skipped_rows += 1;
         }
@@ -489,26 +528,22 @@ impl WeexFutures {
             return;
         }
         if request.skipped_rows > 0 {
-            let kind = match request.kind {
-                Kind::Normal => "order",
-                Kind::Algo => "algo order",
-                Kind::Positions => "position",
-                Kind::Balance => "balance",
-                _ => "symbol configuration",
-            };
-            cx.log(
-                LogLevel::Warning,
-                format!(
-                    "WEEX skipped {} malformed {kind} row(s){}{}",
-                    request.skipped_rows,
-                    if request.skipped.is_empty() { "" } else { ": " },
-                    request.skipped.join(", ")
-                ),
-            );
-        }
-        if request.unidentified {
-            self.account_failed(cx, request, "malformed row without an identity");
-            return;
+            match request.kind {
+                Kind::Normal | Kind::Algo | Kind::Positions => self.log_skipped_rows(cx, &request),
+                Kind::Balance | Kind::Config | Kind::Metadata => {
+                    let kind = if matches!(request.kind, Kind::Balance) {
+                        "balance"
+                    } else {
+                        "symbol configuration"
+                    };
+                    let count = request.skipped_rows;
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        format!("WEEX skipped {count} malformed {kind} row(s)"),
+                    );
+                }
+            }
         }
         match request.kind {
             // The next cycle corrects a read that raced an account event; fencing it
@@ -562,15 +597,20 @@ impl WeexFutures {
                         .filter(|order| seen.insert(order.id.clone()))
                         .filter_map(|order| self.account.snapshot_order(order))
                         .collect();
-                    // A malformed row is not evidence that its order closed.
                     let skipped = std::mem::take(&mut self.account.order_skipped);
+                    rearm_skips(
+                        &mut self.account.skip_logged,
+                        "order:",
+                        &skipped,
+                        orders.iter().filter_map(|o| o.id.split("__").next()),
+                    );
                     orders.extend(
                         cx.store
                             .orders()
                             .iter()
                             .filter(|o| {
                                 !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
-                                    && skipped.iter().any(|id| o.id.split("__").next() == Some(id))
+                                    && o.id.split("__").next().is_some_and(|id| skipped.covers(id))
                                     && seen.insert(o.id.clone())
                             })
                             .filter_map(|o| self.account.snapshot_order(o.clone())),
@@ -589,6 +629,55 @@ impl WeexFutures {
         }
         self.account_finished(cx, false);
     }
+    /// Logs each skipped order or position row once until it maps again. A position, or a
+    /// row without an ID, whose skip keeps no stored copy is an error: it reads as absent.
+    fn log_skipped_rows(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let positions = matches!(request.kind, Kind::Positions);
+        let (prefix, kind) = match request.kind {
+            Kind::Positions => ("position:", "position"),
+            Kind::Algo => ("order:", "algo order"),
+            _ => ("order:", "order"),
+        };
+        let stored = |id: Option<&str>| {
+            if positions {
+                id.map_or(!cx.store.positions().is_empty(), |id| {
+                    cx.store.position(id).is_some()
+                })
+            } else {
+                cx.store.orders().iter().any(|o| {
+                    !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                        && id.is_none_or(|id| o.id.split("__").next() == Some(id))
+                })
+            }
+        };
+        let mut rows: Vec<_> = request
+            .skipped
+            .ids
+            .iter()
+            .map(|id| {
+                let error = positions && !stored(Some(id));
+                (
+                    id.as_str(),
+                    error,
+                    format!("WEEX skipped malformed {kind} row {id}"),
+                )
+            })
+            .collect();
+        if request.skipped.unidentified {
+            let message = format!("WEEX skipped malformed {kind} row without an ID");
+            rows.push(("", !stored(None), message));
+        }
+        for (id, error, message) in rows {
+            let logged = &mut self.account.skip_logged;
+            if logged.len() >= SKIP_LOG_LIMIT {
+                logged.clear();
+            }
+            if logged.insert(format!("{prefix}{id}")) {
+                let level = if error { Level::Error } else { Level::Warn };
+                cx.notice(level, code::ROW_SKIPPED, message);
+            }
+        }
+    }
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -598,19 +687,20 @@ impl WeexFutures {
         if request.cycle != self.account.cycle {
             return;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("WEEX private read: {error}; retaining last-known-good state"),
         );
         if matches!(request.kind, Kind::Normal | Kind::Algo) {
             self.account.orders_failed = true;
             self.account.order_stage.clear();
-            self.account.order_skipped.clear();
+            self.account.order_skipped = Skipped::default();
         }
         if matches!(request.kind, Kind::Config | Kind::Metadata) {
             self.account.settings_failures += 1;
-            self.account.settings_retry_at = cx.now
-                + (2_000.0 * 2f64.powi(self.account.settings_failures.min(5) as i32)).min(60_000.0);
+            let delay = Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
+            self.account.settings_retry_at = cx.now + cx.jittered(delay);
             self.account_finished(cx, false);
             return;
         }
@@ -647,13 +737,18 @@ impl WeexFutures {
                         }
                     })
                     .collect();
-                // A malformed row is not evidence that its position closed.
+                rearm_skips(
+                    &mut self.account.skip_logged,
+                    "position:",
+                    &skipped,
+                    positions.iter().map(|p| p.id.as_str()),
+                );
                 positions.extend(
                     cx.store
                         .positions()
                         .iter()
                         .filter(|old| {
-                            skipped.contains(&old.id)
+                            skipped.covers(&old.id)
                                 && !positions.iter().any(|p: &Position| p.id == old.id)
                         })
                         .cloned()
@@ -667,7 +762,9 @@ impl WeexFutures {
                 self.account.failures = 0;
             }
             let not_before_ms = self.paused_until.max(if self.account.failed {
-                cx.now + (2_000.0 * 2f64.powi(self.account.failures.min(5) as i32)).min(60_000.0)
+                // Only a failed refresh retries with jitter; the pause floor is never shortened.
+                cx.now
+                    + cx.jittered(Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.failures))
             } else {
                 f64::NEG_INFINITY
             });
@@ -723,8 +820,9 @@ impl WeexFutures {
             return true;
         }
         if event.result == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 "WEEX private subscription failed; continuing REST safety loop",
             );
             return true;
@@ -858,13 +956,13 @@ impl WeexFutures {
             // cannot publish rows, send another page, or finish a newer cycle.
             self.account.cycle += 1;
             self.account.order_stage.clear();
-            self.account.order_skipped.clear();
+            self.account.order_skipped = Skipped::default();
             self.account.position_stage = None;
             self.account.orders_failed = true;
             for (timer, _) in self.account.deferred.drain(..) {
                 cx.clear_timer(timer);
             }
-            cx.log(LogLevel::Warning, "WEEX private reconciliation timed out; retaining last-known-good snapshots and retrying reads");
+            cx.notice(Level::Warn, code::REQUEST_FAILED, "WEEX private reconciliation timed out; retaining last-known-good snapshots and retrying reads");
             self.account.pending = 1;
             self.account_finished(cx, true);
             return true;

@@ -229,10 +229,7 @@ fn failed_candle_reads_complete_with_error() {
     );
     assert!(engine.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 9,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 9, .. })
     )));
 }
 
@@ -301,15 +298,21 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
             Action::Notice(Notice::Log {
                 level: LogLevel::Warning,
                 message,
-            }) => Some(message.as_str()),
+            })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                message,
+                ..
+            })) => Some(message.as_str()),
             _ => None,
         })
         .collect();
-    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    // The malformed instruments make the catalogue partial, so it is re-read later.
     assert_eq!(
         warnings,
         [
             "Crypto.com skipped 2 unmappable instrument rows (first: XRPUSD-PERP)",
+            "Startup read failed; retry scheduled",
             "Crypto.com skipped 1 unmappable ticker rows (first: ETHUSD-PERP)"
         ]
     );
@@ -330,7 +333,7 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message }) if message.contains("instrument")
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("instrument")
     )));
 
     let mut engine = Engine::new(Cryptocom::new(Options {
@@ -355,6 +358,6 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
     );
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message }) if message.contains("ticker")
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("ticker")
     )));
 }

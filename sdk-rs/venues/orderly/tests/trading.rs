@@ -14,7 +14,7 @@ fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
     out.into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
-                (command == id).then_some(result)
+                (command == id).then_some(Ok(result))
             }
             Action::Notice(Notice::CommandFailed { command, error }) => {
                 (command == id).then(|| Err(error.legacy_text()))
@@ -162,8 +162,9 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
         assert!(
             out.iter().all(|action| matches!(
                 action,
-                Action::Notice(Notice::CommandDone { command: 10, result: Err(error) })
-                    if error.contains("Bybit BBO and TickSize controls")
+                Action::Notice(Notice::CommandFailed { command: 10, error })
+                    if error.message.contains("Bybit BBO and TickSize controls")
+                        && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
             )),
             "unexpected batch effects (busy={busy}): {out:?}"
         );
@@ -511,7 +512,7 @@ fn queued_second_stop_waits_for_first_pair_then_cancels_it_before_replacement() 
         a,
         Action::Notice(Notice::CommandDone {
             command: 1,
-            result: Ok(_)
+            result: _
         })
     )));
     let writes: Vec<_> = out
@@ -616,13 +617,7 @@ fn bulk_cancel_preempts_unconfirmed_pair_and_discards_queued_placements() {
         }),
     );
     let out = actions(&mut e);
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 2,
-            result: Err(_)
-        })
-    )));
+    assert!(done(out.clone(), 2).is_err());
     let writes: Vec<_> = out
         .into_iter()
         .filter_map(|a| {
@@ -907,7 +902,15 @@ fn bulk_cancel_supersedes_queued_child_cancellation_and_amendment() {
     );
     let out = actions(&mut e);
     for command in [2, 3] {
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: c, result: Err(_) }) if *c == command)), "queued order mutation was not superseded");
+        assert!(
+            done(out.clone(), command).is_err(),
+            "queued order mutation was not superseded"
+        );
+        // Superseded before it was sent.
+        assert_eq!(
+            outcome(out.clone(), command),
+            Some(Some(safe_cex_engine::Outcome::NotSent))
+        );
     }
     reply(
         &mut e,
@@ -1632,7 +1635,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(done(out, 99).unwrap_err().contains("leverage limits"));
     }
 }
 
@@ -1695,7 +1698,7 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
     assert!(body(&r).get("symbol").is_none());
     reply(&mut e, &r, 200, r#"{"success":true}"#);
     let out = actions(&mut e);
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
     assert!(done(out, 101).is_ok());
     for (symbol, expected) in [("BTCUSDC", 80.), ("ETHUSDC", 80.), ("SOLUSDC", 30.)] {
         assert_eq!(e.store().setting(symbol).unwrap().leverage, expected);
@@ -1717,5 +1720,70 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
             .unwrap()
             .leverage,
         isolated.leverage
+    );
+}
+
+fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>> {
+    out.into_iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { command, error }) if command == id => {
+            Some(error.outcome)
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
+    use safe_cex_engine::Outcome;
+    let order = r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#;
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 1, order);
+    let r = requests(&mut e).pop().unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert_eq!(outcome(actions(&mut e), 1), Some(Some(Outcome::Unknown)));
+
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 2, order);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 502, "bad gateway");
+    assert_eq!(outcome(actions(&mut e), 2), Some(Some(Outcome::Unknown)));
+
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 3, order);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        400,
+        r#"{"success":false,"code":-1103,"message":"price out of range"}"#,
+    );
+    assert_eq!(outcome(actions(&mut e), 3), Some(Some(Outcome::Rejected)));
+
+    // A server-side code does not prove the order was refused.
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 4, order);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        400,
+        r#"{"success":false,"code":-1012,"message":"rpc rejected"}"#,
+    );
+    let out = actions(&mut e);
+    assert_eq!(outcome(out.clone(), 4), Some(Some(Outcome::Unknown)));
+    // Reconciled like a lost write: account state is re-read.
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get))
     );
 }

@@ -17,17 +17,22 @@ command-asterdex = []
 command-apexomni = []
 command-polymarket = []
 command-kucoinspot = []
+# Bitunix opts in; other single-venue WASM builds omit the versioned-envelope selector.
+any-field-envelope = []
 # Bybit opts in through its dependency so unrelated single-venue WASM builds
 # omit option-query deserialization and semantic frame storage/writers.
 # Public Command variants and unsupported-IV guards remain available everywhere.
 command-options = []
 product-semantics = []
+# Hyperliquid opts in: the token behind a wrapped spot pair (UBTC behind BTC/USDC).
+underlying-tokens = []
 # Venue crates' tests drive private request helpers through ProbeVenue.
 test-support = []
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+zeroize.workspace = true
 
 [lints]
 workspace = true

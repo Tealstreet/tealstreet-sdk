@@ -5,14 +5,18 @@ mod identity;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
+    TimerId, Venue, VenueError,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use wire::*;
 
 const REST: &str = "https://api.mexc.com";
@@ -22,10 +26,22 @@ const MAX_BUFFERED: usize = 2_000;
 
 #[derive(Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -33,10 +49,22 @@ pub enum Pending {
     Identity(CommandId),
     Trade(trading::Request),
     Account(account::Request),
-    Markets { rows: Vec<Market>, failed: bool },
-    Tickers { rows: Vec<Ticker>, failed: bool },
-    Depth { symbol: String, generation: u32 },
-    Candles { command: CommandId, limit: usize },
+    Markets {
+        rows: Vec<Market>,
+        malformed: HashSet<String>,
+    },
+    Tickers {
+        rows: Vec<Ticker>,
+        failed: bool,
+    },
+    Depth {
+        symbol: String,
+        generation: u32,
+    },
+    Candles {
+        command: CommandId,
+        limit: usize,
+    },
 }
 
 #[derive(Default)]
@@ -56,7 +84,7 @@ struct BookState {
 }
 
 pub struct MexcFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
     /// Regular, plan and stop order reads share the orders scope.
@@ -71,11 +99,15 @@ pub struct MexcFutures {
     candles: HashMap<(String, Interval), u32>,
     next_book_generation: u32,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    // Catalogue rows rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     depth_paused_until: f64,
 }
 
 impl MexcFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.trim().is_empty() => {
                 Some(sign::Credentials {
@@ -104,6 +136,8 @@ impl MexcFutures {
             candles: HashMap::new(),
             next_book_generation: 0,
             discovery: Default::default(),
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             depth_paused_until: 0.0,
         }
     }
@@ -182,8 +216,9 @@ impl MexcFutures {
             symbol: Str<'a>,
         }
         let Ok(identity) = serde_json::from_str::<Identity<'_>>(item) else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping malformed MEXC all-market ticker identity",
             );
             return;
@@ -194,8 +229,9 @@ impl MexcFutures {
         };
         let size = market.contract_size.unwrap_or(1.0);
         let Ok(raw) = serde_json::from_str::<MiniTick>(item) else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping malformed MEXC all-market ticker row",
             );
             return;
@@ -209,8 +245,9 @@ impl MexcFutures {
                 .flatten()
                 .any(|n| n < 0.0)
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping invalid MEXC all-market ticker row",
             );
             return;
@@ -303,8 +340,9 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
-        state.retry =
-            Some(cx.set_timer((250.0 * 2f64.powi(state.failures.min(7) as i32)).min(30_000.0)));
+        // Book resync stays on its nominal schedule: its timing decides which buffered
+        // deltas apply to the snapshot, and it is per symbol, not a shared retry herd.
+        state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {
         for (side, rows) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {
@@ -395,7 +433,8 @@ impl MexcFutures {
             mid_price: None,
         }
     }
-    fn market(raw: Contract<'_>) -> Option<Market> {
+    /// `Ok(None)` is a deliberately filtered contract; `Err` a malformed one.
+    fn market(raw: Contract<'_>) -> Result<Option<Market>, ()> {
         let settle = if raw.settle_coin.is_empty() {
             &raw.quote_coin
         } else {
@@ -406,23 +445,24 @@ impl MexcFutures {
             || raw.is_hidden == Some(true)
             || raw.state != 0.0
         {
-            return None;
-        }
-        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || raw.price_unit <= 0.0 {
-            return None;
+            return Ok(None);
         }
         let step = (raw.contract_size * raw.vol_unit).max(raw.contract_size);
-        Some(Market {
+        let precision = Precision {
+            amount: step,
+            price: raw.price_unit,
+        };
+        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || !precision.is_tradable() {
+            return Err(());
+        }
+        Ok(Some(Market {
             symbol: compact(&raw.symbol),
             pretty_symbol: Some(raw.symbol.to_string()),
             id: raw.symbol.into_owned(),
             base: raw.base_coin.into_owned(),
             quote: raw.quote_coin.into_owned(),
             active: true,
-            precision: Precision {
-                amount: step,
-                price: raw.price_unit,
-            },
+            precision,
             limits: Limits {
                 amount: MinMax {
                     min: (raw.min_vol * raw.contract_size).max(step),
@@ -442,7 +482,7 @@ impl MexcFutures {
             is_expiring: None,
             is_spot: None,
             is_read_only: None,
-        })
+        }))
     }
     fn candle(raw: Kline<'_>) -> Candle {
         Candle {
@@ -459,7 +499,9 @@ impl MexcFutures {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Public),
+        ));
     }
     // The account already started when markets loaded, independent of tickers.
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -486,7 +528,7 @@ impl MexcFutures {
             } else {
                 Pending::Markets {
                     rows: vec![],
-                    failed: false,
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -503,12 +545,21 @@ impl MexcFutures {
                     self.resync(cx, &symbol);
                 }
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request.command, error),
+            Pending::Trade(request) => {
+                let error = VenueError::new(error).kind(ErrorKind::Network);
+                // The amend read precedes the replacement, which was never sent.
+                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                    error.outcome(Outcome::NotSent)
+                } else {
+                    error.outcome(Outcome::Unknown)
+                };
+                self.trade_failed(cx, request.command, error)
+            }
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
@@ -524,6 +575,10 @@ impl Venue for MexcFutures {
         _now: f64,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         self.account_auth(pending, response)
+    }
+
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
     }
 
     fn guard_order_mutations(&self) -> bool {
@@ -543,7 +598,7 @@ impl Venue for MexcFutures {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.discovery_read(cx, false);
@@ -594,7 +649,11 @@ impl Venue for MexcFutures {
             return;
         };
         if message.success == Some(false) {
-            cx.log(LogLevel::Warning, "MEXC websocket request failed");
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                "MEXC websocket request failed",
+            );
             return;
         }
         let symbol = compact(&message.symbol);
@@ -665,16 +724,31 @@ impl Venue for MexcFutures {
             Pending::Account(account::Request::Snapshot(snapshot)) => {
                 self.account_item(cx, snapshot, item)
             }
-            Pending::Markets { rows, failed: _ } => {
+            Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Contract<'_>>(item) {
                     Ok(raw) => {
                         let unit = raw.vol_unit;
-                        if let Some(m) = Self::market(raw) {
-                            self.volume_units.insert(m.symbol.clone(), unit);
-                            rows.push(m);
+                        let symbol = compact(&raw.symbol);
+                        match Self::market(raw) {
+                            Ok(Some(m)) => {
+                                self.volume_units.insert(m.symbol.clone(), unit);
+                                rows.push(m);
+                            }
+                            Ok(None) => {}
+                            Err(()) => {
+                                safe_cex_engine::startup::skipped_row(cx);
+                                malformed.insert(symbol);
+                            }
                         }
                     }
-                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(row) = serde_json::from_str::<ContractIdentity<'_>>(item)
+                            && !row.symbol.is_empty()
+                        {
+                            malformed.insert(compact(&row.symbol));
+                        }
+                    }
                 }
             }
             Pending::Tickers { rows, failed: _ } => match serde_json::from_str::<Tick<'_>>(item) {
@@ -725,14 +799,37 @@ impl Venue for MexcFutures {
             }
             Pending::Trade(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
-            Pending::Markets { rows, failed } => {
-                if failed || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Malformed MEXC market list");
+            Pending::Markets { rows, malformed } => {
+                if rows.is_empty() {
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Malformed MEXC market list",
+                    );
                     self.discovery.failed(cx, false);
                     return;
                 }
-                self.discovery.succeeded(cx, &false);
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 cx.store.set_markets(rows);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|symbol| cx.store.market(symbol).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.discovery.failed(cx, false);
+                } else {
+                    self.discovery.succeeded(cx, &false);
+                }
+                if refresh {
+                    return;
+                }
                 self.account_start(cx);
                 self.stream(
                     cx,
@@ -745,7 +842,11 @@ impl Venue for MexcFutures {
             }
             Pending::Tickers { mut rows, failed } => {
                 if failed || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Malformed MEXC ticker list");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Malformed MEXC ticker list",
+                    );
                     self.discovery.failed(cx, true);
                     return;
                 }
@@ -827,7 +928,10 @@ impl Venue for MexcFutures {
                         .collect();
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
         }
     }
@@ -930,7 +1034,11 @@ impl Venue for MexcFutures {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 let Some(i) = wire::interval(interval) else {
-                    cx.log(LogLevel::Error, interval.unsupported("MEXC"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("MEXC"),
+                    );
                     return;
                 };
                 let key = (symbol.clone(), interval);
@@ -952,11 +1060,11 @@ impl Venue for MexcFutures {
                 to_ms,
             } => {
                 let Some(i) = wire::interval(interval) else {
-                    cx.done(command, Err(interval.unsupported("MEXC")));
+                    cx.fail(command, interval.unsupported("MEXC"));
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Err("Unknown MEXC market".into()));
+                    cx.fail(command, "Unknown MEXC market");
                     return;
                 };
                 let mut path = format!("/api/v1/contract/kline/{}?interval={i}", m.id);
@@ -987,6 +1095,59 @@ impl Venue for MexcFutures {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("MEXC stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

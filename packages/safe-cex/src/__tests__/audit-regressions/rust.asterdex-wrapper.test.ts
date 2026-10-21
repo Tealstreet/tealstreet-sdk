@@ -5,7 +5,6 @@ import type { ExchangeName, ExchangeOptions, OHLCVOptions, Order } from '../../t
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../../exchanges/asterdex/asterdex.types';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
@@ -17,12 +16,17 @@ const SIGNER = '0x2222222222222222222222222222222222222222';
 const PRIVATE = `0x${'12'.repeat(32)}`;
 const running: RustEngineExchange[] = [];
 
-const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'asterdex') => {
+const fixture = (
+  options: Partial<ExchangeOptions> = {},
+  name: ExchangeName = 'asterdex',
+  nativeVersion?: 'v1' | 'v3',
+) => {
   const commands: Array<Record<string, unknown>> = [];
   const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name),
+    ...(nativeVersion ? { construction: () => JSON.stringify({ asterdexApiVersion: nativeVersion }) } : {}),
     start: noActions,
     command(json) {
       const command = JSON.parse(json);
@@ -98,7 +102,6 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
       applicationId: USER,
       publicDataOnly: false,
       asterdex: {
-        apiVersion: 'v3',
         builderAddress: SIGNER,
         builderFeeRateMaker: '0.00002',
         builderFeeRateTaker: '0.00005',
@@ -123,19 +126,37 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     });
   });
 
-  it('rejects wallet-shaped credentials without the main wallet before engine startup', async () => {
-    const { exchange, construct } = fixture({ applicationId: undefined });
-    await expect(exchange.start()).rejects.toThrow(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
-    expect(construct).not.toHaveBeenCalled();
+  it('sends no inferred version and adopts native resolution for canSign and STP', async () => {
+    const { exchange, construct } = fixture({ secret: '', extra: { asterdexApiVersion: 'v1' } }, 'asterdex', 'v3');
+    // Before async WASM loading, preserve the synchronous v1/no-secret answer.
+    expect(exchange.isPublicDataOnly).toBe(true);
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).asterdex.apiVersion).toBe('v1');
+    // Native v3 requires a full auth context; an explicit remote signer still wins.
+    expect(exchange.isPublicDataOnly).toBe(true);
+    await expect(exchange.fetchStpMode()).resolves.toBe('EXPIRE_MAKER');
+
+    const inferred = fixture();
+    await inferred.exchange.start();
+    expect(JSON.parse(inferred.construct.mock.calls[0][1]).asterdex).not.toHaveProperty('apiVersion');
   });
 
-  it('keeps valid auth-only V3 accounts public when the API key is absent, as TS does', () => {
+  it('uses native version for signing eligibility after host creation', async () => {
+    const { exchange } = fixture({ key: 'legacy', secret: 'legacy', applicationId: undefined }, 'asterdex', 'v3');
+    expect(exchange.isPublicDataOnly).toBe(false);
+    await exchange.start();
+    expect(exchange.isPublicDataOnly).toBe(true);
+  });
+
+  it('keeps valid auth-only V3 accounts public before and after host creation, as TS does', async () => {
     const { exchange } = fixture({
       key: '',
       secret: '',
       applicationId: undefined,
       auth: { userAddress: USER, signerAddress: SIGNER, privateKey: PRIVATE },
-    });
+    }, 'asterdex', 'v3');
+    expect(exchange.isPublicDataOnly).toBe(true);
+    await exchange.start();
     expect(exchange.isPublicDataOnly).toBe(true);
   });
 

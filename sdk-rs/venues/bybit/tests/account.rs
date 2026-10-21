@@ -67,7 +67,10 @@ fn respond_snapshot(h: &mut Harness) {
 
 /// A private engine with the account loaded and the private socket authenticated.
 fn ready() -> Harness {
-    let mut h = Harness::started(credentials());
+    ready_options(credentials())
+}
+fn ready_options(options: Options) -> Harness {
+    let mut h = Harness::started(options);
     respond_startup(&mut h);
     respond_snapshot(&mut h);
     let socket = h.socket("/v5/private").unwrap();
@@ -1125,6 +1128,125 @@ fn a_mode_switch_fences_old_position_snapshots_and_queues_a_refresh() {
     assert!(body(&batch).contains(r#""positionIdx":1}"#));
 }
 
+const LOG_SECRET: &str = "audit-origin-secret-value";
+const SIGNED_URL: &str = "https://api.bybit.com/v5/order/create?api_key=audit-origin-secret-value&signature=audit-origin-signature";
+fn log_safe_engine() -> Harness {
+    ready_options(Options {
+        key: Some(LOG_SECRET.into()),
+        secret: Some(LOG_SECRET.into()),
+        ..Options::default()
+    })
+}
+fn assert_private_notices_are_safe(h: &Harness) {
+    for notice in &h.notices {
+        // Debug covers every notice field, including structured venue errors.
+        let text = format!("{notice:?}");
+        assert!(
+            !text.contains(LOG_SECRET),
+            "credential escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains(SIGNED_URL),
+            "signed URL escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains("audit-origin-signature"),
+            "signature escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains("origin_string["),
+            "signed origin escaped in {notice:?}"
+        );
+    }
+}
+fn rejected_signed_origin(code: i64) -> String {
+    serde_json::json!({"retCode": code, "retMsg": format!("error sign! origin_string[1000{LOG_SECRET}20000category=linear] signed_url[{SIGNED_URL}]"), "result":{}, "retExtInfo":{"debug": LOG_SECRET}}).to_string()
+}
+#[test]
+fn signed_origin_never_escapes_on_retry_or_terminal_command_rejection() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        9001,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, &rejected_signed_origin(10004));
+    assert_private_notices_are_safe(&h);
+    let retry = h.take("/v5/order/create-batch");
+    h.reply(retry.id, 200, &rejected_signed_origin(10004));
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "signature rejection retries exactly once"
+    );
+    assert!(h.result(9001).unwrap().is_err());
+    assert!(h.logs.iter().any(|log| log.contains("retCode 10004")));
+    assert_private_notices_are_safe(&h);
+}
+#[test]
+fn signed_origin_in_private_read_retry_exhaustion_and_later_transport_failure_is_safe() {
+    for transport_failure in [false, true] {
+        let mut h = log_safe_engine();
+        h.advance(5000.0);
+        let request = h.take("/v5/account/wallet-balance");
+        h.reply(request.id, 200, &rejected_signed_origin(10004));
+        let retry = h.take("/v5/account/wallet-balance");
+        if transport_failure {
+            h.event(Event::HttpFailed {
+                request: retry.id,
+                error: SIGNED_URL,
+            });
+        } else {
+            h.reply(retry.id, 503, SIGNED_URL);
+        }
+        assert!(!h.has_request("/v5/account/wallet-balance"));
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("failed") || log.contains("HTTP 503"))
+        );
+        assert_private_notices_are_safe(&h);
+    }
+}
+#[test]
+fn receive_window_rejection_drops_echoed_credentials_but_keeps_clock_correction() {
+    let mut h = log_safe_engine();
+    h.advance(5000.0);
+    let response = serde_json::json!({"retCode":10002,"retMsg":format!("recv_window req_timestamp[6000],server_timestamp[8000], origin_string[{LOG_SECRET}] {SIGNED_URL}"),"result":{}}).to_string();
+    let request = h.take("/v5/account/wallet-balance");
+    h.reply(request.id, 200, &response);
+    assert_private_notices_are_safe(&h);
+    let retry = h.take("/v5/account/wallet-balance");
+    assert_eq!(
+        Harness::header(&retry, "X-BAPI-TIMESTAMP").as_deref(),
+        Some("8000")
+    );
+    h.reply(retry.id, 200, &response);
+    assert!(h.logs.iter().any(|log| log.contains("retCode 10002")));
+    assert_private_notices_are_safe(&h);
+}
+#[test]
+fn normal_business_rejections_remain_actionable_after_a_signature_retry() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        9002,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, &rejected_signed_origin(10004));
+    let retry = h.take("/v5/order/create-batch");
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"Available balance is insufficient","result":{}}"#,
+    );
+    let error = h.result(9002).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("Available balance is insufficient"));
+    assert!(!h.has_request("/v5/order/create-batch"));
+    assert_private_notices_are_safe(&h);
+}
+
 #[test]
 fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
     use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
@@ -1169,8 +1291,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.message.contains("456") && error.message.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -1209,7 +1331,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -1220,7 +1342,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -1234,12 +1356,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -1250,9 +1372,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -1268,7 +1390,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -1765,4 +1887,96 @@ fn windowed_fill_request_sequence_is_pinned() {
             "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=50",
         ]
     );
+}
+
+#[test]
+fn write_failures_never_claim_a_refusal_the_answer_does_not_prove() {
+    use safe_cex_engine::Outcome;
+    let unknown = Some(Outcome::Unknown);
+    for (body, outcome) in [
+        // A 2xx without a Bybit envelope proves nothing.
+        ("<html>gateway</html>", unknown),
+        // A per-item internal error may follow acceptance.
+        (
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":10016,"msg":"Internal System Error"}]}}"#,
+            unknown,
+        ),
+        // An explicit per-item refusal with nothing accepted.
+        (
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":110007,"msg":"insufficient balance"}]}}"#,
+            Some(Outcome::Rejected),
+        ),
+    ] {
+        let mut h = ready();
+        place(
+            &mut h,
+            71,
+            vec![limit("BTCUSDT", OrderSide::Buy, 0.001, 90_000.0)],
+        );
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, 200, body);
+        assert_eq!(h.outcomes, [(71, outcome)], "{body}");
+    }
+    // One leg cancelled, the other refused: something took effect.
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let other = "5cf98598-39a7-459e-97bf-76ca765ee020";
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec![ORDER_ID.into(), other.into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"x"},{"orderId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110020,"msg":"not allowed"}]}}"#,
+    );
+    assert_eq!(h.outcomes, [(14, None)]);
+}
+
+fn balance_info(h: &mut Harness, command: u32) -> serde_json::Value {
+    h.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::FetchBalanceInfo,
+    });
+    serde_json::from_str(h.result(command).unwrap().as_ref().unwrap()).unwrap()
+}
+
+#[test]
+fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
+    let mut h = Harness::started(credentials());
+    assert_eq!(balance_info(&mut h, 90), serde_json::Value::Null);
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let expected: serde_json::Value =
+        serde_json::from_str::<serde_json::Value>(WALLET).unwrap()["result"]["list"][0].clone();
+    let info = balance_info(&mut h, 91);
+    assert_eq!(info, expected);
+    assert_eq!(info["accountType"], "UNIFIED");
+    assert_eq!(info["coin"][0]["marginCollateral"], true);
+    assert_eq!(info["coin"][0]["collateralSwitch"], true);
+
+    // Stream pushes move the balance but not `info`, as TS reads it from REST only.
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"topic":"wallet","id":"w","creationTime":1,"data":[{"accountType":"UNIFIED","totalEquity":"2000","totalWalletBalance":"2000","totalMarginBalance":"2000","totalAvailableBalance":"2000","totalInitialMargin":"0","totalMaintenanceMargin":"0","coin":[{"coin":"USDT","equity":"2000","walletBalance":"2000","usdValue":"2000"}]}]}"#,
+    );
+    assert_eq!(balance_info(&mut h, 92), expected);
+
+    // A failed read keeps the last good payload.
+    h.advance(60_000.0);
+    assert!(h.has_request("/v5/account/wallet-balance"));
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond(
+            "/v5/account/wallet-balance",
+            200,
+            r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+        );
+    }
+    assert_eq!(balance_info(&mut h, 93), expected);
 }

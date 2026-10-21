@@ -53,6 +53,12 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) => {
+                let result: Result<String, String> = Ok(result);
+                assert_eq!(command, 42);
+                done.push(result);
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 assert_eq!(command, 42);
                 done.push(result);
             }

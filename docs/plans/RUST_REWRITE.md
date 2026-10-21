@@ -115,7 +115,8 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 | 19 | `CAPABILITIES` (snapshot frames only) | `u32` flags (bits 0-11: clientOrderLookup, fillHistory, orderHistory, incomeHistory, fillsByOrderId, accountLeverage, accountMarginType, cancelWithSymbols, amendWithSymbol, orderBookQuery, options, accountTier); `u32` four-bit fields: account, cancelAll, leverageQuery, maxLeverage, quantityUnits |
-| 20 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
+| 20 | `UNDERLYING_TOKENS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][2]` (venue token name, optional full name): the token behind a wrapped pair, e.g. Hyperliquid `UBTC`/`Unit Bitcoin` behind `BTC/USDC`; applied as `market.info.hlTokenName`/`hlTokenFullName` |
+| 21 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
 
 The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
 Section revision 0 preserves the layouts above. Revision 1 has explicit fixed
@@ -203,16 +204,19 @@ On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
 - At least seven fresh interleaved public pairs with alternating first runner.
-- Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
-  90% of TS. A main or steady CPU objective under 10 ms TS instead allows Rust
-  1 ms above TS: at that size tied runs differ by up to 0.9 ms
-  (`RUST_GATE_TIMING.md`). Include cold implementation loading/WASM compilation in total CPU;
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians
+  clearly below TS, except that small main/steady CPU windows only need to be
+  within run-to-run noise of TS. The exact thresholds, pair counts and their
+  rationale live only in `sdk-rs/harness/performance-policy.mjs`.
+  Overseer decision (2026-10-21): small windows trade the improvement margin
+  for a noise floor (#1461; evidence in `RUST_GATE_TIMING.md`); revisit if a
+  small-window regression slips through. Include cold implementation loading/WASM compilation in total CPU;
   exclude audit callbacks, checkpoint reconstruction and baseline collection.
 - Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
   reservation; never clamp releases to zero. Each measured run must reproduce
   its implementation's audited output and transport receipt.
-- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
-  use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
+- Shipped combined WASM: at most 14,155,776 bytes (13.5 MiB). Standalone builds
+  use the 1,343,488-byte family budget (RUST_WASM_FAMILIES.md). Check browser and Node artifacts before overwrite.
 
 Peak memory and browser cold-start remain cutover requirements; this replay
 gate measures idle-loaded retained memory rather than establishing either.
@@ -576,7 +580,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. [Explicit product decision](GRVT_PRODUCTS_DECISION.md) retires unexposed mapper-only Future/Call/Put paths: TS discovery defaults to perpetuals, explicit non-perpetual public catalogs were empty, and generic dispatch does not establish their lifecycle support. Keep TS/reference sources and public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
-| `bitunix` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `bitunix` | Opt-in USDT futures; streamed discovery/ticker seeds, full-snapshot depth, signed private reconciliation, guarded trading and native history queries. `realizedPNL` is already net of fees and funding and remains verbatim. Live public and documented private replay are separate evidence; default cutover and credentialed lifecycle proof remain later gates. Preserve [port scope and gate evidence](RUST_BITUNIX.md). |
 
 #### Known consumer blockers and replacement order
 
@@ -699,7 +703,11 @@ of mutation acknowledgements. These redacted reads are retained under
 `live-smoke-verify-*`; their success marker is an operational check by the runner,
 while the TS/Rust replay compares the primary lifecycle. A scripted Binance run
 round-trips through that gate; other profiles still need credentialed proof on
-their actual products. The runner never silently upgrades size after rejection
+their actual products. The runner applies a fixed $100 quote-notional cap to both the initial and amended
+order, including inverse face value and native contract multipliers; rounding a
+minimum above the cap refuses before any account mutation. No CLI or environment
+option raises the cap. Limit orders request post-only on engine-supported profiles
+(all currently reviewed profiles except Bitrue and Polymarket). The runner never silently upgrades size after rejection
 or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
 and cleanup; incomplete cleanup remains a failure.
 After cancel-all, mutable leverage is lowered by one (bounded by the market
@@ -707,7 +715,9 @@ minimum) and restored to its captured value, exercising both writes. Fixed or
 already-minimum leverage is set to its original value without increasing risk.
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
-family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read
+family, selected mode (`TESTNET`, `DEMO`, or `MAINNET`) and suffix, for example
+`RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY`. Every optional field uses the same mode
+prefix. Legacy names and another mode's values are never used as a fallback. Credentials are read
 only from the process environment, never command-line arguments or committed
 configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
@@ -757,7 +767,7 @@ The environment table and credential option mapping live in
 `sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling
 another venue or endpoint. A supported endpoint profile does not itself prove
 that every lifecycle command is available for every product/account type.
-Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS` is a comma-separated
+Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS` is a comma-separated
 list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
 for the desired outcome. It is public selection metadata, not a credential.
 Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks

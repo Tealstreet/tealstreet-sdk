@@ -2,8 +2,9 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::capabilities::{AccountLookup, Capabilities};
-use crate::error::VenueError;
+use crate::error::{ErrorKind, VenueError};
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
+use crate::log::{Health, Level, LogEvent, Value, code as log_code};
 use crate::model::{
     CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
@@ -11,6 +12,19 @@ use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
+
+/// Bounds on a host-scaled poll cadence, beyond a venue's own native cadence.
+pub const POLL_POLICY_FLOOR_MS: f64 = 1_000.0;
+pub const POLL_POLICY_CAP_MS: f64 = 120_000.0;
+
+/// Bound a configured absolute cadence; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(POLL_POLICY_FLOOR_MS, POLL_POLICY_CAP_MS)
+    } else {
+        f64::INFINITY
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SocketId(pub u32);
@@ -77,7 +91,7 @@ impl RequestRoute {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
     pub method: Method,
@@ -90,7 +104,22 @@ pub struct HttpRequest {
     pub body: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("id", &self.id)
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("url", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .field("signer_headers", &"<redacted>")
+            .field("body", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadSignRequest {
     pub exchange_name: &'static str,
@@ -98,6 +127,18 @@ pub struct PayloadSignRequest {
     pub payload: String,
     pub scheme: &'static str,
     pub encoding: &'static str,
+}
+
+impl std::fmt::Debug for PayloadSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignRequest")
+            .field("exchange_name", &self.exchange_name)
+            .field("key", &"<redacted>")
+            .field("payload", &"<redacted>")
+            .field("scheme", &self.scheme)
+            .field("encoding", &self.encoding)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +210,16 @@ impl MergedScopeAuth {
     }
 }
 
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Info => Self::Info,
+            LogLevel::Warning => Self::Warn,
+            LogLevel::Error => Self::Error,
+        }
+    }
+}
+
 #[cfg(test)]
 mod merged_scope_auth_tests {
     use super::{AuthOutcome::*, MergedScopeAuth};
@@ -200,19 +251,21 @@ pub enum Notice {
     },
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
+    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
     Log {
         level: LogLevel,
         message: String,
     },
+    Event(LogEvent),
     /// Error diagnostic attributed to a command; completion owns its outcome.
     CommandError {
         command: CommandId,
         message: String,
     },
-    /// `Ok` carries the command's JSON result.
+    /// The command succeeded; `result` is its JSON. Failures arrive as `CommandFailed`.
     CommandDone {
         command: CommandId,
-        result: Result<String, String>,
+        result: String,
     },
     /// Actual native write identities, emitted before their corresponding I/O.
     CommandProgress {
@@ -263,6 +316,68 @@ pub struct SocketContext {
     pub recover: bool,
 }
 
+/// Everything a host needs to open one socket; `Cx::connect` takes it or a bare URL.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SocketSpec {
+    pub url: String,
+    /// Logical feed role lets hosts route identical venue URLs independently.
+    pub channel: Option<SocketChannel>,
+    pub context: Option<SocketContext>,
+    pub headers: Vec<(&'static str, String)>,
+    /// Binary protocols still receive text control responses through on_message.
+    pub binary: bool,
+}
+
+impl SocketSpec {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn channel(mut self, channel: SocketChannel) -> Self {
+        self.channel = Some(channel);
+        self
+    }
+
+    pub fn feed(mut self, feed: impl Into<String>, recover: bool) -> Self {
+        self.context = Some(SocketContext {
+            feed: feed.into(),
+            recover,
+        });
+        self
+    }
+
+    pub fn headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn binary(mut self) -> Self {
+        self.binary = true;
+        self
+    }
+}
+
+impl From<&str> for SocketSpec {
+    fn from(url: &str) -> Self {
+        Self::new(url)
+    }
+}
+
+impl From<String> for SocketSpec {
+    fn from(url: String) -> Self {
+        Self::new(url)
+    }
+}
+
+impl From<&String> for SocketSpec {
+    fn from(url: &String) -> Self {
+        Self::new(url.as_str())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     WsConnect {
@@ -270,13 +385,7 @@ pub enum Action {
         binary: bool,
         socket: SocketId,
         url: String,
-        channel: Option<SocketChannel>,
-        context: Option<SocketContext>,
-    },
-    /// Upgrade authentication; hosts must fail closed if headers are unsupported.
-    WsConnectWithHeaders {
-        socket: SocketId,
-        url: String,
+        /// Upgrade authentication; hosts must fail closed if headers are unsupported.
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
         context: Option<SocketContext>,
@@ -311,14 +420,21 @@ pub enum VenueAction {
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
     SetAccountTier { tier: String },
+    /// Venue-reported closed positions as the venue's own JSON rows, newest
+    /// window first, for hosts that map them with the venue's TS mappers.
+    FetchClosedPositions {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    },
+    /// The venue's raw account balance payload as JSON, or `null` before one
+    /// is read, for hosts that expose it as `balance.info`.
+    FetchBalanceInfo,
 }
 
 /// The shared rejection for a venue action the venue does not implement.
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.done(
-        command,
-        Err("This action is not supported on this venue".into()),
-    );
+    cx.fail(command, "This action is not supported on this venue");
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -447,7 +563,7 @@ pub enum Command {
 
 #[cfg(feature = "order-locks")]
 impl Command {
-    fn completion_id(&self) -> Option<CommandId> {
+    pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
             | Self::AmendOrderWithSymbol { command, .. }
@@ -528,7 +644,6 @@ impl<'a> Response<'a> {
     }
 }
 
-#[derive(Debug)]
 pub enum Event<'a> {
     /// Host polling policy: a factor on each poll's own cadence (resolved SDK
     /// tick over its metadata tick); infinity pauses optional venue polling.
@@ -591,6 +706,15 @@ pub enum Event<'a> {
     Command(Command),
 }
 
+impl std::fmt::Debug for Event<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Events include authenticated payloads, headers and delegated signatures.
+        f.debug_struct("Event")
+            .field("kind", &std::mem::discriminant(self))
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
@@ -612,7 +736,10 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
+const JITTER_GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+
 struct PollTimer {
+    logical: TimerId,
     default_interval_ms: f64,
     bounds: PollTimerBounds,
     physical: Option<TimerId>,
@@ -651,83 +778,80 @@ fn observe_account_auth<V: Venue>(
     }));
 }
 
-struct Io<P> {
-    #[cfg(feature = "order-locks")]
-    order_locks: crate::order_locks::OrderLocks,
-    #[cfg(feature = "order-locks")]
-    active_commands: std::collections::HashSet<CommandId>,
-    #[cfg(feature = "order-locks")]
-    order_read_tokens: HashMap<RequestId, u64>,
-    #[cfg(feature = "order-locks")]
-    order_response_token: Option<u64>,
-    actions: Vec<Action>,
-    public_feed_policy: PublicFeedPolicy,
-    pending: HashMap<RequestId, PendingHttp<P>>,
-    signatures: Vec<(RequestId, PendingSignature)>,
-    streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
-    incoming: HashMap<RequestId, Incoming>,
-    timers: HashMap<TimerId, ()>,
-    poll_scale: Option<f64>,
-    poll_ceiling_ms: Option<f64>,
-    poll_timers: HashMap<TimerId, PollTimer>,
-    poll_physical: HashMap<TimerId, TimerId>,
-    next_id: u32,
-    /// Retained symbol buffers; only the active prefix belongs to the next frame.
-    changed_books: Vec<String>,
-    changed_books_active: usize,
-    candles: Vec<(String, Interval, Candle)>,
-    fills: Vec<(Fill, Option<FillFinancials>)>,
-    frame: Vec<u8>,
-    snapshot: Vec<u8>,
+/// Host poll policy and the registered polls. Deliberately not generic over a
+/// venue's pending type: every venue in a bundle shares this one copy.
+#[derive(Default)]
+struct Polls {
+    scale: Option<f64>,
+    ceiling_ms: Option<f64>,
+    /// A venue registers only a few polls, kept in registration order.
+    entries: Vec<PollTimer>,
 }
 
-impl<P> Default for Io<P> {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "order-locks")]
-            order_locks: crate::order_locks::OrderLocks::default(),
-            #[cfg(feature = "order-locks")]
-            active_commands: std::collections::HashSet::new(),
-            #[cfg(feature = "order-locks")]
-            order_read_tokens: HashMap::new(),
-            #[cfg(feature = "order-locks")]
-            order_response_token: None,
-            actions: Vec::new(),
-            public_feed_policy: PublicFeedPolicy::Direct,
-            pending: HashMap::new(),
-            signatures: Vec::new(),
-            streams: HashMap::new(),
-            incoming: HashMap::new(),
-            timers: HashMap::new(),
-            poll_scale: None,
-            poll_ceiling_ms: None,
-            poll_timers: HashMap::new(),
-            poll_physical: HashMap::new(),
-            next_id: 1,
-            changed_books: Vec::new(),
-            changed_books_active: 0,
-            candles: Vec::new(),
-            fills: Vec::new(),
-            frame: Vec::new(),
-            snapshot: Vec::new(),
+/// The engine timer state a poll change writes to.
+struct TimerSink<'a> {
+    next_id: &'a mut u32,
+    timers: &'a mut HashMap<TimerId, ()>,
+    actions: &'a mut Vec<Action>,
+}
+
+fn next_engine_id(next_id: &mut u32) -> u32 {
+    let id = *next_id;
+    *next_id = next_id.wrapping_add(1).max(1);
+    id
+}
+
+impl TimerSink<'_> {
+    fn clear(&mut self, timer: TimerId) {
+        if self.timers.remove(&timer).is_some() {
+            self.actions.push(Action::ClearTimer { timer });
         }
     }
 }
 
-impl<P> Io<P> {
-    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
-        let index = self.signatures.iter().position(|(id, _)| *id == request)?;
-        Some(self.signatures.swap_remove(index).1)
+/// A poll's own cadence times the host scale. A slowdown never exceeds the
+/// host's absolute ceiling unless the native cadence is already slower.
+fn poll_interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
+    let scale = scale.unwrap_or(1.);
+    // Only an explicit infinite scale or native cadence pauses; a huge finite
+    // scale overflowing the product is still finite and takes the cap below.
+    if scale == f64::INFINITY || default_ms == f64::INFINITY {
+        return f64::INFINITY;
     }
-    fn next(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
-        id
+    let interval = (default_ms * scale).min(f64::MAX);
+    let interval = match ceiling_ms {
+        Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
+            interval.min(default_ms.max(ceiling))
+        }
+        _ => interval,
+    };
+    // Host policy cannot flood a venue or overflow a timer; infinity pauses.
+    if interval.is_finite() {
+        interval.clamp(
+            default_ms.min(POLL_POLICY_FLOOR_MS),
+            default_ms.max(POLL_POLICY_CAP_MS),
+        )
+    } else {
+        interval
+    }
+}
+
+impl Polls {
+    fn interval(&self, default_ms: f64) -> f64 {
+        poll_interval_for(default_ms, self.scale, self.ceiling_ms)
     }
 
-    fn arm_poll(&mut self, now: f64, logical: TimerId) {
-        let poll = &self.poll_timers[&logical];
-        let interval = self.poll_interval(poll.default_interval_ms);
+    fn current_interval(&self, logical: TimerId) -> Option<f64> {
+        let poll = self.entries.iter().find(|poll| poll.logical == logical)?;
+        Some(
+            self.interval(poll.default_interval_ms)
+                .max(poll.bounds.minimum_interval_ms),
+        )
+    }
+
+    fn arm(&mut self, now: f64, index: usize, sink: &mut TimerSink<'_>) {
+        let interval = self.interval(self.entries[index].default_interval_ms);
+        let poll = &mut self.entries[index];
         // Never hand an infinite/invalid deadline to a host. Infinity policy
         // retains the registration so a finite update can resume it.
         if !interval.is_finite()
@@ -743,52 +867,72 @@ impl<P> Io<P> {
         if !at_ms.is_finite() {
             return;
         }
-        let physical = TimerId(self.next());
-        self.poll_timers.get_mut(&logical).unwrap().physical = Some(physical);
-        self.poll_physical.insert(physical, logical);
-        self.timers.insert(physical, ());
-        self.actions.push(Action::SetTimer {
+        let physical = TimerId(next_engine_id(sink.next_id));
+        poll.physical = Some(physical);
+        sink.timers.insert(physical, ());
+        sink.actions.push(Action::SetTimer {
             timer: physical,
             at_ms,
         });
     }
 
-    fn clear_physical_timer(&mut self, timer: TimerId) {
-        if self.timers.remove(&timer).is_some() {
-            self.actions.push(Action::ClearTimer { timer });
+    fn register(
+        &mut self,
+        now: f64,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+        sink: &mut TimerSink<'_>,
+    ) -> TimerId {
+        let logical = TimerId(next_engine_id(sink.next_id));
+        self.entries.push(PollTimer {
+            logical,
+            default_interval_ms,
+            bounds,
+            physical: None,
+        });
+        self.arm(now, self.entries.len() - 1, sink);
+        logical
+    }
+
+    /// Removes a registration; false when `logical` is not a poll.
+    fn clear(&mut self, logical: TimerId, sink: &mut TimerSink<'_>) -> bool {
+        let Some(index) = self.entries.iter().position(|poll| poll.logical == logical) else {
+            return false;
+        };
+        if let Some(physical) = self.entries.remove(index).physical {
+            sink.clear(physical);
         }
+        true
     }
 
-    /// A poll's own cadence times the host scale. A slowdown never exceeds the
-    /// host's absolute ceiling unless the native cadence is already slower.
-    fn poll_interval(&self, default_ms: f64) -> f64 {
-        Self::interval_for(default_ms, self.poll_scale, self.poll_ceiling_ms)
+    /// A fired physical timer ends its one-shot registration; returns the
+    /// logical ID the venue knows.
+    fn fired(&mut self, physical: TimerId) -> Option<TimerId> {
+        let index = self
+            .entries
+            .iter()
+            .position(|poll| poll.physical == Some(physical))?;
+        Some(self.entries.remove(index).logical)
     }
 
-    fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
-        let interval = default_ms * scale.unwrap_or(1.);
-        match ceiling_ms {
-            Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
-                interval.min(default_ms.max(ceiling))
-            }
-            _ => interval,
-        }
-    }
-
-    fn set_poll_policy(&mut self, now: f64, scale: Option<f64>, ceiling_ms: Option<f64>) {
-        let (old_scale, old_ceiling) = (self.poll_scale, self.poll_ceiling_ms);
+    fn set_policy(
+        &mut self,
+        now: f64,
+        scale: Option<f64>,
+        ceiling_ms: Option<f64>,
+        sink: &mut TimerSink<'_>,
+    ) {
+        let (old_scale, old_ceiling) = (self.scale, self.ceiling_ms);
         if (old_scale, old_ceiling) == (scale, ceiling_ms) {
             return;
         }
-        self.poll_scale = scale;
-        self.poll_ceiling_ms = ceiling_ms;
-        // Sort logical IDs so action ordering is independent of HashMap seeds.
-        let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
-        logicals.sort_unstable_by_key(|timer| timer.0);
-        for logical in logicals {
-            let poll = &self.poll_timers[&logical];
-            let old_interval = Self::interval_for(poll.default_interval_ms, old_scale, old_ceiling);
-            let new_interval = Self::interval_for(poll.default_interval_ms, scale, ceiling_ms);
+        self.scale = scale;
+        self.ceiling_ms = ceiling_ms;
+        // Registration order keeps action ordering deterministic.
+        for index in 0..self.entries.len() {
+            let poll = &self.entries[index];
+            let old_interval = poll_interval_for(poll.default_interval_ms, old_scale, old_ceiling);
+            let new_interval = poll_interval_for(poll.default_interval_ms, scale, ceiling_ms);
             if old_interval.is_finite()
                 && old_interval > 0.
                 && new_interval.is_finite()
@@ -798,12 +942,118 @@ impl<P> Io<P> {
                 // An equivalent cadence must not postpone an already due poll.
                 continue;
             }
-            if let Some(physical) = self.poll_timers.get_mut(&logical).unwrap().physical.take() {
-                self.poll_physical.remove(&physical);
-                self.clear_physical_timer(physical);
+            if let Some(physical) = self.entries[index].physical.take() {
+                sink.clear(physical);
             }
-            self.arm_poll(now, logical);
+            self.arm(now, index, sink);
         }
+    }
+}
+
+struct Io<P> {
+    #[cfg(feature = "order-locks")]
+    order_locks: crate::order_locks::OrderLocks,
+    #[cfg(feature = "order-locks")]
+    active_commands: std::collections::HashSet<CommandId>,
+    #[cfg(feature = "order-locks")]
+    order_read_tokens: HashMap<RequestId, u64>,
+    #[cfg(feature = "order-locks")]
+    order_response_token: Option<u64>,
+    actions: Vec<Action>,
+    placement_acks: crate::placement_acks::PlacementAcks,
+    public_feed_policy: PublicFeedPolicy,
+    pending: HashMap<RequestId, PendingHttp<P>>,
+    signatures: Vec<(RequestId, PendingSignature)>,
+    streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
+    incoming: HashMap<RequestId, Incoming>,
+    timers: HashMap<TimerId, ()>,
+    polls: Polls,
+    next_id: u32,
+    /// Retained symbol buffers; only the active prefix belongs to the next frame.
+    changed_books: Vec<String>,
+    changed_books_active: usize,
+    candles: Vec<(String, Interval, Candle)>,
+    fills: Vec<(Fill, Option<FillFinancials>)>,
+    frame: Vec<u8>,
+    snapshot: Vec<u8>,
+    /// Retry-jitter state; advanced only by `Cx::jittered`, so replays repeat it.
+    jitter: u64,
+    min_level: Level,
+    health: Health,
+    sockets: SocketRoles,
+    /// One rejection often arrives as an auth-kind failure plus `deactivate`.
+    auth_failure_counted: bool,
+    /// Each retried read's latest Error time and digit-normalised text, by call site.
+    retried_failures: HashMap<&'static str, (f64, String)>,
+}
+
+impl<P> Default for Io<P> {
+    fn default() -> Self {
+        Self {
+            #[cfg(feature = "order-locks")]
+            order_locks: crate::order_locks::OrderLocks::default(),
+            #[cfg(feature = "order-locks")]
+            active_commands: std::collections::HashSet::new(),
+            #[cfg(feature = "order-locks")]
+            order_read_tokens: HashMap::new(),
+            #[cfg(feature = "order-locks")]
+            order_response_token: None,
+            actions: Vec::new(),
+            placement_acks: Default::default(),
+            public_feed_policy: PublicFeedPolicy::Direct,
+            pending: HashMap::new(),
+            signatures: Vec::new(),
+            streams: HashMap::new(),
+            incoming: HashMap::new(),
+            timers: HashMap::new(),
+            polls: Polls::default(),
+            next_id: 1,
+            changed_books: Vec::new(),
+            changed_books_active: 0,
+            candles: Vec::new(),
+            fills: Vec::new(),
+            frame: Vec::new(),
+            snapshot: Vec::new(),
+            jitter: JITTER_GOLDEN_GAMMA,
+            min_level: Level::Info,
+            health: Health::default(),
+            sockets: SocketRoles::default(),
+            auth_failure_counted: false,
+            retried_failures: HashMap::new(),
+        }
+    }
+}
+
+impl<P> Io<P> {
+    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
+        let index = self.signatures.iter().position(|(id, _)| *id == request)?;
+        Some(self.signatures.swap_remove(index).1)
+    }
+    /// splitmix64 step salted by the event clock, as `socket::Supervisor` mixes.
+    fn mix(&mut self, salt: u64) -> u64 {
+        self.jitter = self
+            .jitter
+            .wrapping_add(salt)
+            .wrapping_add(JITTER_GOLDEN_GAMMA);
+        let mut z = self.jitter;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+    fn next(&mut self) -> u32 {
+        next_engine_id(&mut self.next_id)
+    }
+
+    /// Splits the poll registry from the timer state it writes to.
+    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
+        (
+            &mut self.polls,
+            TimerSink {
+                next_id: &mut self.next_id,
+                timers: &mut self.timers,
+                actions: &mut self.actions,
+            },
+        )
     }
 }
 
@@ -812,57 +1062,14 @@ impl<P> Cx<'_, P> {
         self.io.public_feed_policy
     }
 
-    pub fn connect(&mut self, url: impl Into<String>) -> SocketId {
-        self.connect_with_channel(url, None)
-    }
-
-    /// Logical feed role lets hosts route identical venue URLs independently.
-    pub fn connect_channel(&mut self, url: impl Into<String>, channel: SocketChannel) -> SocketId {
-        self.connect_with_channel(url, Some(channel))
-    }
-
-    fn connect_with_channel(
-        &mut self,
-        url: impl Into<String>,
-        channel: Option<SocketChannel>,
-    ) -> SocketId {
-        self.connect_context(url, channel, None, false)
-    }
-
-    pub fn connect_feed(
-        &mut self,
-        url: impl Into<String>,
-        channel: SocketChannel,
-        feed: impl Into<String>,
-        recover: bool,
-    ) -> SocketId {
-        self.connect_context(
+    pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let SocketSpec {
             url,
-            Some(channel),
-            Some(SocketContext {
-                feed: feed.into(),
-                recover,
-            }),
-            false,
-        )
-    }
-
-    /// Binary protocols still receive text control responses through on_message.
-    pub fn connect_binary_channel(
-        &mut self,
-        url: impl Into<String>,
-        channel: SocketChannel,
-    ) -> SocketId {
-        self.connect_context(url, Some(channel), None, true)
-    }
-
-    fn connect_context(
-        &mut self,
-        url: impl Into<String>,
-        channel: Option<SocketChannel>,
-        context: Option<SocketContext>,
-        binary: bool,
-    ) -> SocketId {
+            channel,
+            context,
+            headers,
+            binary,
+        } = spec.into();
         if channel == Some(SocketChannel::Public)
             && self.io.public_feed_policy != PublicFeedPolicy::Direct
         {
@@ -870,52 +1077,18 @@ impl<P> Cx<'_, P> {
             return SocketId(0);
         }
         let socket = SocketId(self.io.next());
+        if let Some(channel) = &channel {
+            self.io
+                .sockets
+                .connected(socket, channel, &mut self.io.health);
+        }
         self.io.actions.push(Action::WsConnect {
             binary,
             socket,
-            url: url.into(),
-            channel,
-            context,
-        });
-        socket
-    }
-
-    pub fn connect_with_headers(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-    ) -> SocketId {
-        self.connect_headers_channel(url, headers, None)
-    }
-
-    pub fn connect_with_headers_channel(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-        channel: SocketChannel,
-    ) -> SocketId {
-        self.connect_headers_channel(url, headers, Some(channel))
-    }
-
-    fn connect_headers_channel(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-        channel: Option<SocketChannel>,
-    ) -> SocketId {
-        if channel == Some(SocketChannel::Public)
-            && self.io.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            // Socket zero is reserved for suppressed feeds; it never reaches a host.
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
-        self.io.actions.push(Action::WsConnectWithHeaders {
-            socket,
-            url: url.into(),
+            url,
             headers,
             channel,
-            context: None,
+            context,
         });
         socket
     }
@@ -933,6 +1106,11 @@ impl<P> Cx<'_, P> {
     pub fn close(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.sockets.closed(socket, false) {
+            self.io.health.count(log_code::WS_CLOSED);
         }
         self.io.actions.push(Action::WsClose { socket });
     }
@@ -1112,6 +1290,16 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    /// Spreads a failed-request retry delay into `[0.75, 1.0] * delay_ms` so
+    /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
+    /// Non-finite and non-positive delays pass through unchanged.
+    pub fn jittered(&mut self, delay_ms: f64) -> f64 {
+        if !(delay_ms.is_finite() && delay_ms > 0.0) {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, self.io.mix(self.now.to_bits()))
+    }
+
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
         let timer = TimerId(self.io.next());
         self.io.timers.insert(timer, ());
@@ -1128,6 +1316,11 @@ impl<P> Cx<'_, P> {
     pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
         self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
     }
+    /// The interval a registered poll is armed with under the current host
+    /// policy (bounded, and infinite while paused).
+    pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
+        self.io.polls.current_interval(timer)
+    }
 
     /// Configuration changes rearm from change-time, honoring both the recurring
     /// minimum and the unchanged absolute deadline. Backoff should therefore be
@@ -1138,27 +1331,15 @@ impl<P> Cx<'_, P> {
         default_interval_ms: f64,
         bounds: PollTimerBounds,
     ) -> TimerId {
-        let logical = TimerId(self.io.next());
-        self.io.poll_timers.insert(
-            logical,
-            PollTimer {
-                default_interval_ms,
-                bounds,
-                physical: None,
-            },
-        );
-        self.io.arm_poll(self.now, logical);
-        logical
+        let now = self.now;
+        let (polls, mut sink) = self.io.polls();
+        polls.register(now, default_interval_ms, bounds, &mut sink)
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        if let Some(poll) = self.io.poll_timers.remove(&timer) {
-            if let Some(physical) = poll.physical {
-                self.io.poll_physical.remove(&physical);
-                self.io.clear_physical_timer(physical);
-            }
-        } else {
-            self.io.clear_physical_timer(timer);
+        let (polls, mut sink) = self.io.polls();
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
         }
     }
 
@@ -1175,21 +1356,87 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    /// Unstructured shim kept until venues emit [`Cx::event`].
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        self.io.actions.push(Action::Notice(Notice::Log {
+        push_log(
+            &mut self.io.actions,
+            self.io.min_level,
             level,
-            message: message.into(),
-        }));
+            message.into(),
+        );
+    }
+
+    /// Whether an event at `level` reaches the host; check before formatting
+    /// an expensive Debug message.
+    pub fn logs(&self, level: Level) -> bool {
+        level >= self.io.min_level
+    }
+
+    /// [`Cx::event`] without fields.
+    pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        self.event(level, code, message, Vec::new());
+    }
+
+    /// A `request.failed` read the venue retries on its own schedule. A repeat
+    /// of the same failure inside [`RETRIED_FAILURE_ERROR_EVERY_MS`] of the site's
+    /// last Error is a warning; otherwise, and whenever the failure text changes,
+    /// it is an Error. The app's auth badge and reload latch need an Error at
+    /// least that often while a key stays rejected.
+    pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
+        let message = message.into();
+        let shape: String = message
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .collect();
+        let now = self.now;
+        let level = match self.io.retried_failures.get(site) {
+            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
+                Level::Warn
+            }
+            _ => {
+                self.io.retried_failures.insert(site, (now, shape));
+                Level::Error
+            }
+        };
+        self.notice(level, log_code::REQUEST_FAILED, message);
+    }
+
+    /// Counted in [`Health`] whatever the host's minimum level.
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, Value)>,
+    ) {
+        // A rejection often also arrives as an auth-kind failure or `deactivate`.
+        if code == log_code::AUTH_REJECTED {
+            count_auth_failure(self.io, None);
+        }
+        let io = &mut *self.io;
+        push_event(
+            &mut io.actions,
+            &mut io.health,
+            io.min_level,
+            LogEvent {
+                level,
+                code,
+                message: message.into(),
+                fields,
+            },
+        );
     }
 
     pub fn deactivate(&mut self) {
+        count_auth_failure(self.io, None);
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
-    pub fn done(&mut self, command: CommandId, result: Result<String, String>) {
+    /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
+    pub fn done(&mut self, command: CommandId, result: String) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_locks.finish(command, result.is_err());
+            self.io.order_locks.finish(command, false);
             self.io.active_commands.remove(&command);
         }
         self.io
@@ -1220,21 +1467,29 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        self.io.actions.push(Action::Notice(Notice::StartupFailed {
-            error: error.into(),
-        }));
+        let error = error.into();
+        count_auth_failure(self.io, Some(&error));
+        self.io
+            .actions
+            .push(Action::Notice(Notice::StartupFailed { error }));
     }
 
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        self.fail_with(command, error.into());
+    }
+
+    // Out of line so the hundreds of venue call sites share one body (wasm size budget).
+    #[inline(never)]
+    fn fail_with(&mut self, command: CommandId, error: VenueError) {
         #[cfg(feature = "order-locks")]
         {
             self.io.order_locks.finish(command, true);
             self.io.active_commands.remove(&command);
         }
-        self.io.actions.push(Action::Notice(Notice::CommandFailed {
-            command,
-            error: error.into(),
-        }));
+        count_auth_failure(self.io, Some(&error));
+        self.io
+            .actions
+            .push(Action::Notice(Notice::CommandFailed { command, error }));
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
@@ -1294,6 +1549,11 @@ pub trait Venue {
     }
     /// Prevent overlapping precomputed amendments and cancellations.
     fn guard_order_mutations(&self) -> bool {
+        false
+    }
+    /// Cancel and amend route only through stored orders: hold one naming an
+    /// acknowledged placement until the store has it (`placement_acks`).
+    fn cancel_needs_stored_order(&self) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -1391,11 +1651,57 @@ pub trait Venue {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
 }
 
+/// Startup never hangs silently: sections still unloaded after this are named
+/// in a visible notice, repeated on a slow cadence until they load (non-terminal).
+const STARTUP_WATCH_MS: f64 = 60_000.0;
+const EMPTY_CATALOGUE_WARNING: &str = "Venue returned an empty market catalogue; it was not applied and the previous catalogue is kept";
+const STARTUP_REPEAT_MS: f64 = 300_000.0;
+
+fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
+    let loaded = cx.store.loaded();
+    let tickers = cx.io.public_feed_policy != PublicFeedPolicy::Disabled;
+    let missing: Vec<&str> = [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .filter_map(|(name, done, required)| (required && !done).then_some(name))
+    .collect();
+    if missing.is_empty() {
+        return false;
+    }
+    // Only missing tickers can still leave a private account usable (no prices).
+    let level = if missing == ["tickers"] {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    };
+    cx.log(
+        level,
+        format!(
+            "Startup incomplete: still waiting for {}",
+            missing.join(", ")
+        ),
+    );
+    true
+}
+
 pub struct Engine<V: Venue> {
     venue: V,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    /// Checked on handled events, so it adds no timer of its own.
+    startup_watch_at: Option<f64>,
+    /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
+    ack_timer: Option<(TimerId, f64)>,
+    /// Set while dispatching released commands, which must not be held again.
+    releasing: bool,
+    /// Hosts opt in when the account can sign; public-only engines have no account sections.
+    account_startup: bool,
     shared_books: HashMap<String, Book>,
     shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
     shared_ticker_revision: u64,
@@ -1425,6 +1731,10 @@ impl<V: Venue> Engine<V> {
             store,
             io: Io::default(),
             started: false,
+            startup_watch_at: None,
+            ack_timer: None,
+            releasing: false,
+            account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
             shared_ticker_revision: 0,
@@ -1446,6 +1756,12 @@ impl<V: Venue> Engine<V> {
         }
         self.io.public_feed_policy = policy;
         Ok(())
+    }
+
+    /// Account sections (balance, orders, positions) are expected at startup only
+    /// for an account that can sign, matching the SDK's readiness rule.
+    pub fn set_account_startup(&mut self, account: bool) {
+        self.account_startup = account;
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -1552,6 +1868,15 @@ impl<V: Venue> Engine<V> {
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
+    /// Events below `level` are dropped before they are built; defaults to Info.
+    pub fn set_log_level(&mut self, level: Level) {
+        self.io.min_level = level;
+    }
+
+    pub fn health(&self) -> &Health {
+        &self.io.health
+    }
+
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
         self.io.actions.push(Action::Notice(Notice::Log {
@@ -1632,10 +1957,69 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        if let Event::TimerFired { timer } = &event
+            && self.ack_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.ack_timer = None;
+        } else {
+            self.handle_event(now, event);
+        }
+        if self.venue.cancel_needs_stored_order() {
+            self.release_held(now);
+        }
+    }
+
+    /// Dispatch held cancellations whose acknowledged ids are now stored, or
+    /// whose wait expired, then re-arm the wake-up for the remaining ones.
+    fn release_held(&mut self, now: f64) {
+        // Bookkeeping reads this event's outcomes here rather than in `Cx`, so
+        // venues that do not opt in compile none of it.
+        let io = &mut self.io;
+        io.placement_acks.observe(&io.actions, &io.fills, now);
+        let released = self.io.placement_acks.release(&self.store, now);
+        if !released.is_empty() {
+            // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
+            let was_releasing = std::mem::replace(&mut self.releasing, true);
+            for command in released {
+                self.handle_event(now, Event::Command(command));
+            }
+            self.releasing = was_releasing;
+        }
+        let next = self.io.placement_acks.next_deadline(&self.store, now);
+        if self.ack_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.ack_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.ack_timer = Some((timer, at_ms));
+        }
+    }
+
+    fn handle_event(&mut self, now: f64, event: Event<'_>) {
+        if self.venue.cancel_needs_stored_order()
+            && !self.releasing
+            && let Event::Command(command) = &event
+        {
+            match command {
+                Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
+                Command::CancelOrders { .. } | Command::AmendOrder { .. }
+                    if self.io.placement_acks.hold(&self.store, command, now) =>
+                {
+                    self.release_held(now);
+                    return;
+                }
+                _ => {}
+            }
+        }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
             && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
             | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
@@ -1658,6 +2042,7 @@ impl<V: Venue> Engine<V> {
         {
             self.io.order_response_token = None;
         }
+        self.io.auth_failure_counted = false;
         #[cfg(feature = "command-tracking")]
         if matches!(&event, Event::Command(_)) {
             self.commands_received = true;
@@ -1693,24 +2078,45 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        if let Some(at) = self.startup_watch_at
+            && now >= at
+        {
+            self.startup_watch_at =
+                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
+        }
         match event {
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                let ceiling = cx.io.poll_ceiling_ms;
-                cx.io.set_poll_policy(now, Some(scale), ceiling);
+                let (polls, mut sink) = cx.io.polls();
+                let ceiling = polls.ceiling_ms;
+                polls.set_policy(now, Some(scale), ceiling, &mut sink);
                 self.venue.on_poll_scale(&mut cx, scale)
             }
             Event::PollCeilingChanged { ceiling_ms } => {
                 let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
-                let scale = cx.io.poll_scale;
-                cx.io.set_poll_policy(now, scale, ceiling_ms);
+                let (polls, mut sink) = cx.io.polls();
+                let scale = polls.scale;
+                polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
-            Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
-            Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
-            Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
-            Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
+            Event::WsOpened { socket } => {
+                cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
+                self.venue.on_open(&mut cx, socket)
+            }
+            Event::WsBinary { socket, data } => {
+                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                self.venue.on_binary(&mut cx, socket, data)
+            }
+            Event::WsMessage { socket, text } => {
+                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                self.venue.on_message(&mut cx, socket, text)
+            }
+            Event::WsClosed { socket, code } => {
+                cx.io.sockets.closed(socket, true);
+                cx.io.health.count(log_code::WS_CLOSED);
+                self.venue.on_close(&mut cx, socket, code)
+            }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
                 self.http_chunk(now, request, response.body.as_bytes());
@@ -1769,17 +2175,13 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.io.health.count(log_code::HTTP_FAILED);
                     self.venue.on_request_failed(&mut cx, pending.value, error);
                 }
             }
             Event::TimerFired { timer } => {
                 if cx.io.timers.remove(&timer).is_some() {
-                    let logical = if let Some(logical) = cx.io.poll_physical.remove(&timer) {
-                        cx.io.poll_timers.remove(&logical);
-                        logical
-                    } else {
-                        timer
-                    };
+                    let logical = cx.io.polls.fired(timer).unwrap_or(timer);
                     self.venue.on_timer(&mut cx, logical);
                 }
             }
@@ -1794,9 +2196,9 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("symbol-aware amendment is unsupported by this venue".into()),
+                    "symbol-aware amendment is unsupported by this venue",
                 );
             }
             Event::Command(command) => {
@@ -1835,7 +2237,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.done(id, Err(error.into()));
+                        cx.fail(id, error);
                         return;
                     }
                 }
@@ -1854,10 +2256,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.done(
-                            command,
-                            Err("Options are not enabled on this account".into()),
-                        );
+                        cx.fail(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -1875,9 +2274,9 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.done(
+                cx.fail(
                     command,
-                    Err("Placement outcome is uncertain; reconcile before cancel-all".into()),
+                    "Placement outcome is uncertain; reconcile before cancel-all",
                 );
             } else {
                 if let Some(id) = command.completion_id() {
@@ -1952,6 +2351,12 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        let status = incoming.status;
+        if status == 429 {
+            cx.io.health.count(log_code::RATE_LIMITED);
+        } else if status >= 500 {
+            cx.io.health.count(log_code::HTTP_FAILED);
+        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
@@ -2036,11 +2441,17 @@ impl<V: Venue> Engine<V> {
 
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        if self.store.take_rejected_empty_catalogue() {
+            self.io.actions.push(Action::Notice(Notice::Log {
+                level: LogLevel::Warning,
+                message: EMPTY_CATALOGUE_WARNING.to_owned(),
+            }));
+        }
         self.io.actions.drain(..)
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.io.actions.is_empty()
+        !self.io.actions.is_empty() || self.store.rejected_empty_catalogue()
     }
 
     /// The venue's synchronized book for `symbol`, if any.
@@ -2098,12 +2509,16 @@ impl<V: Venue> Engine<V> {
 
     /// Like [`take_frame`](Self::take_frame) but only books, candles and
     /// fills, which consumers want at the venue's book cadence; store
-    /// sections wait for the next full frame.
+    /// sections wait for the next full frame unless fills are pending, which
+    /// travel with the orders they belong to.
     pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.write_frame(now, false)
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        // A fill must not reach a consumer before its order: a book-cadence
+        // flush carrying fills writes the store sections with them.
+        let store = store || !self.io.fills.is_empty();
         if !store && self.store.markets_pending() {
             return None;
         }
@@ -2329,6 +2744,117 @@ fn apply_signature(
     Ok(())
 }
 
+// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
+// would otherwise each inline a copy (the per-venue wasm budget is tight).
+#[inline(never)]
+fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
+    let enabled = match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warn,
+        LogLevel::Error => Level::Error,
+    };
+    if enabled >= min_level {
+        actions.push(Action::Notice(Notice::Log {
+            level,
+            message: crate::log::cap(message),
+        }));
+    }
+}
+
+/// The longest a repeating retried-read failure goes without an Error. Below the
+/// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
+pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
+
+/// Live sockets that declared a role, for reconnect and private-traffic counts.
+#[derive(Default)]
+struct SocketRoles {
+    live: Vec<(SocketId, u8)>,
+    /// Private sockets alone, so the per-frame check scans one or two ids.
+    private: Vec<SocketId>,
+    /// Closes per role whose replacement connect has not happened yet.
+    awaiting_reconnect: [u32; 3],
+}
+
+impl SocketRoles {
+    fn role(channel: &SocketChannel) -> u8 {
+        match channel {
+            SocketChannel::Public => 0,
+            SocketChannel::Private => 1,
+            SocketChannel::Business => 2,
+        }
+    }
+
+    fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
+        let role = Self::role(channel);
+        let awaiting = &mut self.awaiting_reconnect[role as usize];
+        if *awaiting > 0 {
+            *awaiting -= 1;
+            health.reconnects = health.reconnects.saturating_add(1);
+        }
+        self.live.push((socket, role));
+        if role == 1 {
+            self.private.push(socket);
+        }
+    }
+
+    /// Whether `socket` was a live role socket. Only an unexpected close makes
+    /// the role's next connect a reconnect.
+    fn closed(&mut self, socket: SocketId, unexpected: bool) -> bool {
+        let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
+            return false;
+        };
+        let (_, role) = self.live.swap_remove(index);
+        if unexpected {
+            self.awaiting_reconnect[role as usize] =
+                self.awaiting_reconnect[role as usize].saturating_add(1);
+        }
+        self.private.retain(|id| *id != socket);
+        true
+    }
+
+    fn received(&self, socket: SocketId, now: f64, health: &mut Health) {
+        if self.private.contains(&socket) {
+            health.last_private_message_ms = Some(now);
+        }
+    }
+}
+
+/// At most one per engine event; `error: None` is a definitive deactivation.
+fn count_auth_failure<P>(io: &mut Io<P>, error: Option<&VenueError>) {
+    let auth = error.is_none_or(|error| {
+        matches!(
+            error.kind,
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+        )
+    });
+    if auth && !io.auth_failure_counted {
+        io.auth_failure_counted = true;
+        io.health.count(log_code::AUTH_REJECTED);
+    }
+}
+
+#[inline(never)]
+fn push_event(
+    actions: &mut Vec<Action>,
+    health: &mut Health,
+    min_level: Level,
+    mut event: LogEvent,
+) {
+    if event.code != log_code::AUTH_REJECTED {
+        health.count(event.code);
+    }
+    if event.level < min_level {
+        return;
+    }
+    event.message = crate::log::cap(event.message);
+    for (_, value) in &mut event.fields {
+        if let Value::Str(text) = value {
+            *text = crate::log::cap(std::mem::take(text));
+        }
+    }
+    actions.push(Action::Notice(Notice::Event(event)));
+}
+
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
@@ -2462,14 +2988,14 @@ mod streaming_tests {
             };
             cx.command_error(0, "background error");
             cx.command_error(7, "command error");
-            cx.done(7, Err("command error".into()));
+            cx.fail(7, "command error");
         }
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(matches!(actions.as_slice(), [
             Action::Notice(Notice::Log { level: LogLevel::Error, message: background }),
             Action::Notice(Notice::CommandError { command: 7, message }),
-            Action::Notice(Notice::CommandDone { command: 7, result: Err(result) }),
-        ] if background == "background error" && message == "command error" && result == message));
+            Action::Notice(Notice::CommandFailed { command: 7, error: result }),
+        ] if background == "background error" && message == "command error" && result.legacy_text() == *message));
         assert_eq!(before, engine.snapshot_frame(0.));
     }
 
@@ -2544,14 +3070,12 @@ mod streaming_tests {
             #[cfg(feature = "order-locks")]
             if let Some(completion) = text.strip_prefix("complete:") {
                 let (id, status) = completion.split_once(':').unwrap();
-                cx.done(
-                    id.parse().unwrap(),
-                    if status == "ok" {
-                        Ok("[]".into())
-                    } else {
-                        Err("Lost write reply".into())
-                    },
-                );
+                let id = id.parse().unwrap();
+                if status == "ok" {
+                    cx.done(id, "[]".into());
+                } else {
+                    cx.fail(id, "Lost write reply");
+                }
                 return;
             }
             #[cfg(feature = "order-locks")]
@@ -2663,13 +3187,11 @@ mod streaming_tests {
             2,
             "overlapping native mutation must not dispatch"
         );
-        assert!(engine.drain_actions().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
         // Duplicate IDs cannot release the first operation's lock.
         engine.handle(
             0.,
@@ -2700,7 +3222,7 @@ mod streaming_tests {
             store: &mut engine.store,
             io: &mut engine.io,
         };
-        cx.done(5, Err("lost response".into()));
+        cx.fail(5, "lost response");
         engine.handle(
             0.,
             Event::Command(Command::CancelOrders {
@@ -2861,7 +3383,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, result: Err(error) }) if *id == command && error == "Placement outcome is uncertain; reconcile before cancel-all")));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all")));
         }
         engine
             .io
@@ -2931,7 +3453,7 @@ mod streaming_tests {
             "later cancel-all is dispatched"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("uncertain"))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("uncertain"))));
     }
 
     #[cfg(feature = "order-locks")]
@@ -3377,19 +3899,20 @@ mod streaming_tests {
         let kinds = crate::wire::sections(&market)
             .map(|(kind, _)| kind)
             .collect::<Vec<_>>();
-        for kind in [section::BOOK, section::CANDLES, section::FILLS] {
+        // A fill travels with the store sections, so its flush carries them too.
+        for kind in [
+            section::BOOK,
+            section::CANDLES,
+            section::FILLS,
+            section::TICKER_DELTAS,
+            section::BALANCE,
+        ] {
             assert!(kinds.contains(&kind));
         }
         assert!(
             engine.take_market_frame(1.).is_none(),
             "events must flush exactly once"
         );
-        let normal = engine.take_frame(1.).unwrap().to_vec();
-        let kinds = crate::wire::sections(&normal)
-            .map(|(kind, _)| kind)
-            .collect::<Vec<_>>();
-        assert!(kinds.contains(&section::TICKER_DELTAS));
-        assert!(kinds.contains(&section::BALANCE));
         assert!(engine.take_frame(1.).is_none());
     }
 
@@ -3421,12 +3944,12 @@ mod streaming_tests {
         let mut engine = frame_engine();
         engine.handle(0.0, Event::Command(Command::FetchAccount { command: 8 }));
         let result = engine.drain_actions().find_map(|action| match action {
-            Action::Notice(Notice::CommandDone { command: 8, result }) => Some(result),
+            Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error.message),
             _ => None,
         });
         assert_eq!(
-            result,
-            Some(Err("This action is not supported on this venue".into()))
+            result.as_deref(),
+            Some("This action is not supported on this venue")
         );
     }
 
@@ -3440,13 +3963,13 @@ mod streaming_tests {
                 action: VenueAction::FetchAccountTier,
             }),
         );
-        let result = engine.drain_actions().find_map(|action| match action {
-            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+        let error = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 9, error }) => Some(error.message),
             _ => None,
         });
         assert_eq!(
-            result,
-            Some(Err("This action is not supported on this venue".into()))
+            error.as_deref(),
+            Some("This action is not supported on this venue")
         );
     }
 
@@ -3476,6 +3999,10 @@ mod streaming_tests {
                 volume: 4.,
             },
         ));
+        assert!(engine.take_market_frame(1.).is_none());
+        assert_eq!(engine.io.changed_books_active, 1);
+        assert_eq!(engine.io.candles.len(), 1);
+        // A pending fill would promote the flush to a full frame (MARKETS first).
         engine.io.fills.push((
             Fill {
                 order_id: "filled-order".into(),
@@ -3486,10 +4013,6 @@ mod streaming_tests {
             },
             None,
         ));
-        assert!(engine.take_market_frame(1.).is_none());
-        assert_eq!(engine.io.changed_books_active, 1);
-        assert_eq!(engine.io.candles.len(), 1);
-        assert_eq!(engine.io.fills.len(), 1);
         let frame = engine.take_frame(2.).unwrap().to_vec();
         let sections: Vec<_> = crate::wire::sections(&frame).collect();
         assert!(sections.iter().any(|(kind, _)| *kind == section::MARKETS));
@@ -3550,9 +4073,7 @@ mod streaming_tests {
         assert!(engine.venue.commands.is_empty());
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone {
-            command: 31, result: Err(error),
-        })] if error.contains("unsupported"))
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: 31, error })] if error.legacy_text().contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(1.), before);
         let legacy = Command::SetTickerSymbols {
@@ -3600,13 +4121,13 @@ mod streaming_tests {
         assert!(engine.venue.commands.is_empty());
         for (index, action) in actions.iter().enumerate() {
             assert!(
-                matches!(action, Action::Notice(Notice::CommandDone { command, result: Err(error) })
-                if *command == index as u32 + 1 && error.contains("Options are not enabled"))
+                matches!(action, Action::Notice(Notice::CommandFailed { command, error })
+                if *command == index as u32 + 1 && error.message.contains("Options are not enabled"))
             );
         }
     }
 
-    fn market(symbol: &str) -> crate::model::Market {
+    pub(super) fn market(symbol: &str) -> crate::model::Market {
         use crate::model::{Limits, Market, MinMax, Precision};
         Market {
             id: symbol.into(),
@@ -3789,7 +4310,7 @@ mod streaming_tests {
             book_sections(engine.take_frame(2.).unwrap())[0].0,
             section::BOOK
         );
-        engine.store.set_markets(Vec::new());
+        engine.store.set_markets(vec![market("B")]);
         engine.take_frame(3.).unwrap();
         assert!(engine.book_baselines.is_empty());
         engine.store.set_markets(vec![market("A")]);
@@ -4398,13 +4919,11 @@ mod signing_tests {
                 ids: vec!["native".into()],
             }),
         );
-        assert!(engine.drain_actions().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
         assert!(engine.io.order_locks.contains(1));
         engine.handle(
             3.,
@@ -4500,9 +5019,216 @@ mod signing_tests {
 }
 
 #[cfg(test)]
+mod security_debug {
+    use super::*;
+
+    #[test]
+    fn transport_and_signing_debug_never_render_authentication_material() {
+        let sentinel = "credential-sentinel-never-log";
+        let http = HttpRequest {
+            id: RequestId(17),
+            method: Method::Post,
+            route: None,
+            timeout_ms: Some(5_000),
+            url: format!("https://venue.test/private?signature={sentinel}"),
+            headers: vec![("Authorization", sentinel.into())],
+            signer_headers: vec![("X-Proof".into(), sentinel.into())],
+            body: Some(sentinel.into()),
+        };
+        let signing = PayloadSignRequest {
+            exchange_name: "test-venue",
+            key: sentinel.into(),
+            payload: sentinel.into(),
+            scheme: "test",
+            encoding: "test",
+        };
+        let event = Event::PayloadSigned {
+            request: RequestId(17),
+            signature: sentinel,
+            headers: vec![("X-Proof".into(), sentinel.into())],
+        };
+        for debug in [
+            format!("{http:?}"),
+            format!("{signing:?}"),
+            format!("{event:?}"),
+        ] {
+            assert!(!debug.contains(sentinel));
+            assert!(!debug.contains("https://venue.test"));
+        }
+        assert!(format!("{http:?}").contains("RequestId(17)"));
+        assert!(format!("{signing:?}").contains("test-venue"));
+        assert!(format!("{event:?}").contains("kind"));
+    }
+}
+
+#[cfg(test)]
+mod jitter_tests {
+    use super::*;
+
+    fn draws(clocks: &[f64], delay: f64) -> Vec<f64> {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        clocks
+            .iter()
+            .map(|&now| {
+                Cx {
+                    now,
+                    store: &mut store,
+                    io: &mut io,
+                }
+                .jittered(delay)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn retry_jitter_stays_in_the_last_quarter_and_replays() {
+        let clocks: Vec<f64> = (0..64).map(|i| f64::from(i) * 250.0).collect();
+        let first = draws(&clocks, 4_000.0);
+        assert!(first.iter().all(|d| (3_000.0..=4_000.0).contains(d)));
+        assert_eq!(first, draws(&clocks, 4_000.0));
+        // Same clock, successive calls: the state advances, so draws differ.
+        let same_clock = draws(&[0.0; 8], 4_000.0);
+        assert!(same_clock.windows(2).all(|pair| pair[0] != pair[1]));
+        assert_ne!(first[..8], draws(&[1.0; 8], 4_000.0)[..]);
+    }
+
+    #[test]
+    fn retry_jitter_passes_through_unschedulable_delays() {
+        let draws = draws(&[0.0; 4], f64::INFINITY);
+        assert!(draws.iter().all(|d| *d == f64::INFINITY));
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(cx.jittered(0.0), 0.0);
+        assert_eq!(cx.jittered(-5.0), -5.0);
+        assert!(cx.jittered(f64::NAN).is_nan());
+        assert_eq!(
+            cx.io.jitter, JITTER_GOLDEN_GAMMA,
+            "pass-through draws nothing"
+        );
+    }
+}
+
+#[cfg(test)]
 mod startup_tests {
     use super::*;
     use crate::startup::{Backoff, number_or_zero};
+
+    fn assert_jittered(actual: f64, nominal: f64) {
+        assert!(
+            (0.75 * nominal..=nominal).contains(&actual),
+            "{actual} outside jittered [0.75, 1.0] x {nominal}"
+        );
+    }
+
+    #[test]
+    fn discovery_retry_jitters_but_never_undercuts_a_rate_limit_minimum() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = Backoff::default();
+        let keys = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        for key in keys {
+            retry.failed(&mut cx, key);
+        }
+        // A 1 s Retry-After equals the nominal first delay, so jitter cannot shorten it.
+        retry.failed_after(&mut cx, "limited", 1_000.0);
+        let delays: Vec<_> = cx
+            .io
+            .actions
+            .drain(..)
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        let (jittered, limited) = delays.split_at(keys.len());
+        for delay in jittered {
+            assert_jittered(*delay, 1_000.0);
+        }
+        assert!(jittered.iter().any(|delay| *delay < 1_000.0));
+        assert!(limited.iter().all(|delay| *delay == 1_000.0));
+    }
+
+    #[test]
+    fn discovery_retry_waits_out_a_rate_limit_window() {
+        use crate::startup::rate_limit_pause_ms;
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = Backoff::default();
+        retry.failed_after(&mut cx, "markets", 120_000.0);
+        retry.failed_after(&mut cx, "tickers", 10.0);
+        let delays: Vec<_> = cx
+            .io
+            .actions
+            .drain(..)
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        // A read failing during the ban waits it out too, whatever its own minimum.
+        assert_eq!(delays, [120_000.0, 120_000.0]);
+        // A later, shorter ban neither shortens the window nor reschedules reads already due.
+        retry.failed_after(&mut cx, "premium", 90_000.0);
+        let actions = std::mem::take(&mut cx.io.actions);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::ClearTimer { .. }))
+        );
+        let delays: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(delays, [120_000.0]);
+        // A longer ban still pushes back every waiting read.
+        retry.failed_after(&mut cx, "funding", 150_000.0);
+        let actions = std::mem::take(&mut cx.io.actions);
+        let delays: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(delays, [150_000.0; 4]);
+        let response = |status, headers| Response {
+            status,
+            headers,
+            body: "",
+        };
+        assert_eq!(
+            rate_limit_pause_ms(&response(429, "Retry-After: 30"), 5_000.0),
+            30_000.0
+        );
+        assert_eq!(rate_limit_pause_ms(&response(418, ""), 5_000.0), 5_000.0);
+        assert_eq!(
+            rate_limit_pause_ms(&response(429, "retry-after: soon"), 5_000.0),
+            5_000.0
+        );
+        assert_eq!(
+            rate_limit_pause_ms(&response(503, "Retry-After: 30"), 5_000.0),
+            0.0
+        );
+    }
 
     #[test]
     fn discovery_backoff_caps_deduplicates_and_resets_independent_reads() {
@@ -4527,7 +5253,7 @@ mod startup_tests {
                 })
                 .collect();
             assert_eq!(timers.len(), 1);
-            assert_eq!(timers[0].1, expected);
+            assert_jittered(timers[0].1, expected);
             assert_eq!(retry.on_timer(timers[0].0), Some("markets"));
             assert_eq!(retry.on_timer(timers[0].0), None);
         }
@@ -4544,7 +5270,9 @@ mod startup_tests {
             })
             .collect();
         assert_eq!(timers.len(), 2);
-        assert!(timers.iter().all(|(_, at)| *at == 1000.));
+        for (_, at) in &timers {
+            assert_jittered(*at, 1_000.0);
+        }
         retry.succeeded(&mut cx, &"tickers");
         assert_eq!(retry.on_timer(timers[0].0), None);
         assert!(
@@ -4564,5 +5292,767 @@ mod startup_tests {
         for bad in ["NaN", "inf", "oops", "1x"] {
             assert_eq!(number_or_zero(bad), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod startup_watch_tests {
+    use super::streaming_tests::market;
+    use super::*;
+
+    struct Idle;
+    impl Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {
+            panic!("the idle venue sets no timers");
+        }
+        fn on_command(&mut self, _cx: &mut Cx<'_, ()>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
+        engine.handle(now, Event::PollScaleChanged { scale: 1.0 });
+        engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    struct PollVenue;
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351: typed native policy events obey the same bounds as host
+    // commands, and invalid typed inputs retain the last policy.
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        for (input, expected) in [(0.00001, 1_000.0), (1e300, 120_000.0)] {
+            let scale = input / 2_000.0;
+            let typed = armed_after(|engine| {
+                engine.handle(0.0, Event::PollScaleChanged { scale });
+            });
+            assert_eq!(typed, [expected]);
+            #[cfg(feature = "polling-control")]
+            {
+                let json = format!(r#"{{"op":"setPollScale","scale":{scale}}}"#);
+                let crate::command::HostInput::PollScaleChanged { scale: decoded, .. } =
+                    crate::command::decode_host_input(&json).unwrap()
+                else {
+                    panic!("{json} must decode as a polling control")
+                };
+                let commanded = armed_after(|engine| {
+                    engine.handle(0.0, Event::PollScaleChanged { scale: decoded });
+                });
+                assert_eq!(typed, commanded, "typed and host-command bounds agree");
+            }
+        }
+        let mut engine = Engine::new(PollVenue);
+        engine.start(0.0);
+        engine.handle(
+            0.0,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
+            },
+        );
+        assert!(
+            engine
+                .drain_actions()
+                .any(|action| matches!(action, Action::ClearTimer { .. }))
+        );
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(0.0, Event::PollScaleChanged { scale: invalid });
+            assert!(
+                !engine
+                    .drain_actions()
+                    .any(|action| matches!(action, Action::SetTimer { .. })),
+                "{invalid} must retain the pause"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_venue_catalogue_is_warned_about_and_never_applied() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_markets(Vec::new());
+        assert!(engine.has_actions());
+        let logs: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logs,
+            [(LogLevel::Warning, EMPTY_CATALOGUE_WARNING.to_owned())]
+        );
+        assert_eq!(engine.store().markets().len(), 1);
+        assert!(engine.drain_actions().next().is_none());
+    }
+
+    #[test]
+    fn unloaded_startup_is_reported_until_every_section_loads() {
+        let mut engine = Engine::new(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        assert!(
+            engine
+                .drain_actions()
+                .all(|action| !matches!(action, Action::SetTimer { .. })),
+            "the watch adds no timer of its own"
+        );
+        engine.store_mut().set_markets(vec![market("A")]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS - 1.0).is_empty());
+        assert_eq!(
+            notices(&mut engine, STARTUP_WATCH_MS),
+            [(
+                LogLevel::Error,
+                "Startup incomplete: still waiting for tickers, balance, orders, positions"
+                    .to_owned()
+            )]
+        );
+        assert!(notices(&mut engine, STARTUP_WATCH_MS + 1.0).is_empty());
+        let store = engine.store_mut();
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        let repeat = STARTUP_WATCH_MS + STARTUP_REPEAT_MS;
+        assert_eq!(
+            notices(&mut engine, repeat),
+            [(
+                LogLevel::Warning,
+                "Startup incomplete: still waiting for tickers".to_owned()
+            )]
+        );
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, repeat + STARTUP_REPEAT_MS).is_empty());
+        assert!(notices(&mut engine, repeat + 10.0 * STARTUP_REPEAT_MS).is_empty());
+    }
+
+    #[test]
+    fn public_only_engine_is_not_told_its_account_never_loaded() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
+        let mut disabled = Engine::new(Idle);
+        disabled
+            .set_public_feed_policy(PublicFeedPolicy::Disabled)
+            .unwrap();
+        disabled.set_account_startup(true);
+        disabled.start(0.0);
+        let store = disabled.store_mut();
+        store.set_markets(vec![market("A")]);
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod placement_ack_tests {
+    use super::*;
+    use crate::model::{Order, OrderSide, OrderStatus, OrderType};
+    use crate::placement_acks::{ACK_WAIT_MS, FILL_GRACE_MS};
+
+    /// Routes cancellation only through stored orders, like Bybit or Binance.
+    struct StoredOnly {
+        needs_stored: bool,
+        sent: Vec<String>,
+    }
+
+    fn order(id: &str) -> Order {
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    impl Venue for StoredOnly {
+        type Pending = ();
+        fn cancel_needs_stored_order(&self) -> bool {
+            self.needs_stored
+        }
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        /// The private stream reports the order named by the message, a group
+        /// child (`child@group`), or a fill of an unstored order (`fill:id`).
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
+            if let Some(id) = text.strip_prefix("remove:") {
+                cx.store.remove_orders(&[id]);
+            } else if let Some(id) = text.strip_prefix("fill:") {
+                cx.fill(Fill {
+                    order_id: id.into(),
+                    symbol: "BTCUSDT".into(),
+                    side: OrderSide::Buy,
+                    price: 1.,
+                    amount: 1.,
+                });
+            } else if let Some((child, group)) = text.split_once('@') {
+                let mut row = order(child);
+                row.parent_id = Some(group.into());
+                cx.store.upsert_order(row);
+            } else {
+                cx.store.upsert_order(order(text));
+            }
+        }
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {
+            panic!("the venue sets no timers");
+        }
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+            match command {
+                Command::PlaceOrders { command, .. } => cx.done(command, r#"["7","8"]"#.into()),
+                Command::CancelOrders { command, ids } => {
+                    if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
+                        cx.fail(command, format!("Order {id} not found"));
+                    } else {
+                        self.sent.extend(ids);
+                        cx.done(command, "null".into());
+                    }
+                }
+                Command::AmendOrder { command, id, .. } => {
+                    if cx.store.order(&id).is_none() {
+                        cx.fail(command, format!("Order {id} not found"));
+                    } else {
+                        self.sent.push(format!("amend {id}"));
+                        cx.done(command, format!(r#"["{id}"]"#));
+                    }
+                }
+                _ => {}
+            }
+        }
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn engine(needs_stored: bool) -> Engine<StoredOnly> {
+        let mut engine = Engine::new(StoredOnly {
+            needs_stored,
+            sent: Vec::new(),
+        });
+        engine.start(0.);
+        engine
+    }
+
+    fn place(engine: &mut Engine<StoredOnly>, now: f64) {
+        engine.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: Vec::new(),
+            }),
+        );
+    }
+
+    fn cancel(engine: &mut Engine<StoredOnly>, now: f64, command: CommandId, id: &str) {
+        engine.handle(
+            now,
+            Event::Command(Command::CancelOrders {
+                command,
+                ids: vec![id.into()],
+            }),
+        );
+    }
+
+    fn results(engine: &mut Engine<StoredOnly>) -> Vec<(CommandId, Result<String, String>)> {
+        engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandDone { command, result }) => {
+                    Some((command, Ok(result)))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    Some((command, Err(error.legacy_text())))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn own_timer(engine: &mut Engine<StoredOnly>) -> Option<(TimerId, f64)> {
+        engine
+            .drain_actions()
+            .fold(None, |armed, action| match action {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                Action::ClearTimer { .. } => None,
+                _ => armed,
+            })
+    }
+
+    #[test]
+    fn cancel_of_an_acknowledged_placement_waits_for_the_stream_then_reaches_the_venue() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        assert_eq!(results(&mut engine), [(1, Ok(r#"["7","8"]"#.into()))]);
+        // A chaser stopped mid-placement cancels the returned id at once.
+        cancel(&mut engine, 1., 2, "7");
+        assert!(
+            engine.venue.sent.is_empty(),
+            "held until the store has the order"
+        );
+        assert!(results(&mut engine).is_empty());
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert_eq!(engine.venue.sent, ["7"]);
+        assert_eq!(results(&mut engine), [(2, Ok("null".into()))]);
+    }
+
+    #[test]
+    fn an_amendment_of_an_acknowledged_placement_waits_too() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "7".into(),
+                price: Some(2.),
+                amount: None,
+            }),
+        );
+        assert!(engine.venue.sent.is_empty());
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert_eq!(engine.venue.sent, ["amend 7"]);
+    }
+
+    #[test]
+    fn a_held_cancel_is_dispatched_at_its_deadline_and_fails_explicitly() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        let (timer, at_ms) = own_timer(&mut engine).expect("an engine wake-up is armed");
+        // The wait is bounded by the acknowledgement (placed at 0), not the cancel.
+        assert_eq!(at_ms, ACK_WAIT_MS);
+        engine.handle(at_ms, Event::TimerFired { timer });
+        assert_eq!(
+            results(&mut engine),
+            [(2, Err("Order 7 not found".into()))],
+            "the stream never reported the order: the venue answers, never silence"
+        );
+        // The expired id is not held again.
+        cancel(&mut engine, at_ms + 1., 3, "7");
+        assert_eq!(results(&mut engine), [(3, Err("Order 7 not found".into()))]);
+    }
+
+    #[test]
+    fn released_cancel_disarms_the_wake_up() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        let (timer, _) = own_timer(&mut engine).unwrap();
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert!(engine.drain_actions().any(
+            |action| matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)
+        ));
+    }
+
+    #[test]
+    fn unrelated_ids_and_opted_out_venues_are_never_held() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "unknown");
+        assert_eq!(
+            results(&mut engine),
+            [(2, Err("Order unknown not found".into()))]
+        );
+
+        let mut engine = engine_without_hold();
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    fn stream(engine: &mut Engine<StoredOnly>, now: f64, text: &str) {
+        engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text,
+            },
+        );
+    }
+
+    #[test]
+    fn stored_legs_and_group_children_release_a_held_cancel() {
+        // OKX stores an algo order only as its `_sl` leg.
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        stream(&mut engine, 2., "7_sl");
+        assert!(
+            results(&mut engine)
+                .iter()
+                .any(|(command, _)| *command == 2),
+            "a stored leg is the order"
+        );
+        // Orderly stores only a TP/SL group's children, each naming the group.
+        let mut grouped = engine_with_hold();
+        place(&mut grouped, 0.);
+        grouped.drain_actions().for_each(drop);
+        cancel(&mut grouped, 1., 2, "7");
+        stream(&mut grouped, 2., "70@7");
+        assert!(
+            results(&mut grouped)
+                .iter()
+                .any(|(command, _)| *command == 2)
+        );
+    }
+
+    #[test]
+    fn a_fill_of_an_unstored_order_shortens_its_wait_to_the_grace_period() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        engine.drain_actions().for_each(drop);
+        // A venue may drop a filled order rather than store it.
+        stream(&mut engine, 2., "fill:7");
+        let (timer, at_ms) = own_timer(&mut engine).expect("re-armed for the grace period");
+        assert_eq!(at_ms, 2. + FILL_GRACE_MS);
+        engine.handle(at_ms, Event::TimerFired { timer });
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    #[test]
+    fn a_partial_fill_before_the_order_row_keeps_the_cancel_until_the_row_lands() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        // Bybit and Hyperliquid fills arrive on a topic separate from orders.
+        stream(&mut engine, 2., "fill:7");
+        assert!(
+            results(&mut engine).is_empty(),
+            "the remainder may still be live"
+        );
+        stream(&mut engine, 3., "7");
+        assert_eq!(results(&mut engine), [(2, Ok("null".into()))]);
+    }
+
+    #[test]
+    fn a_released_cancel_is_not_held_again_behind_a_later_one() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        engine.handle(
+            2.,
+            Event::Command(Command::CancelOrders {
+                command: 3,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 3., "7");
+        assert_eq!(
+            results(&mut engine),
+            [(2, Ok("null".into()))],
+            "the first cancel goes out once 7 is stored; the second still waits for 8"
+        );
+        stream(&mut engine, 4., "8");
+        assert_eq!(results(&mut engine), [(3, Ok("null".into()))]);
+    }
+
+    #[test]
+    fn a_later_write_to_a_held_order_keeps_its_arrival_order() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "7".into(),
+                price: Some(2.),
+                amount: None,
+            }),
+        );
+        assert!(results(&mut engine).is_empty());
+        // The id's own wait has ended while the amend is still held: the cancel
+        // must not overtake it; the amend goes out first.
+        cancel(&mut engine, ACK_WAIT_MS + 0.5, 3, "7");
+        let order: Vec<_> = results(&mut engine)
+            .into_iter()
+            .map(|(command, _)| command)
+            .collect();
+        assert_eq!(order, [2, 3]);
+    }
+
+    #[test]
+    fn a_fill_of_one_id_keeps_the_wait_for_the_others_in_the_command() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 2., "fill:8");
+        let (timer, at_ms) = own_timer(&mut engine).unwrap();
+        assert_eq!(at_ms, ACK_WAIT_MS, "7 is still awaited for its full wait");
+        // 7's row lands after the fill's grace; the cancel must still wait for it.
+        engine.handle(2. + FILL_GRACE_MS + 1., Event::TimerFired { timer });
+        assert!(results(&mut engine).is_empty());
+        stream(&mut engine, 4000., "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 8 not found".into()))]);
+    }
+
+    #[test]
+    fn the_wake_up_never_targets_a_command_waiting_behind_another() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        engine.handle(
+            1.5,
+            Event::Command(Command::CancelOrders {
+                command: 3,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 2., "fill:8");
+        let (timer, at_ms) = own_timer(&mut engine).unwrap();
+        assert_eq!(
+            at_ms, ACK_WAIT_MS,
+            "cancel 3 is behind cancel 2, which waits for 7"
+        );
+        engine.handle(at_ms, Event::TimerFired { timer });
+        let order: Vec<_> = results(&mut engine)
+            .into_iter()
+            .map(|(command, _)| command)
+            .collect();
+        assert_eq!(order, [2, 3]);
+        assert!(own_timer(&mut engine).is_none(), "nothing left to wake for");
+    }
+
+    #[test]
+    fn an_order_stored_then_removed_does_not_hold_a_later_cancel() {
+        // Hyperliquid removes terminal orders from the store.
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        stream(&mut engine, 1., "7");
+        stream(&mut engine, 2., "remove:7");
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 3., 2, "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    fn engine_with_hold() -> Engine<StoredOnly> {
+        engine(true)
+    }
+
+    fn engine_without_hold() -> Engine<StoredOnly> {
+        engine(false)
+    }
+}
+
+#[cfg(test)]
+mod fill_frame_tests {
+    use super::streaming_tests::market;
+    use super::*;
+    use crate::model::{Order, OrderSide, OrderStatus, OrderType};
+
+    /// The private stream updates an order (`order`) or fills it (`fill`).
+    struct Stream;
+
+    fn order() -> Order {
+        Order {
+            id: "7".into(),
+            parent_id: None,
+            status: OrderStatus::Closed,
+            symbol: "A".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 1.,
+            remaining: 0.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    impl Venue for Stream {
+        type Pending = ();
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
+            cx.store.upsert_order(order());
+            if text == "fill" {
+                cx.fill(Fill {
+                    order_id: "7".into(),
+                    symbol: "A".into(),
+                    side: OrderSide::Buy,
+                    price: 1.,
+                    amount: 1.,
+                });
+            }
+        }
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, ()>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn started() -> Engine<Stream> {
+        let mut engine = Engine::new(Stream);
+        engine.start(0.);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        engine
+    }
+
+    fn kinds(frame: Option<&[u8]>) -> Vec<u16> {
+        frame
+            .map(|frame| crate::wire::sections(frame).map(|(kind, _)| kind).collect())
+            .unwrap_or_default()
+    }
+
+    fn message(engine: &mut Engine<Stream>, text: &str) {
+        engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text,
+            },
+        );
+    }
+
+    #[test]
+    fn a_book_cadence_flush_carries_the_orders_its_fills_belong_to() {
+        let mut engine = started();
+        message(&mut engine, "fill");
+        let sections = kinds(engine.take_market_frame(1.));
+        assert!(sections.contains(&section::FILLS));
+        assert!(
+            sections.contains(&section::ORDERS),
+            "a fill must never reach a consumer before its order: {sections:?}"
+        );
+        assert!(
+            kinds(engine.take_frame(2.)).is_empty(),
+            "nothing is sent twice"
+        );
+    }
+
+    #[test]
+    fn a_book_cadence_flush_without_fills_leaves_store_sections_to_the_full_frame() {
+        let mut engine = started();
+        message(&mut engine, "order");
+        assert!(!kinds(engine.take_market_frame(1.)).contains(&section::ORDERS));
+        assert!(kinds(engine.take_frame(2.)).contains(&section::ORDERS));
     }
 }

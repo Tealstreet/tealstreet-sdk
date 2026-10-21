@@ -25,7 +25,7 @@ fn probe(venue: Kucoin) -> ProbeVenue<Kucoin, impl FnMut(&mut Kucoin, &mut Cx<'_
                 None,
                 Pending::Markets {
                     rows: vec![],
-                    invalid: false,
+                    malformed: Default::default(),
                 },
             );
         }
@@ -37,7 +37,7 @@ fn probe(venue: Kucoin) -> ProbeVenue<Kucoin, impl FnMut(&mut Kucoin, &mut Cx<'_
             ArrayAt::EnvelopeField("data"),
             Pending::Markets {
                 rows: vec![],
-                invalid: false,
+                malformed: Default::default(),
             },
         );
     })
@@ -101,10 +101,11 @@ fn invalid_secondary_identity_stops_startup_before_io() {
     opts.read_credentials.as_mut().unwrap().secret.clear();
     let mut engine = Engine::new(Kucoin::new(opts));
     engine.start(1700000000000.0);
-    assert!(!engine.drain_actions().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-    )));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
 }
 
 fn public_only_options() -> Options {
@@ -193,7 +194,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
             },
         },
     );
-    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result: Ok(result) }) if result == "[]")));
+    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result }) if result == "[]")));
     let queries = [
         Query::Fills {
             symbol: Some(symbol.clone()),
@@ -224,7 +225,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone { command: done, result: Err(error) })] if *done == command && error.contains("credentials"))
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: done, error })] if *done == command && error.legacy_text().contains("credentials"))
         );
     }
 }

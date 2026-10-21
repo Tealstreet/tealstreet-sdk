@@ -4,11 +4,11 @@ use crate::account::{order_side, order_type, venue_error};
 use crate::sign::{Query, Signed};
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderStatus};
 use safe_cex_engine::paging::{self, PageRow, RangeWalk, Step, WindowOrder};
-use safe_cex_engine::{
-    CommandId, Cx, LogLevel, Method, Query as Read, Response, TimerId, json, num,
-};
+use safe_cex_engine::{CommandId, Cx, Method, Query as Read, Response, TimerId, json, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
@@ -202,12 +202,12 @@ impl BinanceFutures {
                 read,
                 Read::OrderByClientId { .. } | Read::PublicTrades { .. }
             ) {
-                cx.done(command, Err("Binance Spot query is not supported".into()));
+                cx.fail(command, "Binance Spot query is not supported");
             } else {
                 let profile = if self.is_spot() { "Spot" } else { "COIN-M" };
-                cx.done(
+                cx.fail(
                     command,
-                    Err(format!("Binance {profile} history is not supported")),
+                    format!("Binance {profile} history is not supported"),
                 );
             }
             return;
@@ -221,7 +221,7 @@ impl BinanceFutures {
             return;
         }
         if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         match read {
@@ -235,7 +235,7 @@ impl BinanceFutures {
             } => {
                 // userTrades requires a symbol.
                 let Some(symbol) = symbol else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 let windows = match (from_ms, to_ms) {
@@ -261,7 +261,7 @@ impl BinanceFutures {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 self.history.reads.insert(command, InFlight::Orders);
@@ -345,11 +345,11 @@ impl BinanceFutures {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._:/-".contains(&b))
         {
-            cx.done(command, Err("Invalid Binance client order ID".into()));
+            cx.fail(command, "Invalid Binance client order ID");
             return;
         }
         if cx.store.market(&symbol).is_none() {
-            cx.done(command, Ok(UNKNOWN.into()));
+            cx.done(command, UNKNOWN.into());
             return;
         }
         // Secondary GET snapshots may belong to another account. Their cached
@@ -359,14 +359,17 @@ impl BinanceFutures {
                 order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
-            cx.done(command, found(order.clone(), None));
+            {
+                let result: Result<String, String> = found(order.clone(), None);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            };
             return;
         }
         if self.credentials.is_none() || self.options.public_data_only {
-            cx.done(
-                command,
-                Err("Binance client order lookup requires credentials".into()),
-            );
+            cx.fail(command, "Binance client order lookup requires credentials");
             return;
         }
         let query = Query::new()
@@ -496,7 +499,10 @@ impl BinanceFutures {
                 serde_json::from_str::<&RawValue>(response.body).map_err(|e| e.to_string())?;
             found(order, Some(info))
         })();
-        cx.done(command, result);
+        match result {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error),
+        };
     }
 
     fn history_request(
@@ -530,7 +536,7 @@ impl BinanceFutures {
         let Some((from, to)) = windows.pop_front() else {
             let json = serde_json::to_string(rows).unwrap_or_default();
             self.history.reads.remove(&command);
-            cx.done(command, Ok(json));
+            cx.done(command, json);
             return;
         };
         let query = Query::new()
@@ -583,18 +589,18 @@ impl BinanceFutures {
             Step::ChunkDone => *delay = Some(cx.set_timer(INCOME_CHUNK_DELAY_MS)),
             Step::Finished => {
                 if walk.truncated {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
                         format!(
                             "Income history is INCOMPLETE: {} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.",
                             walk.exhausted_chunks
                         ),
+                        vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
                     );
                 }
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
                 let json = serde_json::to_string(rows).unwrap_or_default();
                 self.history.reads.remove(&command);
-                cx.done(command, Ok(json));
+                cx.done(command, json);
             }
         }
     }
@@ -667,7 +673,7 @@ impl BinanceFutures {
                 Err(message) => {
                     cx.command_error(command, format!("Error fetching executions: {message}"));
                     self.history.reads.remove(&command);
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
             },
             InFlight::Orders => {
@@ -709,14 +715,11 @@ impl BinanceFutures {
                             });
                         });
                         orders.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                        cx.done(
-                            command,
-                            Ok(serde_json::to_string(&orders).unwrap_or_default()),
-                        );
+                        cx.done(command, serde_json::to_string(&orders).unwrap_or_default());
                     }
                     Err(message) => {
                         cx.command_error(command, message);
-                        cx.done(command, Ok("[]".into()));
+                        cx.done(command, "[]".into());
                     }
                 }
             }
@@ -750,7 +753,7 @@ impl BinanceFutures {
                             }
                         };
                         self.history.reads.remove(&command);
-                        cx.done(command, Ok(result));
+                        cx.done(command, result);
                     }
                     Some(walk) => {
                         match parsed {
@@ -794,10 +797,7 @@ impl BinanceFutures {
                         });
                     });
                 }
-                cx.done(
-                    command,
-                    Ok(serde_json::to_string(&trades).unwrap_or_default()),
-                );
+                cx.done(command, serde_json::to_string(&trades).unwrap_or_default());
             }
         }
     }

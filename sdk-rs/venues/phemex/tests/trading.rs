@@ -51,7 +51,7 @@ fn done(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result.clone())),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
@@ -487,6 +487,60 @@ fn stop_brackets_and_hedged_reduce_side() {
     assert_eq!(p(r, "stopPxRp").as_deref(), Some("68000"));
     assert_eq!(p(r, "closeOnTrigger").as_deref(), Some("true"));
     assert_eq!(p(r, "triggerType").as_deref(), Some("ByMarkPrice"));
+}
+
+#[test]
+fn index_price_is_encoded_for_standalone_and_attached_protection() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut e = engine();
+        let mut o = opts("");
+        o.kind = kind;
+        o.side = OrderSide::Sell;
+        o.price = Some(if kind == OrderType::StopLoss {
+            68000.
+        } else {
+            70000.
+        });
+        o.trigger_type = Some(StopTriggerType::IndexPrice);
+        o.sl_trigger_type = Some(StopTriggerType::IndexPrice);
+        o.tp_trigger_type = Some(StopTriggerType::IndexPrice);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 95,
+                orders: vec![o],
+            },
+        );
+        let sent = writes(&a);
+        assert_eq!(sent.len(), 1, "{a:?}");
+        assert_eq!(p(&sent[0], "triggerType").as_deref(), Some("ByIndexPrice"));
+        let mut reply = ack(&sent[0], "indexed-stop");
+        reply["data"]["triggerType"] = json!("ByIndexPrice");
+        reply["data"]["stopPxRp"] = json!(p(&sent[0], "stopPxRp").unwrap());
+        let complete = respond(&mut e, &sent[0], reply);
+        assert!(done(&complete).is_ok());
+        assert_eq!(
+            e.store().order("indexed-stop").unwrap().trigger_type,
+            Some(StopTriggerType::IndexPrice)
+        );
+    }
+    let mut e = engine();
+    let mut o = opts("");
+    o.stop_loss = Some(68000.);
+    o.take_profit = Some(70000.);
+    o.sl_trigger_type = Some(StopTriggerType::IndexPrice);
+    o.tp_trigger_type = Some(StopTriggerType::IndexPrice);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 96,
+            orders: vec![o],
+        },
+    );
+    let sent = writes(&a);
+    assert_eq!(sent.len(), 1, "{a:?}");
+    assert_eq!(p(&sent[0], "slTrigger").as_deref(), Some("ByIndexPrice"));
+    assert_eq!(p(&sent[0], "tpTrigger").as_deref(), Some("ByIndexPrice"));
 }
 
 #[test]
@@ -1471,7 +1525,7 @@ fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
             a,
             Action::Notice(Notice::CommandDone {
                 command: 42,
-                result: Ok(_)
+                result: _
             })
         )));
     }
@@ -1806,7 +1860,7 @@ fn queued_cancel_all_continues_after_proven_rejection() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 112,
-            result: Ok(_)
+            result: _
         })
     )));
 }
@@ -2256,7 +2310,10 @@ fn error_logs(actions: &[Action]) -> usize {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )
         })
         .count()
@@ -2269,7 +2326,12 @@ fn warnings(actions: &[Action]) -> Vec<String> {
             Action::Notice(Notice::Log {
                 level: safe_cex_engine::LogLevel::Warning,
                 message,
-            }) => Some(message.clone()),
+            })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                message,
+                ..
+            })) => Some(message.clone()),
             _ => None,
         })
         .collect()
@@ -2470,7 +2532,11 @@ fn failed_read_retries_and_empty_code_reconciles() {
     let (read, now) = unproven_then_read(&mut e, 1000., 141, "unknown-caller");
     let a = reply(&mut e, now + 1., &read, 500, "{}");
     let (timer, wake) = latest_timer(&a).expect("failed read schedules a retry");
-    assert_eq!(wake, now + 2001.);
+    let delay = wake - (now + 1.);
+    assert!(
+        (0.75 * 2000. ..=2000.).contains(&delay),
+        "retry {delay} outside jittered [0.75, 1.0] x 2000"
+    );
     let a = at(&mut e, wake, Event::TimerFired { timer });
     let read = open_order_reads(&a).remove(0);
     reply(
@@ -2550,7 +2616,7 @@ fn transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_
         a,
         Action::Notice(Notice::CommandDone {
             command: 172,
-            result: Ok(_)
+            result: _
         })
     )));
     let (timer, wake) = latest_timer(&a).expect("read still owed");

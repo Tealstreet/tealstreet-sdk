@@ -1,22 +1,25 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue, VenueError, num,
 };
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -27,13 +30,26 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 pub enum Pending {
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
         rows: Vec<Market>,
-        failed: bool,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -63,11 +79,14 @@ struct CandleState {
     last: Option<Candle>,
 }
 pub struct Blofin {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    // Instrument ids rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     public_supervisor: Supervisor,
     books: HashMap<String, DepthState>,
@@ -120,12 +139,15 @@ fn round_usd(v: f64) -> f64 {
 }
 impl Blofin {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             startup: Default::default(),
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             live_tickers: Default::default(),
             public_supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 20_000.0,
@@ -155,7 +177,9 @@ impl Blofin {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Public),
+        ));
     }
     fn public_close(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = None;
@@ -428,6 +452,7 @@ impl Venue for Blofin {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,
+            closed_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -437,7 +462,9 @@ impl Venue for Blofin {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));
             return;
         }
         self.read(
@@ -445,7 +472,7 @@ impl Venue for Blofin {
             "/api/v1/market/instruments",
             Pending::Markets {
                 rows: vec![],
-                failed: false,
+                malformed: HashSet::new(),
             },
         );
     }
@@ -483,7 +510,11 @@ impl Venue for Blofin {
         };
         if !m.event.is_empty() {
             if m.event == "error" {
-                cx.log(LogLevel::Error, format!("BloFin socket error {}", m.code));
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("BloFin socket error {}", m.code),
+                );
             }
             return;
         }
@@ -495,8 +526,9 @@ impl Venue for Blofin {
                     for raw in rows.data {
                         match serde_json::from_str::<Tick<'_>>(raw.get()) {
                             Ok(row) => self.ticker(cx, &row, m.arg.channel == "funding-rate"),
-                            Err(_) => cx.log(
-                                LogLevel::Error,
+                            Err(_) => cx.notice(
+                                Level::Error,
+                                code::ROW_SKIPPED,
                                 "Malformed BloFin ticker row; retaining known ticker",
                             ),
                         }
@@ -546,8 +578,9 @@ impl Venue for Blofin {
         match pending {
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets { rows, failed } => {
+            Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m)
                         if m.inst_type.eq_ignore_ascii_case("SWAP")
@@ -567,10 +600,10 @@ impl Venue for Blofin {
                             .iter()
                             .any(|number| !number.is_finite() || *number <= 0.0)
                         {
-                            {
-                                *failed = true;
-                                safe_cex_engine::startup::skipped_row(cx);
-                            };
+                            safe_cex_engine::startup::skipped_row(cx);
+                            if !m.inst_id.is_empty() {
+                                malformed.insert(m.inst_id.into_owned());
+                            }
                             return;
                         }
                         rows.push(Market {
@@ -611,8 +644,20 @@ impl Venue for Blofin {
                     }
                     Ok(_) => {}
                     Err(_) => {
-                        *failed = true;
                         safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(key) = serde_json::from_str::<InstrumentKey<'_>>(item)
+                            && !key.inst_id.is_empty()
+                            && key
+                                .inst_type
+                                .as_deref()
+                                .is_none_or(|t| t.eq_ignore_ascii_case("SWAP"))
+                            && key
+                                .contract_type
+                                .as_deref()
+                                .is_none_or(|t| t.eq_ignore_ascii_case("linear"))
+                        {
+                            malformed.insert(key.inst_id.into_owned());
+                        }
                     }
                 }
             }
@@ -644,8 +689,9 @@ impl Venue for Blofin {
                 Err(_) => {
                     *failed = true;
                     safe_cex_engine::startup::skipped_row(cx);
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::ROW_SKIPPED,
                         "Malformed BloFin ticker row; omitted from initial tickers",
                     );
                 }
@@ -667,6 +713,10 @@ impl Venue for Blofin {
                 self.history_response(cx, request, response);
                 return;
             }
+            Pending::Closed(request) => {
+                self.closed_response(cx, request, response);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 return;
@@ -682,9 +732,28 @@ impl Venue for Blofin {
             return;
         }
         match pending {
-            Pending::Markets { rows, failed } if !failed || !rows.is_empty() => {
-                self.startup.succeeded(cx, &true);
+            Pending::Markets { rows, malformed } if !rows.is_empty() => {
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 cx.store.set_markets(rows);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|id| cx.store.market_by_id(id).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.startup.failed(cx, true);
+                } else {
+                    self.startup.succeeded(cx, &true);
+                }
+                if refresh {
+                    return;
+                }
                 self.connect(cx);
                 self.read(
                     cx,
@@ -707,7 +776,7 @@ impl Venue for Blofin {
                 failed: false,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                cx.done(command, serde_json::to_string(&rows).unwrap());
             }
             other => self.on_request_failed(cx, other, "Malformed BloFin response"),
         }
@@ -716,6 +785,10 @@ impl Venue for Blofin {
         let pending = match pending {
             Pending::History(request) => {
                 self.history_failed(cx, request, error);
+                return;
+            }
+            Pending::Closed(request) => {
+                Self::closed_failed(cx, request, error);
                 return;
             }
             Pending::Trade(request) => {
@@ -730,7 +803,7 @@ impl Venue for Blofin {
             return;
         }
         if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.to_string()));
+            cx.fail(command, error.to_string());
         } else {
             self.startup
                 .failed(cx, matches!(pending, Pending::Markets { .. }));
@@ -774,6 +847,21 @@ impl Venue for Blofin {
             SocketTick::Handled | SocketTick::Unhandled => {}
         }
     }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::SetTickerSymbols { .. } => {}
@@ -801,7 +889,11 @@ impl Venue for Blofin {
                 interval: i,
             } => {
                 let Some(bar) = interval(i) else {
-                    cx.log(LogLevel::Error, i.unsupported("BloFin"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("BloFin"),
+                    );
                     return;
                 };
                 let state = self.candles.entry((symbol.clone(), i)).or_default();
@@ -844,7 +936,7 @@ impl Venue for Blofin {
             } => {
                 if let Some(m) = cx.store.market(&symbol) {
                     let Some(bar) = interval(i) else {
-                        cx.done(command, Err(i.unsupported("BloFin")));
+                        cx.fail(command, i.unsupported("BloFin"));
                         return;
                     };
                     let step = i.ms();
@@ -872,7 +964,7 @@ impl Venue for Blofin {
                         },
                     );
                 } else {
-                    cx.done(command, Err(format!("Unknown market {symbol}")));
+                    cx.fail(command, format!("Unknown market {symbol}"));
                 }
             }
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
@@ -886,6 +978,59 @@ impl Venue for Blofin {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("BloFin stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

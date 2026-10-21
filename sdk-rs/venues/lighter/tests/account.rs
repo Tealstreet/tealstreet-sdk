@@ -550,7 +550,7 @@ fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
     }
 }
 #[test]
-fn unmapped_owned_position_rejects_snapshot_but_zero_rows_remain_legitimate() {
+fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_legitimate() {
     for quantity in ["2", "0"] {
         let (mut e, socket) = ready();
         let positions = e.store().positions().to_vec();
@@ -571,9 +571,10 @@ fn unmapped_owned_position_rejects_snapshot_but_zero_rows_remain_legitimate() {
             );
         reply_at(&mut e, NOW + 2., &request, 200, &body);
         if quantity == "2" {
-            assert_eq!(e.store().positions(), positions);
+            assert_eq!(e.store().positions().len(), 1);
+            assert_eq!(e.store().positions()[0].contracts, positions[0].contracts);
             assert_eq!(*e.store().balance(), balance);
-            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) if message.contains("account snapshot failed"))));
+            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped position 999 on an unknown market")));
         } else {
             assert_eq!(e.store().positions().len(), positions.len());
             assert_eq!(e.store().positions()[0].contracts, positions[0].contracts);
@@ -583,7 +584,7 @@ fn unmapped_owned_position_rejects_snapshot_but_zero_rows_remain_legitimate() {
     }
 }
 #[test]
-fn unmapped_working_order_rejects_snapshot_but_terminal_unknown_rows_are_ignored() {
+fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_are_ignored() {
     for status in ["open", "canceled", "filled"] {
         let (mut e, socket) = ready();
         let previous = e.store().orders().to_vec();
@@ -596,54 +597,71 @@ fn unmapped_working_order_rejects_snapshot_but_terminal_unknown_rows_are_ignored
             r#"{{"code":200,"orders":[{{"order_index":"999","market_id":999,"status":"{status}","remaining_base_amount":"2"}}]}}"#
         );
         reply_at(&mut e, NOW + 2., &request, 200, &body);
-        if status == "open" {
-            assert_eq!(e.store().orders(), previous);
-            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) if message.contains("order snapshot failed"))));
-        } else {
-            assert!(e.store().orders().is_empty());
-        }
+        // The snapshot commits either way; its omission of 42 removes it.
+        assert_eq!(previous.len(), 1);
+        assert!(e.store().orders().is_empty());
+        assert_eq!(
+            e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped order 999 on an unknown market")),
+            status == "open"
+        );
     }
 }
 #[test]
-fn unmapped_initial_position_never_claims_empty_private_account_loaded() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
-    e.start(NOW);
-    let bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
-    let mut warning = false;
-    for _ in 0..20 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        if actions.is_empty() {
-            break;
+fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
+    for pnl in [true, false] {
+        let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
+        e.start(NOW);
+        let mut bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
+        if !pnl {
+            bad = bad.replace(r#""unrealized_pnl":"0","#, "");
         }
-        for action in actions {
-            match action {
-                Action::Http(r) => {
-                    let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
-                    {
-                        META
-                    } else if r.url.contains("exchangeStats") {
-                        r#"{"code":200,"order_book_stats":[]}"#
-                    } else if r.url.contains("accountActiveOrders") {
-                        OPEN
-                    } else if r.url.contains("/account?") {
-                        &bad
-                    } else {
-                        panic!("unexpected request {}", r.url)
-                    };
-                    reply(&mut e, &r, 200, body);
+        let mut warning = false;
+        for _ in 0..20 {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            if actions.is_empty() {
+                break;
+            }
+            for action in actions {
+                match action {
+                    Action::Http(r) => {
+                        let body =
+                            if r.url.contains("orderBookDetails") || r.url.contains("orderBooks") {
+                                META
+                            } else if r.url.contains("exchangeStats") {
+                                r#"{"code":200,"order_book_stats":[]}"#
+                            } else if r.url.contains("accountActiveOrders") {
+                                OPEN
+                            } else if r.url.contains("/account?") {
+                                &bad
+                            } else {
+                                panic!("unexpected request {}", r.url)
+                            };
+                        reply(&mut e, &r, 200, body);
+                    }
+                    Action::Notice(safe_cex_engine::Notice::Log {
+                        level: safe_cex_engine::LogLevel::Warning,
+                        message,
+                    })
+                    | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                        level: safe_cex_engine::Level::Warn,
+                        message,
+                        ..
+                    })) if message == "Lighter skipped position 999 on an unknown market" => {
+                        warning = true
+                    }
+                    _ => {}
                 }
-                Action::Notice(safe_cex_engine::Notice::Log {
-                    level: safe_cex_engine::LogLevel::Warning,
-                    message,
-                }) if message.contains("account snapshot failed") => warning = true,
-                _ => {}
             }
         }
+        assert!(warning);
+        assert!(e.store().loaded().positions);
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().loaded().balance, pnl);
+        if pnl {
+            assert_eq!(e.store().balance().total, 1000.0);
+            assert_eq!(e.store().balance().free, 900.0);
+        }
     }
-    assert!(warning);
-    assert!(!e.store().loaded().positions);
-    assert!(!e.store().loaded().balance);
-    assert!(e.store().positions().is_empty());
 }
 
 #[test]
@@ -667,7 +685,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {
@@ -1034,4 +1052,298 @@ fn a_socket_drop_after_pings_without_payloads_backfills_from_the_last_payload() 
     );
     reply_at(&mut e, NOW + 91_200.0, backfill, 200, &body);
     assert_eq!(fill_count(e.take_frame(NOW + 91_200.0).unwrap()), 1);
+}
+#[test]
+fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
+    let (mut e, s) = ready();
+    let order = |id: u32, market: u32, kind: &str, price: &str| {
+        format!(
+            r#"{{"order_index":"{id}","market_id":{market},"status":"open","type":"{kind}","time_in_force":1,"is_ask":false,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2","price":"{price}"}}"#
+        )
+    };
+    let position = |market: u32, size: &str| {
+        format!(
+            r#"{{"market_id":{market},"position":"{size}","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","initial_margin_fraction":1000,"margin_mode":0,"liquidation_price":"50"}}"#
+        )
+    };
+    let resync = |e: &mut safe_cex_engine::Engine<_>,
+                  now: f64,
+                  orders: &[String],
+                  positions: &[String]| {
+        e.handle(now, Event::WsOpened { socket: s });
+        let orders = format!(r#"{{"code":200,"orders":[{}]}}"#, orders.join(","));
+        let account = format!(
+            r#"{{"code":200,"accounts":[{{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{}]}}]}}"#,
+            positions.join(",")
+        );
+        for r in requests(e) {
+            let body = if r.url.contains("ActiveOrders") {
+                &orders
+            } else {
+                &account
+            };
+            reply_at(e, now, &r, 200, body);
+        }
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => Some(message),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    resync(
+        &mut e,
+        NOW + 1.0,
+        &[
+            order(42, 1, "limit", "90"),
+            order(43, 2, "limit", "80"),
+            order(44, 1, "limit", "70"),
+            order(46, 1, "limit", "60"),
+        ],
+        &[position(1, "2"), position(2, "1")],
+    );
+    assert_eq!(e.store().orders().len(), 4);
+    assert_eq!(e.store().positions().len(), 2);
+    let logs = resync(
+        &mut e,
+        NOW + 2.0,
+        &[
+            order(42, 1, "limit", "91"),
+            order(43, 2, "limit", "bad"),
+            order(44, 1, "mystery", "71"),
+        ],
+        &[position(1, "3"), position(2, "bad")],
+    );
+    let price = |e: &safe_cex_engine::Engine<_>, id: &str| e.store().order(id).map(|o| o.price);
+    let size = |e: &safe_cex_engine::Engine<_>, symbol: &str| {
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == symbol)
+            .map(|p| p.contracts)
+    };
+    assert_eq!(price(&e, "42"), Some(91.0));
+    assert_eq!(price(&e, "43"), Some(80.0));
+    assert_eq!(
+        e.store().order("44").map(|o| (o.price, o.kind)),
+        Some((70.0, OrderType::Limit))
+    );
+    assert_eq!(price(&e, "46"), None);
+    assert_eq!(size(&e, "ETH"), Some(3.0));
+    assert_eq!(size(&e, "BTC"), Some(1.0));
+    for expected in [
+        "Lighter skipped unmappable order 43",
+        "Lighter skipped unmappable order 44",
+        "Lighter skipped malformed position BTC",
+    ] {
+        assert!(logs.iter().any(|m| m == expected), "{expected}: {logs:?}");
+    }
+    assert!(
+        !logs
+            .iter()
+            .any(|m| m.contains("bad") || m.contains("mystery"))
+    );
+    resync(
+        &mut e,
+        NOW + 3.0,
+        &[order(42, 1, "limit", "91")],
+        &[position(1, "3")],
+    );
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(size(&e, "BTC"), None);
+    assert_eq!(e.store().positions().len(), 1);
+}
+#[test]
+fn unknown_snapshot_order_type_is_never_invented_as_a_limit() {
+    let (mut e, s) = ready();
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("ActiveOrders"))
+        .unwrap();
+    reply_at(
+        &mut e,
+        NOW + 2.0,
+        &r,
+        200,
+        &OPEN
+            .replace(r#""order_index":"42""#, r#""order_index":"47""#)
+            .replace(r#""type":"limit""#, r#""type":"mystery""#),
+    );
+    assert!(e.store().order("47").is_none());
+    assert!(e.store().order("42").is_none());
+}
+#[test]
+fn spot_rows_in_private_snapshots_are_skipped_silently_and_perp_rows_commit() {
+    let meta = META.replace(
+        r#""order_book_details":["#,
+        r#""order_book_details":[{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1"},"#,
+    );
+    let (mut e, s) = ready_with_meta(options(), &meta);
+    assert!(e.store().market("ETH/USDC").is_none());
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    let spot_order = r#"{"order_index":"77","market_id":2048,"status":"open","type":"limit","time_in_force":1,"is_ask":false,"initial_base_amount":"1","remaining_base_amount":"1","price":"10"}"#;
+    for r in requests(&mut e) {
+        let body = if r.url.contains("ActiveOrders") {
+            OPEN.replace(r#""orders":["#, &format!(r#""orders":[{spot_order},"#))
+        } else {
+            ACCOUNT
+                .replace(
+                    r#""positions":["#,
+                    r#""positions":[{"market_id":2048,"position":"5","sign":1},"#,
+                )
+                .replace(
+                    r#""available_balance":"900""#,
+                    r#""available_balance":"850""#,
+                )
+        };
+        reply_at(&mut e, NOW + 2.0, &r, 200, &body);
+    }
+    let logs = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !logs
+            .iter()
+            .any(|m| m.contains("skipped") || m.contains("failed")),
+        "{logs:?}"
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .map(|o| o.id.as_str())
+            .collect::<Vec<_>>(),
+        ["42"]
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().balance().free, 850.0);
+}
+#[test]
+fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
+    for kind in [
+        r#""twap""#,
+        r#""twap-sub""#,
+        r#""liquidation""#,
+        "6",
+        "7",
+        "8",
+    ] {
+        let (mut e, s) = ready();
+        let row = |id: u32, price: &str| {
+            format!(
+                r#"{{"order_index":"{id}","market_id":1,"status":"open","type":{kind},"time_in_force":1,"is_ask":false,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2","price":"{price}"}}"#
+            )
+        };
+        message(
+            &mut e,
+            s,
+            NOW + 1.0,
+            &format!(
+                r#"{{"channel":"account_all_orders:718895","orders":{{"1":[{}]}}}}"#,
+                row(60, "80")
+            ),
+        );
+        assert_eq!(
+            e.store().order("60").map(|o| o.kind),
+            Some(OrderType::Limit),
+            "{kind}"
+        );
+        e.handle(NOW + 2.0, Event::WsOpened { socket: s });
+        let r = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("ActiveOrders"))
+            .unwrap();
+        reply_at(
+            &mut e,
+            NOW + 3.0,
+            &r,
+            200,
+            &format!(
+                r#"{{"code":200,"orders":[{},{}]}}"#,
+                row(60, "81"),
+                row(61, "82")
+            ),
+        );
+        for (id, price) in [("60", 81.0), ("61", 82.0)] {
+            assert_eq!(
+                e.store().order(id).map(|o| (o.kind, o.price)),
+                Some((OrderType::Limit, price)),
+                "{kind} {id}"
+            );
+        }
+    }
+}
+#[test]
+fn skipped_position_row_with_only_a_market_id_keeps_the_stored_copy() {
+    let (mut e, socket) = ready();
+    let mut market = e.store().market("ETH").unwrap().clone();
+    market.id = "999".into();
+    market.symbol = "SOL".into();
+    let mut markets = e.store().markets().to_vec();
+    markets.push(market);
+    e.store_mut().set_markets(markets);
+    let mut sol = e.store().position("ETH").unwrap().clone();
+    sol.id = "SOL".into();
+    sol.symbol = "SOL".into();
+    sol.contracts = 5.0;
+    let mut positions = e.store().positions().to_vec();
+    positions.push(sol);
+    e.store_mut().set_positions(positions);
+    e.handle(NOW + 1., Event::WsOpened { socket });
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/account?"))
+        .unwrap();
+    let body = ACCOUNT.replace(
+        "\"positions\":[",
+        r#""positions":[{"market_id":999,"position":"5"},"#,
+    );
+    reply_at(&mut e, NOW + 2., &request, 200, &body);
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Lighter skipped position SOL on an unknown market")));
+    assert_eq!(e.store().position("SOL").map(|p| p.contracts), Some(5.0));
+    assert_eq!(e.store().position("ETH").map(|p| p.contracts), Some(2.0));
+}
+#[test]
+fn skipped_position_rows_keep_the_balance_updating() {
+    for (row, eth) in [
+        // Malformed owned row: its stored copy stays and carries its PnL.
+        (r#"{"market_id":1,"position":"bad"}"#, Some(2.0)),
+        // Flat row that fails mapping: a valid closure, not a skip.
+        (
+            r#"{"market_id":1,"position":"0","avg_entry_price":"bad"}"#,
+            None,
+        ),
+    ] {
+        let (mut e, socket) = ready();
+        assert_eq!(e.store().balance().free, 900.0);
+        e.handle(NOW + 1., Event::WsOpened { socket });
+        let request = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/account?"))
+            .unwrap();
+        let body = format!(
+            r#"{{"code":200,"accounts":[{{"index":718895,"collateral":"1100","total_asset_value":"1100","available_balance":"850","positions":[{row}]}}]}}"#
+        );
+        reply_at(&mut e, NOW + 2., &request, 200, &body);
+        assert_eq!(e.store().position("ETH").map(|p| p.contracts), eth, "{row}");
+        let balance = e.store().balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used),
+            (1100.0, 850.0, 250.0),
+            "{row}"
+        );
+    }
 }

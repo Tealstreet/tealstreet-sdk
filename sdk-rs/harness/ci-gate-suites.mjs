@@ -7,6 +7,7 @@ const primaryBooks = Object.freeze({
   asterdex: 'BTCUSDT,ETHUSDT',
   woo: 'BTCUSDT,ETHUSDT',
   binance: 'BTCUSDT,ETHUSDT,SOLUSDT',
+  bitunix: 'BTCUSDT,ETHUSDT',
   orderly: 'BTCUSDC,ETHUSDC',
   coinbase: 'BTC-USD,ETH-USD',
   bitget: 'BTCUSDT,ETHUSDT',
@@ -71,6 +72,8 @@ const suiteCases = (suite) => {
     cases.push(privateCase(suite, 'lighter-testnet'));
   } else if (suite === 'bitget') {
     cases.push(privateCase('bitgetinverse'));
+  } else if (suite === 'hyperliquid') {
+    cases.push(privateCase('hyperliquid', 'hyperliquid-spot'));
   }
   return Object.freeze(cases.map((item) => Object.freeze(item)));
 };

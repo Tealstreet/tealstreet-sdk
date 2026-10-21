@@ -72,7 +72,21 @@ pub fn private_started_with_markets(
     Vec<HttpRequest>,
     safe_cex_engine::TimerId,
 ) {
+    let (e, socket, reads, timer, _) = private_started_with_retry(markets);
+    (e, socket, reads, timer)
+}
+/// Also returns the catalogue retry a partial first read schedules.
+pub fn private_started_with_retry(
+    markets: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    safe_cex_engine::TimerId,
+    Option<safe_cex_engine::TimerId>,
+) {
     let mut e = Engine::new(MexcFutures::new(Options {
+        recv_window: None,
         read_credentials: None,
         public_data_only: false,
         key: Some("replay-key".into()),
@@ -82,6 +96,10 @@ pub fn private_started_with_markets(
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, markets);
     let mut actions: Vec<_> = e.drain_actions().collect();
+    let retry = actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 100.0, 1000.0) => Some(*timer),
+        _ => None,
+    });
     let ticker = actions
         .iter()
         .find_map(|a| match a {
@@ -142,5 +160,10 @@ pub fn private_started_with_markets(
             socket: private_socket,
         },
     );
-    (e, private_socket, reads, timer)
+    (e, private_socket, reads, timer, retry)
+}
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
 }

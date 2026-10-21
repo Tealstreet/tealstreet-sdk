@@ -1,6 +1,11 @@
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_grvt::{Grvt, Options};
 
+/// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 // A transport failure must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
@@ -34,7 +39,10 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );
@@ -45,7 +53,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         let timer = actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == now + delay => Some(*timer),
+                Action::SetTimer { timer, at_ms } if jittered(*at_ms - now, delay) => Some(*timer),
                 _ => None,
             })
             .expect("bounded public discovery backoff");
@@ -64,7 +72,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -144,11 +152,13 @@ fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_bac
                     .iter()
                     .any(|action| matches!(action, Action::Http(_)))
             );
-            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) if message.contains("Invalid or empty GRVT instrument catalog"))));
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Invalid or empty GRVT instrument catalog"))));
             let retry = actions
                 .iter()
                 .find_map(|action| match action {
-                    Action::SetTimer { timer, at_ms } if *at_ms == now + 1000.0 => Some(*timer),
+                    Action::SetTimer { timer, at_ms } if jittered(*at_ms - now, 1000.0) => {
+                        Some(*timer)
+                    }
                     _ => None,
                 })
                 .unwrap();

@@ -2,8 +2,10 @@
 //! trading writes are never repeated after network or upstream failure.
 use std::collections::{HashMap, VecDeque};
 
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Cx, LogLevel, Method, RequestRoute, Response, TimerId, Venue};
+use safe_cex_engine::log::code;
+use safe_cex_engine::{Cx, Method, RequestRoute, Response, TimerId, Venue};
 use serde::Deserialize;
 
 use crate::sign::{Query, Version};
@@ -408,8 +410,9 @@ impl AsterDex {
             );
             return;
         } else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Aster time sync failed; retaining the last clock offset",
             );
         }
@@ -445,6 +448,11 @@ mod tests {
     use crate::Options;
     use safe_cex_engine::book::Book;
     use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
+
+    /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+    fn jittered(actual: f64, nominal: f64) -> bool {
+        (0.75 * nominal..=nominal).contains(&actual)
+    }
 
     struct Probe {
         inner: AsterDex,
@@ -582,7 +590,12 @@ mod tests {
                     Action::SetTimer { timer, at_ms } => {
                         self.timers.push((timer, at_ms - self.now))
                     }
-                    Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                    Action::Notice(Notice::CommandDone { result, .. }) => {
+                        self.done.push(Ok(result))
+                    }
+                    Action::Notice(Notice::CommandFailed { error, .. }) => {
+                        self.done.push(Err(error.legacy_text()))
+                    }
                     _ => {}
                 }
             }
@@ -878,7 +891,7 @@ mod tests {
             let index = self
                 .timers
                 .iter()
-                .position(|(_, at)| *at == self.now + delay)
+                .position(|(_, at)| jittered(*at - self.now, delay))
                 .expect("retry timer");
             let (timer, at) = self.timers.remove(index);
             self.now = at;

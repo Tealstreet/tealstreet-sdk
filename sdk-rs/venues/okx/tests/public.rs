@@ -108,7 +108,7 @@ fn candles_on_business_and_all_sockets_watch_silence() {
         &envelope(r#"["1700000000000","1","3","0.5","2","9","10","20","1"]"#),
         5.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s.contains("\"volume\":20.0"))));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s.contains("\"volume\":20.0"))));
 }
 
 type Timers = Vec<(safe_cex_engine::TimerId, f64)>;
@@ -319,13 +319,7 @@ fn failed_ticker_read_retries_with_backoff_keeping_the_committed_catalog() {
             now,
         );
         assert!(e.store().loaded().markets && !e.store().loaded().tickers);
-        let timer = actions(&mut e)
-            .iter()
-            .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == now + delay => Some(*timer),
-                _ => None,
-            })
-            .expect("backoff timer");
+        let timer = retry_timer(&actions(&mut e), now, delay).expect("backoff timer");
         now += delay;
         e.handle(now, Event::TimerFired { timer });
     }
@@ -348,7 +342,11 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
             to_ms: None,
         }),
     );
-    let request = actions(&mut e).remove(0);
+    // The clock jumps far past startup, so an engine startup notice may precede the read.
+    let request = actions(&mut e)
+        .into_iter()
+        .find(|action| matches!(action, Action::Http(_)))
+        .unwrap();
     assert!(
         matches!(&request, Action::Http(r) if r.url.ends_with("bar=1m&limit=300&before=1799982000000&after=1800000000000"))
     );
@@ -358,7 +356,7 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
         matches!(&fallback, Action::Http(r) if r.url.contains("/history-candles?") && r.url.contains("&limit=100&"))
     );
     reply(&mut e, &fallback, &envelope(""), 1_800_000_000_002.0);
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s == "[]")));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s == "[]")));
 }
 
 #[test]
@@ -578,13 +576,7 @@ fn all_undecodable_ticker_rows_retry_startup() {
     assert!(!e.store().loaded().tickers);
     let out = actions(&mut e);
     assert!(out.iter().all(|a| !matches!(a, Action::WsConnect { .. })));
-    let timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1_002.0 => Some(*timer),
-            _ => None,
-        })
-        .expect("startup retry timer");
+    let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1_002.0, Event::TimerFired { timer });
     let request = actions(&mut e).remove(0);
     assert!(is_get(&request, "/api/v5/market/tickers?instType=SWAP"));

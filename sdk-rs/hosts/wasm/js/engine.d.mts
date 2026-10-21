@@ -3,7 +3,11 @@ import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
+  construction(): string;
+  /** Native construction failures throw Error with JSON-encoded venueError detail. */
   constructor(venue: string, optionsJson: string);
+  /** JSON-encoded health counters. */
+  health(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
@@ -32,3 +36,6 @@ export function wasmMemoryBytes(): number;
 
 /** Web build only: fetch and instantiate the module. */
 export default function init(module?: unknown): Promise<unknown>;
+
+/** Resolved account choices without construction or I/O. */
+export function resolveConstruction(venue: string, optionsJson: string): string;

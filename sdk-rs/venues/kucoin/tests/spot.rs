@@ -144,9 +144,8 @@ impl H {
             // Failures as the plain text the host renders.
             let action = match action {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    let result = Err(error.legacy_text());
-                    self.failures.push(error);
-                    Action::Notice(Notice::CommandDone { command, result })
+                    self.failures.push(error.clone());
+                    Action::Notice(Notice::CommandFailed { command, error })
                 }
                 action => action,
             };
@@ -217,13 +216,14 @@ impl H {
             .actions
             .iter()
             .position(
-                |a| matches!(a,Action::Notice(Notice::CommandDone{command,..})if *command==id),
+                |a| matches!(a,Action::Notice(Notice::CommandDone{command,..} | Notice::CommandFailed{command,..})if *command==id),
             )
             .unwrap();
         match self.actions.remove(i) {
             Action::Notice(Notice::CommandDone { result, .. }) => {
-                result.map(|r| serde_json::from_str(&r).unwrap())
+                Ok(serde_json::from_str(&result).unwrap())
             }
+            Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
             _ => unreachable!(),
         }
     }
@@ -1363,11 +1363,12 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
         }));
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Secondary read credentials"))));
-        assert!(!actions.iter().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-        )));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Secondary read credentials"))));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+        );
     }
 }
 #[test]
@@ -1433,13 +1434,13 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         error: "failed write transport",
     });
     let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed write transport")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed write transport")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed write transport")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
     );
     assert!(!h.actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed write transport")
+        |a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed write transport")
     ));
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
@@ -1472,7 +1473,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -1483,7 +1484,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -1497,12 +1498,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -1513,9 +1514,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -1531,7 +1532,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {

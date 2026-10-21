@@ -138,11 +138,6 @@ impl Harness {
                     socket,
                     channel: Some(c),
                     ..
-                }
-                | Action::WsConnectWithHeaders {
-                    socket,
-                    channel: Some(c),
-                    ..
                 } if *c == role => Some(*socket),
                 _ => None,
             })
@@ -163,7 +158,7 @@ impl Harness {
             })
             .expect("command completion");
         match self.actions.remove(index) {
-            Action::Notice(Notice::CommandDone { result, .. }) => result,
+            Action::Notice(Notice::CommandDone { result, .. }) => Ok(result),
             Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
             _ => unreachable!(),
         }
@@ -292,7 +287,7 @@ fn broad_and_exact_fill_reads_isolate_supported_markets() {
 }
 
 #[test]
-fn malformed_catalog_refresh_skips_bad_market_and_commits_valid_neighbours() {
+fn malformed_catalog_refresh_keeps_the_previous_row_and_commits_valid_neighbours() {
     let mut h = Harness::new(false);
     let timer = h
         .actions
@@ -312,9 +307,11 @@ fn malformed_catalog_refresh_skips_bad_market_and_commits_valid_neighbours() {
     );
     assert!(malformed.contains(r#""ts":"NaN""#));
     h.respond(r, &malformed, "");
-    assert_eq!(h.e.store().markets().len(), MARKETS.len() - 1);
+    // The malformed AVAX row keeps its previous market so held rows stay mapped.
+    assert_eq!(h.e.store().markets().len(), MARKETS.len());
     for market in h.e.store().markets() {
-        assert_eq!(market.precision.price, 0.2);
+        let expected = if market.base == "AVAX" { 0.1 } else { 0.2 };
+        assert_eq!(market.precision.price, expected, "{}", market.symbol);
     }
 }
 
@@ -1116,4 +1113,35 @@ fn truncated_or_auth_rejected_stream_never_promotes_staged_cancel_rows() {
     h.respond(write, r#"{"r":{"a":true}}"#, "");
     assert!(h.result(332).is_ok());
     no_cancel(&h);
+}
+
+#[test]
+fn a_mismatched_configured_signer_warns_without_blocking_startup() {
+    let secret = format!("0x{}", "01".repeat(32));
+    let signer = secret
+        .parse::<PrivateKeySigner>()
+        .unwrap()
+        .address()
+        .to_string();
+    for (configured, warns) in [
+        ("0x0000000000000000000000000000000000000001", true),
+        (signer.as_str(), false),
+    ] {
+        let mut e = safe_cex_engine::Engine::new(safe_cex_venue_grvt::Grvt::new(
+            safe_cex_venue_grvt::Options {
+                key: Some("fixture-key".into()),
+                secret: Some(secret.clone()),
+                signer_address: Some(configured.into()),
+                ..Default::default()
+            },
+        ));
+        e.start(0.0);
+        let warned = e.drain_actions().any(|a| {
+            matches!(a,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Warn
+                    && event.message.contains("does not match wallet address"))
+        });
+        assert_eq!(warned, warns, "{configured}");
+    }
 }

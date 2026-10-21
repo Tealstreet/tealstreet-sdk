@@ -187,7 +187,7 @@ impl Kraken {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(*command, Ok("null".into()));
+                    cx.done(*command, "null".into());
                 }
                 return true;
             }
@@ -573,7 +573,7 @@ impl Kraken {
             };
             let Some(mut step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
-                cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap()));
+                cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
                 continue;
             };
             if matches!(&step, Step::Cancel(_))
@@ -723,9 +723,17 @@ impl Kraken {
         });
         let result = reply.and_then(|r| {
             if !ok {
+                // Keep the venue's own error code, as TS does with `responseData.error`.
+                let detail = r
+                    .error
+                    .as_deref()
+                    .filter(|code| !code.is_empty())
+                    .or_else(|| r.errors.first().map(|e| e.message.as_str()))
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default();
                 return Err(http_failure(
                     response.status,
-                    format!("Kraken HTTP {}", response.status),
+                    format!("Kraken HTTP {}{detail}", response.status),
                 ));
             }
             if r.result != "success"
@@ -955,7 +963,7 @@ impl Kraken {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
             match result {
-                Ok(result) => cx.done(job.command, Ok(result)),
+                Ok(result) => cx.done(job.command, result),
                 Err(mut error) => {
                     if job.amend_canceled {
                         error.message = format!(

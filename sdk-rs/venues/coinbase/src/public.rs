@@ -1,12 +1,13 @@
 use crate::{Coinbase, Pending, ProductKind, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
@@ -324,8 +325,13 @@ impl Coinbase {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket =
-            Some(cx.connect_feed(WS, SocketChannel::Public, "market", self.public.recover));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(WS)
+                    .channel(SocketChannel::Public)
+                    .feed("market", self.public.recover),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -1045,13 +1051,13 @@ impl Coinbase {
                 invalid,
             } => {
                 if invalid {
-                    cx.done(command, Err("Malformed Coinbase candles".into()));
+                    cx.fail(command, "Malformed Coinbase candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                    );
+                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 }
             }
         }
@@ -1063,11 +1069,11 @@ impl Coinbase {
         error: &str,
     ) {
         match pending {
-            Request::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Request::Candles { command, .. } => cx.fail(command, error),
             Request::Daily {
                 symbol, generation, ..
             } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 if let Some(state) = self
                     .public
                     .daily
@@ -1082,7 +1088,7 @@ impl Coinbase {
                     Request::Products { kind, .. } => Some(kind),
                     _ => None,
                 };
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 if let Some(timer) = self.public.poll.take() {
                     cx.clear_timer(timer);
                 }
@@ -1168,7 +1174,11 @@ impl Coinbase {
             return true;
         };
         if envelope.kind == "error" {
-            cx.log(LogLevel::Warning, envelope.message.as_ref());
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                envelope.message.as_ref(),
+            );
             self.reconnect_public(cx);
             return true;
         }
@@ -1391,13 +1401,11 @@ impl Coinbase {
         {
             if self.public.deferred.len() >= 256 {
                 if let Command::FetchCandles { command, .. } = command {
-                    cx.done(
-                        command,
-                        Err("Coinbase public startup command queue is full".into()),
-                    );
+                    cx.fail(command, "Coinbase public startup command queue is full");
                 }
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
                     "Coinbase public startup command queue is full",
                 );
                 return None;
@@ -1519,11 +1527,11 @@ impl Coinbase {
                 to_ms,
             } => {
                 let Some((granularity, seconds)) = interval(timeframe) else {
-                    cx.done(command, Err(timeframe.unsupported("Coinbase")));
+                    cx.fail(command, timeframe.unsupported("Coinbase"));
                     return None;
                 };
                 if cx.store.market(&symbol).is_none() {
-                    cx.done(command, Err("Unknown Coinbase market".into()));
+                    cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
                 let end = to_ms.unwrap_or(cx.now) / 1000.;
@@ -1531,7 +1539,7 @@ impl Coinbase {
                     .map(|n| n / 1000.)
                     .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).clamp(1, 300)));
                 if !start.is_finite() || !end.is_finite() || start < 0. || end <= start {
-                    cx.done(command, Err("Invalid Coinbase candle range".into()));
+                    cx.fail(command, "Invalid Coinbase candle range");
                     return None;
                 }
                 let path = format!(
@@ -1553,7 +1561,7 @@ impl Coinbase {
                         invalid: false,
                     }),
                 ) {
-                    cx.done(command, Err(error));
+                    cx.fail(command, error);
                 }
             }
             Command::SetTickerSymbols { .. } => {}

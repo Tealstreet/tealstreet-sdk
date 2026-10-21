@@ -10,6 +10,7 @@
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
 //      | { op: 'accountAuth', credential, scope, outcome }  (opted-in clients only)
+//      structured events add { code, fields } to 'log' and may use level 'debug'
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -38,7 +39,7 @@ export class WorkersWebSocket extends EventTarget {
     const headers = { ...options.headers, Upgrade: 'websocket' };
     const selectedProtocols = typeof protocols === 'string' ? protocols : protocols.join(', ');
     if (selectedProtocols) headers['Sec-WebSocket-Protocol'] = selectedProtocols;
-    fetch(url.replace(/^ws/, 'http'), { headers, signal: this.abort.signal }).then(
+    fetch(url.replace(/^ws/, 'http'), { headers, signal: this.abort.signal, redirect: 'error' }).then(
       (response) => {
         const socket = response.webSocket;
         if (!socket) return this.fail();
@@ -143,7 +144,7 @@ export const workersTransport = () => ({
   async request({ method, url, headers, body, signal, route, timeoutMs }) {
     if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
     const deadline = AbortSignal.timeout(Math.max(1, timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
@@ -181,25 +182,33 @@ const KEEPALIVE_MS = 30_000;
  * supplies engineOptions for protocol choices tied to its resolved routes,
  * overriding conflicting caller flags before engine construction.
  */
-export const createEngineObject = ({ loadEngine, createTransport, flush = { store: 250, books: 60 } }) =>
+export const createEngineObject = ({ loadEngine, createTransport, accountToken, flush = { store: 250, books: 60 } }) =>
   class EngineObject {
-    constructor(state) {
+    constructor(state, env) {
       this.state = state;
+      this.env = env;
       this.clients = new Set();
       // Clients that predate accountAuth may reject an unknown op, so it is opt-in.
       this.accountAuthClients = new Set();
       this.host = undefined;
+      this.starting = undefined;
       this.timers = [];
     }
 
     async fetch(request) {
-      if (request.headers.get('Upgrade') !== 'websocket') {
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
         return new Response('expected a websocket', { status: 426 });
+      }
+      // Deployment owns the token for this object's account. A client cannot claim it.
+      let token;
+      try { token = await accountToken?.(this.state, this.env); } catch { /* fail closed */ }
+      if (typeof token !== 'string' || !token || request.headers.get('Authorization') !== `Bearer ${token}`) {
+        return new Response('unauthorized', { status: 401 });
       }
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
       this.clients.add(server);
-      server.addEventListener('message', (event) => this.receive(server, event.data));
+      server.addEventListener('message', (event) => { void this.receive(server, event.data); });
       server.addEventListener('close', () => this.leave(server));
       if (this.host) server.send(this.host.snapshot());
       // A client joining after startup failed must not wait on it.
@@ -208,54 +217,110 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    reply(client, message) {
+      if (this.clients.has(client)) {
+        try { client.send(JSON.stringify(message)); } catch { this.leave(client); }
+      }
+    }
+
     async receive(client, data) {
-      if (typeof data !== 'string') return;
-      const message = JSON.parse(data);
+      if (!this.clients.has(client) || typeof data !== 'string') return;
+      let message;
+      try { message = JSON.parse(data); } catch {
+        this.reply(client, { op: 'log', level: 'error', message: 'Invalid engine message' });
+        return;
+      }
+      if (!message || typeof message !== 'object' || Array.isArray(message)) return;
       if (message.op === 'accountAuth') {
         this.accountAuthClients.add(client);
         return;
       }
-      if (message.op === 'start' && !this.host) {
-        const { WasmEngine } = await loadEngine(message.venue);
-        if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
-          || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
-          client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
+      if (message.op === 'start') {
+        if (this.host || this.starting) {
+          this.reply(client, { op: 'log', level: 'error', message: 'Engine is already started or starting' });
           return;
         }
-        const raw = workersTransport();
-        const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
-        this.host = new EngineHost(
-          new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
-          transport,
-          {
-            onFrame: (frame) => this.broadcast(frame),
-            onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
-            onStartupFailed: (detail) => {
-              this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
-              this.broadcast(this.startupFailure);
+        if (typeof message.venue !== 'string' || (message.options != null &&
+          (typeof message.options !== 'object' || Array.isArray(message.options)))) {
+          this.reply(client, { op: 'log', level: 'error', message: 'Invalid engine options' });
+          return;
+        }
+        const attempt = {};
+        this.starting = attempt;
+        // A new start replaces any failure reported by an earlier engine lifetime.
+        this.startupFailure = undefined;
+        let host;
+        try {
+          const { WasmEngine } = await loadEngine(message.venue);
+          if (this.starting !== attempt || !this.clients.has(client)) return;
+          if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
+            || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
+            this.reply(client, { op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' });
+            return;
+          }
+          const raw = workersTransport();
+          const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
+          if (this.starting !== attempt || !this.clients.has(client)) return;
+          host = new EngineHost(
+            new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
+            transport,
+            {
+              onFrame: (frame) => this.broadcast(frame),
+              onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
+              onStartupFailed: (detail) => {
+                this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
+                this.broadcast(this.startupFailure);
+              },
+              onLog: (level, text) => this.notify(level !== 'info', { op: 'log', level, message: text }),
+              // Legacy `log` clients keep working; structured clients also read code and fields.
+              onEvent: ({ level, code, message, fields }) => this.notify(level === 'warn' || level === 'error', {
+                op: 'log', level: level === 'warn' ? 'warning' : level, message, code, fields,
+              }),
+              onAccountAuth: (result) => {
+                for (const optedIn of this.accountAuthClients) this.reply(optedIn, { op: 'accountAuth', ...result });
+              },
             },
-            onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
-            onAccountAuth: (result) => {
-              const text = JSON.stringify({ op: 'accountAuth', ...result });
-              for (const optedIn of this.accountAuthClients) optedIn.send(text);
-            },
-          },
-        );
-        this.host.start();
-        this.timers.push(setInterval(() => this.host?.flush(), flush.store));
-        if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+          );
+          if (this.starting !== attempt || !this.clients.has(client)) { host.dispose(); return; }
+          this.host = host;
+          host.start();
+          if (this.host !== host) return;
+          this.timers.push(setInterval(() => this.host?.flush(), flush.store));
+          if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+        } catch {
+          host?.dispose();
+          if (this.host === host) this.host = undefined;
+          this.reply(client, { op: 'log', level: 'error', message: 'Engine start failed' });
+        } finally {
+          if (this.starting === attempt) this.starting = undefined;
+        }
         return;
       }
       if (message.op === 'command' && this.host) {
-        this.host.command(message.command).then(
-          (result) => client.send(JSON.stringify({ op: 'done', id: message.id, result })),
-          (error) => client.send(JSON.stringify({ op: 'done', id: message.id, error: String(error?.message ?? error) })),
-        );
+        if (message.command?.op === 'publicFeedUpdate') {
+          this.reply(client, { op: 'done', id: message.id, error: 'public feed updates require a trusted host provider' });
+          return;
+        }
+        const host = this.host;
+        try {
+          const result = await host.command(message.command);
+          if (this.host === host) this.reply(client, { op: 'done', id: message.id, result });
+        } catch (error) {
+          if (this.host === host) this.reply(client, { op: 'done', id: message.id, error: String(error?.message ?? error) });
+        }
       }
     }
 
     broadcast(message) {
-      for (const client of this.clients) client.send(message);
+      for (const client of this.clients) {
+        try { client.send(message); } catch { this.leave(client); }
+      }
+    }
+
+    /** With no client attached, Warn+ goes to the console instead of being dropped. */
+    notify(warn, notice) {
+      if (this.clients.size > 0) this.broadcast(JSON.stringify(notice));
+      else if (warn) console.warn(`safe-cex ${notice.level} ${notice.code ?? 'log'}: ${notice.message}`);
     }
 
     /** The last client leaving stops the engine and drops its credentials. */
@@ -263,10 +328,12 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       this.clients.delete(client);
       this.accountAuthClients.delete(client);
       if (this.clients.size > 0) return;
+      this.starting = undefined;
       this.timers.forEach(clearInterval);
       this.timers = [];
       this.host?.dispose();
       this.host = undefined;
+      this.startupFailure = undefined;
     }
 
     async alarm() {

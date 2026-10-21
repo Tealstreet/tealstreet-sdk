@@ -223,7 +223,7 @@ fn candles_use_documented_volume_and_request_window() {
         .drain_actions()
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone { command: 7, result }) => {
-                Some(result.unwrap())
+                Some(result)
             }
             _ => None,
         })
@@ -420,5 +420,5 @@ fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_s
         )
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log {message, ..}) if message.contains("Malformed BloFin ticker row"))));
+        Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("Malformed BloFin ticker row"))));
 }

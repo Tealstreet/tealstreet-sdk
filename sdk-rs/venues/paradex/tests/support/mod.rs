@@ -79,9 +79,9 @@ impl Harness {
                 Action::Http(r) => self.pending.push(r),
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.actions.push(Action::Notice(Notice::CommandDone {
+                    self.actions.push(Action::Notice(Notice::CommandFailed {
                         command,
-                        result: Err(error.legacy_text()),
+                        error: error.clone(),
                     }));
                     self.failures.push(error);
                 }
@@ -157,6 +157,26 @@ impl Harness {
         self.e.handle(at, Event::TimerFired { timer });
         self.collect();
     }
+    /// Fires the failed-read retry jittered into `[0.75, 1.0] * nominal` at
+    /// the nominal delay, which is never before the jittered deadline.
+    pub fn retry(&mut self, nominal: f64) {
+        let timer = self
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if (0.75 * nominal..=nominal).contains(&(*at_ms - self.now)) =>
+                {
+                    Some(*timer)
+                }
+                _ => None,
+            })
+            .expect("jittered retry timer");
+        self.now += nominal;
+        self.e.handle(self.now, Event::TimerFired { timer });
+        self.collect();
+    }
     pub fn timer(&mut self, at: f64) {
         let timer = self.timer_at(at);
         self.now = at;
@@ -178,7 +198,10 @@ impl Harness {
             .rev()
             .find_map(|a| match a {
                 Action::Notice(Notice::CommandDone { command, result }) if *command == id => {
-                    Some(result.as_ref().map(String::as_str).map_err(String::as_str))
+                    Some(Ok(result.as_str()))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+                    Some(Err(error.message.as_str()))
                 }
                 _ => None,
             })

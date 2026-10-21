@@ -1,9 +1,12 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::{
@@ -49,6 +52,7 @@ pub enum Request {
         revision: u64,
         market: Option<String>,
         orders: Vec<Order>,
+        coverage: SnapshotCoverage<String>,
         valid: bool,
     },
     Backfill {
@@ -144,6 +148,9 @@ pub struct Snapshot {
     known_settings: HashSet<String>,
     equity: f64,
     free: f64,
+    coverage: SnapshotCoverage<String>,
+    /// Each skipped owned row's identity and native PnL, as far as they parsed.
+    skipped: Vec<(Option<String>, Option<f64>)>,
 }
 
 #[derive(Default, Deserialize)]
@@ -458,6 +465,16 @@ fn each_row<'a, T: Deserialize<'a>>(
         Ok(())
     }
 }
+enum OrderRowError {
+    /// A working order, by native id, on a market this session cannot map.
+    Unmapped(String),
+    Invalid(String),
+}
+impl OrderRowError {
+    fn serde(error: serde_json::Error) -> Self {
+        Self::Invalid(error.to_string())
+    }
+}
 fn index(text: &str) -> Option<u64> {
     let n = text.parse::<u64>().ok()?;
     (n <= i64::MAX as u64).then_some(n)
@@ -664,8 +681,9 @@ impl Lighter {
                 }),
             );
         } else {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Failed to resolve Lighter account index. Provide account index in Application ID.",
             );
         }
@@ -696,8 +714,9 @@ impl Lighter {
                 self.account.signer = Some(signer);
                 self.connect_private(cx);
             }
-            Err(error) => cx.log(
-                LogLevel::Warning,
+            Err(error) => cx.notice(
+                Level::Warn,
+                code::CONFIG_INVALID,
                 format!("Lighter signer unavailable at startup: {error}"),
             ),
         }
@@ -741,14 +760,20 @@ impl Lighter {
             return;
         }
         self.account.orders_inflight = true;
-        self.request_orders(cx, None, self.account.revision);
+        self.request_orders(cx, None, self.account.revision, SnapshotCoverage::default());
     }
-    fn request_orders(&mut self, cx: &mut Cx<'_, Pending>, market: Option<String>, revision: u64) {
+    fn request_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        market: Option<String>,
+        revision: u64,
+        coverage: SnapshotCoverage<String>,
+    ) {
         let auth = match self.account_auth(cx.now) {
             Ok(a) => a,
             Err(e) => {
                 self.account.orders_inflight = false;
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, e);
                 return;
             }
         };
@@ -773,6 +798,7 @@ impl Lighter {
                 revision,
                 market,
                 orders: Vec::new(),
+                coverage,
                 valid: true,
             }),
         );
@@ -816,8 +842,12 @@ impl Lighter {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.open = false;
         self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket =
-            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Private));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws_url())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
     }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
@@ -825,7 +855,7 @@ impl Lighter {
             socket,
             format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
         );
-        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.log(LogLevel::Warning,e)}
+        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,e)}
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -1096,8 +1126,9 @@ impl Lighter {
             .filter(|pnl| pnl.is_finite())
             .unwrap_or(0.0);
         if reported_pnl.is_none() {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "Lighter position PnL unavailable; retaining prior valuation",
             );
         }
@@ -1122,6 +1153,36 @@ impl Lighter {
             leverage,
             margin_type,
         ))
+    }
+    /// Stored positions are keyed by symbol, so a native id resolves through the
+    /// catalogue, then the store's markets; an id neither knows stays as itself.
+    fn position_key(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        market_id: &str,
+        hint: Option<&str>,
+    ) -> Option<String> {
+        if !symbol.is_empty() {
+            return Some(symbol.into());
+        }
+        let id = if market_id.is_empty() {
+            hint.unwrap_or_default()
+        } else {
+            market_id
+        };
+        (!id.is_empty()).then(|| {
+            self.symbol_for_id(id)
+                .or_else(|| {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .find(|m| m.id == id)
+                        .map(|m| m.symbol.as_str())
+                })
+                .unwrap_or(id)
+                .into()
+        })
     }
     fn snapshot_row(
         &self,
@@ -1151,19 +1212,65 @@ impl Lighter {
             ..Snapshot::default()
         };
         if let Some(raw) = wire.positions {
-            let mut unmapped_owned = false;
             let mut invalid_limits = false;
-            each_row(raw, |row: PositionWire<'_>, hint| {
+            each_row(raw, |row: &RawValue, hint| {
+                let Ok(row) = serde_json::from_str::<PositionWire<'_>>(row.get()) else {
+                    #[derive(Deserialize)]
+                    struct Identity<'a> {
+                        #[serde(default, borrow, alias = "marketId")]
+                        market_id: Atom<'a>,
+                        #[serde(default, borrow)]
+                        symbol: Cow<'a, str>,
+                        #[serde(default, borrow, alias = "position", alias = "qty")]
+                        size: Option<&'a RawValue>,
+                        #[serde(default, borrow, alias = "unrealizedPnl")]
+                        unrealized_pnl: Option<&'a RawValue>,
+                    }
+                    let num = |raw: Option<&RawValue>| {
+                        raw.and_then(|raw| serde_json::from_str::<Num>(raw.get()).ok())
+                            .map(|n| n.0)
+                    };
+                    let (identity, size, pnl) =
+                        match serde_json::from_str::<Identity<'_>>(row.get()) {
+                            Ok(row) => (
+                                self.position_key(cx, &row.symbol, &row.market_id.0, hint),
+                                num(row.size),
+                                num(row.unrealized_pnl),
+                            ),
+                            Err(_) => (None, None, None),
+                        };
+                    // A flat row of a known market is a closure whatever else failed.
+                    if identity.is_some() && size == Some(0.0) {
+                        return;
+                    }
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        match &identity {
+                            Some(id) => format!("Lighter skipped malformed position {id}"),
+                            None => "Lighter skipped malformed position without a market".into(),
+                        },
+                    );
+                    snapshot.skipped.push((identity.clone(), pnl));
+                    snapshot.coverage.reject(identity);
+                    return;
+                };
                 let owned = row.size.as_ref().is_some_and(|n| n.0 != 0.0);
+                let pnl = row.unrealized_pnl.as_ref().map(|n| n.0);
+                let market_id = if row.market_id.0.is_empty() {
+                    hint.unwrap_or_default()
+                } else {
+                    &row.market_id.0
+                };
+                if self.spot_market(market_id) || self.spot_market(&row.symbol) {
+                    return;
+                }
                 let symbol = if !row.symbol.is_empty() {
                     Some(row.symbol.as_ref())
                 } else {
-                    self.symbol_for_id(if row.market_id.0.is_empty() {
-                        hint.unwrap_or_default()
-                    } else {
-                        &row.market_id.0
-                    })
+                    self.symbol_for_id(market_id)
                 };
+                let identity = self.position_key(cx, &row.symbol, &row.market_id.0, hint);
                 if symbol
                     .and_then(|symbol| cx.store.market(symbol))
                     .is_some_and(|market| {
@@ -1194,12 +1301,20 @@ impl Lighter {
                         snapshot.positions.push(position);
                     }
                 } else if owned {
-                    unmapped_owned = true;
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        match &identity {
+                            Some(id) => {
+                                format!("Lighter skipped position {id} on an unknown market")
+                            }
+                            None => "Lighter skipped position without a market".into(),
+                        },
+                    );
+                    snapshot.skipped.push((identity.clone(), pnl));
+                    snapshot.coverage.reject(identity);
                 }
             })?;
-            if unmapped_owned {
-                return Err("Lighter owned position has unavailable market metadata".into());
-            }
             if invalid_limits {
                 return Err("Invalid Lighter market leverage limits".into());
             }
@@ -1212,14 +1327,81 @@ impl Lighter {
         raw: &RawValue,
         market_hint: Option<&str>,
     ) -> Result<Option<Order>, String> {
+        self.map_order_row(cx, raw, market_hint, false)
+            .map_err(|e| match e {
+                OrderRowError::Unmapped(_) => {
+                    "Lighter working order has unavailable market metadata".into()
+                }
+                OrderRowError::Invalid(e) => e,
+            })
+    }
+    /// Maps one active-order snapshot row into `orders` or records it as skipped.
+    fn snapshot_order(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        raw: &RawValue,
+        market_hint: Option<&str>,
+        orders: &mut Vec<Order>,
+        coverage: &mut SnapshotCoverage<String>,
+    ) {
+        match self.map_order_row(cx, raw, market_hint, true) {
+            Ok(order) => return orders.extend(order),
+            Err(OrderRowError::Unmapped(id)) => {
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
+                    format!("Lighter skipped order {id} on an unknown market"),
+                );
+                return coverage.reject(Some(id));
+            }
+            Err(OrderRowError::Invalid(_)) => {}
+        }
         #[derive(Deserialize)]
         struct Nested<'a> {
             #[serde(default, borrow)]
             order: Option<&'a RawValue>,
         }
-        let nested: Nested<'_> = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
-        let wire: OrderWire<'_> =
-            serde_json::from_str(nested.order.unwrap_or(raw).get()).map_err(|e| e.to_string())?;
+        #[derive(Deserialize)]
+        struct Identity<'a> {
+            #[serde(default, borrow, alias = "orderId", alias = "OrderId")]
+            order_id: Option<Atom<'a>>,
+            #[serde(default, borrow, alias = "orderIndex", alias = "OrderIndex")]
+            order_index: Option<Atom<'a>>,
+        }
+        let id = serde_json::from_str::<Nested<'_>>(raw.get())
+            .ok()
+            .and_then(|n| serde_json::from_str::<Identity<'_>>(n.order.unwrap_or(raw).get()).ok())
+            .and_then(|row| {
+                row.order_id
+                    .or(row.order_index)
+                    .and_then(|a| index(&a.0))
+                    .map(|n| n.to_string())
+            });
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            match &id {
+                Some(id) => format!("Lighter skipped unmappable order {id}"),
+                None => "Lighter skipped unmappable order without an id".into(),
+            },
+        );
+        coverage.reject(id);
+    }
+    fn map_order_row(
+        &self,
+        cx: &Cx<'_, Pending>,
+        raw: &RawValue,
+        market_hint: Option<&str>,
+        known_kind: bool,
+    ) -> Result<Option<Order>, OrderRowError> {
+        #[derive(Deserialize)]
+        struct Nested<'a> {
+            #[serde(default, borrow)]
+            order: Option<&'a RawValue>,
+        }
+        let nested: Nested<'_> = serde_json::from_str(raw.get()).map_err(OrderRowError::serde)?;
+        let wire: OrderWire<'_> = serde_json::from_str(nested.order.unwrap_or(raw).get())
+            .map_err(OrderRowError::serde)?;
         let Some(id) = wire
             .order_id
             .as_ref()
@@ -1227,7 +1409,9 @@ impl Lighter {
             .and_then(|a| index(&a.0))
             .map(|n| n.to_string())
         else {
-            return Err("Lighter order has no valid native order id".into());
+            return Err(OrderRowError::Invalid(
+                "Lighter order has no valid native order id".into(),
+            ));
         };
         let market_id = if wire.market_id.0.is_empty() {
             market_hint.unwrap_or_default()
@@ -1244,10 +1428,12 @@ impl Lighter {
             if matches!(status.as_str(), "FILLED" | "EXPIRED" | "REJECTED")
                 || status.starts_with("CANCELED")
                 || status.starts_with("CANCELLED")
+                || self.spot_market(market_id)
+                || self.spot_market(&wire.symbol)
             {
                 return Ok(None);
             }
-            return Err("Lighter working order has unavailable market metadata".into());
+            return Err(OrderRowError::Unmapped(id));
         };
         let existing = cx
             .store
@@ -1256,12 +1442,21 @@ impl Lighter {
             .find(|o| o.id == id)
             .or_else(|| self.account.records.get(&id));
         let mut kind = match normalized(&wire.kind.0).as_str() {
+            // TWAP, its slices and liquidations rest like limits, as the stream maps them.
+            "0" | "6" | "7" | "8" | "LIMIT" | "TWAP" | "TWAP_SUB" | "LIQUIDATION" => {
+                OrderType::Limit
+            }
             "1" | "MARKET" => OrderType::Market,
             "2" | "3" | "STOP_LOSS" | "STOP_MARKET" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" => {
                 OrderType::StopLoss
             }
             "4" | "5" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TAKE_PROFIT_LIMIT" => {
                 OrderType::TakeProfit
+            }
+            _ if known_kind => {
+                return Err(OrderRowError::Invalid(
+                    "Lighter order has an unknown type".into(),
+                ));
             }
             _ => OrderType::Limit,
         };
@@ -1473,19 +1668,14 @@ impl Lighter {
             }
             Request::Orders {
                 orders,
+                coverage,
                 valid,
                 market,
                 ..
-            } => {
-                match serde_json::from_str::<&RawValue>(item)
-                    .map_err(|e| e.to_string())
-                    .and_then(|raw| self.account_map_order(cx, raw, market.as_deref()))
-                {
-                    Ok(Some(order)) => orders.push(order),
-                    Ok(None) => {}
-                    Err(_) => *valid = false,
-                }
-            }
+            } => match serde_json::from_str::<&RawValue>(item) {
+                Ok(raw) => self.snapshot_order(cx, raw, market.as_deref(), orders, coverage),
+                Err(_) => *valid = false,
+            },
         }
     }
     fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>, revision: u64, snapshot: Snapshot) {
@@ -1516,20 +1706,24 @@ impl Lighter {
                 p
             })
             .collect::<Vec<_>>();
-        positions.extend(
-            cx.store
-                .positions()
-                .iter()
-                .filter(|p| {
-                    self.account
-                        .position_revision
-                        .get(&p.symbol)
-                        .copied()
-                        .unwrap_or(0)
-                        > revision
-                })
-                .cloned(),
-        );
+        let kept = cx
+            .store
+            .positions()
+            .iter()
+            .filter(|p| {
+                (self
+                    .account
+                    .position_revision
+                    .get(&p.symbol)
+                    .copied()
+                    .unwrap_or(0)
+                    > revision
+                    || !snapshot.coverage.allows_absence(&p.symbol))
+                    && !positions.iter().any(|q| q.symbol == p.symbol)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        positions.extend(kept);
         cx.store.set_positions(positions);
         let mut settings = snapshot
             .settings
@@ -1575,14 +1769,32 @@ impl Lighter {
                 s.margin_type = Some(margin);
             });
         }
-        {
-            let upnl = cx.store.positions().iter().try_fold(0.0, |sum, position| {
-                let value = sum + position.unrealized_pnl;
-                value.is_finite().then_some(value)
-            });
+        // Equity, free and used are native aggregates. PnL sums the committed rows
+        // (retained copies included) plus each skipped row with no copy; a skipped
+        // row without a copy or a parsed PnL leaves the split unknown, so it holds.
+        let skipped_pnl = snapshot.skipped.iter().try_fold(0.0, |sum, (key, pnl)| {
+            if key
+                .as_ref()
+                .is_some_and(|key| cx.store.positions().iter().any(|p| &p.symbol == key))
+            {
+                Some(sum)
+            } else {
+                pnl.map(|pnl| sum + pnl)
+            }
+        });
+        if let Some(skipped_pnl) = skipped_pnl {
+            let upnl = cx
+                .store
+                .positions()
+                .iter()
+                .try_fold(skipped_pnl, |sum, position| {
+                    let value = sum + position.unrealized_pnl;
+                    value.is_finite().then_some(value)
+                });
             let Some(upnl) = upnl else {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::VALUATION_UNAVAILABLE,
                     "Lighter position PnL invalid; preserving previous balance",
                 );
                 return;
@@ -1598,7 +1810,13 @@ impl Lighter {
             self.schedule_heal(cx);
         }
     }
-    fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, revision: u64, orders: Vec<Order>) {
+    fn commit_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        revision: u64,
+        orders: Vec<Order>,
+        coverage: &SnapshotCoverage<String>,
+    ) {
         let mut ids = HashSet::new();
         let mut merged = orders
             .into_iter()
@@ -1613,7 +1831,8 @@ impl Lighter {
                 .orders()
                 .iter()
                 .filter(|o| {
-                    self.account.order_revision.get(&o.id).copied().unwrap_or(0) > revision
+                    (self.account.order_revision.get(&o.id).copied().unwrap_or(0) > revision
+                        || (!coverage.allows_absence(&o.id) && !ids.contains(&o.id)))
                         && !self.account.suppressed.contains(&o.id)
                 })
                 .cloned(),
@@ -1673,8 +1892,7 @@ impl Lighter {
                         self.request_backfill(cx, run);
                         return;
                     }
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                         "Lighter fill backfill stopped before the outage start; older fills may be missing",
                     );
                 }
@@ -1733,8 +1951,9 @@ impl Lighter {
                     }
                     self.trade_kick(cx);
                 } else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Lighter account snapshot failed; preserving account state",
                     );
                 }
@@ -1743,6 +1962,7 @@ impl Lighter {
                 revision,
                 market,
                 orders,
+                coverage,
                 valid,
             } => {
                 if ok && valid {
@@ -1750,15 +1970,16 @@ impl Lighter {
                         batch.orders.extend(orders);
                         if let Some(market) = batch.markets.pop_front() {
                             let revision = batch.revision;
-                            self.request_orders(cx, Some(market), revision);
+                            // The batch's skipped rows ride along to its commit.
+                            self.request_orders(cx, Some(market), revision, coverage);
                         } else {
                             let batch = self.account.batch.take().unwrap();
                             self.account.orders_inflight = false;
-                            self.commit_orders(cx, batch.revision, batch.orders);
+                            self.commit_orders(cx, batch.revision, batch.orders, &coverage);
                         }
                     } else {
                         self.account.orders_inflight = false;
-                        self.commit_orders(cx, revision, orders);
+                        self.commit_orders(cx, revision, orders, &coverage);
                     }
                 } else if market.is_none()
                     && (status.as_ref().is_some_and(|s| {
@@ -1778,15 +1999,21 @@ impl Lighter {
                             markets,
                             orders: Vec::new(),
                         });
-                        self.request_orders(cx, Some(market), revision);
+                        self.request_orders(
+                            cx,
+                            Some(market),
+                            revision,
+                            SnapshotCoverage::default(),
+                        );
                     } else {
                         self.account.orders_inflight = false;
                     }
                 } else {
                     self.account.orders_inflight = false;
                     self.account.batch = None;
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Lighter order snapshot failed; preserving all orders",
                     );
                 }
@@ -1802,6 +2029,7 @@ impl Lighter {
         if let Request::Orders {
             valid,
             orders,
+            coverage,
             market,
             ..
         } = &mut request
@@ -1816,15 +2044,10 @@ impl Lighter {
                 && let Some(raw) = envelope.orders
                 && raw.get().starts_with('{')
             {
-                let mut accepted = true;
                 let result = each_row(raw, |row: &RawValue, hint| {
-                    match self.account_map_order(cx, row, hint.or(market.as_deref())) {
-                        Ok(Some(order)) => orders.push(order),
-                        Ok(None) => {}
-                        Err(_) => accepted = false,
-                    }
+                    self.snapshot_order(cx, row, hint.or(market.as_deref()), orders, coverage)
                 });
-                *valid = accepted && result.is_ok();
+                *valid = result.is_ok();
             }
         }
         self.account_response(cx, request, response);
@@ -1838,25 +2061,25 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
-            Request::ChangeTier { command } => cx.done(
+            Request::ChangeTier { command } => cx.fail(
                 command,
-                Err(format!(
-                    "Lighter account tier change outcome is unknown: {error}"
-                )),
+                format!("Lighter account tier change outcome is unknown: {error}"),
             ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
                     format!("Lighter account snapshot failed: {error}"),
                 );
             }
             Request::Orders { .. } => {
                 self.account.orders_inflight = false;
                 self.account.batch = None;
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
                     format!("Lighter order snapshot failed: {error}"),
                 );
             }
@@ -1873,7 +2096,11 @@ impl Lighter {
         }
         self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
-            cx.log(LogLevel::Warning, "Invalid Lighter private frame");
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Invalid Lighter private frame",
+            );
             return true;
         };
         if frame.kind == "ping" {
@@ -1967,7 +2194,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         if let Some(raw) = payload.positions {
@@ -2016,7 +2243,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         let live_after = if frame.kind.starts_with("subscribed") {
@@ -2031,7 +2258,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         true
@@ -2153,14 +2380,14 @@ impl Lighter {
     }
     fn backfill_failed(&mut self, cx: &mut Cx<'_, Pending>, mut run: Backfill, error: String) {
         if run.retried {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                 format!("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect: {error}"),
             );
             return;
         }
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::REQUEST_FAILED,
             format!("Lighter fill backfill failed, retrying: {error}"),
         );
         run.retried = true;
@@ -2170,18 +2397,18 @@ impl Lighter {
         self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
     }
     fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
-        let auth = match self.account_auth(cx.now) {
-            Ok(auth) => auth,
-            Err(e) => {
-                cx.log(
-                    LogLevel::Warning,
+        let auth =
+            match self.account_auth(cx.now) {
+                Ok(auth) => auth,
+                Err(e) => {
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                     format!(
                         "Lighter fill backfill skipped; fills during the outage may be missing: {e}"
                     ),
                 );
-                return;
-            }
-        };
+                    return;
+                }
+            };
         let account = self.account.account_index.unwrap();
         let mut url = format!(
             "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",

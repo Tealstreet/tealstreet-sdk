@@ -58,16 +58,19 @@ fn started(read: bool) -> (Engine<Bingx>, Vec<Action>) {
         ..Options::default()
     }));
     e.start(1000.);
-    let a = drain(&mut e);
-    let r = http(&a, "/quote/contracts");
+    // Private reads may start before the public seed completes, so keep every startup action.
+    let mut all = drain(&mut e);
+    let r = http(&all, "/quote/contracts");
     let a = reply(&mut e, &r, 200, MARKETS);
     assert!(auth(&a).is_empty());
-    let daily = http(&a, "/quote/ticker");
+    all.extend(a);
+    let daily = http(&all, "/quote/ticker");
     let a = reply(&mut e, &daily, 200, DAILY);
     assert!(auth(&a).is_empty());
-    let premium = http(&a, "/quote/premiumIndex");
-    let a = reply(&mut e, &premium, 200, PREMIUM);
-    (e, a)
+    all.extend(a);
+    let premium = http(&all, "/quote/premiumIndex");
+    all.extend(reply(&mut e, &premium, 200, PREMIUM));
+    (e, all)
 }
 #[test]
 fn actual_private_read_reports_selected_signer_once_and_public_reads_stay_silent() {

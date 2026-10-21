@@ -109,9 +109,9 @@ impl<V: safe_cex_engine::Venue> Plain for Engine<V> {
         self.drain_actions()
             .map(|a| match a {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    Action::Notice(Notice::CommandDone {
+                    Action::Notice(Notice::CommandFailed {
                         command,
-                        result: Err(error.legacy_text()),
+                        error: error.clone(),
                     })
                 }
                 a => a,
@@ -129,4 +129,9 @@ pub fn failures<V: safe_cex_engine::Venue>(e: &mut Engine<V>) -> Vec<safe_cex_en
             _ => None,
         })
         .collect()
+}
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
 }

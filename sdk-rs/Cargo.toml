@@ -5,6 +5,7 @@ members = [
     "engine",
     "hosts/native",
     "hosts/wasm",
+    "registry",
     "venues/*",
 ]
 
@@ -25,6 +26,7 @@ js-sys = "0.3.106"
 # Internal
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
+safe-cex-venues = { path = "registry", default-features = false }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-bitrue = { path = "venues/bitrue" }
 safe-cex-venue-grvt = { path = "venues/grvt" }
@@ -32,6 +34,7 @@ safe-cex-venue-hyperliquid = { path = "venues/hyperliquid" }
 safe-cex-venue-blofin = { path = "venues/blofin" }
 safe-cex-venue-mexc = { path = "venues/mexc" }
 safe-cex-venue-bingx = { path = "venues/bingx" }
+safe-cex-venue-bitunix = { path = "venues/bitunix" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
 safe-cex-venue-cryptocom = { path = "venues/cryptocom" }
 safe-cex-venue-okx = { path = "venues/okx" }
@@ -87,6 +90,10 @@ opt-level = 3
 # Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
 opt-level = 3
+
+# Size-optimized so the combined shipped wasm stays within its ceiling.
+[profile.release.package.safe-cex-venue-bitunix]
+opt-level = "z"
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"

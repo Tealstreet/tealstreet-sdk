@@ -1,13 +1,15 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
-import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import {
   COINBASE_REPLAY,
   verifyCoinbaseRequest,
   verifyCoinbaseSubscribe,
   coinbaseSubscription,
   createCoinbaseSocketAudit,
+  installSynchronousEs256,
 } from './coinbase-protocol.mjs';
+import { installSynchronousDigest } from './sync-webcrypto.mjs';
 import {
   APEX_SEED,
   apexWireBody,
@@ -510,6 +512,7 @@ const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
 
 const okx = (name) => ({
   rust: name,
+  virtualPrivateClock: true,
   requestKey: typedRequest,
   ts: {
     module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
@@ -795,10 +798,26 @@ const coinbase = (name) => ({
   compareWriteOrder: true,
   compareClientIds: true,
   compareFillPrices: true,
+  // Both order censuses run on timers (TS write reconcile and tick, Rust tick and
+  // REST pacing). Fire them at tape time, or a checkpoint races a census in flight.
+  virtualPrivateClock: true,
+  // Native REST pacing stores an absolute next-send time; startup's paced reads
+  // must not leave it seconds ahead of a rewound clock.
+  monotonicReplayClock: true,
+  loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousEs256(); },
   isWrite: (method) => method !== 'GET',
   generatedBodyId: (key, value) =>
     key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
 });
+
+const headerValue = (headers, name) => (Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+  .find(([key]) => key.toLowerCase() === name)?.[1];
+function validBitunixSignature(key, nonce, timestamp, sign, query, body) {
+  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  return key === 'replay-key' && typeof nonce === 'string' && nonce.length > 0
+    && /^\d+$/.test(String(timestamp)) && Number.isSafeInteger(Number(timestamp))
+    && sign === hash(hash(`${nonce}${timestamp}${key}${query}${body ?? ''}`) + 'replay-secret');
+}
 
 export const VENUES = {
   txflow: {
@@ -1235,6 +1254,9 @@ export const VENUES = {
   paradex: {
     ...paradexProtocol,
     rust: 'paradex',
+    // Order refresh debounces and REST reconciliation run on timers; at wall time a
+    // checkpoint races them (canceled-row retention at checkpoints 5-7).
+    virtualPrivateClock: true,
     ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
     // Effective position leverage differs from configured cross-margin leverage.
     tsSettings: (exchange, store) =>
@@ -1247,6 +1269,7 @@ export const VENUES = {
   },
   apexomni: {
     rust: 'apexomni',
+    virtualPrivateClock: true,
     ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
     privateSocket: '/realtime_private',
     replayCredentials: { omniKeySeed: APEX_SEED },
@@ -1328,6 +1351,7 @@ export const VENUES = {
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',
+    virtualPrivateClock: true,
     ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
     privateSocket: '/ws/',
     compareFillPrices: true,
@@ -1358,6 +1382,7 @@ export const VENUES = {
   ...Object.fromEntries(['lighter', 'lighter-robinhood'].map((name) => [name, lighter(name)])),
   woo: {
     rust: 'woo',
+    virtualPrivateClock: true,
     wooProtocol: true,
     subscriptionGenerations: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
@@ -1478,6 +1503,42 @@ export const VENUES = {
       };
     },
   },
+  bitunix: {
+    rust: 'bitunix',
+    // The private tape times account snapshots after each command; replay them
+    // on the recorded clock so a later snapshot cannot answer an earlier read.
+    virtualPrivateClock: true,
+    ts: { module: `${root}/bitunix/bitunix.exchange.ts`, className: 'BitunixExchange', name: 'bitunix' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.futuresWebsocket.messageHandlers).filter((key) => key.includes('_depthop_')).length >= count,
+    privateSocket: '/private/',
+    isWrite: (method) => method !== 'GET',
+    matchRequestBody: true,
+    compareFillPrices: true,
+    // `{"ping": <ms>}` is a timestamped heartbeat, not a feed subscription.
+    socketMessage: (message) =>
+      message && typeof message === 'object' && Object.keys(message).length === 1 && message.ping !== undefined
+        ? undefined : message,
+    // Documented double-SHA256 signature over nonce, timestamp, key, sorted
+    // query (key+value pairs) and body; public /market/ reads are unsigned.
+    validateRequest({ url, body = '', headers = {} }) {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes('/market/')) return;
+      const query = [...parsed.searchParams].sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}${value}`).join('');
+      if (!validBitunixSignature(headerValue(headers, 'api-key'), headerValue(headers, 'nonce'),
+        headerValue(headers, 'timestamp'), headerValue(headers, 'sign'), query, body))
+        throw new Error(`invalid Bitunix request signature: ${parsed.pathname}`);
+    },
+    validateSocketMessage(socket, text) {
+      const frame = JSON.parse(text);
+      if (frame.op !== 'login') return;
+      const arg = Array.isArray(frame.args) && frame.args.length === 1 ? frame.args[0] : {};
+      if (!validBitunixSignature(arg?.apiKey, arg?.nonce, arg?.timestamp, arg?.sign, '', ''))
+        throw new Error('invalid Bitunix socket login');
+      socket.loginVerified = true;
+    },
+  },
   bitget: {
     rust: 'bitget',
     ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
@@ -1515,6 +1576,9 @@ export const VENUES = {
   },
   backpack: {
     rust: 'backpack',
+    virtualPrivateClock: true,
+    // TS ed25519 signing hashes through WebCrypto, which settles on wall time.
+    loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousDigest(); },
     ignoreGeneratedBodyId: (key, value, callerIds, context) =>
       key === 'clientId' &&
       !callerIds.has(String(value)) &&
@@ -1682,6 +1746,7 @@ export const VENUES = {
   },
   weex: {
     rust: 'weex',
+    virtualPrivateClock: true,
     requestKey: typedRequest,
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
     privateSocket: '/v3/ws/private',
@@ -1923,6 +1988,9 @@ export const VENUES = {
   polymarket,
   kucoin: {
     ...kucoin,
+    // TS keeps canceled rows until a REST order poll replaces them; at wall time a
+    // checkpoint races that poll (checkpoints 6-7). Run the polls on tape time.
+    virtualPrivateClock: true,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
   kucoinspot,

@@ -5,18 +5,19 @@ mod identity;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -26,6 +27,14 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone)]
 pub struct InstrumentInfo {
     pub hash: String,
@@ -50,6 +59,8 @@ pub(crate) enum Job {
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
+        /// Instrument ids whose rows were skipped as malformed.
+        malformed: Vec<String>,
         failed: bool,
     },
     Candles {
@@ -106,7 +117,7 @@ struct TickerState {
     subscriptions: u8,
 }
 pub struct Grvt {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
@@ -157,6 +168,7 @@ fn interval(i: Interval) -> Option<&'static str> {
 }
 impl Grvt {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
@@ -297,10 +309,14 @@ impl Grvt {
             }
             Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
-                cx.log(LogLevel::Warning, "GRVT instrument read failed");
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "GRVT instrument read failed",
+                );
                 self.startup_retry.failed(cx, ());
             }
-            Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
+            Job::Candles { command, .. } => cx.fail(command, "GRVT candle read failed"),
         }
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -311,6 +327,7 @@ impl Grvt {
             Job::Markets {
                 rows: vec![],
                 metadata: HashMap::new(),
+                malformed: vec![],
                 failed: false,
             },
         );
@@ -319,7 +336,9 @@ impl Grvt {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.public_url()).channel(SocketChannel::Public),
+        ));
         self.public.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -430,7 +449,13 @@ impl Grvt {
             Interval::W1 => "candles-1w",
             _ => return,
         };
-        c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(SocketChannel::Public)
+                    .feed(feed, false),
+            ),
+        );
         c.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -656,6 +681,10 @@ impl Grvt {
     }
 }
 impl Venue for Grvt {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -674,6 +703,19 @@ impl Venue for Grvt {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        // GRVT itself refuses an untagged signer; a stale configured address must not block trading.
+        if let (Some(secret), Some(expected)) = (
+            self.options.secret.as_deref(),
+            self.options.signer_address.as_deref(),
+        ) && let Ok(signer) = sign::signer_address(secret)
+            && !signer.eq_ignore_ascii_case(expected)
+        {
+            cx.notice(Level::Warn, code::CONFIG_INVALID,
+                format!(
+                    "Provided signer address ({expected}) does not match wallet address ({signer}). Make sure {signer} is tagged to your API key in the GRVT UI."
+                ),
+            );
+        }
         self.fetch_markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -776,10 +818,14 @@ impl Venue for Grvt {
             Job::Markets {
                 rows,
                 metadata,
+                malformed,
                 failed: _,
             } => {
                 let Ok(i) = serde_json::from_str::<wire::Instrument<'_>>(item) else {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if let Some(id) = instrument_id(item) {
+                        malformed.push(id);
+                    }
                     return;
                 };
                 if i.kind != "PERPETUAL" {
@@ -787,6 +833,9 @@ impl Venue for Grvt {
                 }
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if !i.id.is_empty() {
+                        malformed.push(i.id.to_string());
+                    }
                     return;
                 }
                 metadata.insert(
@@ -887,22 +936,36 @@ impl Venue for Grvt {
             Job::Trade(request) => self.trade_response(cx, request, response),
             Job::History(request) => self.history_response(cx, *request, response),
             Job::Markets {
-                rows,
-                metadata,
+                mut rows,
+                mut metadata,
+                malformed,
                 failed,
             } => {
                 if failed || rows.is_empty() {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "Invalid or empty GRVT instrument catalog",
                     );
                     self.startup_retry.failed(cx, ());
                     return;
                 }
+                // A held market whose row is briefly malformed keeps its previous row,
+                // so its positions and orders stay mapped across the refresh.
+                for id in malformed {
+                    if rows.iter().any(|market| market.id == id) {
+                        continue;
+                    }
+                    if let Some(previous) = cx.store.market_by_id(&id)
+                        && let Some(info) = self.metadata.get(&id)
+                    {
+                        rows.push(previous.clone());
+                        metadata.insert(id, info.clone());
+                    }
+                }
                 // The public instrument catalog has no authenticated leverage
                 // rails. Retain those already fetched from the trading API;
                 // replacing signing metadata must not restore the 1..100 defaults.
-                let mut rows = rows;
                 let has_new_markets = rows
                     .iter()
                     .any(|market| cx.store.market_by_id(&market.id).is_none());
@@ -965,13 +1028,13 @@ impl Venue for Grvt {
                 ..
             } => {
                 if failed {
-                    cx.done(command, Err("Invalid GRVT candles".into()));
+                    cx.fail(command, "Invalid GRVT candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                    );
+                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 }
             }
         }
@@ -1000,10 +1063,12 @@ impl Venue for Grvt {
                 Job::Markets {
                     rows,
                     metadata,
+                    malformed,
                     failed,
                 } => {
                     rows.clear();
                     metadata.clear();
+                    malformed.clear();
                     *failed = false;
                 }
                 Job::Candles { rows, failed, .. } => {
@@ -1112,10 +1177,7 @@ impl Venue for Grvt {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1153,7 +1215,11 @@ impl Venue for Grvt {
                 interval: timeframe,
             } => {
                 if interval(timeframe).is_none() {
-                    cx.log(LogLevel::Error, timeframe.unsupported("GRVT"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        timeframe.unsupported("GRVT"),
+                    );
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
@@ -1195,11 +1261,11 @@ impl Venue for Grvt {
                 to_ms,
             } => {
                 let Some(i) = interval(timeframe) else {
-                    cx.done(command, Err(timeframe.unsupported("GRVT")));
+                    cx.fail(command, timeframe.unsupported("GRVT"));
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Err("Unknown GRVT market".into()));
+                    cx.fail(command, "Unknown GRVT market");
                     return;
                 };
                 #[derive(Serialize)]
@@ -1219,7 +1285,7 @@ impl Venue for Grvt {
                     .chain(to_ms)
                     .any(|v| !v.is_finite() || v < 0.)
                 {
-                    cx.done(command, Err("Invalid GRVT candle bounds".into()));
+                    cx.fail(command, "Invalid GRVT candle bounds");
                     return;
                 }
                 let body = serde_json::to_string(&Body {
@@ -1250,9 +1316,7 @@ impl Venue for Grvt {
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. }
             | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => {
-                cx.done(command, Err("GRVT private phase pending".into()))
-            }
+            | Command::Query { command, .. } => cx.fail(command, "GRVT private phase pending"),
             Command::CancelOrdersWithSymbols { command, .. }
             | Command::FetchMaxLeverage { command, .. }
             | Command::AmendOrderWithSymbol { command, .. }
@@ -1260,7 +1324,7 @@ impl Venue for Grvt {
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. } => {
-                cx.done(command, Err("Unsupported GRVT command".into()))
+                cx.fail(command, "Unsupported GRVT command")
             }
         }
     }
@@ -1278,4 +1342,15 @@ impl Venue for Grvt {
                 .map(|(s, d)| (s.as_str(), &d.book)),
         )
     }
+}
+
+/// The native id of an instrument row that failed to decode, when it has one.
+fn instrument_id(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow, rename = "i", alias = "instrument")]
+        id: std::borrow::Cow<'a, str>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (!row.id.is_empty()).then(|| row.id.into_owned())
 }

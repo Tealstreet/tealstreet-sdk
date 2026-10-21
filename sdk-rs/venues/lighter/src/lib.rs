@@ -8,14 +8,15 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 fn revalue_position(position: &mut Position, price: f64) {
@@ -29,7 +30,7 @@ fn revalue_position(position: &mut Position, price: f64) {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub testnet: bool,
     pub robinhood: bool,
@@ -43,6 +44,15 @@ pub struct Options {
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_key_index);
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -143,12 +153,14 @@ struct CandleState {
     in_flight: bool,
 }
 pub struct Lighter {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     limits: limits::Limits,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
+    /// Native ids and symbols of spot markets, whose private rows belong to another product.
+    spot_markets: HashSet<String>,
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, Interval), CandleState>,
@@ -167,6 +179,7 @@ fn supported(interval: Interval) -> bool {
 }
 impl Lighter {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -174,6 +187,7 @@ impl Lighter {
             limits: limits::Limits::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
+            spot_markets: HashSet::new(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -215,6 +229,9 @@ impl Lighter {
             "USDC"
         }
     }
+    fn spot_market(&self, id_or_symbol: &str) -> bool {
+        !id_or_symbol.is_empty() && self.spot_markets.contains(id_or_symbol)
+    }
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
         self.symbols.get(id).map(String::as_str)
     }
@@ -242,8 +259,12 @@ impl Lighter {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket =
-            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws_url())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         self.public.open = false;
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
@@ -380,7 +401,7 @@ impl Lighter {
             }
             Err(error) => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error))
+                    cx.fail(c, error)
                 }
             }
         }
@@ -620,7 +641,7 @@ impl Lighter {
                 ..
             } => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()));
+                    cx.fail(c, error);
                 } else if let Some(s) = self
                     .candles
                     .get_mut(&(symbol, interval))
@@ -633,6 +654,10 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account_tier: true,
@@ -727,8 +752,9 @@ impl Venue for Lighter {
             return;
         }
         if let Some(error) = frame.error {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 format!("Lighter WS {}: {}", error.code, error.message),
             );
             return;
@@ -853,7 +879,12 @@ impl Venue for Lighter {
             Pending::Markets { rows, metadata, .. } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m) => {
-                        if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
+                        if m.market_type.eq_ignore_ascii_case("spot") {
+                            self.spot_markets.insert(format!("{:.0}", m.market_id));
+                            self.spot_markets.insert(m.symbol.to_string());
+                            return;
+                        }
+                        if m.status != "active" {
                             return;
                         }
                         let size = m
@@ -1182,7 +1213,14 @@ impl Venue for Lighter {
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else {
                     if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                         s.in_flight = false;
@@ -1321,7 +1359,11 @@ impl Venue for Lighter {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
-                    cx.log(LogLevel::Error, "Lighter order book market not found");
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        "Lighter order book market not found",
+                    );
                     return;
                 }
                 let state = self.books.entry(symbol.clone()).or_default();
@@ -1350,7 +1392,11 @@ impl Venue for Lighter {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Lighter"));
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Lighter"),
+                    );
                     return;
                 }
                 let Some(m) = cx.store.market(&symbol) else {
@@ -1408,7 +1454,10 @@ impl Venue for Lighter {
                         })
                         .map_err(|e| e.to_string())
                     });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Command::Query { command, query } => self.history_query(cx, command, query),
             other => self.trade_command(cx, other),

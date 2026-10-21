@@ -3,15 +3,17 @@ mod trading;
 mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
-    SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
+    SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -92,7 +94,7 @@ struct SpotBook {
     last: f64,
 }
 pub struct KucoinSpot {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
@@ -117,6 +119,7 @@ pub struct KucoinSpot {
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = (!options.public_data_only)
             .then(|| {
                 options
@@ -488,16 +491,16 @@ impl KucoinSpot {
         self.wallet_valuation_pending = unpriced;
         if unpriced {
             if newly_unpriced {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     "KuCoin Spot USD wallet valuation awaits a valid quote; retaining prior USD balance",
                 );
             }
             return Ok(());
         }
         if unquoted && !self.wallet_unquoted_warned {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "KuCoin Spot wallet currency has no USD quote; valued at 0",
             );
         }
@@ -774,12 +777,13 @@ impl Venue for KucoinSpot {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if self.options.testnet || (!self.options.public_data_only && self.credentials.is_none()) {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "KuCoin Spot requires production key, secret and passphrase",
             );
             return;
@@ -859,11 +863,12 @@ impl Venue for KucoinSpot {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
-            {
-                Ok(r) => rows.push(r.market()),
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            Pending::Markets { rows, invalid: _ } => {
+                match serde_json::from_str::<Instrument>(item).map(Instrument::market) {
+                    Ok(market) if market.precision.is_tradable() => rows.push(market),
+                    _ => safe_cex_engine::startup::skipped_row(cx),
+                }
+            }
             Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
                 Err(_) => safe_cex_engine::startup::skipped_row(cx),
@@ -970,17 +975,20 @@ impl Venue for KucoinSpot {
                             cx.now as u64,
                             channel,
                         );
-                        c.socket = Some(cx.connect_channel(
-                            url,
+                        c.socket = Some(cx.connect(safe_cex_engine::SocketSpec::new(url).channel(
                             if channel == 1 {
                                 SocketChannel::Private
                             } else {
                                 SocketChannel::Public
                             },
-                        ));
+                        )));
                     }
                     _ => {
-                        cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
+                        cx.notice(
+                            Level::Error,
+                            code::STREAM_UNAVAILABLE,
+                            "invalid KuCoin Spot bullet server",
+                        );
                         self.reconnect(cx, channel);
                     }
                 }
@@ -991,7 +999,7 @@ impl Venue for KucoinSpot {
                 if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT)
                     && let Err(e) = self.account_balance(cx, data)
                 {
-                    cx.log(LogLevel::Error, e);
+                    cx.retried_failure("kucoin.spot.mod:1001", e);
                 }
                 if !current {
                     self.heal(cx, true);
@@ -1006,7 +1014,7 @@ impl Venue for KucoinSpot {
                         .collect::<VecDeque<_>>(),
                     Err(e) => {
                         self.orders_loading = false;
-                        cx.log(LogLevel::Error, e.to_string());
+                        cx.retried_failure("kucoin.spot.mod:1016", e.to_string());
                         return;
                     }
                 };
@@ -1112,7 +1120,7 @@ impl Venue for KucoinSpot {
                     r.page = 1;
                     self.page(cx, r);
                 } else if let Some((command, id)) = r.lookup {
-                    cx.done(command, Ok(lookup_output(&r.symbol, &id, &r.rows)));
+                    cx.done(command, lookup_output(&r.symbol, &id, &r.rows));
                 } else {
                     self.orders_loading = false;
                     if r.revision == self.revision {
@@ -1129,10 +1137,10 @@ impl Venue for KucoinSpot {
                 invalid,
             } => {
                 if invalid {
-                    cx.done(command, Err("invalid KuCoin Spot candles".into()));
+                    cx.fail(command, "invalid KuCoin Spot candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                    cx.done(command, serde_json::to_string(&rows).unwrap());
                 }
             }
             Pending::Account(command) => {
@@ -1164,7 +1172,10 @@ impl Venue for KucoinSpot {
                         )
                     })
                     .map_err(|e| e.to_string());
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Pending::Fills(command) => {
                 #[derive(Serialize)]
@@ -1198,7 +1209,10 @@ impl Venue for KucoinSpot {
                     }
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 })();
-                cx.done(command, out);
+                match out {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
             }
         }
     }
@@ -1222,7 +1236,7 @@ impl Venue for KucoinSpot {
                 if let Some((command, id)) = r.lookup {
                     cx.command_error(command, error);
                     let out = lookup_output(&r.symbol, &id, cx.store.orders());
-                    cx.done(command, Ok(out));
+                    cx.done(command, out);
                     return;
                 } else {
                     self.orders_loading = false;
@@ -1237,20 +1251,14 @@ impl Venue for KucoinSpot {
             | Pending::Fills(command)
             | Pending::Account(command) => {
                 cx.command_error(command, error);
-                cx.done(command, Err(error.into()));
+                cx.fail(command, error);
                 return;
             }
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
-        cx.log(
-            if discovery {
-                LogLevel::Warning
-            } else {
-                LogLevel::Error
-            },
-            error,
-        );
+        let level = if discovery { Level::Warn } else { Level::Error };
+        cx.notice(level, code::REQUEST_FAILED, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(tickers) = self.discovery.on_timer(timer) {
@@ -1315,7 +1323,11 @@ impl Venue for KucoinSpot {
                 interval: i,
             } => {
                 if interval(i).is_err() {
-                    cx.log(LogLevel::Error, i.unsupported("KuCoin Spot"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("KuCoin Spot"),
+                    );
                     return;
                 }
                 let n = self.candles.entry((symbol.clone(), i)).or_default();
@@ -1356,7 +1368,7 @@ impl Venue for KucoinSpot {
                 to_ms,
             } => {
                 let Ok((minutes, native)) = interval(i) else {
-                    cx.done(command, Err(i.unsupported("KuCoin Spot")));
+                    cx.fail(command, i.unsupported("KuCoin Spot"));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1406,7 +1418,7 @@ impl Venue for KucoinSpot {
 impl KucoinSpot {
     fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         if self.credentials.is_none() {
-            cx.done(command, Err("KuCoin Spot requires credentials".into()));
+            cx.fail(command, "KuCoin Spot requires credentials");
             return;
         }
         match query {
@@ -1418,7 +1430,7 @@ impl KucoinSpot {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 let mut path = format!("/api/v1/hf/fills?symbol={symbol}");
@@ -1454,11 +1466,11 @@ impl KucoinSpot {
                     }
                     cx.done(
                         command,
-                        Ok(serde_json::to_string(&Found {
+                        serde_json::to_string(&Found {
                             found: true,
                             order: o,
                         })
-                        .unwrap()),
+                        .unwrap(),
                     );
                 } else {
                     self.page(
@@ -1474,11 +1486,59 @@ impl KucoinSpot {
                     );
                 }
             }
-            Query::PublicTrades { .. } => cx.done(
+            Query::PublicTrades { .. } => cx.fail(
                 command,
-                Err("KuCoin Spot public trades are not implemented in TS".into()),
+                "KuCoin Spot public trades are not implemented in TS",
             ),
-            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, Ok("[]".into())),
+            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, "[]".into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod security_credentials {
+    use super::*;
+    use safe_cex_crypto::secrets::EraseSecrets;
+    #[test]
+    fn spot_owns_both_credential_copies_in_scrubbing_carriers() {
+        let mut venue = KucoinSpot::new(Options {
+            key: Some("private-key".into()),
+            secret: Some("private-secret".into()),
+            passphrase: Some("private-passphrase".into()),
+            broker: Some(sign::BrokerOptions {
+                partner: "partner".into(),
+                broker_key: "private-broker-key".into(),
+                broker_name: "broker".into(),
+                verify: None,
+            }),
+            ..Options::default()
+        });
+        let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+        assert!(venue.credentials.is_some());
+        venue.options.erase_secrets();
+        venue.credentials.as_mut().unwrap().erase_secrets();
+        assert!(venue.options.secret.is_none());
+        assert!(venue.options.broker.as_ref().unwrap().broker_key.is_empty());
+        let credentials = venue.credentials.as_ref().unwrap();
+        assert!(credentials.secret.is_empty() && credentials.passphrase.is_empty());
+        assert!(credentials.broker.as_ref().unwrap().broker_key.is_empty());
+    }
+    #[test]
+    fn incomplete_and_public_only_credentials_keep_a_scrubbing_owner() {
+        for (key, public_data_only) in [
+            (None, false),
+            (Some(String::new()), false),
+            (Some("key".into()), true),
+        ] {
+            let venue = KucoinSpot::new(Options {
+                key,
+                secret: Some("private-secret".into()),
+                passphrase: Some("private-passphrase".into()),
+                public_data_only,
+                ..Options::default()
+            });
+            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+            assert!(venue.credentials.is_none());
         }
     }
 }

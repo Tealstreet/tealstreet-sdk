@@ -134,7 +134,7 @@ fn charts_are_public_and_convert_ms_to_seconds() {
         200,
         r#"{"candles":[{"time":1700000000000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}]}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:7,result:Ok(s)})if s.contains("1700000000.0"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:7,result:s})if s.contains("1700000000.0"))));
 }
 #[test]
 fn public_socket_role_is_explicit() {
@@ -230,10 +230,7 @@ fn failed_or_incomplete_candles_are_explicit_errors() {
         reply(&mut e, &r, 200, body);
         assert!(e.drain_actions().any(|a| matches!(
             a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone {
-                command: 9,
-                result: Err(_)
-            })
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 9, .. })
         )));
     }
 }
@@ -261,7 +258,7 @@ fn malformed_credentials_report_a_signing_error_before_private_activation() {
         ..Default::default()
     }));
     e.start(NOW);
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("base64"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("base64"))));
 }
 
 #[test]
@@ -422,7 +419,7 @@ fn capped_candle_page_continues_to_the_newest_bars() {
         200,
         r#"{"candles":[{"time":1699999940000,"open":"2","high":"3","low":"1","close":"2.5","volume":"4"}],"more_candles":false}"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Ok(s) }) if s.contains("1699999880.0") && s.contains("1699999940.0"))));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: s }) if s.contains("1699999880.0") && s.contains("1699999940.0"))));
 }
 // Kraken Futures used to chart unsupported intervals as 1h candles.
 #[test]
@@ -443,7 +440,7 @@ fn unsupported_chart_intervals_are_rejected_not_served_as_one_hour() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Err(e) })
-            if e == "Kraken does not support 3m candles"
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 8, error: e })
+            if e.legacy_text() == "Kraken does not support 3m candles"
     )));
 }

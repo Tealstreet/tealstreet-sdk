@@ -9,24 +9,26 @@ pub mod spot;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    Store, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, Store,
+    TimerId, Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 const REST: &str = "https://api-futures.kucoin.com";
 const SNAPSHOT_SHARD: usize = 380;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -35,6 +37,20 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub broker: Option<sign::BrokerOptions>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+        if let Some(broker) = self.broker.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(broker);
+        }
+    }
 }
 
 pub enum Pending {
@@ -45,7 +61,7 @@ pub enum Pending {
     Funding(funding::Request),
     Markets {
         rows: Vec<Market>,
-        invalid: bool,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -126,7 +142,7 @@ struct BookState {
 }
 
 pub struct Kucoin {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
     trading: trading::Trading,
@@ -138,6 +154,11 @@ pub struct Kucoin {
     message_id: u64,
     book_generation: u64,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    /// Discovery retries wait out a rate-limit window the venue announced.
+    discovery_paused_until: f64,
+    // Unified symbols of contracts rejected as malformed; owned exposure there holds.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
 }
 
 pub(crate) fn internal_symbol(id: &str) -> String {
@@ -198,6 +219,7 @@ fn success(status: u16, body: &str) -> Result<Envelope<'_>, String> {
 
 impl Kucoin {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -227,6 +249,9 @@ impl Kucoin {
             message_id: 0,
             book_generation: 0,
             discovery: Default::default(),
+            discovery_paused_until: 0.0,
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
         }
     }
     pub(crate) fn signed(
@@ -366,7 +391,7 @@ impl Kucoin {
             } else {
                 Pending::Markets {
                     rows: vec![],
-                    invalid: false,
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -580,7 +605,7 @@ impl Kucoin {
         generation: u64,
         error: &str,
     ) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         if let Some(book) = self
             .books
             .get_mut(symbol)
@@ -784,16 +809,21 @@ impl Venue for Kucoin {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if self.options.testnet {
-            cx.log(LogLevel::Error, "KuCoin Futures testnet is unsupported");
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "KuCoin Futures testnet is unsupported",
+            );
             return;
         }
         if !self.options.public_data_only && self.credentials.is_none() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "KuCoin credentials require key, secret and passphrase",
             );
             return;
@@ -903,15 +933,24 @@ impl Venue for Kucoin {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Funding(request) => self.funding_item(cx, request, item),
             Pending::Trade(request) => self.trading_item(cx, request, item),
-            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
-            {
-                Ok(row) => {
-                    if let Some(m) = row.market() {
-                        rows.push(m);
+            Pending::Markets { rows, malformed } => {
+                match serde_json::from_str::<Instrument>(item) {
+                    Ok(row) => {
+                        if let Some(m) = row.market() {
+                            rows.push(m);
+                        }
+                    }
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(key) = serde_json::from_str::<InstrumentKey>(item)
+                            && !key.symbol.is_empty()
+                            && key.in_scope()
+                        {
+                            malformed.insert(internal_symbol(&key.symbol));
+                        }
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            }
             Pending::Tickers { rows, invalid: _ } => {
                 match serde_json::from_str::<TickerRow>(item) {
                     Ok(row) => {
@@ -941,6 +980,10 @@ impl Venue for Kucoin {
         }
         let status = response.status;
         let body = response.body;
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         match pending {
             Pending::Identity(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
@@ -977,7 +1020,11 @@ impl Venue for Kucoin {
                                 && s.ping_timeout.is_finite()
                                 && s.ping_timeout >= 1000.0
                         }) else {
-                            cx.log(LogLevel::Error, "invalid KuCoin websocket server");
+                            cx.notice(
+                                Level::Error,
+                                code::STREAM_UNAVAILABLE,
+                                "invalid KuCoin websocket server",
+                            );
                             self.reconnect_later(cx, channel);
                             return;
                         };
@@ -998,34 +1045,55 @@ impl Venue for Kucoin {
                             }
                             Role::Private => (SocketChannel::Private, "private".into()),
                         };
-                        c.socket = Some(cx.connect_feed(
-                            format!(
-                                "{}{separator}token={}&connectId={}-{}",
-                                server.endpoint,
-                                encode(bullet.token),
-                                cx.now as u64,
-                                self.message_id
+                        c.socket = Some(
+                            cx.connect(
+                                safe_cex_engine::SocketSpec::new(format!(
+                                    "{}{separator}token={}&connectId={}-{}",
+                                    server.endpoint,
+                                    encode(bullet.token),
+                                    cx.now as u64,
+                                    self.message_id
+                                ))
+                                .channel(role)
+                                .feed(feed, false),
                             ),
-                            role,
-                            feed,
-                            false,
-                        ));
+                        );
                         c.pong = Some(cx.set_timer(c.ping_timeout));
                     }
                     Err(error) => {
-                        cx.log(LogLevel::Warning, error);
+                        cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error);
                         self.reconnect_later(cx, channel);
                     }
                 }
             }
-            Pending::Markets { rows, invalid } => {
-                if success(status, body).is_err() || invalid || rows.is_empty() {
-                    self.discovery.failed(cx, false);
+            Pending::Markets { rows, malformed } => {
+                if success(status, body).is_err() || rows.is_empty() {
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.discovery.failed_after(cx, false, pause);
                 } else {
-                    self.discovery.succeeded(cx, &false);
+                    let refresh = cx.store.loaded().markets;
+                    let rows = if refresh {
+                        keep_listed(cx.store.markets(), rows)
+                    } else {
+                        rows
+                    };
                     cx.store.set_markets(rows);
                     self.books
                         .retain(|symbol, _| cx.store.market(symbol).is_some());
+                    let before = self.malformed_markets.len();
+                    self.malformed_markets.extend(malformed);
+                    self.malformed_markets
+                        .retain(|symbol| cx.store.market(symbol).is_none());
+                    let after = self.malformed_markets.len();
+                    // A partial catalogue commits so private reads start, then re-reads.
+                    if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                        self.discovery.failed(cx, false);
+                    } else {
+                        self.discovery.succeeded(cx, &false);
+                    }
+                    if refresh {
+                        return;
+                    }
                     self.discovery_read(cx, true);
                     if self.credentials.is_some() {
                         self.account_start(cx);
@@ -1034,7 +1102,8 @@ impl Venue for Kucoin {
             }
             Pending::Tickers { rows, invalid } => {
                 if success(status, body).is_err() || invalid || rows.is_empty() {
-                    self.discovery.failed(cx, true);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.discovery.failed_after(cx, true, pause);
                 } else {
                     self.discovery.succeeded(cx, &true);
                     cx.store.set_tickers(rows);
@@ -1046,16 +1115,19 @@ impl Venue for Kucoin {
                 rows,
                 invalid,
             } => {
-                cx.done(
-                    command,
-                    success(status, body).and_then(|_| {
+                {
+                    let result: Result<String, String> = success(status, body).and_then(|_| {
                         if invalid {
                             Err("invalid KuCoin candle row".into())
                         } else {
                             serde_json::to_string(&rows).map_err(|e| e.to_string())
                         }
-                    }),
-                );
+                    });
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
         }
     }
@@ -1082,12 +1154,18 @@ impl Venue for Kucoin {
                     return;
                 }
                 self.connections[channel].token_pending = false;
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error);
                 self.reconnect_later(cx, channel);
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Markets { .. } => self.discovery.failed(cx, false),
-            Pending::Tickers { .. } => self.discovery.failed(cx, true),
+            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Markets { .. } => {
+                let pause = self.discovery_paused_until - cx.now;
+                self.discovery.failed_after(cx, false, pause);
+            }
+            Pending::Tickers { .. } => {
+                let pause = self.discovery_paused_until - cx.now;
+                self.discovery.failed_after(cx, true, pause);
+            }
             Pending::Identity(_) => unreachable!(),
         }
     }
@@ -1148,11 +1226,15 @@ impl Venue for Kucoin {
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::FetchLeverage { command, .. } => {
-                cx.done(command, Err("KuCoin leverage query is unsupported".into()));
+                cx.fail(command, "KuCoin leverage query is unsupported");
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
-                    cx.log(LogLevel::Error, "unknown KuCoin market");
+                    cx.notice(
+                        Level::Error,
+                        code::SUBSCRIPTION_REJECTED,
+                        "unknown KuCoin market",
+                    );
                     return;
                 }
                 if !self.books.contains_key(&symbol) {
@@ -1203,7 +1285,7 @@ impl Venue for Kucoin {
                         );
                     }
                 }
-                Err(e) => cx.log(LogLevel::Error, e),
+                Err(e) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e),
             },
             Command::UnsubscribeCandles {
                 symbol,
@@ -1245,13 +1327,13 @@ impl Venue for Kucoin {
                             from_ms.unwrap_or(end - minutes as f64 * 60000.0 * 500.0)
                         };
                         if !start.is_finite() || !end.is_finite() || start < 0.0 || start > end {
-                            cx.done(command, Err("invalid KuCoin candle range".into()));
+                            cx.fail(command, "invalid KuCoin candle range");
                             return;
                         }
                         let api = api_symbol(cx.store, &symbol);
                         self.public(cx,&format!("/api/v1/kline/query?symbol={api}&granularity={minutes}&from={}&to={}",start as u64,end as u64),Some(ArrayAt::EnvelopeField("data")),Pending::Candles{command,rows:vec![],invalid:false});
                     }
-                    Err(e) => cx.done(command, Err(e)),
+                    Err(e) => cx.fail(command, e),
                 }
             }
             Command::Query { command, query } => self.history_command(cx, command, query),
@@ -1276,6 +1358,59 @@ impl Venue for Kucoin {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("KuCoin stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

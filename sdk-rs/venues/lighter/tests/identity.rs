@@ -49,6 +49,12 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) => {
+                let result: Result<String, String> = Ok(result);
+                assert_eq!(command, 42);
+                done.push(result);
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 assert_eq!(command, 42);
                 done.push(result);
             }
@@ -64,7 +70,6 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
             Action::Http(_)
             | Action::SignPayload { .. }
             | Action::WsConnect { .. }
-            | Action::WsConnectWithHeaders { .. }
             | Action::WsSend { .. }
             | Action::SetTimer { .. } => {
                 panic!("identity completion must not start another lifecycle")

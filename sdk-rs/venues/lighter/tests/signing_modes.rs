@@ -75,7 +75,7 @@ fn reject_write(engine: &mut Engine<Lighter>) {
             .any(|action| matches!(action, Action::Http(_)))
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 9, result: Err(error) }) if error.contains("signer unavailable"))));
+        Action::Notice(Notice::CommandFailed { command: 9, error }) if error.message.contains("signer unavailable"))));
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
                     .iter()
                     .any(|action| matches!(action, Action::Http(_)))
             );
-            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: Ok(value) }) if value == "[]")));
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: value }) if value == "[]")));
         }
         result.engine.handle(
             NOW,

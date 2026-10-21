@@ -2,7 +2,9 @@
 use crate::account::decode_order;
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{CommandId, Cx, Query, Response};
@@ -50,6 +52,21 @@ pub(crate) struct Request {
     failed: Option<String>,
     rows: Vec<Row>,
     staged: Vec<Row>,
+}
+/// Request-level failures fail the read; row-level ones skip only that row.
+enum Rejected {
+    Request(String),
+    Row(String),
+}
+impl From<String> for Rejected {
+    fn from(error: String) -> Self {
+        Self::Request(error)
+    }
+}
+impl From<&str> for Rejected {
+    fn from(error: &str) -> Self {
+        Self::Request(error.into())
+    }
 }
 impl Request {
     pub(crate) fn array_at(&self) -> Option<ArrayAt> {
@@ -348,7 +365,7 @@ impl Grvt {
                     None | Some("FUNDING_FEE") => Kind::Funding,
                     Some("COMMISSION" | "REALIZED_PNL") => Kind::IncomeFills,
                     _ => {
-                        cx.done(command, Err("Unsupported GRVT income category".into()));
+                        cx.fail(command, "Unsupported GRVT income category");
                         return;
                     }
                 };
@@ -381,15 +398,12 @@ impl Grvt {
         };
         if kind != Kind::Trades && (self.options.public_data_only || self.account.session.is_none())
         {
-            cx.done(
-                command,
-                Err("GRVT query requires an authenticated session".into()),
-            );
+            cx.fail(command, "GRVT query requires an authenticated session");
             return;
         }
         let selected = symbol.as_ref().and_then(|s| cx.store.market(s));
         if symbol.is_some() && selected.is_none() {
-            cx.done(command, Err("Unknown GRVT query market".into()));
+            cx.fail(command, "Unknown GRVT query market");
             return;
         }
         let result =
@@ -397,12 +411,12 @@ impl Grvt {
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {
-                cx.done(command, Err(e));
+                cx.fail(command, e);
                 return;
             }
         };
         if from.is_some_and(|f| f > to) || order_id.as_ref().is_some_and(String::is_empty) {
-            cx.done(command, Err("Invalid GRVT query range or order ID".into()));
+            cx.fail(command, "Invalid GRVT query range or order ID");
             return;
         }
         if kind == Kind::Lookup
@@ -410,12 +424,12 @@ impl Grvt {
                 id.parse::<u64>().ok().is_none_or(|n| n == 0) || id.starts_with('0')
             })
         {
-            cx.done(command, Err("Invalid GRVT client order ID".into()));
+            cx.fail(command, "Invalid GRVT client order ID");
             return;
         }
         let account = self.account.trading_account_id.clone();
         if kind != Kind::Trades && account.is_none() {
-            cx.done(command, Err("GRVT query requires a subaccount".into()));
+            cx.fail(command, "GRVT query requires a subaccount");
             return;
         }
         let target_created = order_id
@@ -504,9 +518,18 @@ impl Grvt {
             r.failed = Some("Malformed GRVT history page exceeds the native limit".into());
             return;
         }
-        let result = self.history_decode(cx, r, item);
-        if let Err(error) = result {
-            r.failed = Some(error);
+        match self.history_decode(cx, r, item) {
+            Ok(()) => {}
+            Err(Rejected::Request(error)) => r.failed = Some(error),
+            Err(Rejected::Row(error)) => {
+                // The raw text stands in for the identity, so paging still sees a fresh row.
+                r.page_raw.insert(format!("skipped:{item}"));
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
+                    format!("Skipped malformed GRVT historical order: {error}"),
+                );
+            }
         }
     }
     fn history_decode(
@@ -514,7 +537,7 @@ impl Grvt {
         cx: &Cx<'_, Pending>,
         r: &mut Request,
         item: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), Rejected> {
         match r.kind {
             Kind::Fills | Kind::IncomeFills => {
                 let f: FillWire<'_> =
@@ -676,19 +699,20 @@ impl Grvt {
                 }
             }
             Kind::Orders => {
-                let o = decode_order(item, cx.store, cx.now)?;
+                // Ownership is checked before decoding, so a foreign row always fails the read.
+                let extra: OrderExtras<'_> = serde_json::from_str(item)
+                    .map_err(|_| Rejected::Row("Invalid GRVT historical order".into()))?;
+                if !extra.account.is_empty() && Some(&*extra.account) != r.account.as_deref() {
+                    return Err("GRVT order belongs to another subaccount".into());
+                }
+                let o = decode_order(item, cx.store, cx.now).map_err(Rejected::Row)?;
                 r.page_raw.insert(
                     o.native_id
                         .clone()
                         .unwrap_or_else(|| format!("{}:{}", o.order.id, o.created_ns)),
                 );
-                let extra: OrderExtras<'_> =
-                    serde_json::from_str(item).map_err(|_| "Invalid GRVT historical order")?;
-                if !extra.account.is_empty() && Some(&*extra.account) != r.account.as_deref() {
-                    return Err("GRVT order belongs to another subaccount".into());
-                }
                 if o.created_ns == 0 {
-                    return Err("Missing GRVT order creation time".into());
+                    return Err(Rejected::Row("Missing GRVT order creation time".into()));
                 }
                 if o.order.status == OrderStatus::Open || !r.accepts(&o.order.symbol, o.created_ns)
                 {
@@ -794,7 +818,10 @@ impl Grvt {
                 })
                 .map_err(|e| e.to_string())
             })();
-            cx.done(r.command, result);
+            match result {
+                Ok(data) => cx.done(r.command, data),
+                Err(error) => cx.fail(r.command, error),
+            };
             return;
         }
         if let Some(error) = r.failed.take() {
@@ -864,10 +891,10 @@ impl Grvt {
         }
         r.rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
         r.rows.truncate(r.limit);
-        cx.done(
-            r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(r.command, data),
+            Err(error) => cx.fail(r.command, error),
+        };
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -875,6 +902,6 @@ impl Grvt {
         request: Request,
         error: &str,
     ) {
-        cx.done(request.command, Err(error.to_owned()));
+        cx.fail(request.command, error.to_owned());
     }
 }

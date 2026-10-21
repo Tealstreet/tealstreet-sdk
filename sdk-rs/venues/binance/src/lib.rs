@@ -8,13 +8,15 @@ mod sign;
 mod trading;
 pub mod wire;
 
+use safe_cex_engine::Level;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query, Signed};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -30,6 +32,9 @@ const SILENCE_LIMIT_MS: f64 = 20_000.0;
 /// Background reads pause at 80% of the 2,400 request-weight budget.
 const WEIGHT_PAUSE_THRESHOLD: f64 = 1_920.0;
 const WEIGHT_PAUSE_MS: f64 = 60_000.0;
+/// Binance IP bans can last hours; a longer or overflowing `Retry-After` is capped
+/// so background reads resume instead of stopping for good.
+const MAX_BAN_PAUSE_MS: f64 = 86_400_000.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Variant {
@@ -40,7 +45,7 @@ pub enum Variant {
     Spot,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -52,6 +57,16 @@ pub struct Options {
     pub recv_window: Option<f64>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 struct Urls {
@@ -206,7 +221,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     urls: Urls,
     paths: &'static paths::Paths,
     credentials: Option<Credentials>,
@@ -235,7 +250,13 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
-    pub fn new(mut options: Options) -> Self {
+    /// The catalogue is complete and no discovery read awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && self.discovery.idle()
+    }
+
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         if options.variant == Variant::UsdM && options.portfolio_margin {
             options.variant = Variant::PortfolioMargin;
         }
@@ -427,9 +448,13 @@ impl BinanceFutures {
                 Channel::SpotTicker(index) => format!("spot-ticker-{index}"),
                 _ => "spot-books".to_owned(),
             };
-            cx.connect_feed(url, role, feed, false)
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(role)
+                    .feed(feed, false),
+            )
         } else {
-            cx.connect_channel(url, role)
+            cx.connect(safe_cex_engine::SocketSpec::new(url).channel(role))
         };
         let connection = self.connection(channel);
         connection.socket = Some(socket);
@@ -453,7 +478,9 @@ impl BinanceFutures {
                     .header("retry-after")
                     .map(num::parse)
                     .filter(|seconds| *seconds > 0.0)
-                    .map_or(WEIGHT_PAUSE_MS, |seconds| seconds * 1_000.0),
+                    .map_or(WEIGHT_PAUSE_MS, |seconds| {
+                        (seconds * 1_000.0).min(MAX_BAN_PAUSE_MS)
+                    }),
             )
         } else {
             response
@@ -513,8 +540,9 @@ impl BinanceFutures {
             self.reset_spot_subscription(cx);
             self.account.resync_orders_on_open = true;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::WS_DISCONNECTED,
             format!("Binance socket closed ({code}); reconnecting"),
         );
     }
@@ -540,8 +568,9 @@ impl BinanceFutures {
         for topic in params {
             let encoded = serde_json::to_string(topic).expect("string");
             if encoded.len() + 128 >= 4096 {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
                     "Binance Spot stream name exceeds the control frame limit",
                 );
                 return;
@@ -630,14 +659,16 @@ impl BinanceFutures {
         rejected: bool,
     ) {
         if response.status != 200 || markets.is_empty() {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 format!(
                     "Binance exchangeInfo read unavailable (HTTP {})",
                     response.status
                 ),
             );
-            self.discovery.failed(cx, 0);
+            self.discovery
+                .failed_after(cx, 0, self.background_paused_until - cx.now);
             return;
         }
         let was_loaded = cx.store.loaded().markets;
@@ -666,7 +697,8 @@ impl BinanceFutures {
         }
         self.catalogue_partial = rejected;
         if rejected {
-            self.discovery.failed(cx, 0);
+            self.discovery
+                .failed_after(cx, 0, self.background_paused_until - cx.now);
         } else {
             self.discovery.succeeded(cx, &0);
         }
@@ -772,12 +804,17 @@ impl BinanceFutures {
             Err(error) => Some(error.to_owned()),
         };
         if let Some(failure) = failure {
-            cx.log(LogLevel::Warning, format!("Binance tickers: {failure}"));
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("Binance tickers: {failure}"),
+            );
             for reported in &mut self.ticker_seed.reported {
                 *reported &= !from;
             }
             self.ticker_seed.finished &= !from;
-            self.discovery.failed(cx, from);
+            self.discovery
+                .failed_after(cx, from, self.background_paused_until - cx.now);
             return;
         }
         self.discovery.succeeded(cx, &from);
@@ -807,8 +844,9 @@ impl BinanceFutures {
                 .map(|(ticker, _)| ticker)
                 .collect()
         };
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::STARTUP_PROGRESS,
             format!(
                 "Loaded {} Binance markets",
                 tickers.len().min(cx.store.markets().len())
@@ -1021,8 +1059,10 @@ impl BinanceFutures {
     fn snapshot_failed(cx: &mut Cx<'_, Pending>, state: &mut BookState, min_delay_ms: f64) {
         state.book.clear();
         state.failures += 1;
-        let backoff = (1_000.0 * 2f64.powi(state.failures as i32 - 1)).min(MAX_SNAPSHOT_BACKOFF_MS);
-        state.sync = Sync::Cooldown(cx.set_timer(backoff.max(min_delay_ms)));
+        let backoff = Backoff::new(1_000.0, u32::MAX, MAX_SNAPSHOT_BACKOFF_MS)
+            .delay(state.failures.saturating_sub(1));
+        let delay = cx.jittered(backoff).max(min_delay_ms);
+        state.sync = Sync::Cooldown(cx.set_timer(delay));
     }
 
     fn on_depth_snapshot(
@@ -1040,8 +1080,9 @@ impl BinanceFutures {
                 RATE_LIMIT_PAUSE_MS
             };
             self.rest_paused_until = self.rest_paused_until.max(cx.now + pause);
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_PAUSED,
                 format!(
                     "Binance REST limited (HTTP {status}); pausing depth snapshots for {pause} ms"
                 ),
@@ -1115,8 +1156,9 @@ impl BinanceFutures {
             && !self.books.contains_key(&symbol)
             && self.books.len() + self.candles.len() >= 1_024
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
                 "Binance Spot supports at most 1024 combined book/candle streams per account",
             );
             return;
@@ -1159,16 +1201,10 @@ impl BinanceFutures {
     ) {
         let Response { status, body, .. } = response;
         if status != 200 {
-            cx.done(
-                command,
-                Err(format!("Binance klines HTTP {status}: {body}")),
-            );
+            cx.fail(command, format!("Binance klines HTTP {status}: {body}"));
             return;
         }
-        cx.done(
-            command,
-            Ok(serde_json::to_string(&candles).unwrap_or_default()),
-        );
+        cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
     }
 }
 
@@ -1277,6 +1313,10 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         match self.options.variant {
@@ -1297,7 +1337,7 @@ impl Venue for BinanceFutures {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.get_streamed(
@@ -1383,8 +1423,9 @@ impl Venue for BinanceFutures {
                 if let Some(at) = pending.iter().position(|request| *request == id) {
                     pending.swap_remove(at);
                     if ack.code.is_some_and(|code| code != 0) {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::SUBSCRIPTION_REJECTED,
                             format!("Binance Spot subscription rejected: {}", ack.msg),
                         );
                         cx.close(socket);
@@ -1456,7 +1497,13 @@ impl Venue for BinanceFutures {
                             && matches!(&*m.margin_asset, "USDT" | "USDC")
                     }
                 {
-                    markets.push(market_from_wire(&m, self.options.variant));
+                    let market = market_from_wire(&m, self.options.variant);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Pending::Daily => {
@@ -1527,7 +1574,7 @@ impl Venue for BinanceFutures {
             return;
         }
         match pending {
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation
@@ -1536,7 +1583,10 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::Account(request) => self.on_account_failed(cx, request, error),
-            Pending::ExchangeInfo { .. } => self.discovery.failed(cx, 0),
+            Pending::ExchangeInfo { .. } => {
+                self.discovery
+                    .failed_after(cx, 0, self.background_paused_until - cx.now)
+            }
             Pending::Daily => self.source_finished(cx, source::DAILY, Err(error)),
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
@@ -1610,14 +1660,18 @@ impl Venue for BinanceFutures {
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {
                 if !self.supports(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Binance"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Binance"),
+                    );
                     return;
                 }
                 if self.is_spot()
                     && !self.candles.contains_key(&(symbol.clone(), interval))
                     && self.books.len() + self.candles.len() >= 1_024
                 {
-                    cx.log(LogLevel::Error, "Binance Spot supports at most 1024 combined book/candle streams per account");
+                    cx.notice(Level::Error, code::SUBSCRIPTION_REJECTED, "Binance Spot supports at most 1024 combined book/candle streams per account");
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_insert(0);
@@ -1647,13 +1701,13 @@ impl Venue for BinanceFutures {
                 to_ms,
             } => {
                 if !self.supports(interval) {
-                    cx.done(command, Err(interval.unsupported("Binance")));
+                    cx.fail(command, interval.unsupported("Binance"));
                     return;
                 }
                 let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
-                        cx.done(command, Err(error.into()));
+                        cx.fail(command, error);
                         return;
                     }
                 };

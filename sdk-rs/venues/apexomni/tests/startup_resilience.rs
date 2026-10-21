@@ -1,6 +1,11 @@
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 // A transport failure must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
@@ -34,7 +39,10 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );
@@ -45,7 +53,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         let timer = actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == now + delay => Some(*timer),
+                Action::SetTimer { timer, at_ms } if jittered(*at_ms - now, delay) => Some(*timer),
                 _ => None,
             })
             .expect("bounded public discovery backoff");

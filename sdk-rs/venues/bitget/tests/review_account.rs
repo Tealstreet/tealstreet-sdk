@@ -106,11 +106,11 @@ fn late_uta_detection_that_never_responds_completes_with_a_bounded_error() {
 }
 
 #[test]
-fn confirmed_uta_probe_retry_exhaustion_cannot_restart_classic_detection() {
+fn repeated_confirmed_uta_probe_failures_cannot_restart_classic_detection() {
     let mut h = Harness::classic();
     late_uta_query(&mut h);
     for _ in 0..4 {
-        for _ in 0..20 {
+        for _ in 0..200 {
             if h.requests
                 .iter()
                 .any(|r| r.url.contains("/account/settings"))
@@ -189,7 +189,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -200,7 +200,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -214,12 +214,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -230,9 +230,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -248,7 +248,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {

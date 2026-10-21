@@ -1,14 +1,25 @@
 //! Optional credentials for the TS secondary client's GET-only identity.
+use zeroize::Zeroize;
+
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadCredentials {
     pub key: String,
+    /// A missing secret parses so `validate` rejects it by name; AsterDEX ignores the field.
+    #[serde(default)]
     pub secret: String,
     #[serde(default)]
     pub passphrase: Option<String>,
 }
 
 impl ReadCredentials {
+    /// Erase an engine-owned copy before its containing options are released.
+    pub fn erase_secrets(&mut self) {
+        self.key.zeroize();
+        self.secret.zeroize();
+        self.passphrase.zeroize();
+    }
+
     pub fn validate_passphrase(&self, primary: Option<&str>) -> Result<(), &'static str> {
         if self
             .passphrase
@@ -42,7 +53,8 @@ mod tests {
     use super::*;
     #[test]
     fn secondary_credentials_require_both_keys_and_inherit_passphrase_only_when_omitted() {
-        assert!(serde_json::from_str::<ReadCredentials>(r#"{"key":"read"}"#).is_err());
+        let missing: ReadCredentials = serde_json::from_str(r#"{"key":"read"}"#).unwrap();
+        assert!(missing.validate().is_err());
         let mut read: ReadCredentials =
             serde_json::from_str(r#"{"key":"read","secret":"secret"}"#).unwrap();
         assert!(read.validate().is_ok());
@@ -64,5 +76,18 @@ mod tests {
         for part in ["test-key", "test-secret", "test-pass"] {
             assert!(!debug.contains(part));
         }
+    }
+
+    #[test]
+    fn secondary_credential_cleanup_erases_all_owned_fields() {
+        let mut read = ReadCredentials {
+            key: "secondary-key".into(),
+            secret: "secondary-secret".into(),
+            passphrase: Some("secondary-passphrase".into()),
+        };
+        read.erase_secrets();
+        assert!(read.key.is_empty());
+        assert!(read.secret.is_empty());
+        assert!(read.passphrase.as_deref().is_none_or(str::is_empty));
     }
 }

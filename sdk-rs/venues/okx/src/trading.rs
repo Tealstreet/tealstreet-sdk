@@ -489,7 +489,8 @@ impl Okx {
                     m.precision.price,
                     false,
                 )?));
-                p.order_px = Some(if let Some(price) = o.price {
+                // Like TS, a zero price means market execution once triggered.
+                p.order_px = Some(if let Some(price) = o.price.filter(|p| *p != 0.0) {
                     num::format(adjusted(price, m.precision.price, false)?)
                 } else {
                     "-1".into()
@@ -824,23 +825,31 @@ impl Okx {
                     s.margin_type = Some(MarginType::Cross);
                 });
                 self.account_after_settings(cx);
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
             }
             Finish::Mode(hedged) => {
                 self.account.mode_version += 1;
                 cx.store.set_hedged(hedged);
                 self.account_after_settings(cx);
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
             }
-            Finish::Amend(id) => cx.done(
-                command,
-                serde_json::to_string(&[id]).map_err(|e| e.to_string()),
-            ),
-            Finish::Ids => cx.done(
-                command,
-                serde_json::to_string(&job.ids).map_err(|e| e.to_string()),
-            ),
-            Finish::Empty => cx.done(command, Ok("[]".into())),
+            Finish::Amend(id) => {
+                let result: Result<String, String> =
+                    serde_json::to_string(&[id]).map_err(|e| e.to_string());
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
+            Finish::Ids => {
+                let result: Result<String, String> =
+                    serde_json::to_string(&job.ids).map_err(|e| e.to_string());
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
+            Finish::Empty => cx.done(command, "[]".into()),
         }
     }
 

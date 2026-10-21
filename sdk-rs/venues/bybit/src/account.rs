@@ -4,18 +4,22 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus,
     OrderType, Position, PositionGreeks, PositionMode, PositionSide, RejectReason, StopTriggerType,
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketId, Store, TimerId, num};
+use safe_cex_engine::{Cx, Fill, Response, SocketId, Store, TimerId, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
+/// Consecutive Hyro reads the private stream may overtake before one is admitted.
+const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
 /// A failed order snapshot is retried this often until one succeeds.
 const ORDERS_RETRY_MS: f64 = 15_000.0;
@@ -68,6 +72,9 @@ pub struct Mapped {
     pub position_bound: bool,
     fill_cursor: FillCursor,
     terminal: bool,
+    /// A spot TP/SL classified with neither a trigger direction nor a price
+    /// to compare against; reclassified once tickers are seeded.
+    unpriced_tpsl: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -131,6 +138,7 @@ struct HyroSnapshot {
 #[derive(Default)]
 pub struct AccountState {
     started: bool,
+    unpriced_tpsl: HashSet<String>,
     unsupported_logged: HashSet<String>,
     /// Demo reduce-only repair reads due: order id, symbol, placement time.
     fill_repairs: HashMap<TimerId, (String, String, f64)>,
@@ -155,7 +163,8 @@ pub struct AccountState {
     revision: u32,
     handshake: Option<&'static str>,
     handshake_timer: Option<TimerId>,
-    snapshot_attempts: u8,
+    /// Admits the third read in a row that the private stream overtook.
+    snapshot_guard: safe_cex_engine::fence::StaleGuard,
     snapshot: Option<HyroSnapshot>,
     pub margin_type: Option<MarginType>,
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
@@ -266,6 +275,22 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
                 && [&row.avg_price, &row.mark_price, &row.unrealised_pnl]
                     .into_iter()
                     .all(|value| float_of(value).is_finite())))
+}
+
+/// The first account of a wallet-balance body, verbatim.
+fn raw_wallet_account(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        result: Option<Result<'a>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: Vec<&'a serde_json::value::RawValue>,
+    }
+    let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
+    Some(envelope.result?.list.first()?.get().to_owned())
 }
 
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
@@ -417,6 +442,21 @@ pub fn position_id(symbol: &str, side: PositionSide, mode: Option<PositionMode>)
 /// Map an order row: the order, plus its attached stop-loss and take-profit
 /// as `{id}__stop_loss` / `{id}__take_profit` rows. `None` for a row the
 /// store cannot hold (an unknown type or no side).
+/// The spot TP/SL kind from its trigger against the current last price, or
+/// `None` while there is no price or the order is not a TP/SL.
+fn priced_tpsl_kind(order: &Order, store: &Store) -> Option<OrderType> {
+    let last = store.ticker(&order.symbol).map_or(0.0, |t| t.last);
+    if last <= 0.0 || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        return None;
+    }
+    let below = order.price < last;
+    Some(if (order.side == OrderSide::Sell) == below {
+        OrderType::StopLoss
+    } else {
+        OrderType::TakeProfit
+    })
+}
+
 pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     let stop_order_type = present(&o.stop_order_type);
     let tpsl_mode = present(&o.tpsl_mode);
@@ -433,8 +473,9 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     let is_stop = stop_order_type.is_some_and(|t| t != "UNKNOWN") || from_create_type.is_some();
     let trigger_price = present(&o.trigger_price);
     let spot_tpsl = stop_order_type == Some("tpslOrder");
+    let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
+    let unpriced_tpsl = spot_tpsl && o.trigger_direction.is_none() && last <= 0.0;
     let spot_tpsl_kind = spot_tpsl.then(|| {
-        let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
         let below = match o.trigger_direction {
             Some(1) => false,
             Some(2) => true,
@@ -572,6 +613,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        unpriced_tpsl,
         terminal: matches!(
             o.order_status.as_ref(),
             "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
@@ -1059,10 +1101,14 @@ impl BybitLinear {
             && self.account.hyro_transient_streak < 3
         {
             self.account.hyro_transient_streak += 1;
-            cx.log(LogLevel::Warning, format!("HyroTrader {message}; retrying"));
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("HyroTrader {message}; retrying"),
+            );
             // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
-            self.account.snapshot_attempts = 0;
+            self.account.snapshot_guard = Default::default();
             self.account.orders = None;
             self.account.positions = None;
             self.account.orders_generation += 1;
@@ -1077,7 +1123,11 @@ impl BybitLinear {
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
         self.account.hyro_transient = false;
         self.account.hyro_transient_streak = 0;
-        cx.log(LogLevel::Error, format!("HyroTrader {message}"));
+        cx.notice(
+            Level::Error,
+            code::STREAM_UNAVAILABLE,
+            format!("HyroTrader {message}"),
+        );
         if let Some(socket) = self.private.socket {
             cx.close(socket);
             self.on_socket_closed(cx, Channel::Private, 4001);
@@ -1111,14 +1161,13 @@ impl BybitLinear {
             }
         } else {
             self.account.handshake = None;
-            self.account.snapshot_attempts = 0;
+            self.account.snapshot_guard = Default::default();
             self.start_hyro_snapshot(cx);
             self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
         }
     }
 
     fn start_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.snapshot_attempts += 1;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
             orders: None,
@@ -1140,7 +1189,11 @@ impl BybitLinear {
         }
         let snapshot = self.account.snapshot.take().expect("checked above");
         let moved = snapshot.revision != self.account.revision;
-        if moved && self.account.snapshot_attempts < 3 {
+        if !self
+            .account
+            .snapshot_guard
+            .admit(!moved, HYRO_OVERTAKEN_READS)
+        {
             if self.account.ready {
                 // Hyro streams no wallet, so order/position frames cannot make it stale.
                 self.account.wallet = snapshot.wallet;
@@ -1151,11 +1204,11 @@ impl BybitLinear {
             self.start_hyro_snapshot(cx);
             return;
         }
-        // Steady frames must not turn reconciliation into a reconnect loop: after
-        // three overtaken reads, admit this one; the next tick reconciles again.
+        // Steady frames must not turn reconciliation into a reconnect loop: the guard
+        // admits the third overtaken read; the next tick (not an immediate re-read,
+        // which steady frames would turn into continuous polling) corrects it.
         if moved {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::REQUEST_FAILED,
                 "HyroTrader private stream kept moving during reconciliation; using the latest snapshot",
             );
         }
@@ -1227,7 +1280,6 @@ impl BybitLinear {
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
-        self.account.snapshot_attempts = 0;
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1740,7 +1792,15 @@ impl BybitLinear {
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.log(LogLevel::Error, format!("[WS]{op}:{message}"));
+                cx.notice(
+                    Level::Error,
+                    if op == "auth" {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::SUBSCRIPTION_REJECTED
+                    },
+                    format!("[WS]{op}:{message}"),
+                );
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
                     && let Some(socket) = self.private.socket
@@ -1768,6 +1828,7 @@ impl BybitLinear {
         let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
+        self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
         }
@@ -1786,7 +1847,7 @@ impl BybitLinear {
                     && status != "Filled"
                     && !QUIET_REJECT_REASONS.contains(&reason)
                 {
-                    cx.log(LogLevel::Error, reason.to_owned());
+                    cx.notice(Level::Error, code::ORDER_REJECTED, reason.to_owned());
                 }
                 let final_status = if status == "Filled" {
                     OrderStatus::Closed
@@ -1806,6 +1867,32 @@ impl BybitLinear {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn note_unpriced_tpsl(&mut self, mapped: &Mapped) {
+        // The spot TP/SL itself is the parent row; legs carry their own kind.
+        let Some(order) = mapped.orders.first() else {
+            return;
+        };
+        if mapped.unpriced_tpsl {
+            self.account.unpriced_tpsl.insert(order.id.clone());
+        } else {
+            self.account.unpriced_tpsl.remove(&order.id);
+        }
+    }
+
+    /// Spot TP/SL rows read before the ticker seed were labelled against a
+    /// zero price; relabel them from their trigger now that one exists.
+    pub(crate) fn reclassify_unpriced_tpsl(&mut self, cx: &mut Cx<'_, Pending>) {
+        for id in std::mem::take(&mut self.account.unpriced_tpsl) {
+            if let Some(kind) = cx
+                .store
+                .order(&id)
+                .and_then(|o| priced_tpsl_kind(o, cx.store))
+            {
+                cx.store.update_order(&id, |order| order.kind = kind);
+            }
         }
     }
 
@@ -1958,6 +2045,7 @@ impl BybitLinear {
                 {
                     *invalid = true;
                 } else if let Some(mapped) = mapped {
+                    self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }
             }
@@ -2033,8 +2121,9 @@ impl BybitLinear {
                         cx, order_id, symbol, placed_at, cursor, filled, pages, body,
                     ),
                     Err(message) => {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::REQUEST_FAILED,
                             format!("Bybit fill check for order {order_id} failed: {message}"),
                         );
                         // After the grace a failed check still lets open orders correct the row.
@@ -2061,8 +2150,7 @@ impl BybitLinear {
                         }
                     }
                     // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.log(
-                        LogLevel::Warning,
+                    Err(message) => cx.notice(Level::Warn, code::REQUEST_FAILED,
                         format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"),
                     ),
                 }
@@ -2125,7 +2213,10 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit orders: {message}"));
+                        cx.retried_failure(
+                            "bybit.account:2216",
+                            format!("Bybit orders: {message}"),
+                        );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
@@ -2174,7 +2265,10 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit positions: {message}"));
+                        cx.retried_failure(
+                            "bybit.account:2269",
+                            format!("Bybit positions: {message}"),
+                        );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
@@ -2192,8 +2286,9 @@ impl BybitLinear {
                         .as_ref()
                         .is_err_and(|m| m.contains("accountType only support UNIFIED"));
                 if retired {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "Bybit wallet refused CONTRACT; reading the UNIFIED wallet",
                     );
                     self.account.classic = false;
@@ -2213,6 +2308,7 @@ impl BybitLinear {
                     return;
                 }
                 self.account.hyro_transient |= outcome.is_err();
+                let outcome_body = outcome.as_ref().ok().copied();
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
@@ -2224,6 +2320,10 @@ impl BybitLinear {
                 });
                 match account {
                     Ok((wallet, coins)) => {
+                        // TS keeps the venue's first account verbatim as `balance.info`.
+                        self.balance_info = outcome_body
+                            .and_then(raw_wallet_account)
+                            .or(self.balance_info.take());
                         if self.variant.is_hyro() {
                             if let Some(snapshot) = &mut self.account.snapshot {
                                 snapshot.wallet = Some(wallet);
@@ -2237,7 +2337,10 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit balance: {message}"));
+                        cx.retried_failure(
+                            "bybit.account:2342",
+                            format!("Bybit balance: {message}"),
+                        );
                         if self.variant.is_hyro() {
                             self.hyro_read_failed(cx, "wallet reconciliation failed");
                         }
@@ -2282,9 +2385,16 @@ impl BybitLinear {
         self.account.orders_snapshot_version += 1;
         self.account.position_bound.clear();
         let mut orders = Vec::new();
-        for mapped in join.rows {
+        for mut mapped in join.rows {
             if self.stale_terminal_snapshot(&mapped) {
                 continue;
+            }
+            // Rows parsed before a seed that has since landed are relabelled here.
+            if mapped.unpriced_tpsl
+                && let Some(kind) = priced_tpsl_kind(&mapped.orders[0], cx.store)
+            {
+                mapped.orders[0].kind = kind;
+                self.account.unpriced_tpsl.remove(&mapped.orders[0].id);
             }
             if mapped.position_bound {
                 self.account
@@ -2322,8 +2432,9 @@ impl BybitLinear {
                 merged.push(order.clone());
             }
             if self.account.unsupported_logged.insert(id.clone()) {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::ROW_SKIPPED,
                     if known.is_some() {
                         format!(
                             "Bybit order {id} has an unsupported type; its last known state is kept"

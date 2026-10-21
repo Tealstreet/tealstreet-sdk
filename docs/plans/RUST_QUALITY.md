@@ -7,9 +7,10 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
 
 ## Bugs found (fix now, ahead of the standards)
 
-- Command rejections on Rust venues never emit `'error'`
+- ~~Command rejections on Rust venues never emit `'error'`
   (`rust.exchange.ts:857-868`), so the app shows no toast unless the venue also
-  logs. Emit once per rejection, de-duplicated against a same-frame `Log Error`.
+  logs. Emit once per rejection, de-duplicated against a same-frame `Log Error`.~~
+  Each rejection emits one `'error'` carrying its `ExchangeError`.
 - ~~Lost-send recovery never runs for Rust: `isUnknownOutcome`
   (`utils/unknownSendOutcome.ts:3`) does not match the Rust "outcome unknown"
   texts (lighter, coinbase, txflow, orderly, bybit). **Risky** (enables lookups
@@ -20,12 +21,26 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
   `StartupFailed{error}` rejects `start()`; Bybit fails startup on definitive
   key rejections (10003/10004 after resend/10010/33004) of its signed fee read.
-- Secrets in logs: 53 log sites interpolate raw bodies; Bitrue logs whole
-  private frames (`bitrue/src/account.rs:700`), Bybit logs the signed request
-  body (`bybit/src/lib.rs:550`); native transport errors include signed URLs
-  (`hosts/native/src/transport.rs:390,404`).
-- Native and Durable Object hosts drop logs with no client attached; an
-  oversized native broadcast disconnects every peer (`server.rs:386`).
+- Secrets in logs: ~~53 log sites interpolate raw bodies (broader sweep remains).~~
+  Swept: direct body interpolation is gone. Non-2xx `HTTP {status}: {body}`
+  failures keep the venue's error envelope as an actionable message. Every
+  private replay now fails if any log line or command result quotes a replay
+  credential or a signed query (`harness/notice-leaks.mjs`).
+  ~~Bitrue logs whole private frames (`bitrue/src/account.rs:700`), Bybit logs
+  the signed request body (`bybit/src/lib.rs:550`); native transport errors
+  include signed URLs (`hosts/native/src/transport.rs:390,404`).~~ Fixed at
+  private diagnostic/signing and native connection-error boundaries, with
+  all-notice credential/URL regressions. Current reqwest body-stream errors
+  already omit URLs; that path is regression coverage, not a reproduced fix.
+  Ordinary business rejection messages remain actionable.
+- ~~Native and Durable Object hosts drop logs with no client attached.~~ Fixed:
+  Warn+ goes to stderr/console with no client, and log notices are cut to fit
+  before broadcast. ~~An oversized native broadcast disconnects every peer
+  (`server.rs:386`).~~ An oversized delta frame is sent as ordered segments
+  that share its string table; other oversized notices are replaced by a bounded
+  warning, and an oversized completion settles its command with an error. Only
+  a single section larger than the limit still makes peers resnapshot, and that
+  is logged.
 
 ## Error handling
 
@@ -49,7 +64,8 @@ pub struct VenueError {
 }
 ```
 
-`CommandDone` carries it, `Deactivate{error}` and a terminal
+`CommandFailed` carries it (`Cx::fail` is the only failure path; `Cx::done`
+is success-only), `Deactivate{error}` and a terminal
 `StartupFailed{error}` replace the reasonless deactivate and the BreakoutProp
 prefix match. The wire carries the object. TS exposes `ExchangeError extends
 Error` with `kind`, `category` (1:1 onto `ErrorCategory`), `outcome`,
@@ -57,16 +73,18 @@ Error` with `kind`, `category` (1:1 onto `ErrorCategory`), `outcome`,
 `failedOrderIndex`, redacted `debug`. Regex classification stays only as the
 TS-venue fallback.
 
-PRs: (1) types and plumbing, byte-identical messages, URL redaction
-(Rust side landed: `engine/src/error.rs`, `Cx::fail`, host `detail` beside
-the unchanged `error` text, partial batches as fields; TS `ExchangeError`
-follows the bridge PR); (2) one
-shared parser per venue family, replacing `malformed` flags; (3) TS toast on
-rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
-`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
-`StartupFailed`, BreakoutProp and Bybit landed); (6)
-app and chaser read `kind`/`outcome`; (7) wasm panic disposes the engine and
-surfaces `Internal`.
+PRs: ~~(1) types and plumbing, byte-identical messages, URL redaction~~
+(landed: `engine/src/error.rs`, `Cx::fail`, host `detail` beside the unchanged
+`error` text, partial batches as fields, TS `ExchangeError`); ~~(2) one
+shared parser per venue family, replacing `malformed` flags~~ (every venue
+classifies `kind`/`outcome`/`venueCode`); ~~(3) TS toast on rejection~~;
+~~(4) `outcome: Unknown` at unknown-outcome sites (**risky**)~~; ~~(5)
+`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries)~~
+(validateAccount carries the startup `kind`; the `'error'` event carries
+`classified` and Sentry tags `error_kind`/`error_category`/`error_outcome`/
+`venue_code`); (6) app and chaser read `kind`/`outcome` (tealstreet-next);
+~~(7) wasm panic disposes the engine and surfaces `Internal`~~
+(`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),
@@ -90,10 +108,11 @@ closes, reconnects, auth failures, HTTP failures, rate limited, snapshots
 discarded, rows skipped, last private message) exposed via `getHealth()`.
 Hosts forward events and write Warn+ to stderr/console with no client.
 
-PRs: (1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
-HTTP failure, no-client fallback; (2) redaction sweep with a test that fails on
-secrets in any notice; (3) engine-level ws and auth counting; (4) venue batches
-assigning codes and fixing levels (keep message text stable); (5) health monitor
+PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
+HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`,
+`logLevel` engine option, `EngineHost.health()`/`onEvent`, native `event` notices,
+DO `log` notices with `code` and `fields`); ~~(2) redaction sweep with a test that fails on
+secrets in any notice~~ (every private replay checks every notice); ~~(3) engine-level ws and auth counting~~ (reconnects per socket role, engine-initiated closes, `deactivate` and auth-kind failures, last private frame); ~~(4) venue batches assigning codes and fixing levels (keep message text stable)~~ (every venue emits coded events; retried reads use `Cx::retried_failure`: a repeat of the same failure is a warning, re-raised as an Error every 90 s and whenever the text changes; optional child-leg failures are Errors); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.
 
 tealstreet-next: `exchangeAccountController.ts:180-383`,
@@ -112,9 +131,11 @@ Low risk, do first:
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
    settle it.~~ Done: `engine::url` dialects and `Query`; Kraken's form
    spelling and AsterDEX's raw-value query stay venue-specific.
-3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
-   Migrate with constants unchanged, then jitter, then one startup-retry policy
-   (fixes startup fail-closed on OKX, BloFin, Bitget).
+3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
+   Migrate with constants unchanged, then jitter~~ (done: one schedule shared
+   with `engine::socket::Supervisor`, reconnects jittered); then one
+   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget),
+   landing with the public-startup PR.
 4. ~~`engine::time`: ISO/civil-date math in 9 venues.~~ Done: civil math,
    month arithmetic and ISO formatting shared; venue text grammars stay local.
 
@@ -122,9 +143,22 @@ Medium:
 5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
    row keeps the store's copy. Structurally ends the one-bad-row-discards-the-
    snapshot class (~50 hand-rolled `invalid` flags).
-6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
+6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
-   route `tickInterval` to every venue.
+   route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every
+   venue for the wasm and native hosts and owns the credential rules (#1467,
+   #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
+   venue list is the `hostClock` capability (#1520); polling is the runtime
+   policy (#1392). AsterDEX version inference is shared by native construction
+   and registry metadata; the bridge forwards only explicit overrides and reads
+   the native version after WASM loads. Its synchronous pre-host fallback stays
+   under a compiled TS/Rust parity matrix. Public-mode/signing rules now come
+   from one JSON table embedded by Rust and synchronously imported by TS;
+   raw `publicMode` intent lets the registry own Paradex's explicit-private
+   rule. CI checks every registered name. The registry also selects HyroTrader
+   endpoints from raw config and refuses private non-Paradex payload signers;
+   the WASM constructor bridge preserves typed error classification. Factory
+   routing exceptions and native/harness polling inputs remain supported.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:
    `model::Interval` decoded at the command boundary; AsterDEX, Kraken and
@@ -145,7 +179,8 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`), one `SocketSpec`.
+(done: `engine::test_support`), ~~one `SocketSpec`~~ (done: `Cx::connect` takes
+a `SocketSpec`; one `Action::WsConnect` carries headers).
 ~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
 `windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,

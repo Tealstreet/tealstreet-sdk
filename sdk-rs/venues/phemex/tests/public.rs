@@ -52,6 +52,59 @@ fn started() -> (Engine<PhemexPerpetuals>, SocketId) {
     (e, socket)
 }
 #[test]
+fn daily_candle_to_preserves_the_callers_day_instead_of_shifting_back() {
+    let (mut e, _) = started();
+    let to = 1_700_000_000_000.0; // 2023-11-14 22:13:20 UTC.
+    e.handle(
+        to,
+        Event::Command(Command::FetchCandles {
+            command: 91,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::D1,
+            limit: Some(2),
+            from_ms: None,
+            to_ms: Some(to),
+        }),
+    );
+    let req = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(r) if r.url.contains("/kline/list") => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        req.url
+            .ends_with("resolution=86400&from=1699827200&to=1700000000"),
+        "{}",
+        req.url
+    );
+    respond(
+        &mut e,
+        req.id,
+        r#"{"code":0,"data":{"rows":[[1699833600,86400,0,"100","110","90","105","2",0],[1699920000,86400,0,"105","115","95","110","3",0]]}}"#,
+    );
+    #[derive(serde::Deserialize)]
+    struct Candle {
+        timestamp: f64,
+    }
+    let rows = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone {
+                command: 91,
+                result: json,
+            }) => Some(serde_json::from_str::<Vec<Candle>>(&json).unwrap()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.timestamp).collect::<Vec<_>>(),
+        [1_699_833_600.0, 1_699_920_000.0]
+    );
+}
+
+#[test]
 fn real_value_products_and_packed_ticker() {
     let (mut e, socket) = started();
     assert_eq!(e.store().market("BTCUSDT").unwrap().precision.price, 0.1);
@@ -156,22 +209,16 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
             },
         },
     );
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
     e.handle(now + 59_999., candles(8));
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(error)
-        }) if error.contains("rate limited")
+        Action::Notice(Notice::CommandFailed { command: 8, error }) if error.legacy_text().contains("rate limited")
     )));
     e.handle(now + 60_000., candles(9));
     assert!(e.drain_actions().any(|a| matches!(

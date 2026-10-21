@@ -1,11 +1,17 @@
 use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
+
+/// Private REST pause after a 418/429 that carries no usable `Retry-After`.
+const REST_PAUSE_MS: f64 = 30_000.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OrderSource {
@@ -18,9 +24,9 @@ pub enum Request {
     Probe,
     Positions {
         rows: Vec<Position>,
+        skipped: SnapshotCoverage<PositionKey>,
         coins: std::collections::VecDeque<String>,
         started: f64,
-        invalid: bool,
     },
     Balance {
         row: Option<Amounts>,
@@ -31,7 +37,7 @@ pub enum Request {
     UtaBalance {
         version: u64,
     },
-    Orders(OrderSnapshot),
+    Orders(Box<OrderSnapshot>),
 }
 
 pub struct OrderSnapshot {
@@ -42,13 +48,16 @@ pub struct OrderSnapshot {
     pages: u32,
     page_count: usize,
     rows: Vec<Order>,
+    skipped: SnapshotCoverage<String>,
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
     started: f64,
     stream_revision: u64,
-    invalid: bool,
     virtual_only: bool,
 }
+
+/// Symbol and side of a position row; a `None` side covers both legs.
+type PositionKey = (String, Option<PositionSide>);
 
 #[derive(Clone)]
 pub struct InverseAsset {
@@ -83,8 +92,10 @@ pub struct Account {
     pub authenticated: bool,
     pub needs_recovery: bool,
     poll: Option<TimerId>,
-    probe_retry: Option<TimerId>,
-    probe_retries: u8,
+    /// Backs off the settings probe that gates private startup; transient failures never end it.
+    probe: safe_cex_engine::startup::Backoff<()>,
+    signature_rejections: u8,
+    pub startup_rejected: bool,
     tick: u32,
     positions_in_flight: bool,
     balance_in_flight: bool,
@@ -227,7 +238,7 @@ impl BitgetFutures {
                     cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
                 }
             }
-            Err(error) => cx.log(LogLevel::Error, error),
+            Err(error) => cx.retried_failure("bitget.account:241", error),
         }
     }
 
@@ -238,15 +249,19 @@ impl BitgetFutures {
             cx.store.set_orders(vec![]);
             return;
         }
+        if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
+            let error =
+                VenueError::new("Bitget requires a passphrase").kind(ErrorKind::InvalidInput);
+            self.reject_startup(cx, error, false);
+            return;
+        }
         self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
     }
 
     fn private_detected(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.detected = true;
-        self.account.probe_retries = 0;
-        if let Some(timer) = self.account.probe_retry.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.signature_rejections = 0;
+        self.account.probe.succeeded(cx, &());
         self.connect(cx, 3);
         self.refresh_positions(cx);
         self.refresh_balance(cx);
@@ -398,9 +413,9 @@ impl BitgetFutures {
             Some(at),
             Request::Positions {
                 rows: vec![],
+                skipped: SnapshotCoverage::default(),
                 coins,
                 started: cx.now,
-                invalid: false,
             },
         );
     }
@@ -447,7 +462,7 @@ impl BitgetFutures {
         self.account.orders_dirty = false;
         self.order_page(
             cx,
-            OrderSnapshot {
+            Box::new(OrderSnapshot {
                 version: self.account.orders_version,
                 source: OrderSource::Normal,
                 cursor: None,
@@ -455,17 +470,17 @@ impl BitgetFutures {
                 pages: 0,
                 page_count: 0,
                 rows: vec![],
+                skipped: SnapshotCoverage::default(),
                 plans: vec![],
                 trailing: vec![],
                 started: cx.now,
                 stream_revision: self.order_revision_clock(),
-                invalid: false,
                 virtual_only,
-            },
+            }),
         );
     }
 
-    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: OrderSnapshot) {
+    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
         snapshot.page_count = 0;
         let source = snapshot.source;
         let mut path = if self.account.uta {
@@ -523,21 +538,23 @@ impl BitgetFutures {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, invalid, .. } => {
+            Request::Positions { rows, skipped, .. } => {
                 match serde_json::from_str::<PositionRow>(item)
-                    .map_err(|e| e.to_string())
+                    .map_err(|_| "malformed record".to_owned())
                     .and_then(|row| self.map_position(cx, &row))
                 {
                     Ok(p) => rows.push(p),
                     Err(error) => {
-                        // Until rows can be reconciled by captured identity, a
-                        // missing market in a partial catalogue cannot prove an
-                        // owned position absent from an authoritative snapshot.
-                        *invalid = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            format!("skipped Bitget position record: {error}"),
+                        let key = self.position_key(item);
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!(
+                                "skipped Bitget position record {}: {error}",
+                                key.as_ref().map_or("without symbol", |(s, _)| s.as_str())
+                            ),
                         );
+                        skipped.reject(key);
                     }
                 }
             }
@@ -564,7 +581,7 @@ impl BitgetFutures {
             Request::Orders(snapshot) => {
                 snapshot.page_count += 1;
                 match serde_json::from_str::<OrderRow>(item)
-                    .map_err(|e| e.to_string())
+                    .map_err(|_| "malformed record".to_owned())
                     .and_then(|mut row| {
                         if self.account.uta
                             && snapshot.source != OrderSource::Normal
@@ -600,13 +617,16 @@ impl BitgetFutures {
                     }) {
                     Ok(orders) => snapshot.rows.extend(orders),
                     Err(error) => {
-                        // One unmappable working order cannot erase another
-                        // known order or its protective legs on full replacement.
-                        snapshot.invalid = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            format!("skipped Bitget order record: {error}"),
+                        let id = order_row_id(item);
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!(
+                                "skipped Bitget order record {}: {error}",
+                                id.as_deref().unwrap_or("without id")
+                            ),
                         );
+                        snapshot.skipped.reject(id);
                     }
                 }
             }
@@ -621,46 +641,12 @@ impl BitgetFutures {
         response: Response<'_>,
     ) {
         let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body);
-        if matches!(response.status, 429 | 418) {
-            self.account.rest_paused_until = cx.now + 30_000.0;
+        let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, REST_PAUSE_MS);
+        if pause > 0.0 {
+            self.account.rest_paused_until = self.account.rest_paused_until.max(cx.now + pause);
         }
         if let Request::Probe = request {
-            match envelope {
-                Ok(header) if header.code.0 == Some(40084.0) => {
-                    self.account.uta = false;
-                    self.private_detected(cx);
-                }
-                Ok(header) if header.code.0 == Some(0.0) && response.status == 200 => {
-                    if self.options.testnet || self.inverse() {
-                        cx.log(LogLevel::Error, "Bitget inverse/testnet UTA is unsupported");
-                        return;
-                    }
-                    match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
-                        .map_err(|e| e.to_string())
-                        .and_then(Envelope::checked)
-                    {
-                        Ok(settings) => {
-                            self.account.uta = true;
-                            self.apply_settings(cx, &settings);
-                            self.private_detected(cx);
-                        }
-                        Err(error) => self.account_failed(cx, Request::Probe, &error),
-                    }
-                }
-                Ok(header) => self.account_failed(
-                    cx,
-                    Request::Probe,
-                    &format!("Bitget {}: {}", header.code.get(), header.msg),
-                ),
-                Err(_) if response.status >= 500 => {
-                    self.account_transport_failed(
-                        cx,
-                        Request::Probe,
-                        "Bitget settings transport failure",
-                    );
-                }
-                Err(error) => self.account_failed(cx, Request::Probe, &error.to_string()),
-            }
+            self.probe_response(cx, response, envelope.ok(), pause);
             return;
         }
         if envelope
@@ -684,9 +670,9 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
+                skipped,
                 mut coins,
                 started,
-                invalid: false,
             } => {
                 if let Some(coin) = coins.pop_front() {
                     self.account_request(
@@ -700,17 +686,26 @@ impl BitgetFutures {
                         Some(ArrayAt::Envelope(&[&["data"]])),
                         Request::Positions {
                             rows,
+                            skipped,
                             coins,
                             started,
-                            invalid: false,
                         },
                     );
                     return;
                 }
                 self.account.positions_in_flight = false;
-                let rows = self.merge_positions(cx, rows, started);
+                let mut rows = self.merge_positions(cx, rows, started);
                 for p in &rows {
                     self.position_setting(cx, p);
+                }
+                for current in cx.store.positions() {
+                    if !rows.iter().any(|p| p.id == current.id)
+                        && [Some(current.side), None]
+                            .into_iter()
+                            .any(|side| !skipped.allows_absence(&(current.symbol.clone(), side)))
+                    {
+                        rows.push(current.clone());
+                    }
                 }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
@@ -746,10 +741,10 @@ impl BitgetFutures {
                             self.apply_balance(cx, amounts);
                         }
                     }
-                    Err(error) => cx.log(LogLevel::Error, error),
+                    Err(error) => cx.retried_failure("bitget.account:744", error),
                 }
             }
-            Request::Orders(mut snapshot) if !snapshot.invalid => {
+            Request::Orders(mut snapshot) => {
                 if snapshot.version != self.account.orders_version {
                     self.account.orders_in_flight = false;
                     self.refresh_orders(cx, false);
@@ -836,6 +831,7 @@ impl BitgetFutures {
                     self.commit_orders(
                         cx,
                         snapshot.rows,
+                        &snapshot.skipped,
                         snapshot.virtual_only,
                         snapshot.started,
                         snapshot.stream_revision,
@@ -871,7 +867,7 @@ impl BitgetFutures {
         error: &str,
     ) {
         self.clear_in_flight(&request);
-        cx.log(LogLevel::Error, error);
+        cx.retried_failure("bitget.account:870", error);
     }
 
     pub(crate) fn account_transport_failed(
@@ -880,15 +876,144 @@ impl BitgetFutures {
         request: Request,
         error: &str,
     ) {
-        if matches!(request, Request::Probe) && !self.account.uta {
-            self.private_detected(cx);
-        } else if matches!(request, Request::Probe) && self.account.probe_retries < 3 {
-            self.account.probe_retries += 1;
-            self.account.probe_retry =
-                Some(cx.set_timer(250.0 * f64::from(self.account.probe_retries)));
-            cx.log(LogLevel::Warning, error);
+        if matches!(request, Request::Probe) {
+            self.probe_transport_failed(cx, error);
         } else {
             self.account_failed(cx, request, error);
+        }
+    }
+
+    fn probe_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        response: Response<'_>,
+        envelope: Option<Envelope<IgnoredAny>>,
+        pause_ms: f64,
+    ) {
+        let Some(header) = envelope else {
+            if response.status >= 500 {
+                return self.probe_transport_failed(cx, "Bitget settings transport failure");
+            }
+            let error = format!("Bitget settings HTTP {}", response.status);
+            return self.probe_failed(cx, &error, pause_ms);
+        };
+        match header.code.0 {
+            Some(40084.0) => {
+                self.account.uta = false;
+                self.private_detected(cx);
+            }
+            Some(0.0) if response.status == 200 => {
+                if self.options.testnet || self.inverse() {
+                    let error = VenueError::new("Bitget UTA is unsupported on inverse or testnet")
+                        .kind(ErrorKind::Unsupported);
+                    return self.reject_startup(cx, error, false);
+                }
+                match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
+                    .map_err(|e| e.to_string())
+                    .and_then(Envelope::checked)
+                {
+                    Ok(settings) => {
+                        self.account.uta = true;
+                        self.apply_settings(cx, &settings);
+                        self.private_detected(cx);
+                    }
+                    Err(error) => self.probe_failed(cx, &error, 0.0),
+                }
+            }
+            code => {
+                let code = code.unwrap_or(0.0);
+                if !self.startup_ready(cx)
+                    && let Some(kind) = key_rejection(code, &header.msg)
+                {
+                    let signature = code == 40009.0;
+                    if signature {
+                        self.account.signature_rejections += 1;
+                    }
+                    if !signature || self.account.signature_rejections >= 2 {
+                        let read_key = self.options.read_credentials.is_some();
+                        let which = if read_key {
+                            "read-only API key"
+                        } else {
+                            "API key"
+                        };
+                        let error = rejection(which, code, &header.msg, kind);
+                        return self.reject_startup(
+                            cx,
+                            error,
+                            kind == ErrorKind::AuthInvalid && !read_key,
+                        );
+                    }
+                } else {
+                    self.account.signature_rejections = 0;
+                }
+                self.probe_failed(cx, &format!("Bitget {code}: {}", header.msg), pause_ms);
+            }
+        }
+    }
+
+    /// Classic is the safe route when the first probe cannot reach Bitget; a
+    /// confirmed UTA account keeps probing instead of downgrading.
+    fn probe_transport_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        if self.account.uta {
+            self.probe_failed(cx, error, 0.0);
+        } else {
+            self.private_detected(cx);
+        }
+    }
+
+    /// Transient probe failures retry with backoff until detection succeeds,
+    /// never inside the rate-limit window a 418/429 answer set.
+    fn probe_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str, pause_ms: f64) {
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if !self.account.startup_rejected {
+            self.account.probe.failed_after(cx, (), pause_ms);
+        }
+    }
+
+    fn startup_ready(&self, cx: &Cx<'_, Pending>) -> bool {
+        let loaded = cx.store.loaded();
+        loaded.balance && loaded.positions && loaded.orders
+    }
+
+    /// Fails startup once and retires every private retry, read or socket.
+    fn reject_startup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        error: VenueError,
+        trading_key_refused: bool,
+    ) {
+        if std::mem::replace(&mut self.account.startup_rejected, true) {
+            return;
+        }
+        self.account.probe.succeeded(cx, &());
+        self.account.detected = false;
+        self.account.generation += 1;
+        for timer in [
+            self.account.poll.take(),
+            self.account.positions_timer.take(),
+            self.account.balance_timer.take(),
+            self.account.orders_timer.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cx.clear_timer(timer);
+        }
+        self.account.supervisor.cancel(cx);
+        self.account.authenticated = false;
+        self.sockets[3].open = false;
+        if let Some(socket) = self.sockets[3].socket.take() {
+            cx.close(socket);
+        }
+        cx.notice(
+            Level::Error,
+            code::for_startup_error(&error),
+            &error.message,
+        );
+        cx.startup_failed(error);
+        // As Bybit: a refused trading key also stops the host's login loop.
+        if trading_key_refused {
+            cx.deactivate();
         }
     }
 
@@ -1053,6 +1178,7 @@ impl BitgetFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Order>,
+        skipped: &SnapshotCoverage<String>,
         virtual_only: bool,
         started: f64,
         stream_revision: u64,
@@ -1073,15 +1199,16 @@ impl BitgetFutures {
                 *row = current.clone();
             }
         }
-        rows.retain(|row| {
-            !self.account.terminal.contains_key(&row.id)
-                && !cx.store.order(&row.id).is_some_and(|current| {
+        let live = |id: &String| {
+            !self.account.terminal.contains_key(id)
+                && !cx.store.order(id).is_some_and(|current| {
                     matches!(
                         current.status,
                         OrderStatus::Canceling | OrderStatus::Closed | OrderStatus::Canceled
                     )
                 })
-        });
+        };
+        rows.retain(|row| live(&row.id));
         if virtual_only {
             rows.retain(|o| o.parent_id.is_some());
             rows.extend(
@@ -1109,6 +1236,16 @@ impl BitgetFutures {
                 {
                     rows.push(current.clone());
                 }
+            }
+        }
+        // Preset TP/SL children carry their rejected parent's identity.
+        for current in cx.store.orders() {
+            let protected = [Some(&current.id), current.parent_id.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|id| !skipped.allows_absence(id));
+            if protected && live(&current.id) && !rows.iter().any(|r| r.id == current.id) {
+                rows.push(current.clone());
             }
         }
         cx.store.set_orders(rows);
@@ -1207,8 +1344,7 @@ impl BitgetFutures {
         );
         if self.account.inverse_assets.iter().any(|a| !a.priced) {
             if !std::mem::replace(&mut self.account.inverse_unpriced_warned, true) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     "Bitget inverse collateral USD price unavailable; preserving previous USD balance",
                 );
             }
@@ -1260,8 +1396,11 @@ impl BitgetFutures {
         let Ok(header) = serde_json::from_str::<Message<'_, IgnoredAny>>(text) else {
             return;
         };
-        if header.event == "login" {
-            if header.code.and_then(|n| n.0) == Some(0.0) {
+        // Bitget answers a refused login with `event: "error"` and a 300xx code.
+        let refused = header.event == "error" && !self.account.authenticated;
+        if refused || header.event == "login" {
+            let code = header.code.and_then(|n| n.0);
+            if !refused && code == Some(0.0) {
                 if self.account.authenticated {
                     return;
                 }
@@ -1269,8 +1408,17 @@ impl BitgetFutures {
                 self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
             } else {
-                cx.log(
-                    LogLevel::Error,
+                if !self.account.authenticated
+                    && !self.startup_ready(cx)
+                    && let Some(code) = code.filter(|c| matches!(*c as i64, 30011 | 30012))
+                {
+                    let error =
+                        rejection("API key login", code, &header.msg, ErrorKind::AuthInvalid);
+                    return self.reject_startup(cx, error, true);
+                }
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
                     format!("Bitget private WS login failed: {}", header.msg),
                 );
                 if let Some(socket) = self.sockets[3].socket {
@@ -1310,8 +1458,9 @@ impl BitgetFutures {
                         Ok(position) => positions.push(position),
                         Err(error) => {
                             unmapped = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("skipped Bitget position stream record: {error}"),
                             );
                         }
@@ -1371,7 +1520,11 @@ impl BitgetFutures {
                         continue;
                     }
                     let Ok(orders) = self.map_order(cx, &raw) else {
-                        cx.log(LogLevel::Warning, "invalid Bitget order stream record");
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            "invalid Bitget order stream record",
+                        );
                         continue;
                     };
                     let Some(order) = orders.first() else {
@@ -1665,8 +1818,7 @@ impl BitgetFutures {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.probe_retry == Some(timer) {
-            self.account.probe_retry = None;
+        if self.account.probe.on_timer(timer).is_some() {
             self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
         }
         if self.account.write_check.is_some_and(|(t, _)| t == timer) {
@@ -1676,7 +1828,7 @@ impl BitgetFutures {
                 if !self.account.uta {
                     self.account.needs_recovery = true;
                 }
-                cx.log(LogLevel::Warning, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
+                cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
                 self.refresh_positions(cx);
                 self.refresh_balance(cx);
                 self.refresh_orders(cx, false);
@@ -1752,6 +1904,31 @@ impl BitgetFutures {
         symbol.split('_').next().unwrap_or(symbol).to_owned()
     }
 
+    /// Identity of a position row that failed to map, if it has a symbol.
+    fn position_key(&self, item: &str) -> Option<PositionKey> {
+        #[derive(Deserialize)]
+        struct Row<'a> {
+            #[serde(default, borrow)]
+            symbol: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "instId", borrow)]
+            inst_id: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "holdSide", borrow)]
+            hold_side: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "posSide", borrow)]
+            pos_side: std::borrow::Cow<'a, str>,
+            #[serde(default, borrow)]
+            side: std::borrow::Cow<'a, str>,
+        }
+        let row: Row<'_> = serde_json::from_str(item).ok()?;
+        let symbol = self.normalized_symbol(first_text(&[&row.inst_id, &row.symbol]));
+        let side = match first_text(&[&row.hold_side, &row.pos_side, &row.side]) {
+            "short" | "sell" => Some(PositionSide::Short),
+            "long" | "buy" => Some(PositionSide::Long),
+            _ => None,
+        };
+        (!symbol.is_empty()).then_some((symbol, side))
+    }
+
     fn map_position(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1815,11 +1992,17 @@ impl BitgetFutures {
             raw.achieved_profits.get() + raw.total_fee.get() - raw.deducted_fee.get()
         };
         let contracts = if self.inverse() {
-            let reference = cx
-                .store
-                .ticker(&symbol)
-                .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
-                .filter(|p| *p > 0.0)
+            // The row's own mark sizes first snapshots read before tickers load.
+            let reference = [raw.mark_price, raw.market_price]
+                .into_iter()
+                .filter_map(|price| price.0)
+                .find(|p| p.is_finite() && *p > 0.0)
+                .or_else(|| {
+                    cx.store
+                        .ticker(&symbol)
+                        .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
+                        .filter(|p| *p > 0.0)
+                })
                 .unwrap_or(entry);
             if reference > 0.0 {
                 round8(native_contracts / reference)
@@ -2115,6 +2298,26 @@ pub(crate) fn order_status(value: &str) -> Option<OrderStatus> {
         _ => return None,
     })
 }
+/// Native id of an order row that failed to map, chosen as `map_order` does.
+fn order_row_id(item: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(default, rename = "orderId", borrow)]
+        order_id: Identifier<'a>,
+        #[serde(default, rename = "clientOid", borrow)]
+        client_oid: Identifier<'a>,
+        #[serde(default, rename = "ordId", borrow)]
+        ord_id: Identifier<'a>,
+        #[serde(default, borrow)]
+        id: Identifier<'a>,
+    }
+    let row: Row<'_> = serde_json::from_str(item).ok()?;
+    [&row.order_id, &row.client_oid, &row.ord_id, &row.id]
+        .into_iter()
+        .map(Identifier::text)
+        .find(|s| !s.is_empty())
+        .map(std::borrow::Cow::into_owned)
+}
 fn raw_status<'a>(raw: &'a OrderRow<'_>) -> &'a str {
     first_text(&[&raw.status, &raw.state, &raw.plan_status, &raw.order_status])
 }
@@ -2208,6 +2411,34 @@ fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
             .filter(|v| *v > 0.0)
             .map(|v| ("ratio".to_owned(), v))
     }
+}
+
+/// Bitget key refusals no retry can fix (REST common codes): empty or invalid
+/// key/passphrase, missing key, permission or IP, wrong environment. 40009 (bad
+/// signature) is final only after one re-signed resend; others stay transient.
+fn key_rejection(code: f64, msg: &str) -> Option<ErrorKind> {
+    match code as i64 {
+        40001 | 40006 | 40009 | 40011 | 40012 | 40037 => Some(ErrorKind::AuthInvalid),
+        40014 | 40018 => Some(ErrorKind::AuthPermission),
+        _ if msg
+            .to_ascii_lowercase()
+            .contains("environment is incorrect") =>
+        {
+            Some(ErrorKind::AuthInvalid)
+        }
+        _ => None,
+    }
+}
+
+fn rejection(which: &str, code: f64, msg: &str, kind: ErrorKind) -> VenueError {
+    let code = safe_cex_engine::num::format(code);
+    let mut error = VenueError::new(format!("Bitget rejected the {which} ({code}): {msg}"))
+        .kind(kind)
+        .venue_code(code);
+    if !msg.is_empty() {
+        error = error.venue_message(msg);
+    }
+    error
 }
 
 #[cfg(test)]

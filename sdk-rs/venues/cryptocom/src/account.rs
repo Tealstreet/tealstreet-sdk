@@ -1,9 +1,11 @@
 use crate::sign::Params;
 use crate::wire::{Envelope, Message};
 use crate::{Cryptocom, Pending, Skipped, quoted};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, TimerId, num};
+use safe_cex_engine::{Cx, Fill, Method, TimerId, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -466,7 +468,7 @@ impl Cryptocom {
             return;
         }
         self.account.order_rows = None;
-        cx.log(LogLevel::Error, error);
+        cx.retried_failure("cryptocom.account:471", error);
         self.schedule_reconcile(cx);
     }
     pub(crate) fn account_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -475,18 +477,28 @@ impl Cryptocom {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.position(cx.now));
                 } else if num::parse(row.quantity) != 0.0 {
-                    request.invalid = true;
-                    cx.log(LogLevel::Warning, "Crypto.com owned position market unavailable; preserving previous snapshot");
+                    if self.malformed_markets.contains(row.instrument_name) {
+                        request.invalid = true;
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Crypto.com owned position market unavailable; preserving previous snapshot");
+                    } else {
+                        cx.notice(Level::Warn, code::ROW_SKIPPED,
+                            format!("Skipping Crypto.com position on uncatalogued market {}", row.instrument_name),
+                        );
+                    }
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.order(cx.now, cx.store.order(&id(row.order_id))));
-                } else if row.instrument_name.ends_with("-PERP")
-                    && status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open
-                {
-                    request.invalid = true;
-                    cx.log(LogLevel::Warning, "Crypto.com working order market unavailable; preserving previous orders");
+                } else if status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open {
+                    if self.malformed_markets.contains(row.instrument_name) {
+                        request.invalid = true;
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Crypto.com working order market unavailable; preserving previous orders");
+                    } else {
+                        cx.notice(Level::Warn, code::ROW_SKIPPED,
+                            format!("Skipping Crypto.com order on uncatalogued market {}", row.instrument_name),
+                        );
+                    }
                 }
             }),
             Rows::Balance(balance) => serde_json::from_str::<BalanceRow>(item).map(|row| {
@@ -647,7 +659,11 @@ impl Cryptocom {
                         }
                     }
                 } else {
-                    cx.log(LogLevel::Error, "missing balance summary");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "missing balance summary",
+                    );
                 }
                 if self.account.count.is_multiple_of(4) {
                     self.account.order_revision = self.account.revision;

@@ -97,7 +97,7 @@ fn order_ids(e: &TestEngine) -> Vec<&str> {
 }
 fn warned(actions: &[Action], text: &str) -> bool {
     actions.iter().any(|a| {
-        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) if message.contains(text))
+        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(text))
     })
 }
 fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
@@ -253,8 +253,8 @@ fn malformed_startup_rows_still_initialise_the_account_and_signing_state() {
     assert!(e.store().loaded().positions && e.store().loaded().orders);
     assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 2.0);
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
-    assert!(warned(&actions, "malformed order rows (broken)"));
-    assert!(warned(&actions, "malformed position rows (BTCUSDT)"));
+    assert!(warned(&actions, "malformed order row broken;"));
+    assert!(warned(&actions, "malformed position row BTCUSDT;"));
     // Committing the snapshot initialises signing state, which requests balance.
     assert!(
         actions
@@ -349,7 +349,7 @@ fn account_rows_on_a_skipped_market_are_reported_once_as_hidden() {
     let hidden = e
         .drain_actions()
         .filter(|a| {
-            matches!(a, Action::Notice(Notice::Log { level: LogLevel::Error, message })
+            matches!(a, Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
                 if message.contains("position on ETH-USDT is hidden"))
         })
         .count();
@@ -379,7 +379,7 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
     assert!(socket.is_some());
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
             if message.contains("Invalid OmniKey seed") && message.contains("placement is disabled")
     )));
     answer(&mut e, http, 30.0, ACCOUNT, &list(&[PARENT]));
@@ -404,4 +404,23 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
         Action::Notice(Notice::CommandFailed { command: 4, error })
             if error.message.contains("OmniKey seed")
     )));
+}
+
+#[test]
+fn one_malformed_order_keeps_its_stored_copy_while_valid_peers_commit() {
+    let (mut e, socket) = ready(&list(&[PARENT, FRESH]));
+    assert_eq!(order_ids(&e), ["fresh", "parent", "parent__stop_loss"]);
+    let changed = FRESH.replace(r#""price":"95""#, r#""price":"96""#);
+    let broken = PARENT.replace(r#""side":"BUY""#, r#""side":"SIDEWAYS""#);
+    heal_orders(&mut e, socket, 100.0, &list(&[&changed, &broken]));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(e.store().order("fresh").unwrap().price, 96.0);
+    assert_eq!(order_ids(&e), ["fresh", "parent", "parent__stop_loss"]);
+    assert!(warned(
+        &actions,
+        "ApeX skipped malformed order row parent; keeping its last known state"
+    ));
+    assert!(!warned(&actions, "SIDEWAYS"));
+    heal_orders(&mut e, socket, 3000.0, &list(&[&changed]));
+    assert_eq!(order_ids(&e), ["fresh"]);
 }

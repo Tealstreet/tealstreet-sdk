@@ -365,57 +365,150 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     h.ws(&order_event("123", "2", "partially_filled"));
     assert!(h.e.store().orders().is_empty());
 }
+// BAD-USDT is skipped as malformed (zero leverage cap); ETH-USD is deliberately
+// filtered (inverse); MISSING-USDT is not listed at all.
+const PARTIAL_INSTRUMENTS: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"},{"instId":"BAD-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BAD","quoteCurrency":"USDT","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"0"},{"instId":"ETH-USD","instType":"SWAP","contractType":"inverse","baseCurrency":"ETH","quoteCurrency":"USD","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"50"}]}"#;
+const BALANCES: &str =
+    r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#;
+const WORKING: &str = r#"{"instId":"BTC-USDT","instType":"SWAP","orderCategory":"normal","orderId":"working","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}"#;
+
 #[test]
-fn unmapped_owned_position_rejects_scope_but_zero_and_other_products_are_ignored() {
-    for (quantity, kind, rejected) in [
-        ("4", "SWAP", true),
-        ("0", "SWAP", false),
-        ("4", "SPOT", false),
+fn owned_position_on_malformed_market_rejects_scope_but_other_missing_rows_are_skipped() {
+    for (inst, quantity, kind, rejected) in [
+        ("BAD-USDT", "4", "SWAP", true),
+        ("BAD-USDT", "0", "SWAP", false),
+        ("BAD-USDT", "4", "SPOT", false),
+        ("ETH-USD", "4", "SWAP", false),
+        ("MISSING-USDT", "4", "SWAP", false),
     ] {
-        let mut h = Harness::new();
+        let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
         h.seed();
         let previous = h.e.store().positions().to_vec();
         let balance = h.e.store().balance().clone();
         h.e.handle(10_000., Event::TimerFired { timer: h.tick });
         h.collect();
         let known = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"2\"");
-        h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"MISSING-USDT","instType":"{kind}","positions":"{quantity}"}}]}}"#));
+        h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"{inst}","instType":"{kind}","positions":"{quantity}"}}]}}"#));
         if rejected {
             assert_eq!(h.e.store().positions(), previous);
             assert_eq!(*h.e.store().balance(), balance);
             assert!(!h.pending.iter().any(|r| r.url.contains("asset/balances")));
-            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position has unavailable market metadata"))));
+            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("owned position has unavailable market metadata"))));
         } else {
-            h.reply(
-                "balances",
-                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
-            );
+            h.reply("balances", BALANCES);
+            assert_eq!(h.e.store().positions().len(), 1, "{inst} {kind} {quantity}");
             assert_eq!(h.e.store().positions()[0].contracts, 0.002);
         }
     }
 }
 #[test]
-fn unmapped_initial_position_does_not_claim_empty_account_loaded() {
-    let mut h = Harness::new();
+fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    h.modes();
+    let filtered = POSITION
+        .replace("BTC-USDT", "ETH-USD")
+        .replace(
+            "\"maintenanceMargin\":\"0.72\"",
+            "\"maintenanceMargin\":\"1.28\"",
+        )
+        .replace("\"unrealizedPnl\":\"0.5\"", "\"unrealizedPnl\":\"2\"");
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{POSITION},{filtered}]}}"#),
+    );
+    h.reply("balances", BALANCES);
+    let filtered_order = WORKING
+        .replace("BTC-USDT", "ETH-USD")
+        .replace("\"working\"", "\"external\"");
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{WORKING},{filtered_order}]}}"#),
+    );
+    // The skipped row still advances the page cursor.
+    let next = h.take("orders-pending");
+    assert!(next.url.contains("after=external"));
+    h.respond(next, r#"{"code":"0","data":[]}"#);
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let store = h.e.store();
+    let loaded = store.loaded();
+    assert!(loaded.positions && loaded.balance && loaded.orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    // Account totals still count the native row outside the catalogue.
+    assert_eq!(store.balance().used, 2.0);
+    assert_eq!(store.balance().upnl, 2.5);
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "working");
+    for kind in ["position", "order"] {
+        let needle = format!("Skipping BloFin {kind} on uncatalogued market ETH-USD");
+        assert!(
+            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains(&needle))),
+            "{kind}"
+        );
+    }
+}
+#[test]
+fn malformed_market_initial_position_does_not_claim_empty_account_loaded() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     h.modes();
     h.reply(
         "account/positions",
-        r#"{"code":"0","data":[{"instId":"MISSING-USDT","positions":"2"}]}"#,
+        r#"{"code":"0","data":[{"instId":"BAD-USDT","positions":"2"}]}"#,
     );
     assert!(!h.e.store().loaded().positions);
     assert!(!h.e.store().loaded().balance);
 }
 #[test]
-fn unmapped_working_order_rejects_authoritative_order_scope() {
-    let mut h = Harness::new();
+fn working_order_on_malformed_market_rejects_authoritative_order_scope() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
     let previous = h.e.store().orders().to_vec();
     h.e.handle(10_000., Event::TimerFired { timer: h.tick });
     h.collect();
-    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"MISSING-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
+    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BAD-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
     assert_eq!(h.e.store().orders(), previous);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("working order has unavailable market metadata"))));
+}
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    assert!(h.e.store().market_by_id("BAD-USDT").is_none());
+    let retry = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms, 1000.0) => Some(*timer),
+            _ => None,
+        })
+        .expect("partial catalogue retry");
+    h.seed();
+    h.actions.clear();
+    h.e.handle(1000., Event::TimerFired { timer: retry });
+    h.collect();
+    h.reply(
+        "instruments",
+        &PARTIAL_INSTRUMENTS.replace("\"maxLeverage\":\"0\"", "\"maxLeverage\":\"20\""),
+    );
+    assert!(
+        h.e.store().market_by_id("BAD-USDT").is_some(),
+        "repaired market"
+    );
+    assert!(h.e.store().market_by_id("BTC-USDT").is_some());
+    assert!(
+        h.pending.is_empty(),
+        "no ticker reseed or private restart: {:?}",
+        h.pending
+    );
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::SetTimer { .. })),
+        "{:?}",
+        h.actions
+    );
+    assert!(h.e.store().loaded().positions);
 }
 
 // Drive the actual account loop through slow/fast updates, a parked stale callback,
@@ -446,7 +539,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -457,7 +550,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -471,12 +564,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -487,9 +580,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -505,7 +598,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -594,17 +687,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     engine.handle(
         now,
         Event::PollScaleChanged {
-            scale: 100.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
-    engine.handle(now + 100.0, Event::TimerFired { timer });
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let reads: Vec<_> = output
         .iter()
@@ -617,7 +710,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     // Keep any next periodic timer for a loop that rearms before HTTP completes.
     for r in reads {
         engine.handle(
-            now + 100.0,
+            now + 1_500.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -632,15 +725,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     let next = output
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 200.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == now + 3_000.0 => Some(*timer),
             _ => None,
         })
         .expect("next account tick");
-    engine.handle(now + 200.0, Event::TimerFired { timer: next });
+    engine.handle(now + 3_000.0, Event::TimerFired { timer: next });
     engine.drain_actions().for_each(drop);
-    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+    // The jittered failure floor is fixed once and must survive every policy change.
+    let mut floor = None;
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
-            now + 200.0 + offset,
+            now + 3_000.0 + offset,
             Event::PollScaleChanged {
                 scale: interval_ms / POLL_MS,
             },
@@ -655,7 +750,14 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 40_200.0]);
+            let at = *times.first().expect("one rearmed poll");
+            assert_eq!(times, vec![at]);
+            let delay = at - (now + 3_000.0);
+            assert!(
+                (0.75 * 40_000.0..=40_000.0).contains(&delay),
+                "jittered failure backoff {delay}"
+            );
+            assert_eq!(*floor.get_or_insert(at), at);
         }
     }
 }
@@ -1224,7 +1326,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
             h.e.take_frame(START + 13.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
         h.e.handle(
             START + 14.0,
             Event::WsMessage {
@@ -1283,7 +1385,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
         h.e.take_frame(START + 4.0)
             .is_none_or(|f| executions(f).is_empty())
     );
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution price unavailable for order 123")&&message.contains("missing cumulative quote baseline"))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123")&& event.message.contains("missing cumulative quote baseline"))));
     h.e.handle(
         START + 5.0,
         Event::WsMessage {
@@ -1344,7 +1446,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
             h.e.take_frame(START + 3.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
     }
 }
 #[test]
@@ -1413,7 +1515,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
             h.e.take_frame(START + 4.0)
                 .is_none_or(|frame| executions(frame).is_empty())
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
         let seed = startup_execution(
             "123",
             8,
@@ -1552,7 +1654,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
             [(260.0 - f64::from(known_average), 0.004)],
             "startup/eviction must retain the last proven cumulative quote (evict={evict})"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))));
     }
 }
 #[test]
@@ -1601,10 +1703,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
         );
         assert!(!h.actions.iter().any(|action| matches!(
             action,
-            Action::Notice(safe_cex_engine::Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
-                ..
-            })
+            Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error
         )));
         let live = startup_execution(
             "123",
@@ -1627,7 +1726,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
                 .is_none_or(|frame| executions(frame).is_empty()),
             "a missing historical quote cannot replay historical quantity4..6 as live"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("missing cumulative quote baseline"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("missing cumulative quote baseline"))));
         let suffix = startup_execution("123", 10, 140, START - 100.0, START + 6.0, "filled");
         for now in [START + 7.0, START + 8.0] {
             h.e.handle(
@@ -1695,6 +1794,114 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
     );
     assert!(h.e.store().order("456").is_some());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            if message.contains("Malformed BloFin order row"))));
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("Malformed BloFin order row"))));
+}
+fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
+    actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+        _ => None,
+    })
+}
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let (retry, at) = new_timer(&h.actions)
+        .filter(|(_, at)| jittered(*at, 1000.0))
+        .expect("partial catalogue retry");
+    h.seed();
+    h.ws(&format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{WORKING}]}}"#
+    ));
+    assert!(h.e.store().order("working").is_some());
+    let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
+    h.e.handle(at, Event::TimerFired { timer: retry });
+    h.collect();
+    // BTC-USDT drops out of the list while BAD-USDT stays malformed.
+    h.reply(
+        "instruments",
+        &PARTIAL_INSTRUMENTS.replacen("BTC-USDT", "SOL-USDT", 1),
+    );
+    assert_eq!(h.e.store().market_by_id("BTC-USDT"), Some(&listed));
+    assert!(h.e.store().market_by_id("SOL-USDT").is_some());
+    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{POSITION}]}}"#),
+    );
+    h.reply("balances", BALANCES);
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{WORKING}]}}"#),
+    );
+    while h.pending.iter().any(|r| r.url.contains("orders-pending")) {
+        h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    }
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let store = h.e.store();
+    assert!(store.loaded().positions && store.loaded().balance && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert!(store.order("working").is_some());
+}
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let mut retry = new_timer(&h.actions).filter(|(_, at)| jittered(*at, 1000.0));
+    let mut rereads = 0;
+    while let Some((timer, at)) = retry.take() {
+        h.e.handle(at, Event::TimerFired { timer });
+        h.collect();
+        h.actions.clear();
+        h.reply("instruments", PARTIAL_INSTRUMENTS);
+        rereads += 1;
+        retry = new_timer(&h.actions);
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("stops re-reading"))));
+}
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
+#[test]
+fn auth_failure_ticks_are_jittered_while_healthy_ticks_keep_their_cadence() {
+    let mut h = Harness::new();
+    h.seed();
+    let mut now = 10_000.0;
+    let mut tick = h.tick;
+    let fire = |h: &mut Harness, timer, now: f64| {
+        h.actions.clear();
+        h.e.handle(now, Event::TimerFired { timer });
+        h.collect();
+        h.actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms - now >= 7_500.0 => {
+                    Some((*timer, *at_ms - now))
+                }
+                _ => None,
+            })
+            .expect("next tick")
+    };
+    let (next, delay) = fire(&mut h, tick, now);
+    assert_eq!(delay, 10_000.0, "healthy polling cadence is exact");
+    h.reply(
+        "orders-pending",
+        r#"{"code":"152401","msg":"Access key does not exist","data":[]}"#,
+    );
+    let mut delays = Vec::new();
+    (tick, now) = (next, now + delay);
+    for _ in 0..6 {
+        let (next, delay) = fire(&mut h, tick, now);
+        delays.push(delay);
+        (tick, now) = (next, now + delay);
+    }
+    assert!(delays.iter().all(|d| jittered(*d, 20_000.0)), "{delays:?}");
+    assert!(delays.iter().any(|d| *d < 20_000.0), "{delays:?}");
 }

@@ -58,10 +58,10 @@ of saved accounts.
 | `polymarket` | Yes | TS default, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage; generic algorithm fixtures do not enable venue features. Prediction CLOB V2 outcome shares with typed prediction/holding metadata; native local-wallet signature types 0/1/2/3 and supplied/derived L2 credentials. Limit/GTC only; no client IDs, market/conditional/bracket/reduce-only orders, or generic fills/order-history/income/public-trades query claims. Preserve authoritative final-fill-safe cancel-replace and bounded sampled price history. Read [venue-ports/POLYMARKET.md](venue-ports/POLYMARKET.md) for exact auth/product/query scope; private tests use documented fixtures, not live-key proof. |
 | `grvt` | Yes | TS default; perpetual-only Rust catalog, with local EIP-712 signing (chains 325/326), API-key/session login, routed/direct private auth, subaccount discovery and mandatory builder authorization. Canonical caller IDs are decimal 1..2^63-1; limit/market/protective/bracket commands and final-fill-safe cancel-replace, one-way positions, real leverage reads/updates; margin-mode mutation unsupported. Bounded fills/history/funding/public-trade queries and definitive client-ID lookup, including the chaser fill-verification hook. Preserve public browser builder-authorization exports and signing/session routing. [Explicit retirement decision](GRVT_PRODUCTS_DECISION.md) resolves unexposed mapper-only Future/Call/Put paths; no future/options claim or TS deletion. Exact scope/evidence: [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
-| `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
+| `bitunix` | Yes | TS default; opt-in USDT futures. Closed-PnL rows stay TS only (no `closedPositions` capability). Scope and gate evidence: [RUST_BITUNIX.md](RUST_BITUNIX.md). |
 
-The sole name absent from `RUST_VENUES` is `bitunix`.
-Do not silently route it through another family's adapter.
+Every `ExchangeName` is in `RUST_VENUES`.
+Do not silently route a venue through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
 BreakoutProp starts the actual Rust engine with documented DXtrade session/
@@ -76,35 +76,120 @@ Read-only inventory of every tealstreet-next use of the SDK that the landing
 branch changes. The landing branch reaches master and tealstreet-next in one
 cutover, so each item below must be handled in the same change set (or before).
 
-**Inputs.** tealstreet-next `origin/master` `3decd5c6bc` (2026-10-20), read with
+**Inputs.** Original tealstreet-next audit: `origin/master` `41e538d78d` (2026-10-20), read with
 `git grep`/`git show` only; Tealstreet/tealstreet-mobile `master` through the
-GitHub API. SDK `origin/feat/rust-rewrite` `b6c4f006a6` (includes #1375 bridge outcomes
-and #1399), plus the open contract PRs #1400 (engine capabilities),
-#1388 (structured events, `getHealth`), #1401/#1403 (VenueError detail, Rust only),
-and the merged #1377, #1383, #1386, #1393, #1394, #1334. Line numbers are
-tealstreet-next `origin/master` unless an SDK path is named.
+GitHub API. SDK `origin/feat/rust-rewrite` `1fa06c93b5` (2026-10-21), which has
+the merged contract PRs #1375, #1377, #1383, #1386, #1394, #1400, #1411, #1424,
+#1401, #1439, #1441, #1443, #1445, #1447, #1451, #1453, #1462, #1467 and #1469 (venue construction and the Polymarket, Orderly, BreakoutProp and AsterDEX construction rules moved into the shared `safe-cex-venues` crate; messages and the `start()` rejection point unchanged) and the per-venue classified-error PRs (#1403, #1404,
+#1417, #1425, #1429, #1432, #1434, #1436, #1437, #1438, #1442, #1444, #1446,
+#1452, #1455, #1457, #1458, #1460, #1463, #1468, #1470, #1471, #1473, #1478,
+#1479, #1475, and the B9 SDK PRs #1482, #1483, #1484), plus #1388 (engine log
+events, `getHealth`), #1450 (B5), #1510 and #1531 (payload-signer routing, narrowed to Bybit/Binance).
+The [2026-10-21 refresh](#contract-refresh-2026-10-21) checks SDK landing
+`3d73437e589`, tealstreet-next local `origin/master` `fdd2389a825`
+(`git grep`/`git show` only), and mobile `master` `8377a4f3f1e` through the
+GitHub API. Existing line references retain the original NX audit revision;
+new history-forwarding references below use `fdd2389a825`. Open PR proposals
+are not merged contracts.
+
+Construction follow-ups: checked SDK landing `570d15f3001` for #1563/#1567/#1575, retaining
+those downstream inventory revisions. The existing NX script-editor options
+already declare `extra.asterdexApiVersion?: 'v1' | 'v3'` and
+`extra.hyrotraderMode?: 'demo' | 'production'`; no new caller edit.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
 cannot proceed for the affected venues/hosts until one does.
 
 **Re-run** when a contract PR merges: repeat the three scans in
-[Audit method](#audit-method) and update the rows that cite that PR.
+[Audit method](#audit-method), then update the Status and Resolving PRs columns
+and the rows that cite that PR. Open contract work is tracked separately from
+the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
+
+### Contract refresh, 2026-10-21
+
+Initial batch checked landing `3d73437e589`, including the merges after the last refresh
+(#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
+The construction follow-ups check through #1575 at `570d15f3001`, including
+#1563, the #1550 logging merge and #1518's internal failure-path refactor.
+The subsequent #1558 logging-level merge is checked at `e757d8d7990`.
+The following rows record the caller effect, including changes requiring no
+downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
+
+| Merged PR / landing commit | Contract and caller effect |
+| --- | --- |
+| #1476 / `0741419bf2` | Local signing-credential validation moves from TS into `safe-cex-venues`, shared by WASM/native construction. The existing error text and `start()` rejection remain; engine loading now precedes this validation. B2's hosted TS hedge and #1531's payload-signer routing remain in force. |
+| #1519 / `9363852438` | One options blob reaches every venue; each Rust arm consumes its fields. No caller edit. A non-AsterDEX secondary read key without a secret now gets `Secondary read credentials require a nonempty key and secret`, replacing a decode error; AsterDEX keeps its separate read-agent rules. |
+| #1520 / `418e4f6ebc` | Engine capability `hostClock` (CAPABILITIES bit 14) replaces the bridge's virtual-clock name list for Backpack, Coinbase/spot and Orderly. Same corrected signing time; no caller edit. Ship matching engine and reader. |
+| #1392 / `48aeec3783` (earlier merge, stale caller row corrected here) | Resolved Base polling policy now scales every Rust venue's periodic reconciliation, including server multipliers and auth backoff; `Infinity` pauses and a finite update resumes. Socket supervision, startup and explicit reads are unaffected. Existing caller configuration works unchanged. |
+| #1529 / `ea39da2a1b` | BloFin historical-order `amount`/`filled` use base units, as fills/open orders already do; unknown-market rows are omitted. The owner-run `historical_orders` backfill remains required before Rust ingestion. |
+| #1531 / `a4d17f8a88` | Only private Bybit/Binance-family `payloadSigner` accounts fall back to TS. Other non-Paradex private Rust accounts refuse the option as `unsupported`/`notSent`; the construction row below already records the MCP effect. |
+| #1542 / `7ee1411110` and #1554 / `f52f08ea65` | Kraken futures returns the available newest ledger page when its 500-row page cannot be traversed, with `history.incomplete`; Binance exhausted income walks also warn. #1554 adds command-correlated, non-enumerable `incomplete: true` to those array results in the JS WASM host. Forwarding and ingestion must preserve/read it (B11). Kraken HTTP failures also retain the venue error code in their text. |
+| #1551 / `c2a36b7ca1` | Binance native stop-limit orders refuse `updateOrder` as `unsupported`/`notSent`, before cancellation, instead of becoming stop-market orders with the wrong trigger. Regular stop-market amend remains supported. Surface the refusal; no new call shape. |
+| #1513 / `084a326abf` | Cancel/amend of a just-acknowledged placement may wait for its order-store row on opted-in venues, up to 10 s before dispatch. Chaser STOP already waits for placement IDs; no caller edit. A timeout still requires reconciliation before retry. |
+| #1527 / `8c1e779021` | A book-cadence frame carrying fills also carries pending store sections; worker/main consumers apply orders before emitting those fills. No reader or FILLS revision change. Venue-delivered execution-before-order ordering remains possible. |
+| #1538 / `c18c30e45e` | First venue batch uses coded log events; duplicate auth notices in one dispatch count once. Native sessions use `event` notices; DO logs carry `code`/`fields` (#1388). No new `exchange.on` code payload: B9's classified fields remain the host integration. |
+| #1547 / `e8ad6facc1` | Hyperliquid zero TP/SL prices omit that bracket leg; unified/portfolio spot holdings populate `balance.coins` for the margin panel. `currencies` remains unset to preserve sizing. No caller edit. |
+| #1555 / `92a1608191` | Bybit OHLCV with `limit` ignores `from` and returns the newest bars ending at `to`, as TS. Chart/history callers keep the same arguments. |
+| #1546 / `2bd1ef7ae8` and #1556 / `5b0c16a952` | Mobile options/costing and existing production issues are documented in [RUST_MOBILE_B3.md](RUST_MOBILE_B3.md). B3 and the app fixes remain owner items. |
+| #1501 / `550e534e08` | Spot-enabled `hyperliquid` accounts now run on Rust; the perp engine merges spot pairs, holdings and orders. B8's product fallback is superseded. The keyless hosted/payload-signer TS routing remains in place. |
+| #1506 / `c0d37f95d9` | Optional `UNDERLYING_TOKENS` frame section 20 carries merged Hyperliquid spot token names; both consumers reconstruct `Market.info.hlTokenName`/`hlTokenFullName`. The Margin panel's underlying-token risk disclosure works without an app edit. Ship matching engine/reader/applier. |
+| #1560 / `d68a47b7c7` | Orderly bounded OHLCV reads now use native history and preserve caller bounds; trailing-stop display uses the native extreme/callback with BUY adding and SELL subtracting. Candle/order shapes and write contracts are unchanged. The landed display/read note is preserved below. |
+| #1550 / `012e073e4f` | The remaining fifteen venue families use coded log events, completing #1538's migration. Message text and levels remain unchanged; B9's classified-error integration and the native/DO notice contract remain the caller requirements. |
+| #1563 / `60a3dc1e79` | Shared Rust AsterDEX API-version resolution now also supplies optional WASM construction metadata. The wrapper forwards only a valid explicit `extra.asterdexApiVersion` override and adopts the native version for signing eligibility/STP checks after loading. Synchronous pre-host and older-host inference remains parity-tested; account/options/trading call shapes are unchanged. |
+| #1567 / `d06eabae16` | One shared JSON rules table derives signing/public-mode eligibility synchronously in TS and before native validation/startup. Optional raw `publicMode` carries caller intent; `construction()` adds optional `canSign`/`publicDataOnly`, and the WASM module exports no-I/O `resolveConstruction`. Existing application options and legacy native/harness input remain compatible; the explicit-private Paradex refusal moves into the registry. See [Construction metadata and public mode](#construction-metadata-and-public-mode-1563-1567). |
+| #1518 / `8b115cefd7` | Internal `Cx::done` is success-only and `Cx::fail` owns command failures. Hosts still emit the existing `done` error shape with classified detail; message text is unchanged. No caller edit or new wire revision. |
+| #1575 / `570d15f300` | Rust selects HyroTrader endpoints from optional raw mode/network maps, retaining legacy explicit endpoints when that config is absent. Private non-Paradex `payloadSigner` refusal moves into the registry; WASM registry failures carry JSON `Error.venueError`, which the SDK converts to `ExchangeError`, preserving `unsupported`/`notSent` for that refusal. Factory routing and application options stay unchanged; see [Host construction rules](#host-construction-rules-1575). |
+| #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
+
+#1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
+headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
+downstream call shape. They add no cutover edit here. **Pending:** #1430
+adds native account reads and optional fill financials/FILLS revision 2;
+#1522 changes leverage reads. Re-audit those when merged rather than treating their proposed
+contracts as available.
 
 ### Summary: cutover blockers (no new equivalent)
 
-| # | Blocker | tealstreet-next callers | Affects |
-| --- | --- | --- | --- |
-| B1 | **Engine delivery.** Copybara does not mirror `sdk-rs/**`; tealstreet-next already owns an unrelated `sdk-rs/`; `@tealstreet/safe-cex-wasm` `pkg/` is a gitignored build output. No tealstreet-next build runs a Rust/wasm step (Owner decision 1). | every host below; `apps/web/next.config.mjs`, `services/exchange-server` build, `apps/cli/scripts/build.sh`, `packages/exchange-mcp/tsup.config.ts` | all 9 default-Rust names immediately; every opt-in later |
-| B2 | **Keyless hosted signing.** exchange-server constructs private accounts with `secret: ''` and a live `RemoteSigner` (`services/exchange-server/src/server.ts:1015-1034`); the browser signs via `exchange.signHttpRequest`/`signWsAuth` (`apps/web/src/controllers/exchangeController/exchangeAccountController.ts:3029`, `apps/web/src/utils/shim/worker/signingHost.ts:191`). Rust rejects keyless private accounts outside hyperliquid/paradex/lighter*/txflow/coinbase*/polymarket (`rust.exchange.ts:519-536`), so hosted Orderly fails at startup, and no engine path signs through a remote signer (Owner decision 2). | `services/exchange-server/src/server.ts:972-1106`, `remote-signer.ts:513-693`; web `signingHost.ts:74-191`, `exchangeAccountController.ts:2482,3029` | hosted mode for every Rust venue |
-| B3 | **React Native / Hermes.** tealstreet-mobile resolves `registry.native.ts`, which maps the 9 default names to the wasm engine; Hermes has no `WebAssembly` (Owner decision 3). See [Mobile](#mobile). | tealstreet-mobile | coinbase, coinbasespot, 6 Orderly brokers, txflow on mobile |
-| B4 | **Main-thread trading.** Web places orders on the main-thread exchange built by `createExchangeFromAccount` (`apps/web/src/utils/exchange/createExchangeFromAccount.ts:57`; `order/sendOrder.ts:24-26`, `createScaledOrder.ts:452`, `updateOrder.ts:280`, `cancelOrders.ts:136`, `useNuke.ts:7`, `lostSendResolver.ts:82`). A main-thread `RustEngineExchange` has no engine (`rust.exchange.ts`; RUST_AUDITS "Cutover"). **Resolved in safe-cex:** an instance with a `callMethod` listener (the web controller's passthrough, in both `store`-payload and frame modes, and the hosted `ExchangeServerWorker` shim) forwards `placeOrder(s)`, `placeOrderWithClientOrderId`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`, `cancelAllOrders`, `findOrderByClientOrderId`, `nuke*`, `fetchPublicTrades` (`components/chart/datafeed/DefaultDatafeed.ts:705`), `fetchOHLCV` (`components/dom/Dom.tsx:237`, `lightweightCharts/SafeCexKLinesChart.tsx:29`) and the journal axes `fetchHistoricalFills`/`fetchHistoricalOrders`/`fetchIncomeHistory(Range)`/`fetchHistoricalPositions` (`utils/historical/collectAccountAxes.ts:229-241`) whole to the worker's engine. It adopts the worker's capability record without building an engine, so Lighter `changeAccountTier`/`fetchAccountTier` (`components/settings/profile/PerExchangeSettingsBody.tsx:74-130`) appear once markets load and forward to the worker. No tealstreet-next edit for these. Optional edits: journal ingestion (`utils/historical/runHistoricalWindow.ts:45`) should `await exchange.loadCapabilities()` before `isAxisSupported`, or for one round trip after markets load it asks unsupported axes and records empty rather than unsupported; `PerExchangeSettingsBody` does not re-render when the tier methods appear, so a settings panel opened before adoption shows the tier controls disabled until its next render. **Required tealstreet-next edit (warm start):** `registerAccountHelper` (`exchangeAccountController.ts:1747-1752`) runs `hydrateExchangeFromCache` → `eagerExchangeWarmStart` before the worker exists; on a cache miss `ensureMarkets` (`eagerExchangeWarmStart.ts:58`) calls `fetchMarkets()`, which starts a second private Rust engine on the main thread (duplicate sockets and rate-limit usage). In `eagerExchangeWarmStart`, keep `applyCachedSnapshot` but return before `ensureMarkets`/`startEagerUserDataFetches` when `exchange instanceof RustEngineExchange` (import from `@tealstreet/safe-cex/src/exchanges/rust/rust.exchange`); the worker's store payloads seed the same data. Warm start cannot be skipped from safe-cex, because public consumers (candle-server, SDK factory) rely on `fetchMarkets` starting an unstarted engine. Deploy exchange-server before web: an older server answers forwarded methods with an empty failure. | resolved (warm-start edit in tealstreet-next) | web, all Rust venues |
-| B5 | **Socket health and recovery.** `store.socketHealth` is never written by frames; `reconnect`/`recoverAfterOffline` are no-ops/`true`; `getAllSockets()` returns `[]`; `authFailureStreak` stays 0. #1388 `getHealth()` counters are a different shape and not wired into the store. | web `exchangeAccountController.ts:3391-3415`, `utils/exchange/getWebSocketStatus.ts:27-55`, `getExchangeAppearsConnected.tsx:34`, `components/connectionStatus/{ConnectionStatusIndicator.tsx:39,97,ReconnectingBanner.tsx:157-261}`, `nudges/hostedServerForInstability.ts:66`, `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82`; CLI `packages/cli-core/src/commands/BaseCommand.ts:173` (stale-stream gate fails open), `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `apps/cli/src/repl.ts:2831,2903` (key rejection); exchange-server `public-exchange-manager.ts:95,459` | all Rust venues |
-| B6 | ~~**In-process shared public data.** exchange-server passes `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) and Rust rejected it.~~ **Resolved:** Rust accepts the in-process source unchanged. `serveInProcessPublicData` (`exchanges/rust/publicFeed.ts`) speaks the shared-feed protocol over an in-memory port pair, so the account ingests natively and validates the catalog as with `RustPublicFeedProvider`. Like the TS adapter it is lenient: private startup continues after 30 s without a loaded source, and account markets the source has not listed yet are tolerated (their book/candle requests wait). It follows the server's re-attaching source across public-exchange restarts and re-announces a changed catalog. Real field mismatches still fail, so the source must run on the same engine (at cutover the public exchange is Rust too). One hub per source broadcasts changed tickers every 250 ms. No exchange-server edit is needed. Optional exchange-server edit: `createSharedPublicDataSource` keys by venue only, so testnet accounts receive the mainnet source; Rust ignores the source for testnet and runs its own feed, while TS prices testnet off mainnet. Websocket gateways still reject. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
-| B7 | ~~**Per-account proxy token across async engine work.**~~ **Resolved in the SDK:** each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider. Before this, a request outside the account's `AsyncLocalStorage` run went out with no proxy token, and one inside another account's run used that account's token (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. No exchange-server change. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
-| B8 | **Missing per-venue methods** used by the app: `fetchClosedPnl` (no Rust venue), `fetchHistoricalPositions` (only kraken, binance, woo), Hyperliquid `enableSpotMarkets` (throws), Bybit raw `balance.info` (`accountType`, multi-collateral array). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229` (non-null asserted), `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | per family when switched: bybit/okx/blofin (closed PnL); bitget/blofin/bybit/hyperliquid/okx/paradex (journal); hyperliquid spot; bybit margin UI |
-| B9 | **Typed errors.** No TS `ExchangeError` with `kind`/`outcome`/`venueCode` exists on the branch or any open PR; `host.mjs` ignores the wire `detail` from #1377/#1401/#1403. Text matching (below) cannot move to codes until it does. | see [Error strings](#error-strings-that-must-move-to-codes) | all |
-| B10 | **candle-server public exchanges never started.** Resolved on landing by #1375 (`fetchMarkets` starts the engine and waits ≤30 s), provided the engine loads in that image (B1); see [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
+| # | Status | Resolving PRs | Blocker and what is left | tealstreet-next callers | Affects |
+| --- | --- | --- | --- | --- | --- |
+| B1 | **Open: owner decision 1** | none | **Engine delivery.** Copybara does not mirror `sdk-rs/**`; tealstreet-next already owns an unrelated `sdk-rs/`; `@tealstreet/safe-cex-wasm` `pkg/` is a gitignored build output. No tealstreet-next build runs a Rust/wasm step. See [Build and delivery steps](#build-and-delivery-steps). | every host below; `apps/web/next.config.mjs`, `services/exchange-server` build, `apps/cli/scripts/build.sh`, `packages/exchange-mcp/tsup.config.ts` | all 9 default-Rust names immediately; every opt-in later |
+| B2 | **Decided short term: keep remote signing** (Sam, 2026-10-21). Hosted accounts keep working at cutover; the engine port is costed, undecided | #1498 (hedge), #1505 (hosted Coinbase/Orderly); costing in [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md) (#1500) | **Keyless hosted signing.** exchange-server constructs private accounts with `secret: ''` and a live `RemoteSigner` (`services/exchange-server/src/server.ts:1015-1034`); the browser signs via `exchange.signHttpRequest`/`signWsAuth` (`apps/web/src/controllers/exchangeController/exchangeAccountController.ts:3029`, `apps/web/src/utils/shim/worker/signingHost.ts:191`). No engine path signs through a remote signer. Hosted accounts must keep working at and after cutover; server-held session keys are the likely long-term direction but are not committed. **Hedge:** `runsOnRustEngine` keeps every keyless remote-signed account (`isKeylessRemoteSigned`: a `remoteSigner`, no `secret` and no AsterDEX V3 wallet key) on the TS venue, so `createExchange` and `ExchangeWorker` never start it on an engine that cannot sign; a directly built `RustEngineExchange` refuses it at startup with `keyless remote-signed accounts run on the TS venue` instead of starting and rejecting every order (Hyperliquid did). Lighter (read-only without a secret, as TS), Paradex and Polymarket (signing key in `key`) stay on the engine. **Default-Rust names (#1505):** master's TS Coinbase and Orderly venues are restored as hosted-signing-only venues (`exchanges/hostedSigningVenues.ts`). A keyless hosted account on coinbase, coinbasespot or an Orderly broker runs them, and a browser `RustEngineExchange` signs `signHttpRequest`/`signWsAuth` through them, as master did; a main-thread mirror whose server worker is TS keeps its forwarders' capability defaults. TxFlow has no kept venue (no hosted users; its master build was a stub). Orderly hosted private WS signs with the local secret, so it stays unavailable, as on master. **Left:** the engine port itself (Sam's decision, costed in RUST_REMOTE_SIGNING.md); these TS venues are deleted when it lands or session keys replace remote signing. | `services/exchange-server/src/server.ts:972-1106`, `remote-signer.ts:513-693`; web `signingHost.ts:74-191`, `exchangeAccountController.ts:2482,3029` | hosted mode for every Rust venue |
+| B3 | **Open: owner decision 3** | options/costing #1546; live-issue inventory #1556 | **React Native / Hermes.** Sync reaches the wasm imports through `registry.native.ts`, breaking Metro bundling; Hermes cannot execute wasm. The 9 default-Rust names are filtered from the mobile UI, so bundling is the immediate cutover problem. [RUST_MOBILE_B3.md](RUST_MOBILE_B3.md) recommends keeping device TS for cutover and routing through exchange-server with session keys as a direction; neither is decided. Existing transport/signing/storage app fixes remain separate owner items. See [Mobile](#mobile). | tealstreet-mobile | the synced mobile bundle; any future on-device Rust execution |
+| B4 | **Resolved in the SDK; one tealstreet-next edit** | #1443 (merged `6d6e3d666f`); #1462 (merged `341ea148bb`) | **Main-thread trading and reads.** An instance with a `callMethod` listener (the web controller's passthrough in `store`-payload and frame modes, and the hosted `ExchangeServerWorker` shim) forwards `placeOrder(s)`, `placeOrderWithClientOrderId`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`, `cancelAllOrders`, `findOrderByClientOrderId`, `nuke*`, `fetchPublicTrades` (`components/chart/datafeed/DefaultDatafeed.ts:836`), `fetchOHLCV` (`components/dom/Dom.tsx:237`, `lightweightCharts/SafeCexKLinesChart.tsx:29`) and the journal axes `fetchHistoricalFills`/`fetchHistoricalOrders`/`fetchIncomeHistory(Range)`/`fetchHistoricalPositions` (`utils/historical/collectAccountAxes.ts:229-241`) whole to the worker's engine. It adopts the worker's capability record without building an engine, so Lighter `changeAccountTier`/`fetchAccountTier` (`components/settings/profile/PerExchangeSettingsBody.tsx:74-130`) appear once markets load and forward. No edit for these. Optional edits: journal ingestion (`utils/historical/runHistoricalWindow.ts:45`) should `await exchange.loadCapabilities()` before `isAxisSupported`, or for one round trip after markets load it asks unsupported axes and records empty rather than unsupported; `PerExchangeSettingsBody` does not re-render when the tier methods appear, so a panel opened before adoption shows the tier controls disabled until its next render. **Left:** warm start (`utils/exchange/eagerExchangeWarmStart.ts:124` `ensureMarkets` → `fetchMarkets` at `:58`, from `hydrateExchangeFromCache.ts:31`) starts a second private engine on the main thread; skip it for Rust accounts (edit below). Deploy exchange-server before web: an older server answers forwarded methods with an empty failure. | `eagerExchangeWarmStart.ts:116-130`; optional `runHistoricalWindow.ts:45`, `PerExchangeSettingsBody.tsx:74-130` | web, all Rust venues |
+| B5 | **Resolved; no tealstreet-next edit** | #1388 (merged `f9e21a8f37`), #1450 (merged `5ff7ebde6c`) | **Socket health and recovery.** Before #1450, `store.socketHealth` was never written by frames, `reconnect`/`recoverAfterOffline` were no-ops/`true`, `getAllSockets()` returned `[]` and `authFailureStreak` stayed 0. #1450 writes `socketHealth` through the TS summarizer on every socket change and every 5 s, makes `reconnect`/`recoverAfterOffline` close open engine sockets (code 1006) so the venue reopens them (`false` only after dispose or engine death), returns per-channel handles from `getAllSockets` (`isReadonlyFallbackActive()` is always `false`), raises `authFailureStreak` on credential rejections, and teaches the CLI's `findKeyRejection` the engine's wording. Every caller listed then works unchanged; a private stream counts as healthy for 60 s of silence (TS: 20 s), and a socket already in venue backoff (up to 30 s) is not hurried. | web `exchangeAccountController.ts:3391-3415`, `utils/exchange/getWebSocketStatus.ts:27-55`, `getExchangeAppearsConnected.tsx:34`, `components/connectionStatus/{ConnectionStatusIndicator.tsx:39,97,ReconnectingBanner.tsx:157-261}`, `nudges/hostedServerForInstability.ts:66`, `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82`, `order/createLimitOrder.ts:221-222`; CLI `packages/cli-core/src/commands/BaseCommand.ts:173`, `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `apps/cli/src/repl.ts:2831,2903`; exchange-server `public-exchange-manager.ts:95,459` | all Rust venues |
+| B6 | **Resolved; no tealstreet-next edit** | #1441 (merged `ae3a1fc122`) | **In-process shared public data.** Rust accepts exchange-server's `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) unchanged. `serveInProcessPublicData` (`exchanges/rust/publicFeed.ts`) speaks the shared-feed protocol over an in-memory port pair, so the account ingests natively and validates the catalog as with `RustPublicFeedProvider`. Like the TS adapter it is lenient: private startup continues after 30 s without a loaded source, and account markets the source has not listed yet are tolerated (their book/candle requests wait). It follows the server's re-attaching source across public-exchange restarts and re-announces a changed catalog. Real field mismatches still fail, so the source must run on the same engine (at cutover the public exchange is Rust too). One hub per source broadcasts changed tickers every 250 ms. Websocket gateways still reject. Optional exchange-server edit: `createSharedPublicDataSource` keys by venue only, so testnet accounts receive the mainnet source; Rust ignores it for testnet and runs its own feed, while TS prices testnet off mainnet. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
+| B7 | **Resolved; no tealstreet-next edit** | #1439 (merged `0ced7ccf1e`) | **Per-account proxy token across async engine work.** Each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
+| B8 | **Resolved; no tealstreet-next edit** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | none |
+| B9 | **Resolved in the SDK; tealstreet-next must pass the classification** | #1377, #1383, #1401, #1424, #1482, #1483, #1484 (merged); venue PRs merged for all 26 venue families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a classified kind over text patterns. **Left (tealstreet-next):** the hosts' `'error'` handlers must pass `opts.classified` to `processMessage` (edit below), or classification keeps matching text. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
+| B10 | **Resolved, given B1** | #1375 (merged `b6c4f006a6`) | **candle-server public exchanges never started.** `fetchMarkets` (`exchange-pool.ts:265`) now starts the engine and waits ≤30 s for native data; it still needs the engine loadable in that image (B1). See [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
+| B11 | **Open: history completeness forwarding and ingest** | #1542, #1554 (host flag merged; propagation remains) | **Partial history must not become complete coverage.** Kraken futures' saturated income page and Binance's exhausted income chunks resolve with available rows and a non-enumerable `incomplete: true` in the JS WASM host. Worker/JSON hops lose that property; collection and derived history can also discard it. Carry completeness explicitly through each hop and consume it before recording coverage. See [Incomplete history](#incomplete-history-1542-1554). | SDK `CallMethodHandler`/Rust mirror; NX `ExchangeServerWorker`, `collectAccountAxes`, `runHistoricalWindow` | affected Rust income reads and any fill/position axis derived from them |
+
+### What remains before cutover (beyond owner decisions B1–B3)
+
+SDK work: preserve #1554's incomplete-history metadata across forwarding and
+any derived-history reads (B11); the host flag alone does not close this.
+B2's engine port is costed in
+[RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md) and undecided; hosted accounts
+keep working without it.
+
+tealstreet-next edits, shipped with the cutover (listed in [tealstreet-next caller changes shipped at cutover](#tealstreet-next-caller-changes-shipped-at-cutover)):
+
+1. Capability record: the 10 compile-time call sites and two test fixtures (#1400).
+2. Warm-start skip for Rust accounts (B4).
+3. `callMethodInWorkerFireAndForget.ts:3-7` also accepts `code === 'COMMAND_TIMEOUT'`.
+4. Root `CLAUDE.md:662` names `isBaseCapabilityFallback` as the brand check; point it at `exchange.capabilities`.
+5. Pass `opts.classified` from the web and CLI `'error'`/`'warning'` handlers into `ExchangeHealthMonitor.processMessage` (#1484).
+6. Preserve/read history completeness through the worker/hosted response and
+   journal collection; incomplete windows never call `completeWindow` (B11).
+
+Cutover item, `collectAccountAxes`: #1554 supplies an incomplete-history flag,
+but its forwarding/coverage work is still open (B11). The exact transport and
+ingest requirements are in [Incomplete history](#incomplete-history-1542-1554).
+
+Owner item, one-off at cutover: `historical_orders` (created by `supabase/historical_data.sql`) already holds BloFin order rows that TS wrote in contract units. Rust writes base units, so the table would mix both. The fix is to **multiply** `amount`/`filled` by the instrument's `contractValue` (base = contracts × contractValue, e.g. 1000 × 0.001 = 1 BTC). Do not select rows by `ingested_at`: an upsert keeps the original timestamp, so a TS-era row that Rust later rewrites in base units would be converted twice. Run the backfill with BloFin order ingestion paused, before Rust writes any BloFin order row, or make it idempotent: convert only rows whose `filled` far exceeds the summed base `qty` of the matching `historical_fills` (TS fills were already base units). The owner runs it; there is no SQL in this repo.
+
+Deployment order: exchange-server before web (B4 forwarding, `fetchEngineCapabilities`, then B11 completeness metadata). #1538 already emits venue events: deploy safe-cex-server with #1388's notice validator before connecting such engines to native sessions (an older validator closes the session on `type: "event"`).
 
 Not blockers but required edits are listed per area below.
 
@@ -113,8 +198,8 @@ Not blockers but required edits are listed per area below.
 | Set | Names | Selection |
 | --- | --- | --- |
 | Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
-| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
-| TS only | `bitunix`, `binanceoptions` (master-only, survives the merge) | |
+| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
+| TS only | `binanceoptions` (master-only, survives the merge) | |
 
 `ExchangeName` keeps every name, so the exhaustive maps in
 `apps/web/src/components/chart/web/hostedMarketProduct.ts:23` and
@@ -138,38 +223,76 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `start()` single-use; startup failures reject (`StartupFailed`, #1383) | MCP `server.ts:13` (start-once, retried on failure on the same instance); CLI `platform-adapter.ts:247-261` (30 s race) | TS `start()` re-callable | a failed Rust start needs a new instance; MCP retry must recreate the exchange | RT |
 | `validateAccount()` starts the engine; error text from engine startup | web `components/newApiFlow/useAccountForm.ts:210-275` (matches `'passphrase'`, `'api key'`, `'secret'`, `'whitelist'`, `'permission'`, `'secondary'`) | TS venue messages | engine messages (e.g. `<name> credentials were rejected`, `Orderly requires base58-encoded 32-byte key and secret`) | RT |
 | `externalPublicData` websocket gateway rejected; in-process source accepted (B6); `privateOnly`+`publicFeed: direct` rejected | exchange-server `server.ts:1015-1034` | none for in-process | `publicFeed: { mode: 'shared', port }` + `RustPublicFeedProvider` for gateways | RT, B6 |
-| `remoteSigner` refused (most venues) | exchange-server `server.ts:1015`; web hosted signing | browser-signed | none | RT, B2 |
-| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | ignored on Rust → private reads unsigned | RT |
-| `extra.tickInterval` honored only by Orderly/BreakoutProp | MCP `config.ts:59-72` (`Infinity` disables polling); web `createExchangeFromAccount.ts:91-92` (`secondaryApiKeyTickInterval`) | all TS polling venues | other Rust venues poll a fixed engine interval | RT |
+| Keyless `remoteSigner` account routes to TS | exchange-server `server.ts:1015`; web hosted signing | browser-signed | #1498/#1505 keep hosted TS and browser signing working (B2); a direct private engine construction is refused, with the documented exceptions | none through factory/worker; direct construction RT |
+| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510/#1531: `runsOnRustEngine` keeps Bybit/Binance-family `payloadSigner` accounts (not `publicDataOnly`) on TS, whose signers honour it; every other private non-Paradex Rust account with one, including default-Rust Coinbase/Orderly (their kept TS classes ignore it), is refused at startup with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'`. #1575 enforces this in the registry after WASM loading, before venue I/O or signer invocation | RT (MCP `EXCHANGE_ENGINE=rust` signer mode: Bybit/Binance run TS; other venues fail loudly) |
+| Resolved polling policy (#1392) | MCP `config.ts:59-72` (`extra.tickInterval: Infinity` disables polling); web `exchangeAccountController` worker-config multipliers | TS `getTickInterval()` policy | all Rust periodic reconciliation now scales from the resolved interval, including overrides, server multipliers and auth backoff. `Infinity` pauses, finite updates resume; native rate floors/cooldowns remain. Startup, socket supervision and explicit reads continue | none; existing controls now apply to Rust |
 | `instanceof BlofinExchange` | web `components/reactiveStateHelper/exchangeReactiveStateHelper/BlofinExchangeReactiveStateHelper.tsx:6,20` | true for blofin | false when blofin runs Rust | RT (on blofin switch) |
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
 | `Exchange` gains `fetchEngineSnapshot`; #1400 adds `capabilities`/`loadCapabilities` | no `implements Exchange` downstream; only `as Exchange` casts (`apps/cli/src/repl.ts:713,1517-1925`, `cross-trade-daemon.ts:222`, web tests) | | casts still compile | none |
+| #1476/#1519/#1520 construction and clock policy | factory/worker creation and MCP config callers above | TS local-credential check, per-venue options/clock name lists | shared Rust validation, uniform options and engine `hostClock`; no caller edit. Missing secondary-secret errors are now specific; #1531 still narrows payload-signer fallback | RT validation text; same signing clock |
+| Construction metadata/public mode (#1563/#1567) | saved-account/factory/worker callers above; web `components/customModules/monacoTypesString.ts` already declares the Aster override and `publicDataOnly` | synchronous venue branches and derived public-mode hint | shared rules preserve synchronous getters; after WASM loading they adopt native `canSign`/`publicDataOnly` when present, while Aster STP reads native `asterdexApiVersion`. `WasmEngineLike.construction()` remains optional; missing fields use TS fallback. See the input/compatibility boundaries below | none for application callers; additive host API |
+
+#### Construction metadata and public mode (#1563, #1567)
+
+`packages/safe-cex/src/exchanges/rust/construction-rules.json` is now the single
+rules table for signing and private-data eligibility. TS `derivePublicMode`
+evaluates it synchronously before WASM loads; `safe-cex-venues` embeds the same
+file with `include_str!` and evaluates it before credential validation/startup.
+Source delivery/builds (B1) must retain that JSON dependency at the registry's
+include path; compiled engines embed the table.
+The compiled parity matrix covers every registered Rust name across 69 input
+combinations, including signer kinds, public intent and venue-specific rules.
+This preserves existing options and eligibility; it does not add remote signing
+to an engine or establish that credentials are valid.
+
+| Host boundary | Landed contract and compatibility |
+| --- | --- |
+| SDK bridge → native `EngineOptions` | Optional `publicMode: { requested: boolean \| null, remoteSigner: boolean, payloadSigner: boolean, apiKeyIndexPresent: boolean }` carries raw intent/presence beside the existing `publicDataOnly` hint. The SDK sends it; application callers keep using `ExchangeOptions.publicDataOnly`, credentials and signer options. With `publicMode`, Rust derives public mode and sets `accountStartup` from it rather than trusting a conflicting derived hint. |
+| `WasmEngineLike.construction?(): string` | JSON `EngineConstruction` now has optional `canSign`, `publicDataOnly` and `asterdexApiVersion` fields. The wrapper adopts available native fields after loading and uses shared synchronous TS rules for missing fields/older hosts. This metadata is separate from frame/engine capabilities and contains no credentials. Without `publicMode`, native/harness construction keeps the legacy `publicDataOnly`/`accountStartup` interpretation and omits the two new metadata fields; non-Aster metadata can still be `{}`. |
+| WASM module `resolveConstruction(venue, optionsJson): string` | New named export returns the same metadata JSON without constructing an engine or performing I/O. `WasmEngineModule` declares it optional, so existing custom loaders need no new method. Resolving metadata is not credential validation or successful startup; the production wrapper still has synchronous TS getters before async loading. |
+| Explicit-private Paradex startup | `publicDataOnly: false` without key, Paradex address or subkey address still rejects `start()` with `Rust Paradex private accounts require a key, Paradex address and subkey address`. The registry now enforces it after WASM loading and before venue I/O, instead of the bridge refusing before loading. Public/automatic mode and the existing private-field requirements stay as before. |
+
+#### Host construction rules (#1575)
+
+The construction scope in [RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md)
+is now landed through #1563/#1567/#1575. B2's factory routing for keyless remote
+signing and supported payload signers still applies; the engine signing port
+remains an owner item. Paradex signing transport and polling are unchanged.
+
+| Host boundary | Landed contract and compatibility |
+| --- | --- |
+| SDK bridge → HyroTrader registry | Optional `EngineOptions.hyrotrader` carries raw `mode` plus `production`/`simulator` maps, each with `rest`, `publicWs`, `privateWs` and their `livenet`/`testnet` URLs. Rust selects simulator for `mode: 'demo'` or an empty production REST livenet URL (even for testnet accounts), then selects the requested network. All three selected URLs must be configured or construction rejects with `HyroTrader REST/public/private URLs are not configured`. Raw config takes precedence over explicit `endpoints`; omitting it preserves legacy native/harness explicit endpoints. Application callers keep `extra.hyrotraderMode` and `testnet`; this is no new live-connectivity evidence. |
+| Native private `payloadSigner` refusal | `payloadSigner` is parsed across features. After public-mode derivation, private non-Paradex construction refuses it as `unsupported`/`notSent`, including with a local secret, before HTTP/WS I/O or a signing callback. Public accounts bypass the refusal, including the existing Aster/Lighter payload-only public fallback. Paradex delegated signing and the Bybit/Binance TS factory exceptions remain. |
+| Raw WASM constructor → SDK startup | Registry construction failures throw a JS `Error` with JSON-encoded `venueError` detail. The SDK wraps valid detail in `ExchangeError`, preserving message/classification; `validateAccount()` still reports `kind: 'unsupported'` for the payload-signer refusal. Errors without usable detail retain their original form for older/custom loaders; invalid options JSON remains a plain constructor error. No constructor arguments or application call shapes change. |
 
 #### Capability detection
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
 | --- | --- | --- | --- | --- |
-| #1400 un-exports `isBaseCapabilityFallback`, `isInertCapability`, `isEmptyStubCapability` | web `components/openPositions/ClosedPositions.tsx:11,114`, `utils/historical/collectAccountAxes.ts:5,162,164`; `packages/venue-data/src/journal/symbolScopedFills.ts:1,73-76`; `packages/venue-data/.../axis-grading.registry.test.ts:9,81`; `scripts/history-audit/lib/axis-inventory.ts:3,81,83`, `closedPnl.ts:32,234`, `venue-survey.ts:4,86,107,165`; MCP `packages/exchange-mcp/src/tools.ts:15,359-364` | `isBaseCapabilityFallback(exchange.fetchX, 'fetchX')` | `await exchange.loadCapabilities()` then `exchange.capabilities.{fillHistory,orderHistory,incomeHistory,incomeRange,closedPnl,…}` (main-thread mirrors adopt the worker's record) | CT with #1400 |
-| Without #1400: Rust methods are real functions | MCP `tools.ts:359-364` (`typeof fn === 'function' && !isInertCapability(fn)`) | branded base fallbacks hide unsupported tools | Rust forwards → tools advertised for unsupported queries | RT |
+| #1400 (merged) un-exports `isBaseCapabilityFallback`, `isInertCapability`, `isEmptyStubCapability` | web `components/openPositions/ClosedPositions.tsx:11,114`, `utils/historical/collectAccountAxes.ts:5,162,164`; `packages/venue-data/src/journal/symbolScopedFills.ts:1,74-76` (+ fixtures `symbolScopedFills.test.ts:94-99`, `symbolScopedFills.bybit.test.ts:35,47`); `packages/venue-data/.../axis-grading.registry.test.ts:9,89`; `scripts/history-audit/lib/axis-inventory.ts:3,72,74` (call `:128`), `closedPnl.ts:32,234`, `venue-survey.ts:4,86,107,165` | `isBaseCapabilityFallback(exchange.fetchX, 'fetchX')` | `exchange.capabilities.{fillHistory,orderHistory,incomeHistory,incomeRange,closedPnl,…}`; on never-started instances `await exchange.loadCapabilities()` first. Rust mirrors adopt the worker's record from the snapshot frame's `CAPABILITIES` section (#1411) | CT |
+| MCP capability gating | `packages/exchange-mcp/src/tools.ts:2,15,363` | `!isInertCapability(fn)` | already rewritten in the mirrored package by #1400; arrives through Copybara, not a hand edit | none |
 | Coinbase/Orderly fills and order history now served by the engine | web `collectAccountAxes.ts:162-241`, MCP `tools.ts:168,175` | branded empty (TS) | real data; Orderly/Coinbase/TxFlow history rejects `orderId`/`status` filters | RT (additive) |
 
 #### Methods and properties
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
 | --- | --- | --- | --- | --- |
-| `fetchClosedPnl` absent on Rust | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | branded fallback → empty tab | RT, B8 |
-| `fetchHistoricalPositions` only kraken/binance/woo | web `collectAccountAxes.ts:229` (`!` asserted) | TS bitget/blofin/bybit/hyperliquid/okx/paradex | base throws `RustEngineExchange: no journal records path declared…` | RT, B8 |
+| `fetchClosedPnl` | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | engines with the `closedPositions` capability (bybit, bybitdemo, hyrotrader, bybitinverse, okx names, blofin) serve `fetchClosedPositions` rows, mapped by the TS mappers; others report `capabilities.closedPnl` false, as TS (Rust bitunix reports it false; its closed PnL stays on the TS venue) | none (handled) |
+| `fetchHistoricalPositions` | web `collectAccountAxes.ts:229` (`!` asserted) | TS bitget/blofin/bybit/hyperliquid/okx/paradex | as TS: bybit/bybitdemo/hyrotrader fold reported rows with the order-axis leg join, okx (linear) and blofin map reported rows, bitget* fold account-wide fills, hyperliquid/paradex fold per-symbol fills; venues TS leaves undeclared (e.g. bybitinverse) keep the base refusal | none (handled) |
+| Incomplete income results (#1542/#1554) | web `collectAccountAxes.ts` income symbol enumeration, `runHistoricalWindow.ts` coverage | successful arrays treated as complete | inspect/preserve `incomplete: true` before enumeration, folding or spreading, and leave affected coverage uncompleted (B11) | RT, B11 |
+| Binance native stop-limit `updateOrder` (#1551) | web order amendment; SDK chaser amend path | re-place could change the order into stop-market | reject as `unsupported`/`notSent` before any write; do not hide the refusal or retry with a different order type | RT |
 | `updateSymbolMetadata` no-op on weex | web via `callMethodInWorker` `hooks/margin/usePositionMode.ts:62`, `useMarginType.ts:62`, `useLeverageSlider.ts:235`, `hooks/market/useSymbolMetadataUpdate.ts:14` | TS weex | silent no-op | RT |
-| `recoverAfterOffline` always `true` | web `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82` (reload on `false`) | per-socket recovery | never triggers a reload | RT, B5 |
-| `getAllSockets`/`publicWebsocket`/`privateWebsocket`/`authFailureStreak` (base only) | CLI `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `repl.ts:2831,2903`; web `order/createLimitOrder.ts:221-222` (`privateWebsocket.isReadonlyFallbackActive()`) | TS sockets | `[]`/`undefined`/`0`: CLI reconnect does nothing, stale fallback empty, key rejection undetected | RT, B5 |
+| `recoverAfterOffline` closes open engine sockets for the venue to reconnect; `false` only after disposal or engine death | web `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82` (reload on `false`) | per-socket recovery | per-channel recovery; dead engines reload | none (B5 fixed) |
+| `getAllSockets`/`publicWebsocket`/`privateWebsocket`/`businessWebsocket` are per-channel engine socket handles; `authFailureStreak` counts `Deactivate` and `auth.rejected` | CLI `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `repl.ts:2831,2903`; web `order/createLimitOrder.ts:221-222` (`privateWebsocket.isReadonlyFallbackActive()` is `false`) | TS sockets | handles expose `lastReceived`, health, `reconnect`, `recoverAfterOffline`; no `ws`, no per-topic stats | none (B5 fixed) |
 | `fetchMarketsAndTickers` (not on base), `fetchTickers`, `fetchPositions` via `as any` | web `exchangeAccountController.ts:668-669,687,750,863`, `components/customModules/frame/feedSources.ts:82-83`, `eagerExchangeWarmStart.ts:52,58` | REST reads | `fetchMarketsAndTickers` undefined on Rust; `fetchPositions` returns the store; `fetchMarkets`/`fetchTickers` start the engine and wait ≤30 s for native data, else throw `Timed out waiting for native markets|tickers` (#1375) | RT |
 | `fetchBalance` | MCP `tools.ts:144` (`as Exchange & { fetchBalance }`) | venue REST | store balance | RT (equivalent) |
-| `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced | none (handled) |
-| `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command | RT (equivalent) |
+| `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced; the main-thread mirror forwards them (#1462) | none (B4) |
+| `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command; main-thread mirror forwards it (#1462) | RT (B4) |
 | Fill events lack `fee`/`realizedPnl` | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949` | fields present on some TS venues | `{ id, orderId, symbol, side?, price, amount }` | RT (no current reader of fee/realizedPnl found) |
-| `options.enableSpotMarkets` on hyperliquid | web `ChartContainer.tsx:161`, `useChartSession.ts:303` | spot markets | startup throws `Rust Hyperliquid currently supports perpetual markets only` | RT, B8 |
-| `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | only Lighter tier is bridged | RT, B8 (Bybit) |
+| `options.enableSpotMarkets` on hyperliquid | web `ChartContainer.tsx:161`, `useChartSession.ts:303` | spot markets | the Rust perp engine merges spot markets, holdings and orders into the account, as the TS venue; best-effort spot discovery retries on the discovery backoff without holding back perps | none (handled) |
+| `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | Lighter tier bridged; Bybit (all five names) syncs the engine's last REST wallet account verbatim (`balanceInfo` capability, `fetchBalanceInfo` every 2 s), replacing `info` as TS does; frame-forwarding workers send `info` changes to main | none (handled) |
 | `Market.info` raw payload | cli-core `order/prepareCliOrder.ts:44`, `commands/session/CheckCommand.ts:14` (`classifyMarket`); MCP strips `info` (`tools.ts:113`) | raw venue JSON | typed exceptions only (Bybit class/region/underlying, Polymarket, OKX) | RT |
+| `Market.info.hlTokenName`/`hlTokenFullName` (Hyperliquid spot) | web `components/margin/Margin.tsx:783-789` (Underlying Token risk disclosure) | TS merged spot markets | typed `UNDERLYING_TOKENS` frame section (token name, full name) applied as the same `info` fields, so the disclosure renders unchanged | none (handled) |
 | `store` writes from the app | web `eagerExchangeWarmStart.ts:20-107`, `exchangeAccountController.ts:691-884,2573`, `feedSources.ts:98`; `packages/safe-cex-server/src/publicExchange/hydrateStore.ts:6-13`; candle-server `exchange-pool.ts` | TS store | frames overwrite markets/tickers/orders/positions/balance on the next engine frame; app writes are transient | RT |
 
 #### Events and worker protocol
@@ -179,11 +302,12 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | Engine error logs → `'error'` payload `Exchange Error: <message>`; exactly one `'error'` per failed command (#1375, landed) | web `exchangeAccountController.ts:1986-2055` (`(err: string, opts)`); CLI `repl.ts:958-1025` (`args[0] as string`); candle-server `exchange-pool.ts:224-230` | venue `emitAndLogError` strings | prefixed strings; one toast per rejection after #1375 | RT |
 | New events `command-progress`, `engine-dead`, worker op `command-progress` (#1375) | web dispatcher `exchangeAccountController.ts:2425-2800` (unknown ops ignored) | n/a | additive; surface `engine-dead` to the user | add |
 | Worker frame mode (`__workerConfig { acceptsFrames: true }` → `op: 'frame'`, store payload slimmed, no `fill` op) | web `utils/shim/worker/workerFactories.ts:386` (does not set it); exchange-server VWC `virtual-worker-context.ts:247-320` | full `store` payloads | unchanged unless opted in; opting in requires `exchange.applyWorkerFrame(buffer)` on the main thread | none until opted in |
-| `callMethodInWorker` timeout (#1375, landed): Rust = `rustCommandTimeoutMs + 1 s`, error `Rust worker command timed out; reconcile interrupted writes before retrying` with `code: 'COMMAND_TIMEOUT'`, `outcome: 'unknown'` | web `utils/exchange/callMethodInWorkerFireAndForget.ts:3-6` (`error.message === 'Timeout callMethodInWorker'`) | 5 s, exact message | match `code === 'COMMAND_TIMEOUT'` as well | RT |
+| `callMethodInWorker` timeout (#1375, landed): Rust = `rustCommandTimeoutMs + 1 s`, error `Rust worker command timed out; reconcile interrupted writes before retrying` with `code: 'COMMAND_TIMEOUT'`, `outcome: 'unknown'` | web `utils/exchange/callMethodInWorkerFireAndForget.ts:3-7` (`error.message === 'Timeout callMethodInWorker'`) | 5 s, exact message | match `code === 'COMMAND_TIMEOUT'` as well | RT |
 | Partial-batch fields across the worker | web `order/createScaledOrder.ts:64-71` (`partialOrderCount`, `partialOrderIds`) | TS venue errors | preserved across the worker by `serializeCommandError` (#1375, landed) | none |
 | Packed ticker delta adds `midPrice` | exchange-server `public-virtual-worker-context.ts:4,200-235` (imports `PACKED_TICKER_FIELDS`) | | follows the imported constant | none |
 | `exec-result`/`updatePositions:done` gain `errorDetails` (#1375) | web CLI `components/cli/CLI.tsx:306`, `cliChainRunner.ts:454-479`, `runCliLine.ts:77-78` | `{reqId, success, error}` | additive | add |
-| #1388 `event` notice on native sessions | no tealstreet-next consumer (`NativeFrameSession` unused) | | deploy the server before clients | none today |
+| #1388 (merged) `event` notice on native sessions; DO `log` messages gain optional `code`/`fields` | no tealstreet-next consumer (`NativeFrameSession` unused) | | #1538 emits coded venue events; native-session validator must understand `event`. #1554's `history.incomplete` uses an engine command ID, requiring translation if a server remaps IDs | none for current NX hosts; native consumers must update |
+| #1527 fill/store frame ordering | web fill listeners, provisional positions and SDK chasers | fills could flush before already-pending orders by up to 250 ms | a fill-bearing flush carries pending store sections; existing appliers publish them before fill events. Venue execution-before-order delivery can still occur | none; no new FILLS revision |
 
 #### Exchange-server hosting
 
@@ -215,27 +339,34 @@ the op protocol is its ABI. Beyond B2, B6, B7:
 ### Error strings that must move to codes
 
 All of these match message **text**; Rust venue messages differ from the TS
-venue messages they replace. Codes available today: #1375 `error.code`
-(`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`, `ENGINE_PROTOCOL_ERROR`,
-`ENGINE_DISPOSED`, `ENGINE_DEAD`) and `outcome: 'unknown'`; #1388 event codes
-(`ws.reconnect`, `auth.rejected`, `snapshot.discarded`, `row.skipped`,
-`rate_limited`, `ws.closed`, `http.failed`) not yet exposed on `exchange.on`.
-VenueError `kind`/`outcome`/`venueCode` exist only on the Rust wire (B9).
+venue messages they replace. Codes available on landing: `ExchangeError`
+(#1424) on rejected **command promises**, with `kind` (`rejected`,
+`invalidInput`, `authInvalid`, `authExpired`, `authPermission`, `rateLimited`,
+`network`, `timeout`, `venueUnavailable`, `unsupported`, `internal`), `outcome`
+(`notSent`, `rejected`, `unknown`) and `venueCode`, for all 26 classified venue families
+in B9; host `error.code` (`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`,
+`ENGINE_PROTOCOL_ERROR`, `ENGINE_DISPOSED`, `ENGINE_DEAD`, #1375). Through the
+web worker the error is a plain `Error` carrying those fields, so match
+`(err as { kind?: string }).kind`, never `instanceof ExchangeError`. The
+`'error'` event carries `opts.classified` (#1484), worker Sentry reports carry
+`error_kind`-family tags (#1483), `start()` rejects with an `ExchangeError` and `validateAccount`
+returns `kind` since #1482. #1388's event codes (`ws.reconnect`, `auth.rejected`, …) are
+counted in `getHealth()` and reach `onLog`, but are not exposed on `exchange.on`.
 
-| Site | Matched text | Target |
-| --- | --- | --- |
-| SDK `health/errorPatterns.ts` via web `exchangeAccountController.ts:1773,1831,356-392` and CLI `apps/cli/src/exchange-manager.ts:203`, `repl.ts:958-1025`, `error-classifier.ts:18-76` | ~48 regexes (auth/rate/network/time-sync/order) incl. `Bybit API key environment mismatch` | `kind` → `ErrorCategory` once TS `ExchangeError` exists (RUST_QUALITY PR 5); exhaustive category switch `exchangeAccountController.ts:356-392` is CT if categories change |
-| web `exchangeAccountController.ts:245-246,338-340` | `/error sign/i` (bybit*); `builder fee has not been approved` (hyperliquid*) | `kind: 'authInvalid'` / venue code |
-| `packages/exchange-pretty-error-messages/src/bybit/bybitHandler.ts:12,19-32` | `/ab not enough for new leverage/i`, `EC_*` reject reasons, `/error sign/i` | keep Bybit `retMsg`/`rejectReason` verbatim in Rust messages, or map from `venueCode` |
-| web `utils/exchange/callMethodInWorkerFireAndForget.ts:3-6` | `'Timeout callMethodInWorker'` | `code === 'COMMAND_TIMEOUT'` (#1375) |
-| web `order/createLimitOrder.ts:361`, `createMarketOrder.ts:357` via SDK `utils/unknownSendOutcome.ts` | `UNKNOWN_OUTCOME_MESSAGE`/`NOT_SENT_MESSAGE` regexes | `outcome === 'unknown'` (#1375; RUST_QUALITY bug "lost-send recovery never runs for Rust") |
-| web `order/createLimitOrder.ts:369-371` | Lighter `below exchange minimums`, `min_base_amount`, `min_quote_amount` | keep text or `kind: 'invalidInput'` |
-| web `order/createScaledOrder.ts:643-651` | `reduce only`, `reduce-only`, `nothing to reduce`, `position does not exist`, `no position`, `position`+`close` | `kind: 'rejected'` + venue code |
-| web `components/newApiFlow/useAccountForm.ts:240-275` | `passphrase`, `api key`, `secret`, `whitelist`, `permission`, `secondary` | `kind: 'authInvalid'|'authPermission'` + field |
-| web `components/toasts/errorToast.tsx:30-32` | `Server was unavailable for a request`, `Cannot read properties of undefined` | unchanged (app/TS strings) |
-| web `utils/sentry/sentryErrorBlacklist.ts:60-693` | ~148 verbatim venue error regexes | re-derive for Rust messages or filter by `kind` |
-| CLI `apps/cli/src/oneShotResult.ts:41-56` (`KEY_REJECTION`), `connect-error.ts:13-17`, `log-classify.ts:30-57` | key-rejection, `authentication`/`token`/`401`/`timed out`, critical log keywords | `kind` + #1388 `auth.rejected` |
-| exchange-server `alerts.ts:81-94`, SDK `unknownSendOutcome.ts:10-13` | `Invalid API-key`, `Way too many requests`, `banned until`, signer messages | `kind: 'authInvalid'|'rateLimited'`; signer messages stay JS |
+| Site | Matched text | Status | Target |
+| --- | --- | --- | --- |
+| SDK `health/errorPatterns.ts` via web `exchangeAccountController.ts:1773,1831,356-394` and CLI `apps/cli/src/exchange-manager.ts:203`, `repl.ts:958-1025`, `error-classifier.ts:18-76` | ~48 regexes (auth/rate/network/time-sync/order) incl. `Bybit API key environment mismatch` | **Movable** (#1484): pass `opts.classified` from the `'error'` handler (`:1986-2019`, `repl.ts:959`) | `processMessage(message, isError, classified)`; a classified kind wins, text stays the fallback for TS venues. The exhaustive switch `:356-394` is CT if categories change |
+| web `exchangeAccountController.ts:245-246,338-340` | `/error sign/i` (bybit*); `builder fee has not been approved` (hyperliquid*) | **Movable**: `opts.classified` on the `'error'` event (#1484); bybit (#1479) and hyperliquid (#1470) are classified | `opts.classified.kind === 'authInvalid'` / `venueCode`, keeping the text for TS venues |
+| `packages/exchange-pretty-error-messages/src/bybit/bybitHandler.ts:12,21-33` | `/ab not enough for new leverage/i`, `EC_*` reject reasons, `/error sign/i` | **Movable** for command rejections: bybit trading is classified (#1479) | map from `venueCode`; the `'error'`-event toasts read `opts.classified.venueCode` (#1484) |
+| web `utils/exchange/callMethodInWorkerFireAndForget.ts:3-7` | `'Timeout callMethodInWorker'` | **Movable now** | `error.message === CALL_METHOD_IN_WORKER_TIMEOUT \|\| (error as { code?: string }).code === 'COMMAND_TIMEOUT'` (the Rust timeout message differs, `rust.exchange.ts:730-737`; TS venues have no code) |
+| web `order/createLimitOrder.ts:361`, `createMarketOrder.ts:357` via SDK `utils/unknownSendOutcome.ts` | `UNKNOWN_OUTCOME_MESSAGE`/`NOT_SENT_MESSAGE` regexes | **Done in the SDK** (#1424): `isUnknownOutcome` checks `outcome` first (`unknownSendOutcome.ts:19-21`) and `outcome` survives the worker | no web edit; arrives with the safe-cex mirror. #1401 (merged) marks the Lighter, Coinbase, TxFlow, Orderly and Bybit unknown-outcome write sites |
+| web `order/createLimitOrder.ts:367-372` | Lighter `below exchange minimums`, `min_base_amount`, `min_quote_amount` | **Movable** for command rejections: Lighter is classified (#1475) | `kind: 'invalidInput'`, keeping the text for TS venues |
+| web `order/createScaledOrder.ts:642-651` | `reduce only`, `reduce-only`, `nothing to reduce`, `position does not exist`, `no position`, `position`+`close` | Partial: every Rust venue family is classified; TS-only venues still need the text | `err.kind === 'rejected' && err.venueCode === <venue code>`, keeping the text fallback for unclassified venues |
+| web `components/newApiFlow/useAccountForm.ts:246-275` | `passphrase`, `api key`, `secret`, `whitelist`, `permission`, `secondary` | **Movable** (#1482): `validateAccount` returns `{ error, kind }` | branch on `result.kind` (`authInvalid`/`authPermission`), keeping the text for the field hint and TS venues |
+| web `components/toasts/errorToast.tsx:30-32` | `Server was unavailable for a request`, `Cannot read properties of undefined` | Unchanged (app/TS strings) | n/a |
+| web `utils/sentry/sentryErrorBlacklist.ts` | ~148 verbatim venue error regexes | **Movable** (#1483): worker reports carry `error_kind`/`error_category`/`error_outcome`/`venue_code` tags | filter Rust venues by tag; keep the regexes for TS venues |
+| CLI `apps/cli/src/oneShotResult.ts:41-56` (`KEY_REJECTION`), `connect-error.ts:13-17`, `log-classify.ts:30-57` | key-rejection, `authentication`/`token`/`401`/`timed out`, critical log keywords | Partial: `code === 'COMMAND_TIMEOUT'` works for command timeouts; #1450 teaches `findKeyRejection` the engine wording | auth: startup `kind` (#1482); a runtime rejection raises `authFailureStreak` (#1450) and counts `auth.rejected` in `getHealth()` (#1388) |
+| exchange-server `alerts.ts:82-89`, SDK `unknownSendOutcome.ts:10-13` | `Invalid API-key`, `Way too many requests`, `banned until`, signer messages | Blocked: process-handler reasons never see the error object | `kind: 'authInvalid'\|'rateLimited'` where the object is reachable; signer messages stay JS |
 
 ### Build and delivery steps
 
@@ -258,13 +389,22 @@ tealstreet-mobile does not depend on safe-cex as a package: `yarn sync`
 | Realm | How exchanges are built | Cutover effect |
 | --- | --- | --- |
 | App thread (Hermes, Expo 54, RN 0.81, New Architecture) | synced web code (`createExchangeFromAccount` → `registry.native.ts`) constructs exchanges that are never started | Metro bundle fails once synced: `rust.exchange.ts` imports `@tealstreet/safe-cex-wasm/host`, `/wire` and dynamically `/engine`, absent from `src/packages`; Metro ignores package `exports` (`unstable_enablePackageExports=false`) and has no `.wasm` handling. `metro.config.js` already stubs paradex-sdk and poseidon-crypto for Hermes; a similar stub (or a sync change) unblocks the bundle. Hermes execution needs the native host (B3). |
-| Hidden WebView | loads the web app's `/exchange-host` (`apps/web/src/app/exchange-host/page.tsx:53`), a web bundle on `registry.ts` with WebAssembly; its Worker owns the socket and signs with `createExchange(...).signHttpRequest` (`signingHost.ts:88-191`) | engine runs here once the web build ships it (B1). `RustEngineExchange` has no `xhr`, so base `signHttpRequest` returns `Exchange does not have xhr for signing` (B2). |
+| Hidden WebView | loads the web app's `/exchange-host` (`apps/web/src/app/exchange-host/page.tsx:53`), a web bundle on `registry.ts` with WebAssembly; its Worker owns the hosted socket and signs with `createExchange(...).signHttpRequest` (`signingHost.ts:88-191`) | #1498/#1505 preserve hosted TS signing, including browser delegates for default-Rust Coinbase/Orderly (B2). The WebView supports wasm, but this is not an on-device execution migration or a chosen B3 solution. |
 
 No Rust venue runs on mobile today: all 9 default names have
 `supportedOnMobile: false` and `isExchangeAvailableInCurrentEnv` filters them in
 React Native. JS-only or WebView changes ship OTA (`expo-updates`, runtime
 version per build, `check-ota-native-deps` guard); a Hermes native bridge needs
 a native EAS build and a device acceptance gate.
+
+[RUST_MOBILE_B3.md](RUST_MOBILE_B3.md) (#1546/#1556) inventories device-direct
+order writes, validation and warm-start reads, and costs the B3 options. Its
+recommendation to keep device TS through cutover is an owner decision still
+to make. It separately records existing app issues: missing Hermes transport
+registration for proxied accounts (Bitget/BloFin/Binance inverse construction),
+Lighter's throwing poseidon stub on order writes, and plaintext AsyncStorage
+venue secrets/sync keys. Those app fixes are outside this SDK docs lane;
+neither the costed recommendation nor this inventory resolves them.
 
 **candle-server** (`mobile-services/candle-server`, serves mobile charts):
 builds `createPublicExchange(name, { forceAllProxiesOff: true })`
@@ -449,39 +589,106 @@ Existing in-repo consumers still need their factory and store contract.
 These land in tealstreet-next together with the cutover, never before it. Each
 row is the exact edit the SDK contract change requires.
 
-### Capability record (RUST_QUALITY item 8)
+### Capability record (RUST_QUALITY item 8; #1400, #1411)
 
 `isBaseCapabilityFallback`, `isInertCapability` and `isEmptyStubCapability` are
-no longer exported from `@tealstreet/safe-cex/src/exchanges/base`. The only
-reader is `exchange.capabilities` (`ExchangeCapabilities`, keys in
-`CAPABILITY_METHODS`); it also counts an unconditional `return []` as absent.
-Rust venues report theirs once the engine exists, so read after `start()`.
+no longer exported from `@tealstreet/safe-cex/src/exchanges/base` (they were
+never on the package index). The only reader is `exchange.capabilities`
+(`ExchangeCapabilities`, keys in `CAPABILITY_METHODS`); it also counts an
+unconditional `return []` as absent. A Rust exchange reports its record once the
+engine exists: after `start()`, or after `await exchange.loadCapabilities()`,
+which creates the engine without starting it. Every row is a compile-time break.
 
 | File | Old call | New call |
 | --- | --- | --- |
 | `apps/web/src/components/openPositions/ClosedPositions.tsx:114` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` (drop the line-11 import) |
 | `apps/web/src/utils/historical/collectAccountAxes.ts:162` | `!isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')` | `exchange.capabilities.orderHistory` |
-| `apps/web/src/utils/historical/collectAccountAxes.ts:164` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` (drop the line-5 import; `HistoryCapableExchange` gains `capabilities`; reword the line-143 comment) |
-| `packages/venue-data/src/journal/symbolScopedFills.ts:73` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` (parameter type `{ capabilities: ExchangeCapabilities }`) |
-| `packages/venue-data/src/journal/axis-grading.registry.test.ts:81` | `!isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `exchange.capabilities.fillHistory` |
-| `scripts/history-audit/lib/axis-inventory.ts:81-83` | `isBaseCapabilityFallback(fn, method)` → `'base-fallback'`; `isEmptyStubCapability(fn)` → `'empty-stub'` | `exchange.capabilities[axis] ? 'implemented' : 'unavailable'`; the report merges the two absent states |
+| `apps/web/src/utils/historical/collectAccountAxes.ts:164` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` (drop the line-5 import; reword the line-143 comment; `HistoryCapableExchange` already extends `Exchange`) |
+| `packages/venue-data/src/journal/symbolScopedFills.ts:74-76` | `typeof exchange.fetchIncomeHistoryRange === 'function' && !isBaseCapabilityFallback(…)` | `exchange.capabilities.incomeRange` (parameter type `{ capabilities: ExchangeCapabilities }`; drop the line-1 import) |
+| `packages/venue-data/src/journal/symbolScopedFills.test.ts:94-99`, `symbolScopedFills.bybit.test.ts:35,47` | `{ fetchIncomeHistoryRange: … }` fixtures | `{ capabilities: { incomeRange: … } }` |
+| `packages/venue-data/src/journal/axis-grading.registry.test.ts:89` | `!isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `(await exchange.loadCapabilities()).fillHistory` (the instance is never started) |
+| `scripts/history-audit/lib/axis-inventory.ts:72,74` (called at `:128`) | `isBaseCapabilityFallback(fn, method)` → `'base-fallback'`; `isEmptyStubCapability(fn)` → `'empty-stub'` | `await instance.loadCapabilities()`, then map `fetchClosedPnl`→`closedPnl`, `fetchIncomeHistory`→`incomeHistory`, `fetchIncomeHistoryRange`→`incomeRange`, `fetchHistoricalFills`→`fillHistory`: `'implemented'`/`'unavailable'` (the two absent states merge) |
 | `scripts/history-audit/lib/closedPnl.ts:234` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` |
 | `scripts/history-audit/lib/venue-survey.ts:86` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` |
 | `scripts/history-audit/lib/venue-survey.ts:107` | `!isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `exchange.capabilities.closedPnl` |
 | `scripts/history-audit/lib/venue-survey.ts:165` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` |
+| `CLAUDE.md:662` (root) | names `isBaseCapabilityFallback` as the brand check | name `exchange.capabilities` |
+
+`packages/exchange-mcp/src/tools.ts` is a mirrored package: #1400 already
+rewrote it, and Copybara carries that change.
 
 Main-thread mirrors (`createExchangeFromAccount` objects that apply worker
 frames and never create an engine) adopt the record from the worker's snapshot
-frame (`CAPABILITIES` section); before that frame arrives their history answers
-are the base defaults. `apps/web/src/order/lostSendResolver.ts:82` needs no
-change: without an engine, `findOrderByClientOrderId` answers from open orders,
-never definitively, as before. Callers that need the record on an unstarted
-exchange await `exchange.loadCapabilities()` first, as `exchange-mcp` does.
+frame (`CAPABILITIES` section, #1411) or, since #1462, through the
+`fetchEngineCapabilities` worker method once markets load. Before adoption, a
+Rust mirror's history methods are unbranded forwarders, so fills, orders and
+income report **present** and `closedPnl` reports absent until the record arrives.
+`apps/web/src/order/lostSendResolver.ts:82` needs no change: without an engine,
+`findOrderByClientOrderId` answers from open orders, never definitively, as
+before.
 
 `RUST_VENUES` is now a `ReadonlySet<ExchangeName>` (use `isRustVenue`), and the
 engine host no longer has `accountId()` (`getAccount()` answers for every venue
 that reports an account lookup). No tealstreet-next file outside the mirrored
-packages uses either.
+packages uses either. #1411's market quantity units travel as frame flag bits
+and need no tealstreet-next edit.
+
+### Warm start skips Rust accounts (B4)
+
+`apps/web/src/utils/exchange/eagerExchangeWarmStart.ts:123-124`: keep
+`applyCachedSnapshot`, then return `{ hydratedFromCache }` before
+`ensureMarkets` (`:58` calls `fetchMarkets`) and `startEagerUserDataFetches`
+(`:127`) when `exchange instanceof RustEngineExchange` (import from
+`@tealstreet/safe-cex/src/exchanges/rust/rust.exchange`). Otherwise warm start
+starts a second private engine on the main thread before the worker exists. The
+SDK cannot make `fetchMarkets` inert, because candle-server and the public
+factory rely on it starting the engine (B10).
+
+### Error classification reaches the health monitor (B9; #1484)
+
+`ExchangeHealthMonitor` uses a classified kind only when the host passes it.
+The SDK puts it on the `'error'` event options (`opts.classified`), the same
+object that already carries `sendToSentry`/`enhancedContext`.
+
+| File | Old call | New call |
+| --- | --- | --- |
+| `apps/web/src/controllers/exchangeController/exchangeAccountController.ts:1986-2019` (`exchange.on('error', (err, opts) => …)`) and the warning handler `:2041-2051` | builds `{ message, sentryData, enhancedContext, forceToast, suppressConsoleLog }` or passes `err` | add `classified: opts?.classified` to each object (and to the `err` type at `:1779-1788`) |
+| `apps/web/src/controllers/exchangeController/exchangeAccountController.ts:1831` | `healthMonitor.processMessage(errorMessage, msgType === 'error')` | `healthMonitor.processMessage(errorMessage, msgType === 'error', classified)` |
+| `apps/cli/src/repl.ts:959-962` (`'error'`) and `:1015` (`'warning'`) | `monitor.processMessage(error, true)` | `monitor.processMessage(error, true, (args[1] as { classified?: ClassifiedError } \| undefined)?.classified)` (`ClassifiedError` from `@tealstreet/safe-cex/src/commandOutcome`; it is not on the package index) |
+
+### Command timeout code (B9)
+
+`apps/web/src/utils/exchange/callMethodInWorkerFireAndForget.ts:3-7`:
+`isCallMethodInWorkerTimeout` also accepts
+`(error as { code?: string }).code === 'COMMAND_TIMEOUT'`. A Rust worker
+command times out with `Rust worker command timed out; reconcile interrupted
+writes before retrying` instead of `Timeout callMethodInWorker`.
+
+### Incomplete history (#1542, #1554)
+
+**Open cutover work (B11), not a completed caller migration.** In the JS WASM
+host, a `history.incomplete` event with a pending `fields.command` marks that
+command's array result with non-enumerable `incomplete: true`. Currently Kraken
+futures emits it for a saturated 500-row income page that its since-only cursor
+cannot traverse; Binance emits it when an income chunk walk exhausts its bound.
+Available rows remain useful, but totals are lower bounds. An unflagged result
+is not proof that every venue's every history endpoint is exhaustive: other
+`history.incomplete` notices without a command ID do not acquire this flag.
+
+The following boundaries still need implementation before affected Rust
+history can claim journal coverage. NX references in this subsection were
+checked at `fdd2389a825`:
+
+| Boundary | Required edit / proof |
+| --- | --- |
+| SDK `webworker/handlers/CallMethodHandler.ts` → `RustEngineExchange.forwardToWorker` (`WORKER_FORWARDED_METHODS`); NX `services/exchange-server` VWC → `apps/web/src/utils/shim/worker/ExchangeServerWorker.ts` | Carry completeness as an explicit serializable field beside the rows, and restore it at the receiving API boundary. The current `callMethod:done` sends the array directly: structured clone drops the non-enumerable property, as does the hosted JSON hop. Prove both worker and hosted round trips, including an unflagged concurrent request. Deploy the sender and receiver together. |
+| NX `apps/web/src/utils/historical/collectAccountAxes.ts` (`runAxis`, `enumerateTradedSymbols`, symbol-scoped fill aggregation) and derived-history adapters | Inspect the flag before `map`/`filter`/spread/folding/enumeration can drop it. A truncated income symbol list also makes the derived fill/position axis incomplete, even if each subsequent fill read succeeds. Preserve that state in `CollectedAxis`/`AxisOutcome`; do not return `status: 'ok'` for it. Any SDK fold that consumes a flagged result must likewise propagate incompleteness. |
+| NX `apps/web/src/utils/historical/runHistoricalWindow.ts` (`collectAccountAxis` → `postHistoricalRecords` → `completeWindow`) | Leave `historical_coverage` uncompleted for incomplete results. Currently only `status: 'ok'` reaches `completeWindow`, so the collection outcome must distinguish partial data from a successful empty/full window. Keep the available rows distinct from a claim of complete coverage; persisting partial rows must not complete that claim. Add a truncated-window regression. |
+| Native sessions / Durable Object clients, if adopted (`sdk-rs/hosts/native/src/server.rs`, `sdk-rs/hosts/wasm/js/workers.mjs`) | The array flag is attached by `EngineHost`, not encoded as a new frame or `done` field. A direct session client must correlate `history.incomplete` itself and carry completeness onward. These servers remap command IDs for `done`, but not the event's `fields.command`; translate that field with the same mapping before correlating it. No current NX `NativeFrameSession` caller was found. |
+
+The BloFin `historical_orders` base-unit backfill (#1529) is a separate
+owner-run data migration, described above. Neither this metadata propagation
+nor the backfill is implemented by this documentation refresh.
 
 ## Shared helpers that a venue-directory deletion would otherwise remove
 
@@ -1176,3 +1383,28 @@ or deliberately extract that helper before deleting the Hyperliquid TS tree.
 The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
 and transport dependencies. Generic consumer fixtures do not authorize deleting
 those oracle dependencies or enabling measurement-gated order controls.
+
+### Orderly port-review display/read corrections
+
+Orderly `fetchOHLCV` callers supplying `from`/`to` now receive native history
+within those bounds rather than a locally filtered latest-only window. Consumers
+keep the same candle shape. Order lists/chart overlays see a real trailing
+trigger derived from native extreme/callback value or rate: BUY adds, SELL
+subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Phemex explicit index triggers and daily cutoff
+
+Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
+wire value instead of native refusal or TS's mark/last fallback. Default sources
+are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
+keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
+caller signatures are unchanged.
+
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.

@@ -49,14 +49,11 @@ fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
 }
 /// Capability-unsupported products are refused by the engine before the venue runs.
 fn assert_engine_refusal(actions: Vec<Action>) {
-    let [Action::Notice(Notice::CommandDone { command, result })] = actions.as_slice() else {
+    let [Action::Notice(Notice::CommandFailed { command, error })] = actions.as_slice() else {
         panic!("expected only the engine refusal: {actions:?}")
     };
     assert_eq!(*command, 42);
-    assert_eq!(
-        result,
-        &Err("This action is not supported on this venue".to_string())
-    );
+    assert_eq!(error.message, "This action is not supported on this venue");
 }
 fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     let mut done = Vec::new();
@@ -64,6 +61,12 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) => {
+                let result: Result<String, String> = Ok(result);
+                assert_eq!(command, 42);
+                done.push(result);
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 assert_eq!(command, 42);
                 done.push(result);
             }

@@ -8,25 +8,37 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, RequestId, Response, SocketId,
-    TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
+    Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -105,11 +117,11 @@ pub(crate) fn signature_rejected(body: &str) -> bool {
 
 /// Logs a read's skipped rows once, by identity only.
 pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) {
-    log_skipped_at(cx, LogLevel::Warning, kind, ids, "");
+    log_skipped_at(cx, Level::Warn, kind, ids, "");
 }
 pub(crate) fn log_skipped_at(
     cx: &mut Cx<'_, Pending>,
-    level: LogLevel,
+    level: Level,
     kind: &str,
     ids: &[String],
     note: &str,
@@ -123,8 +135,9 @@ pub(crate) fn log_skipped_at(
         .map(|id| if id.is_empty() { "unidentified" } else { id })
         .collect::<Vec<_>>();
     let more = ids.len().saturating_sub(shown.len());
-    cx.log(
+    cx.notice(
         level,
+        code::ROW_SKIPPED,
         format!(
             "BingX skipped {} malformed {kind} row(s): {}{}{note}",
             ids.len(),
@@ -188,6 +201,7 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: safe_cex_engine::startup::Backoff<List>,
+    reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
     // Markets the live stream has priced; a late funding retry never overwrites them.
@@ -198,6 +212,7 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let config_error = options
             .read_credentials
             .as_ref()
@@ -207,12 +222,13 @@ impl Bingx {
         } else {
             options
                 .key
-                .zip(options.secret)
+                .as_ref()
+                .zip(options.secret.as_ref())
                 .filter(|(k, s)| !k.is_empty() && !s.is_empty())
                 .map(|(key, secret)| Credentials {
-                    key,
-                    secret,
-                    read: options.read_credentials,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    read: options.read_credentials.clone(),
                 })
         };
         Self {
@@ -231,6 +247,7 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: 0,
             retries: Default::default(),
+            reread_stalls: 0,
             tickers_committed: false,
             live_priced: Vec::new(),
             staged_tickers: Vec::new(),
@@ -243,6 +260,26 @@ impl Bingx {
                 .observe_order(&order, &kind, &side, attached, &native_status);
         }
         self.trading.retain_open_orders(cx.store);
+    }
+
+    /// Market-indexed side tables follow their symbols across a catalogue refresh.
+    fn remap_market_slots(&mut self, cx: &Cx<'_, Pending>, previous: &[String]) {
+        fn remap<T: Copy + Default>(
+            store: &safe_cex_engine::store::Store,
+            previous: &[String],
+            slots: &mut Vec<T>,
+        ) {
+            let mut moved = vec![T::default(); store.markets().len()];
+            for (symbol, value) in previous.iter().zip(slots.iter()) {
+                if let Some(index) = store.market_index(symbol) {
+                    moved[index as usize] = *value;
+                }
+            }
+            *slots = moved;
+        }
+        remap(cx.store, previous, &mut self.seed_index);
+        remap(cx.store, previous, &mut self.seed_rows_index);
+        remap(cx.store, previous, &mut self.live_priced);
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
@@ -270,8 +307,9 @@ impl Bingx {
     }
 
     fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             "BingX rejected a request signature; re-signing it once",
         );
         let Signed {
@@ -356,10 +394,12 @@ impl Bingx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect_channel(
-            paths::PUBLIC_WS.to_owned(),
-            safe_cex_engine::SocketChannel::Public,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS.to_owned())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -503,7 +543,11 @@ impl Bingx {
                 },
             );
             if result.is_err() {
-                cx.log(LogLevel::Warning, "invalid BingX ticker frame")
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "invalid BingX ticker frame",
+                )
             }
             return;
         }
@@ -638,6 +682,10 @@ impl Venue for Bingx {
         self.account_auth(pending, response)
     }
 
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -645,7 +693,7 @@ impl Venue for Bingx {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.read(
@@ -720,43 +768,44 @@ impl Venue for Bingx {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
-                match serde_json::from_str::<Contract<'_>>(item) {
-                    Ok(m) => rows.push(Market {
-                        id: m.symbol.to_string(),
-                        symbol: m.symbol.replace('-', ""),
-                        pretty_symbol: None,
-                        base: m.asset.into_owned(),
-                        quote: m.currency.into_owned(),
-                        active: m.status == 1.,
-                        precision: Precision {
-                            amount: 10f64.powi(m.quantity_precision as i32).recip(),
-                            price: 10f64.powi(m.price_precision as i32).recip(),
+                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| Market {
+                    id: m.symbol.to_string(),
+                    symbol: m.symbol.replace('-', ""),
+                    pretty_symbol: None,
+                    base: m.asset.into_owned(),
+                    quote: m.currency.into_owned(),
+                    active: m.status == 1.,
+                    precision: Precision {
+                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                        price: 10f64.powi(m.price_precision as i32).recip(),
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: m.trade_min_limit,
+                            max: f64::INFINITY,
                         },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.trade_min_limit,
-                                max: f64::INFINITY,
+                        leverage: MinMax {
+                            min: 1.,
+                            max: if m.max_long_leverage > 0. {
+                                m.max_long_leverage
+                            } else {
+                                100.
                             },
-                            leverage: MinMax {
-                                min: 1.,
-                                max: if m.max_long_leverage > 0. {
-                                    m.max_long_leverage
-                                } else {
-                                    100.
-                                },
-                            },
-                            price: None,
                         },
-                        contract_size: None,
-                        is_expiring: None,
-                        is_inverse: None,
-                        is_spot: None,
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    }),
-                    Err(_) => {
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_perpetual: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                });
+                match market {
+                    Ok(market) if market.precision.is_tradable() => rows.push(market),
+                    _ => {
                         safe_cex_engine::startup::skipped_row(cx);
                         skipped.push(row_symbol(item).unwrap_or_default().into_owned())
                     }
@@ -877,17 +926,42 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets { mut rows, skipped } => {
+            Pending::Markets { rows, skipped } => {
                 log_skipped(cx, "market", &skipped);
                 if rows.is_empty() {
                     self.retry_list(cx, List::Markets);
                     return;
                 }
-                self.account
-                    .set_skipped_markets(skipped.iter().map(|id| id.replace('-', "")));
+                let refresh = cx.store.loaded().markets;
+                let previous: Vec<String> = if refresh {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .map(|m| m.symbol.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let mut rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 rows.shrink_to_fit();
-                self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
+                let (before, after) = self
+                    .account
+                    .set_skipped_markets(cx.store, skipped.iter().map(|id| id.replace('-', "")));
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.retry_list(cx, List::Markets);
+                } else {
+                    self.retries.succeeded(cx, &List::Markets);
+                }
+                if refresh {
+                    self.remap_market_slots(cx, &previous);
+                    return;
+                }
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);
                 }
@@ -962,10 +1036,10 @@ impl Venue for Bingx {
                 valid: true,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                )
+                match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
             }
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
@@ -1022,15 +1096,16 @@ impl Venue for Bingx {
             }
             Pending::Candles { command, .. } => {
                 cx.command_error(command, error);
-                cx.done(command, Err(error.into()));
+                cx.fail(command, error);
                 return;
             }
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
             Pending::Premium { .. } => {
                 if !self.tickers_committed {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "BingX funding read failed; starting without funding rates",
                     );
                     self.commit_tickers(cx, true);
@@ -1038,12 +1113,9 @@ impl Venue for Bingx {
                 self.retry_list(cx, List::Premium)
             }
         }
-        cx.log(
-            if discovery {
-                LogLevel::Warning
-            } else {
-                LogLevel::Error
-            },
+        cx.notice(
+            if discovery { Level::Warn } else { Level::Error },
+            code::REQUEST_FAILED,
             error,
         );
     }
@@ -1126,7 +1198,11 @@ impl Venue for Bingx {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if stream_interval(interval).is_none() {
-                    cx.log(LogLevel::Error, interval.unsupported("BingX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("BingX"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
@@ -1158,11 +1234,11 @@ impl Venue for Bingx {
                 to_ms,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("unknown market {symbol}")));
+                    cx.fail(command, format!("unknown market {symbol}"));
                     return;
                 };
                 let Some(step) = interval_ms(interval) else {
-                    cx.done(command, Err(interval.unsupported("BingX")));
+                    cx.fail(command, interval.unsupported("BingX"));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1172,7 +1248,7 @@ impl Venue for Bingx {
                     end - step * f64::from(limit.unwrap_or(500).min(1500))
                 };
                 if !start.is_finite() || !end.is_finite() || start > end {
-                    cx.done(command, Err("invalid candle time range".into()));
+                    cx.fail(command, "invalid candle time range");
                     return;
                 }
                 let params = Params::new()
@@ -1198,7 +1274,11 @@ impl Venue for Bingx {
                 self.account.bump_orders();
                 self.account.bump_positions();
                 if !self.trading.command(cx, self.credentials.as_ref(), other) {
-                    cx.log(LogLevel::Warning, "unsupported BingX command");
+                    cx.notice(
+                        Level::Warn,
+                        code::COMMAND_UNSUPPORTED,
+                        "unsupported BingX command",
+                    );
                 }
             }
         }
@@ -1209,6 +1289,59 @@ impl Venue for Bingx {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("BingX stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

@@ -23,7 +23,8 @@ export const SECTION = {
   DERIVATIVE_PRODUCTS: 17,
   POSITION_GREEKS: 18,
   CAPABILITIES: 19,
-  ACCOUNT_READ: 20,
+  UNDERLYING_TOKENS: 20,
+  ACCOUNT_READ: 21,
 };
 
 export const NONE = 0xffffffff;
@@ -53,6 +54,7 @@ export const marketQuantityUnits = (flags) => {
 const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
   'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
+  'closedPositions', 'balanceInfo', 'hostClock',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
@@ -274,6 +276,20 @@ export class Frame {
     };
   }
 
+  /** The venue token behind a market (Hyperliquid UBTC behind BTC/USDC). */
+  underlyingTokens() {
+    const section = this.first(SECTION.UNDERLYING_TOKENS);
+    if (!section) return undefined;
+    const count = rowCount(this, section);
+    if (4 + count * 12 > section.length) throw new Error('Truncated underlying tokens');
+    const market = new Uint32Array(this.buffer, section.offset + 4, count);
+    const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count * 2);
+    return { count, market,
+      name: (i) => requiredString(this, refs[i * 2]),
+      fullName: (i) => this.string(refs[i * 2 + 1]),
+    };
+  }
+
   derivativeProducts() {
     const section = this.first(SECTION.DERIVATIVE_PRODUCTS);
     if (!section) return undefined;
@@ -380,17 +396,18 @@ export class Frame {
   }
 
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
-  *books() {
-    yield* this.bookSections(SECTION.BOOK, 3);
+  books() {
+    return this.bookSections(SECTION.BOOK, 3);
   }
 
   /** Changed `[price, amount]` levels; zero amount deletes a price. */
-  *bookDeltas() {
-    yield* this.bookSections(SECTION.BOOK_DELTA, 2);
+  bookDeltas() {
+    return this.bookSections(SECTION.BOOK_DELTA, 2);
   }
 
   *bookSections(kind, width) {
-    for (const section of this.of(kind)) {
+    for (const section of this.sections) {
+      if (section.kind !== kind) continue;
       if (section.offset % 8 || section.length < 16) throw new Error('invalid book section header');
       const market = this.view.getUint32(section.offset, true);
       const bids = this.view.getUint32(section.offset + 4, true);
@@ -621,12 +638,10 @@ export class TickerState {
       const mask = deltas[i + 1];
       if (row >= this.count) throw new Error('ticker delta has no baseline row');
       i += 2;
-      for (let field = 0; field < TICKER_FIELDS.length; field++) {
-        if (mask & (1 << field)) {
-          const name = TICKER_FIELDS[field];
-          this.columns[name] ??= new Float64Array(this.count).fill(NaN);
-          this.columns[name][row] = deltas[i++];
-        }
+      for (let bits = mask; bits; bits &= bits - 1) {
+        const name = TICKER_FIELDS[31 - Math.clz32(bits & -bits)];
+        this.columns[name] ??= new Float64Array(this.count).fill(NaN);
+        this.columns[name][row] = deltas[i++];
       }
     }
   }

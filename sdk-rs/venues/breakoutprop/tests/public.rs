@@ -274,7 +274,7 @@ fn first_401_refreshes_and_resends_once_while_second_fails() {
             .contains(&("Authorization", "DXAPI new-session".into()))
     );
     rig.reply(&retry, 401, "{}");
-    assert!(rig.result(9).as_ref().unwrap_err().contains("401"));
+    assert!(rig.result(9).unwrap_err().contains("401"));
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn login_401_does_not_loop_and_does_not_leak_password_or_response_body() {
         r#"{"message":"example-password secret-token"}"#,
     );
     assert!(rig.requests.is_empty());
-    let error = rig.result(9).as_ref().unwrap_err();
+    let error = rig.result(9).unwrap_err();
     assert_eq!(error, "DXtrade HTTP 401");
     assert!(!format!("{:?}", rig.notices).contains("example-password"));
 }
@@ -412,10 +412,7 @@ fn network_retries_have_three_attempt_limit() {
             rig.reply(&request, 200, QUOTES);
         }
     }
-    assert_eq!(
-        rig.result(9).as_ref().unwrap_err(),
-        "DXtrade transport failed"
-    );
+    assert_eq!(rig.result(9).unwrap_err(), "DXtrade transport failed");
 }
 
 #[test]
@@ -760,7 +757,7 @@ fn rejected_login_deactivates_clears_timers_and_fails_future_reads() {
         assert!(rig.requests.is_empty());
         assert!(rig.timers.is_empty());
         assert!(rig.notices.contains(&Notice::Deactivate));
-        assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message == &format!("DXtrade startup failed: DXtrade HTTP {status}"))));
+        assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } | safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }) if message == &format!("DXtrade startup failed: DXtrade HTTP {status}"))));
         assert!(rig.result(8).is_err());
         rig.command(Command::FetchCandles {
             command: 9,
@@ -787,7 +784,7 @@ fn ambiguous_account_startup_reports_error_without_auth_deactivation_or_retries(
     assert!(rig.requests.is_empty());
     assert!(rig.timers.is_empty());
     assert!(!rig.notices.contains(&Notice::Deactivate));
-    assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message.starts_with("DXtrade startup failed: Multiple accounts"))));
+    assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } | safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }) if message.starts_with("DXtrade startup failed: Multiple accounts"))));
     assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::StartupFailed { error } if error.message.starts_with("DXtrade startup failed: Multiple accounts"))));
 }
 

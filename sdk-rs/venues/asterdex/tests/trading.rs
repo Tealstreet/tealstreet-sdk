@@ -64,7 +64,7 @@ impl Harness {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.legacy_text())));

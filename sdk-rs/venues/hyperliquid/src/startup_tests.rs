@@ -41,14 +41,19 @@ fn http(actions: &[Action], kind: &str) -> HttpRequest {
         })
         .unwrap_or_else(|| panic!("missing request {kind}"))
 }
-fn retry(actions: &[Action], at: f64) -> TimerId {
-    actions
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
-            _ => None,
-        })
-        .expect("public context backoff")
+/// The retry timer armed at `sent` plus the engine's jittered `[0.75, 1.0] * nominal`.
+fn retry_timer(actions: &[Action], sent: f64, nominal: f64) -> Option<TimerId> {
+    actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms }
+            if (0.75 * nominal..=nominal).contains(&(at_ms - sent)) =>
+        {
+            Some(*timer)
+        }
+        _ => None,
+    })
+}
+fn retry(actions: &[Action], sent: f64, nominal: f64) -> TimerId {
+    retry_timer(actions, sent, nominal).expect("public context backoff")
 }
 fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
     let options = Options {
@@ -72,7 +77,7 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
 fn notice(actions: &[Action], text: &str) -> bool {
     actions
         .iter()
-        .any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains(text)))
+        .any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(text)))
 }
 #[test]
 fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {
@@ -92,7 +97,7 @@ fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {
             &tuple(meta, r#"[{"midPx":"bad"},{"midPx":"bad"}]"#),
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
-        let timer = retry(&actions, 2000.0);
+        let timer = retry(&actions, 1000.0, 1000.0);
         assert!(!e.store().loaded().markets);
         assert!(!e.store().loaded().tickers);
         assert!(
@@ -121,7 +126,7 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
         let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
         reply(&mut e, &req, 1000.0, &tuple(meta, ETH_BAD));
         let mut actions = e.drain_actions().collect::<Vec<_>>();
-        let timer = retry(&actions, 2000.0);
+        let timer = retry(&actions, 1000.0, 1000.0);
         if !spot {
             let req = http(&actions, "perpDexs");
             reply(&mut e, &req, 1000.0, "[null]");
@@ -158,7 +163,7 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let first = retry(&actions, 2000.0);
+    let first = retry(&actions, 1000.0, 1000.0);
     let dexs = http(&actions, "perpDexs");
     let btc = e.store().market("BTC-PERP").unwrap().clone();
     assert_eq!(e.venue().assets["BTC-PERP"], 0);
@@ -174,7 +179,7 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, BTC_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let second = retry(&actions, 4000.0);
+    let second = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
             .iter()
@@ -205,7 +210,7 @@ fn partial_hip3_context_keeps_dex_offset_and_does_not_advance_discovery_twice() 
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     assert_eq!(e.venue().assets["XYZ|BTC-PERP"], 110000);
     assert_eq!(e.venue().coins["xyz:btc"], "XYZ|BTC-PERP");
     e.handle(2000.0, Event::TimerFired { timer });
@@ -225,7 +230,7 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
     let actions = e.drain_actions().collect::<Vec<_>>();
@@ -272,7 +277,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     );
     reply(&mut e, &req, 1000.0, &tuple(SPOT_META, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "spotClearinghouseState");
     assert!(!e.store().loaded().balance);
     assert!(e.store().loaded().positions);
@@ -319,7 +324,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 4000.0);
+    let timer = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
             .iter()
@@ -375,9 +380,7 @@ fn delisted_and_unquoted_core_perps_complete_discovery_without_retry() {
     reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0)),
+        retry_timer(&actions, 1000.0, 1000.0).is_none(),
         "well-formed unquoted rows are not a discovery failure"
     );
     assert!(!e.venue().core_discovery_incomplete);
@@ -402,11 +405,7 @@ fn unquoted_spot_contexts_complete_discovery_and_publish_owned_native_balance() 
     );
     reply(&mut e, &req, 1000.0, &tuple(meta, contexts));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0))
-    );
+    assert!(retry_timer(&actions, 1000.0, 1000.0).is_none());
     assert!(!e.venue().core_discovery_incomplete);
     let req = http(&actions, "spotClearinghouseState");
     reply(
@@ -523,4 +522,109 @@ fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
     // The dex snapshot applies: its listed position lands, the delisted one is hidden.
     assert_eq!(e.store().position("XYZ|BTC-PERP").unwrap().contracts, 1.0);
     assert!(e.store().position("XYZ|OLD-PERP").is_none());
+}
+
+fn order_ids(e: &Engine<Hyperliquid>) -> Vec<&str> {
+    e.store().orders().iter().map(|o| o.id.as_str()).collect()
+}
+
+#[test]
+fn perp_order_snapshot_skips_spot_rows_and_commits_perp_orders() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"[{"coin":"@107","oid":99,"side":"B","limitPx":"1","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(!notice(&actions, "skipped"));
+    assert!(e.store().loaded().orders);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn spot_order_snapshot_skips_perp_rows_and_commits_spot_orders() {
+    let mut e = connect(true, true);
+    let req = http(
+        &e.drain_actions().collect::<Vec<_>>(),
+        "spotMetaAndAssetCtxs",
+    );
+    reply(&mut e, &req, 1000.0, &tuple(SPOT_META, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"[{"coin":"BTC","oid":99,"side":"B","limitPx":"90","origSz":"1","sz":"1"},{"coin":"@4","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(!notice(&actions, "skipped"));
+    assert!(e.store().loaded().orders);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn settled_discovery_skips_unknown_market_rows_and_commits_the_rest() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let state = http(&actions, "clearinghouseState");
+    let orders = http(&actions, "frontendOpenOrders");
+    reply(
+        &mut e,
+        &state,
+        1000.0,
+        r#"{"assetPositions":[{"position":{"coin":"SOL","szi":"3","entryPx":"20","positionValue":"60","unrealizedPnl":"0","marginUsed":"6","leverage":{"type":"cross","value":10}}},{"position":{"coin":"BTC","szi":"1","entryPx":"100","positionValue":"100","unrealizedPnl":"0","marginUsed":"10","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"16"},"time":1000}"#,
+    );
+    reply(
+        &mut e,
+        &orders,
+        1000.0,
+        r#"[{"coin":"SOL","oid":99,"side":"B","limitPx":"20","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(notice(
+        &actions,
+        "Hyperliquid skipped position sol on an unknown market"
+    ));
+    assert!(notice(
+        &actions,
+        "Hyperliquid skipped order 99 on an unknown market"
+    ));
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(e.store().loaded().positions);
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().position("BTC-PERP").unwrap().contracts, 1.0);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let timer = retry(&actions, 1000.0, 1000.0);
+    let req = http(&actions, "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    assert!(e.store().setting("BTC-PERP").is_some());
+    assert!(e.store().setting("ETH-PERP").is_none());
+    e.handle(2000.0, Event::TimerFired { timer });
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, GOOD));
+    let setting = e.store().setting("ETH-PERP").expect("seeded setting");
+    assert_eq!(setting.leverage, 20.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
 }

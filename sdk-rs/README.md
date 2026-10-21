@@ -35,7 +35,12 @@ Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
 Explicit headless/direct options stay direct. `createEngineObject` accepts the
 same factory as `createTransport` for account-backed Workers deployments and
-refuses proxy/tunnel flags when no factory is configured. The returned
+refuses proxy/tunnel flags when no factory is configured. Deployments must also
+supply `accountToken(state, env)`, resolving a deployment-managed token unique to
+that object/account; upgrades require `Authorization: Bearer <token>` and fail
+closed when the resolver is absent. Never select an account or token from the
+first client’s start message. Clients sharing that token share account access;
+start cannot replace a running or pending engine. The returned
 transport's credential-free `engineOptions` carry protocol choices derived from
 those same routes. SDK and Workers constructors apply them after caller options;
 GRVT therefore uses first-frame session auth on its proxy and cookie upgrade
@@ -55,7 +60,7 @@ and React Native load it for every venue. `corepack yarn rust:build-wasm
 (`@tealstreet/safe-cex-wasm/engine`) fetches only the family of the account's
 venue (`js/venues.mjs` maps every venue name to its family), and a bundler
 emits one chunk per family. Any browser or Metro bundle that includes safe-cex
-resolves all 27 family imports, so run `--families` before bundling. A family
+resolves all 28 family imports, so run `--families` before bundling. A family
 package is about a tenth of the combined engine's bytes and cold-load CPU
 (`docs/plans/RUST_WASM_FAMILIES.md`).
 `--venue hyperliquid` (or any venue name) builds that venue's family in place
@@ -67,6 +72,23 @@ From the repository root, `corepack yarn rust:test-harness` checks the tape
 transport. `rust:private-tape-mexc` generates a synthetic MEXC futures account
 tape; `rust:gate --venue mexc --tape <path> --books ''` compares its private
 state and command results with TypeScript.
+
+For faster private replay iteration, download a recent matching CI engine:
+
+```bash
+gh run download RUN_ID --name ci-wasm-binance --dir /tmp/binance-ci-wasm
+corepack yarn -s rust:gate:record --ci-wasm /tmp/binance-ci-wasm \
+  --venue binance --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 5 --books ''
+```
+
+The `ci-wasm-<suite>` artifacts expire after three days. The gate checks the
+fixed Rust/build-input tree against HEAD, requires clean covered inputs and
+validates the family, pinned tool versions, build flags and all package hashes.
+It refuses missing or mismatched artifacts with no fallback to another wasm
+build. Harness-only clock/declaration edits can reuse the same engine. Reports
+record its provenance. Local replays help iteration; full green CI on the PR
+head is still required before merge. Existing replay reports retain fourteen
+days of history, without a second copy of the wasm binaries.
 
 Socket routing memoizes successful default URL identities per replay, for both
 engines. Caller IDs and custom URL/query rules bypass this cache; socket state,

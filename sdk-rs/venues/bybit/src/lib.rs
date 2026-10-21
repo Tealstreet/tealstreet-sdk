@@ -1,5 +1,6 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod hyro;
 mod identity;
@@ -11,8 +12,10 @@ mod wire;
 
 use paths::Paths;
 pub use paths::{Category, Endpoints, Variant};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
@@ -20,7 +23,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
@@ -49,8 +52,10 @@ const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
@@ -61,6 +66,16 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 /// One REST request as sent, kept so a rejected signature can be resent.
@@ -132,6 +147,7 @@ pub enum Then {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Closed(closed::Request),
 }
 
 pub struct Pending {
@@ -215,6 +231,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
     products: Vec<ProductState>,
@@ -250,9 +267,13 @@ pub struct BybitLinear {
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
     clock_offset_ms: f64,
+    /// Discovery retries wait out a rate-limit or IP ban across all products.
+    discovery_paused_until: f64,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    /// The raw first account of the last good REST wallet read: TS `balance.info`.
+    balance_info: Option<String>,
 }
 
 /// Bybit kline interval codes.
@@ -314,13 +335,25 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
                 .and_then(|s| s.ret_msg.map(|m| m.into_owned()))
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("retCode {code}"));
-            Some((code, message))
+            // Signature diagnostics can contain the complete signed origin string.
+            Some((code, signing_rejection(code, &message).unwrap_or(message)))
         }
         None => Some((
             i64::from(response.status),
-            format!("HTTP {}: {}", response.status, response.body),
+            format!("HTTP {}", response.status),
         )),
     }
+}
+
+fn signing_rejection(code: i64, message: &str) -> Option<String> {
+    let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
+        "request signature rejected"
+    } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
+        "request timestamp outside receive window"
+    } else {
+        return None;
+    };
+    Some(format!("Bybit {reason} (retCode {code})"))
 }
 
 /// A rejection that is safe to resend once, re-signed: a bad signature
@@ -344,6 +377,7 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let category = match options.variant {
             Variant::Inverse => Category::Inverse,
             Variant::Spot => Category::Spot,
@@ -399,8 +433,9 @@ impl BybitLinear {
             variant: options.variant,
             paths,
             config_error,
+            recv_window: options.recv_window,
             credentials,
-            read_credentials: options.read_credentials,
+            read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
@@ -415,9 +450,11 @@ impl BybitLinear {
                 ..Startup::default()
             },
             clock_offset_ms: 0.0,
+            discovery_paused_until: 0.0,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            balance_info: None,
         }
     }
 
@@ -550,9 +587,11 @@ impl BybitLinear {
             });
         let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
         let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => {
-                credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
-            }
+            (Some(credentials), true) => credentials.headers_window(
+                cx.now + self.clock_offset_ms,
+                &rest.payload,
+                self.recv_window,
+            ),
             (None, true) => return,
             _ => vec![("X-Referer", sign::BROKER_ID.into())],
         };
@@ -587,9 +626,10 @@ impl BybitLinear {
         if let Some(server) = server_time {
             self.clock_offset_ms = server - cx.now;
         }
-        cx.log(
-            LogLevel::Warning,
-            format!("Bybit rejected a signed request; resending it once: {text}"),
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            "Bybit rejected a signed request; resending it once",
         );
         taken.rest.resent = true;
         self.send(cx, taken.rest, taken.then);
@@ -601,12 +641,11 @@ impl BybitLinear {
             Channel::Public => self.paths.public_ws.as_str(),
             Channel::Private => self.paths.private_ws.as_str(),
         };
-        let socket = cx.connect_channel(
-            url,
-            match channel {
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new(url).channel(match channel {
                 Channel::Public => safe_cex_engine::SocketChannel::Public,
                 Channel::Private => safe_cex_engine::SocketChannel::Private,
-            },
+            }),
         );
         let supervise =
             channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;
@@ -656,8 +695,9 @@ impl BybitLinear {
             }
             self.select_category(category);
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::WS_DISCONNECTED,
             format!("Bybit socket closed ({code}); reconnecting"),
         );
     }
@@ -791,7 +831,7 @@ impl BybitLinear {
             "API key"
         };
         let text = format!("Bybit rejected the {which} ({code}): {message}");
-        cx.log(LogLevel::Error, &text);
+        cx.notice(Level::Error, code::AUTH_REJECTED, &text);
         cx.startup_failed(
             VenueError::new(text)
                 .kind(kind)
@@ -805,8 +845,9 @@ impl BybitLinear {
 
     /// A required startup list failed: try the missing ones again, backing off.
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, what: &str, error: &str) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
         if self.category == Category::Option && !self.option_degraded {
@@ -822,7 +863,8 @@ impl BybitLinear {
             // Seeds already loaded elsewhere skip try_load_tickers; publish them too.
             self.try_publish_tickers(cx);
         }
-        self.startup.backoff.failed(cx, ());
+        let pause = self.discovery_paused_until - cx.now;
+        self.startup.backoff.failed_after(cx, (), pause);
     }
 
     fn on_markets(
@@ -894,8 +936,7 @@ impl BybitLinear {
             }
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::REQUEST_FAILED,
                 format!("Failed to fetch Bybit PreLaunch markets, continuing with Trading markets: {error}"),
             );
             self.startup.prelaunch = Some(Vec::new());
@@ -941,8 +982,9 @@ impl BybitLinear {
                 market.maker_fee = Some(maker);
             }
         }
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::STARTUP_PROGRESS,
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
@@ -1099,7 +1141,11 @@ impl BybitLinear {
         self.published_seeds = self.ticker_seeds.len();
         if self.option_degraded && self.ticker_seeds.contains_key(&Category::Option) {
             self.option_degraded = false;
-            cx.log(LogLevel::Info, "Bybit option markets recovered");
+            cx.notice(
+                Level::Info,
+                code::STARTUP_PROGRESS,
+                "Bybit option markets recovered",
+            );
         }
         // Published categories keep their live rows; a late option only appends.
         let mut tickers = if late_option {
@@ -1121,6 +1167,7 @@ impl BybitLinear {
         }
         cx.store.set_tickers(tickers);
         self.tickers_ready = true;
+        self.reclassify_unpriced_tpsl(cx);
         let category = self.category;
         for other in self.categories() {
             // A category without seeded data waits; a connected one is already live.
@@ -1149,7 +1196,11 @@ impl BybitLinear {
             {
                 let op = frame.op.as_deref().unwrap_or_default();
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.log(LogLevel::Error, format!("[WS]{op}:{message}"));
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("[WS]{op}:{message}"),
+                );
             }
             return;
         };
@@ -1384,14 +1435,22 @@ impl BybitLinear {
         if self.category_for(&symbol) == Category::Option
             || !self.category_enabled(self.category_for(&symbol))
         {
-            cx.log(LogLevel::Warning, "Bybit has no candles for this product");
+            cx.notice(
+                Level::Warn,
+                code::COMMAND_UNSUPPORTED,
+                "Bybit has no candles for this product",
+            );
             return;
         }
         let trades = !self.variant.is_hyro();
         let kline = Self::kline_topic(&symbol, interval);
         // Hyro has no trade feed, so its seconds intervals stay unsupported.
         if kline.is_none() && !(trades && seconds_interval(interval).is_some()) {
-            cx.log(LogLevel::Error, interval.unsupported("Bybit"));
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                interval.unsupported("Bybit"),
+            );
             return;
         }
         let key = (symbol.clone(), interval);
@@ -1436,24 +1495,28 @@ impl BybitLinear {
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
         if self.category_for(symbol) == Category::Option {
-            cx.done(command, Err("Bybit has no candles for options".into()));
+            cx.fail(command, "Bybit has no candles for options");
             return;
         }
         if !self.category_enabled(self.category_for(symbol)) {
-            cx.done(command, Err("Bybit product is not enabled".into()));
+            cx.fail(command, "Bybit product is not enabled");
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(command, Err(interval.unsupported("Bybit")));
+            cx.fail(command, interval.unsupported("Bybit"));
             return;
         };
         let query = Query::new()
             .str("category", self.paths.category)
             .str("symbol", symbol)
             .str("interval", code)
-            .opt_num("start", from_ms)
+            // Like TS, a limit asks for the newest bars up to `to`; `from` only bounds an unlimited read.
+            .opt_num("start", from_ms.filter(|_| limit.is_none_or(|n| n == 0)))
             .opt_num("end", to_ms)
-            .num("limit", f64::from(limit.unwrap_or(500).min(1000)));
+            .num(
+                "limit",
+                f64::from(limit.filter(|n| *n > 0).unwrap_or(500).min(1000)),
+            );
         let candles = Vec::new();
         self.send(
             cx,
@@ -1486,7 +1549,13 @@ fn on_item_public(
                     && (category != Category::Option
                         || (m.status == "Trading" && derivative_from_wire(&m, category).is_some()))
                 {
-                    markets.push(market_from_wire(&m, variant, category));
+                    let market = market_from_wire(&m, variant, category);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Then::Fees(fees) => {
@@ -1539,6 +1608,21 @@ impl BybitLinear {
             Ok(response) => venue_error(response).map(|(_, message)| message),
             Err(error) => Some((*error).to_owned()),
         };
+        if let Ok(response) = &response
+            && matches!(
+                then,
+                Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
+            )
+        {
+            // Bybit answers 403 when an IP exceeds the public limit and bans it for 10 minutes:
+            // https://bybit-exchange.github.io/docs/v5/rate-limit
+            let pause = if response.status == 403 {
+                600_000.0
+            } else {
+                safe_cex_engine::startup::rate_limit_pause_ms(response, 10_000.0)
+            };
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         match then {
             Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets {
@@ -1557,7 +1641,11 @@ impl BybitLinear {
                     return self.reject_credentials(cx, code, &message);
                 }
                 if let Some(error) = failure {
-                    cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        format!("Bybit fee rates: {error}"),
+                    );
                 }
                 self.startup.fees = Some(fees);
                 self.try_load_markets(cx);
@@ -1609,19 +1697,17 @@ impl BybitLinear {
                 command,
                 mut candles,
             } => match failure {
-                Some(error) => cx.done(command, Err(format!("Bybit klines: {error}"))),
+                Some(error) => cx.fail(command, format!("Bybit klines: {error}")),
                 None => {
                     // Bybit lists newest first.
                     candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        Ok(serde_json::to_string(&candles).unwrap_or_default()),
-                    );
+                    cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
                 }
             },
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             Then::History(request) => self.on_history_response(cx, request, response),
+            Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
     }
 }
@@ -1847,8 +1933,9 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
             self.startup.prelaunch = Some(Vec::new());
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Timed out waiting for Bybit PreLaunch markets, continuing with Trading markets",
             );
             self.try_load_markets(cx);
@@ -1867,6 +1954,10 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -1878,6 +1969,8 @@ impl Venue for BybitLinear {
             } else {
                 safe_cex_engine::AccountLookup::Query
             },
+            closed_positions: !self.variant.is_spot(),
+            balance_info: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1886,11 +1979,11 @@ impl Venue for BybitLinear {
         if let Some(read) = &self.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if let Some(error) = &self.config_error {
-            cx.log(LogLevel::Error, error.clone());
+            cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
             return;
         }
         if self.category_enabled(Category::Option) {
@@ -2055,16 +2148,39 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { then, .. }) = pending else {
+        let Some(Pending { rest, then, .. }) = pending else {
             return;
         };
-        self.on_public_response(cx, then, Err(error));
+        // A rejected retry may arrive as a host error containing the signed origin URL.
+        let safe_error = (rest.signed && rest.resent)
+            .then_some("Bybit signed request failed after its signature retry");
+        self.on_public_response(cx, then, Err(safe_error.unwrap_or(error)));
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::FetchBalanceInfo => {
+                let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
+                cx.done(command, info);
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 
@@ -2104,9 +2220,15 @@ impl Venue for BybitLinear {
                 _ => None,
             };
             if let Some(id) = id {
-                cx.done(id, Err("Bybit product is not enabled".into()));
+                let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
+                    .outcome(safe_cex_engine::Outcome::NotSent);
+                cx.fail(id, error);
             } else {
-                cx.log(LogLevel::Warning, "Bybit product is not enabled");
+                cx.notice(
+                    Level::Warn,
+                    code::COMMAND_UNSUPPORTED,
+                    "Bybit product is not enabled",
+                );
             }
             return;
         }
@@ -2311,6 +2433,14 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for BybitLinear {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 #[cfg(test)]
 mod candle_start_tests {

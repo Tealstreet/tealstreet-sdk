@@ -133,13 +133,34 @@ market batch and propagates partial or unknown outcomes without automatic retry.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
 
+## Rust account construction
+
+`exchanges/rust/construction-rules.json` declares signing and private-data
+eligibility for every Rust account. TS reads it synchronously before WASM loads;
+Rust embeds the same table and resolves it before credential validation and
+startup. The optional `publicMode` object carries raw caller intent (including
+remote versus payload signer and index presence) beside `publicDataOnly`.
+Without it, legacy native/harness options keep their original interpretation.
+WASM `construction()` reports credential-free `canSign`, `publicDataOnly`, and
+Aster API-version metadata. `resolveConstruction` exposes the same resolution
+without engine construction or I/O. CI compares both evaluators for every
+registered name. Explicit-private Paradex validation belongs to the registry.
+
+The bridge forwards raw Hyro mode and production/simulator URL maps; the
+registry selects network endpoints. Native callers can retain explicit
+`endpoints` when the raw `hyrotrader` config is absent. Private non-Paradex
+`payloadSigner` refusal also belongs to the registry. WASM constructor errors
+carry JSON `venueError` detail, which the bridge wraps as `ExchangeError` to
+preserve `unsupported`/`notSent` through startup and account validation.
+
 ## Rust engine capabilities
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
-order-book queries and options. `RustEngineExchange` routes from that record,
+order-book queries, options, and whether signatures take the host clock as-is
+(`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
@@ -195,6 +216,12 @@ Shared-feed accounts require a fresh provider attachment and account init;
 their closed transferred port cannot be reused. Module-wide WASM initialization
 and sibling accounts remain independent of one account's terminal state.
 
+A terminal `StartupFailed` rejects `start()` with an `ExchangeError` that keeps
+the engine's `kind` and `venueCode`; `validateAccount` returns the same `kind`
+beside `error` (the typed failure wins over the error log venues emit just
+before it), so callers can branch on `authInvalid`/`authPermission` instead of
+matching text. A bare deactivation carries no `kind`.
+
 Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
 positive integer deadline up to 2147482647 ms; long paginated queries may need
 a larger value. The Rust worker RPC allows one additional second for delivery;
@@ -217,6 +244,34 @@ all outcome/receipt fields even when listeners throw. The shared command-error
 allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
+
+## Rust incomplete history
+
+A Rust history read that cannot be walked completely still returns the rows it
+read, with a `history.incomplete` warning event that names its `command`. The
+host then marks the returned array with a non-enumerable `incomplete: true`.
+Kraken (a full 500-row `account-log` page its since-only cursor cannot advance)
+and Binance (exhausted income chunks) set it. Existing callers see a plain array.
+A consumer recording coverage must not treat a flagged result as complete; the
+in-package journal (`journal/buildRecords.ts`) does not read it yet. Structured
+clone drops the property, so a worker or server hop must forward it, translating
+`fields.command` (the engine's id) to its own request id as it does for `done`.
+The event is a Warn: a host whose minimum level is Error drops it, and the flag.
+
+## Rust socket health
+
+Engine venues own their sockets and reconnect policy; the wasm host only
+observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
+private) open/first-frame/close state, at one property write per frame.
+`RustEngineExchange` exposes one `RustSocketHandle` per channel through the
+`BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
+`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
+changes and every 5 s, never through the TS watchdog. A private socket is healthy
+for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
+`auth.rejected` events raise `authFailureStreak`; a private stream delivering
+again resets it.
 
 ## Client order ID contract
 
@@ -386,6 +441,15 @@ part of the venue contract. Never turn a transport/auth/rate-limit failure into
 documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
+
+The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
+for typed engine errors (`classifiedError`), and
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
+specific kinds (auth, rate limit, venue unavailable, network/timeout) win over
+text; catch-all kinds (`rejected`, `invalidInput`, `internal`, `unsupported`)
+only replace the `unknown` fallback, because text patterns know venue auth codes
+the engine leaves generic. Hosts must pass `opts.classified` from their `'error'`
+listener into `processMessage` for this to apply.
 
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
@@ -652,8 +716,16 @@ signing and delegated signing share the same payload. Binance and Bybit skip
 the private websocket with this REST signer. Paradex obtains its JWT through
 the payload signer and uses that JWT on its private websocket too.
 The Rust Paradex host returns signatures as typed engine events; callers keep
-the same callback contract. Tests: `src/__tests__/payload-signer.test.ts` and
-`src/__tests__/paradex.payload-signer.test.ts`.
+the same callback contract. No other Rust venue consumes a payload signer. `runsOnRustEngine` keeps
+Bybit- and Binance-family accounts with one on TS, whose signers honour it.
+Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
+payload signer while `canSign` counts it, so those accounts stay on the engine.
+A Rust account that would run privately with a payload signer refuses at
+startup, before any engine or transport work: an `ExchangeError` with
+`kind: 'unsupported'`, `outcome: 'notSent'`, which `validateAccount` reports
+with its kind. Lighter's payload-only accounts still start public. Tests: `src/__tests__/payload-signer.test.ts`,
+`src/__tests__/paradex.payload-signer.test.ts` and
+`src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
 
@@ -685,7 +757,11 @@ is how a host opts in; the web main thread registers one in
 `hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
 import a telemetry client or POST to a Tealstreet route from this package** —
 call `reportException` / `reportEvent` and let the host decide. Workers still
-ship errors through the `sendToSentry` op, not the sink.
+ship errors through the `sendToSentry` op, not the sink. `emitAndLogError` (the path every command rejection takes,
+in the worker, main thread and exchange-server) and `ExchangeWorker.logError`
+tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
+and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
+the kind rather than venue text.
 
 ## Proxy & Tunnel Architecture
 

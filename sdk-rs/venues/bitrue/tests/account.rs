@@ -131,6 +131,28 @@ impl Harness {
         self.e.handle(at, Event::TimerFired { timer });
         self.collect();
     }
+    fn private_retry(&mut self, nominal: f64) {
+        // Follow the supervisor's actual jittered retry rather than the retired
+        // fixed listen-key retry schedule. Account polling timers stay separate.
+        self.fire_retry(nominal);
+    }
+    /// Fires the newest timer jittered from `nominal` after now; returns its delay.
+    fn fire_retry(&mut self, nominal: f64) -> f64 {
+        let at = self
+            .actions
+            .iter()
+            .rev()
+            .find_map(|action| match action {
+                Action::SetTimer { at_ms, .. } if jittered(*at_ms - self.now, nominal) => {
+                    Some(*at_ms)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no retry jittered from {nominal}: {:?}", self.actions));
+        let delay = at - self.now;
+        self.fire_at(at);
+        delay
+    }
     fn fills(&mut self) -> Vec<(f64, f64)> {
         let Some(frame) = self.e.take_frame(self.now) else {
             return vec![];
@@ -151,6 +173,12 @@ impl Harness {
             .collect()
     }
 }
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 #[test]
 fn futures_listen_key_subscriptions_ping_timestamp_and_keepalive() {
     let mut h = Harness::new();
@@ -391,7 +419,7 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     );
     h.collect();
     h.reply("/account", POSITION);
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.as_ref().is_ok_and(|s|s.contains("\"buyLeverage\":25.0")))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.contains("\"buyLeverage\":25.0"))));
     assert!(h.pending.iter().all(|r| r.method == Method::Get));
 }
 
@@ -445,6 +473,84 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
 
+const LOG_SECRET: &str = "audit-private-stream-secret";
+const SIGNED_STREAM_URL: &str =
+    "wss://fapiws.bitrue.com/stream?listenKey=futures-key&signature=audit-private-stream-signature";
+fn assert_stream_notices_are_safe(h: &Harness) {
+    for action in &h.actions {
+        if let Action::Notice(notice) = action {
+            // Debug covers every notice field, including structured venue errors.
+            let text = format!("{notice:?}");
+            for secret in [
+                LOG_SECRET,
+                SIGNED_STREAM_URL,
+                "futures-key",
+                "audit-private-stream-signature",
+            ] {
+                assert!(!text.contains(secret), "private data escaped in {notice:?}");
+            }
+        }
+    }
+}
+#[test]
+fn private_subscription_rejection_and_followup_failures_never_log_echoed_credentials() {
+    for event in [
+        "user_account_update",
+        "user_order_update",
+        "user_balance_update",
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        h.e.handle(h.now, Event::WsOpened { socket: h.private });
+        h.collect();
+        let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
+        h.ws(&rejected);
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        h.private_retry(1_000.0);
+        let request = h.take("listenKey");
+        h.respond(
+            request,
+            &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+                .to_string(),
+        );
+        assert_stream_notices_are_safe(&h);
+        h.private_retry(2_000.0);
+        let request = h.take("listenKey");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: SIGNED_STREAM_URL,
+            },
+        );
+        h.collect();
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
+    }
+}
+#[test]
+fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
+    let mut h = Harness::new();
+    let snapshot = h.take("/account");
+    h.respond(
+        snapshot,
+        &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+            .to_string(),
+    );
+    let orders = h.take("/openOrders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: orders.id,
+            error: SIGNED_STREAM_URL,
+        },
+    );
+    h.collect();
+    h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
+    assert_stream_notices_are_safe(&h);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
+}
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
     let mut h = Harness::new();
@@ -645,9 +751,12 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
-    h.fire_at(700.0);
+    h.fire_retry(500.0);
     assert!(
         h.pending
             .iter()
@@ -668,12 +777,10 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(200.0);
     h.reply(ETH, FAILED);
-    let mut at = 200.0;
     for delay in [
         500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0, 30_000.0, 30_000.0,
     ] {
-        at += delay;
-        h.fire_at(at);
+        h.fire_retry(delay);
         h.reply(ETH, FAILED);
     }
     assert_eq!(h.e.store().orders().len(), 1);
@@ -681,7 +788,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
         h.actions
             .iter()
             .filter(|a| {
-                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) if message.contains("E-ETH-USDT"))
+                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
             })
             .count()
     };
@@ -692,12 +799,11 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     assert!(!h.pending.iter().any(|r| r.url.contains(ETH)));
 
-    at += 30_000.0;
-    h.fire_at(at);
+    h.fire_retry(30_000.0);
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) if message.contains("E-ETH-USDT recovered")
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
     )));
 
     // A fresh failure after recovery starts again from the initial delay.
@@ -707,9 +813,35 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(h.now + 200.0);
     h.reply(ETH, FAILED);
-    h.fire_at(h.now + 500.0);
+    h.fire_retry(500.0);
     assert!(h.pending.iter().any(|r| r.url.contains(ETH)));
     assert_eq!(errors(&h), 2);
+}
+
+#[test]
+fn failed_symbol_order_read_retries_are_jittered() {
+    const ETH: &str = "/openOrders?contractName=E-ETH-USDT";
+    const FAILED: &str = r#"{"code":"-1","msg":"symbol unavailable"}"#;
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let mut h = Harness::with_market(&markets);
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders?contractName=E-BTC-USDT", ORDER);
+    h.fire_at(200.0);
+    h.reply(ETH, FAILED);
+    let nominal = [500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0];
+    let mut delays = Vec::new();
+    for nominal in nominal {
+        delays.push(h.fire_retry(nominal));
+        h.reply(ETH, FAILED);
+    }
+    assert!(
+        delays
+            .iter()
+            .zip(nominal)
+            .any(|(delay, nominal)| *delay < nominal),
+        "failed order reads must not retry in lockstep: {delays:?}"
+    );
 }
 
 #[test]
@@ -748,7 +880,7 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
             expected
         );
         assert!(h.e.store().setting("E-BTC-USDT").is_none());
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: Ok(v) }) if v.parse::<f64>().ok() == Some(expected))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: v }) if v.parse::<f64>().ok() == Some(expected))));
     }
     for malformed in [
         r#"{"code":"0","data":{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":125}]}}"#,
@@ -778,13 +910,11 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
                 .max,
             75.0
         );
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 52,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 52, .. })))
+        );
     }
     h.e.handle(
         h.now,
@@ -830,13 +960,104 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
             .max,
         100.0
     );
-    assert!(h.actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 61,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 61, .. })))
+    );
+}
+
+#[test]
+fn leverage_bracket_failures_never_echo_private_transport_or_response_diagnostics() {
+    for transport_failure in [true, false] {
+        let mut h = Harness::new();
+        h.seed();
+        let before =
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max;
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 62,
+                symbol: "E-BTC-USDT".into(),
+            }),
+        );
+        h.collect();
+        if transport_failure {
+            let error = format!("provider rejected {LOG_SECRET} at {SIGNED_STREAM_URL}");
+            // The safe GET retries three times before the terminal account error.
+            for _ in 0..4 {
+                let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: &error,
+                    },
+                );
+                h.collect();
+                assert_stream_notices_are_safe(&h);
+            }
+        } else {
+            let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+            let body = serde_json::json!({
+                "code": 401,
+                "msg": format!("{LOG_SECRET} {SIGNED_STREAM_URL}"),
+                "apiKey": LOG_SECRET,
+            })
+            .to_string();
+            h.e.handle(
+                h.now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 403,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            h.collect();
+        }
+        assert_stream_notices_are_safe(&h);
+        let completions = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 62, error }) => {
+                    Some(error.legacy_text())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(
+            completions[0],
+            if transport_failure {
+                "Bitrue leverage bracket read failed"
+            } else {
+                "Bitrue leverage bracket read failed (code 401)"
+            }
+        );
+        assert!(
+            !h.pending
+                .iter()
+                .any(|request| request.url.contains("/leverageBracket"))
+        );
+        assert_eq!(
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max,
+            before
+        );
+    }
 }
 
 #[test]
@@ -864,7 +1085,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         let expected = if malformed {
             "Malformed Bitrue account snapshot; retaining previous state"
         } else {
-            "Bitrue account read failed: snapshot transport failed"
+            "Bitrue account read failed"
         };
         let errors: Vec<_> = h
             .actions
@@ -879,13 +1100,13 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert_eq!(errors, [(91, expected), (92, expected)]);
         for owner in [91, 92] {
             let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command,..}) if *command==owner)).unwrap();
-            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command,result:Err(_)}) if *command==owner)).unwrap();
+            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed{command,..}) if *command==owner)).unwrap();
             assert!(error < done);
         }
         assert!(
             !h.actions
                 .iter()
-                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message==expected))
+                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
         );
     }
 }
@@ -909,9 +1130,9 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         let expected = if malformed {
             "Malformed Bitrue account snapshot; retaining previous state"
         } else {
-            "Bitrue account read failed: snapshot transport failed"
+            "Bitrue account read failed"
         };
-        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) if message==expected)).count(),1);
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
     }
 }
 
@@ -928,7 +1149,11 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
         if attempt < 3 {
             assert!(!h.actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandError { .. } | Notice::CommandDone { .. })
+                Action::Notice(
+                    Notice::CommandError { .. }
+                        | Notice::CommandDone { .. }
+                        | Notice::CommandFailed { .. }
+                )
             )));
             snapshot = h.take("/account");
         }
@@ -963,7 +1188,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -974,7 +1199,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -988,12 +1213,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -1004,9 +1229,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -1022,7 +1247,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {

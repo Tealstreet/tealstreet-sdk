@@ -21,6 +21,10 @@ struct H {
     connects: usize,
     fired: usize,
 }
+/// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 impl H {
     fn new() -> Self {
         Self::with_policy(PublicFeedPolicy::Direct)
@@ -62,11 +66,31 @@ impl H {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::WsClose { socket } => self.closed.push(socket),
-                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    self.done.push(Err(error.legacy_text()))
+                }
+                Action::Notice(Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => self.logs.push(message),
                 _ => {}
             }
         }
+    }
+    /// Finds the retry timer jittered from `nominal`, then advances the clock
+    /// to the nominal delay, which is never before the jittered deadline.
+    fn retry_after(&mut self, nominal: f64) -> TimerId {
+        let now = self.now;
+        let timer = self
+            .timers
+            .iter()
+            .find(|(_, at)| jittered(at - now, nominal))
+            .unwrap()
+            .0;
+        self.now += nominal;
+        timer
     }
     fn event(&mut self, e: Event<'_>) {
         self.e.handle(self.now, e);
@@ -230,11 +254,14 @@ fn market_retry_backoff_doubles_and_caps_at_thirty_seconds() {
         h.event(Event::TimerFired { timer });
     }
     // Shared engine discovery backoff: doubling from one second, capped at thirty.
-    assert_eq!(
-        &delays[..6],
-        &[1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0]
-    );
-    assert!(delays[5..].iter().all(|d| *d == 30000.0));
+    let nominal = [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0];
+    for (delay, nominal) in delays.iter().zip(nominal) {
+        assert!(
+            jittered(*delay, nominal),
+            "{delay} not jittered from {nominal}"
+        );
+    }
+    assert!(delays[5..].iter().all(|d| jittered(*d, 30000.0)));
     assert_eq!(h.http.len(), 1);
 }
 #[test]
@@ -606,13 +633,7 @@ fn rejected_midpoints_keep_prior_quotes_retry_and_allow_valid_peers() {
     );
     assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.0)
-        .unwrap()
-        .0;
-    h.now += 1000.0;
+    let timer = h.retry_after(1000.0);
     h.event(Event::TimerFired { timer });
     h.response(
         "/midpoints",
@@ -621,13 +642,7 @@ fn rejected_midpoints_keep_prior_quotes_retry_and_allow_valid_peers() {
     );
     assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 2000.0)
-        .unwrap()
-        .0;
-    h.now += 2000.0;
+    let timer = h.retry_after(2000.0);
     h.event(Event::TimerFired { timer });
     h.response(
         "/midpoints",
@@ -656,13 +671,7 @@ fn late_midpoint_seeds_preserve_only_supplied_live_quote_fields() {
     assert_eq!((yes.bid, yes.ask, yes.last), (0.4, 0.8, 0.5));
     assert!((yes.mark - 0.6).abs() < 1e-12);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.9);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.)
-        .unwrap()
-        .0;
-    h.now += 1000.;
+    let timer = h.retry_after(1000.);
     h.event(Event::TimerFired { timer });
     h.message(
         r#"{"event_type":"last_trade_price","asset_id":"2","price":"0.8","timestamp":"103"}"#,
@@ -718,13 +727,7 @@ fn failed_midpoint_batch_retries_without_blocking_or_repeating_later_batches() {
     assert_eq!(last.body.as_deref(), Some(r#"[{"token_id":"101"}]"#));
     h.response("/midpoints", 200, r#"{"101":"0.7"}"#);
     assert_eq!(h.e.store().ticker("batch-Outcome101").unwrap().last, 0.7);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.)
-        .unwrap()
-        .0;
-    h.now += 1000.;
+    let timer = h.retry_after(1000.);
     h.event(Event::TimerFired { timer });
     let retry = h
         .http
@@ -890,4 +893,25 @@ fn suppressed_public_feed_is_not_supervised() {
     assert_eq!(h.connects, 0, "no public connects");
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert_eq!(h.fired, 0, "no supervision timers fire");
+}
+
+#[test]
+fn a_market_without_a_positive_tick_is_skipped_as_malformed() {
+    for tick in [r#""0""#, r#""-0.01""#, r#""""#] {
+        let mut h = H::new();
+        let body = format!(
+            r#"[{{"conditionId":"0x9","slug":"zero-tick","clobTokenIds":"[\"9\"]","outcomes":"[\"Yes\"]","orderPriceMinTickSize":{tick}}},{}]"#,
+            &MARKETS[1..MARKETS.len() - 1]
+        );
+        h.response("/markets", 200, &body);
+        assert!(h.e.store().market("election-Yes").is_some());
+        assert!(h.e.store().market("zero-tick-Yes").is_none(), "{tick}");
+        assert!(
+            h.logs
+                .iter()
+                .any(|l| l.contains("malformed Polymarket market row") && l.contains("zero-tick")),
+            "{:?}",
+            h.logs
+        );
+    }
 }

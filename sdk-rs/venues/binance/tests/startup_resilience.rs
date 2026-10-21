@@ -1,6 +1,13 @@
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_binance::{BinanceFutures, Options};
+use support::Harness;
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"###;
 fn public_engine() -> Engine<BinanceFutures> {
     Engine::new(BinanceFutures::new(Options {
@@ -38,7 +45,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -166,10 +173,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -228,10 +232,7 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -246,4 +247,95 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
         })
         .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
+}
+
+fn public_harness() -> Harness {
+    Harness::started(Options {
+        public_data_only: true,
+        ..Default::default()
+    })
+}
+
+/// No retry of `path` until `wait_ms` has passed, then exactly on time.
+fn assert_retry_waits(h: &mut Harness, path: &str, wait_ms: f64) {
+    h.advance(wait_ms - 1.0);
+    assert!(!h.has_request(path), "{path} retried inside the ban window");
+    h.advance(1.0);
+    assert!(h.has_request(path), "{path} retried once the window passed");
+}
+
+#[test]
+fn catalogue_rate_limit_retry_waits_for_retry_after() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 429, "Retry-After: 120", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 120_000.0);
+}
+
+#[test]
+fn ticker_rate_limit_retry_waits_for_retry_after() {
+    let mut h = public_harness();
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    let request = h.take("/fapi/v1/ticker/24hr").id;
+    h.reply(request, 429, "Retry-After: 120", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/ticker/24hr", 120_000.0);
+}
+
+#[test]
+fn an_overflowing_retry_after_resumes_after_a_day_instead_of_never() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 418, "Retry-After: 1e308", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 86_400_000.0);
+}
+
+#[test]
+fn catalogue_ip_ban_without_retry_after_waits_the_weight_pause() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 418, "", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 60_000.0);
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    let valid = r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"}]}"#;
+    for (field, bad) in [
+        ("\"tickSize\":\"0.10\"", "\"tickSize\":\"0\""),
+        ("\"stepSize\":\"0.001\"", "\"stepSize\":\"-1\""),
+        (
+            "{\"filterType\":\"PRICE_FILTER\",\"tickSize\":\"0.10\"},",
+            "",
+        ),
+    ] {
+        let broken = valid
+            .replace("BTCUSDT", "ETHUSDT")
+            .replace("\"BTC\"", "\"ETH\"")
+            .replacen(field, bad, 1);
+        let body = format!(r#"{{"symbols":[{valid},{broken}]}}"#);
+        let mut engine = public_engine();
+        engine.start(0.0);
+        let request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.contains("exchangeInfo") => Some(request),
+                _ => None,
+            })
+            .expect("catalogue request");
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        assert!(engine.store().market("BTCUSDT").is_some());
+        assert!(engine.store().market("ETHUSDT").is_none(), "{bad}");
+        assert!(engine.drain_actions().any(|action| matches!(action,
+            Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    }
 }

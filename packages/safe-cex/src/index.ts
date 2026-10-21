@@ -11,6 +11,7 @@ import type { Store } from './store/store.interface';
 import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './types';
 
 import { getExchangeMetadata } from './exchangeMetadata';
+import { hostedSigningVenues, isKeylessRemoteSigned } from './exchanges/hostedSigningVenues';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
@@ -84,10 +85,13 @@ export const createExchange = async (
   virtualClock.start();
 
   if (options.engine === 'rust') {
-    const { isRustVenue, RustEngineExchange } = await import('./exchanges/rust/rust.exchange');
-    if (isRustVenue(exchangeName)) return new RustEngineExchange(exchangeName, options, store || new DefaultStore());
+    const { runsOnRustEngine, RustEngineExchange } = await import('./exchanges/rust/rust.exchange');
+    if (runsOnRustEngine(exchangeName, options)) {
+      return new RustEngineExchange(exchangeName, options, store || new DefaultStore());
+    }
   }
-  const Exchange = await loadExchange(exchangeName);
+  const hosted = isKeylessRemoteSigned(exchangeName, options) ? hostedSigningVenues[exchangeName] : undefined;
+  const Exchange = hosted ? await hosted() : await loadExchange(exchangeName);
   return new Exchange(exchangeName, options, store || new DefaultStore());
 };
 

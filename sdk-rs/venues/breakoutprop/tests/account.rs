@@ -36,7 +36,7 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
         }
         assert!(h.timers.is_empty());
         let mut old = Vec::new();
-        for interval in [20_000., 500.] {
+        for interval in [20_000., 1_500.] {
             h.engine.handle(
                 h.now,
                 Event::PollScaleChanged {
@@ -407,6 +407,6 @@ fn amount_only_stop_amendment_uses_documented_trigger_after_reconciliation() {
         assert_eq!(body["quantity"], 0.02);
         assert_eq!(body["positionEffect"], "CLOSE");
         rig.reply(&replacement, 200, r#"{"orderId":42}"#);
-        assert_eq!(rig.result(90), &Ok("[\"42\"]".into()));
+        assert_eq!(rig.result(90), Ok("[\"42\"]".into()));
     }
 }

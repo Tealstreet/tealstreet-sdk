@@ -1,7 +1,10 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
+use safe_cex_engine::Level;
+use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
+    Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
     json::{self, ArrayAt},
     model::*,
     socket::{Config, Supervisor, Tick, Timeout},
@@ -106,6 +109,7 @@ pub struct Account {
     snapshot_settings_revision: u64,
     snapshot_positions_seen: bool,
     read_failures: u32,
+    unlisted_logged: HashSet<String>,
 }
 impl Account {
     pub(crate) fn new() -> Self {
@@ -532,6 +536,19 @@ impl Kraken {
         self.account.records.insert(order.id.clone(), order.clone());
         cx.store.upsert_order(order);
     }
+    /// Rows on a market the catalogue filtered or never listed are skipped; only a
+    /// market skipped as malformed (`skipped_markets`) holds the snapshot.
+    fn account_unlisted(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
+        for symbol in symbols {
+            if self.account.unlisted_logged.insert(symbol.clone()) {
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
+                    format!("Kraken {symbol} is not a listed market; its rows are skipped"),
+                );
+            }
+        }
+    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started || self.signer.is_none() || self.options.public_data_only {
             return;
@@ -558,7 +575,9 @@ impl Kraken {
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Private));
+        self.account.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.ws_url()).channel(SocketChannel::Private),
+        ));
         self.account.open = false;
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -612,13 +631,19 @@ impl Kraken {
             };
             if let Err(error) = result {
                 self.account.inflight.remove(&key);
-                cx.log(LogLevel::Error, error);
+                cx.retried_failure("kraken.account:634", error);
             }
         }
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.heal.is_none() {
-            let delay = (1000.0 * 2f64.powi(self.account.read_failures.min(5) as i32)).min(30000.0);
+            let nominal = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
+            // A heal after a websocket event keeps its fixed debounce; failed reads spread.
+            let delay = if self.account.read_failures > 0 {
+                cx.jittered(nominal)
+            } else {
+                nominal
+            };
             self.account.heal = Some(cx.set_timer(delay));
         }
     }
@@ -663,7 +688,7 @@ impl Kraken {
         true
     }
     fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        cx.log(LogLevel::Error, message);
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, message);
         if let Some(socket) = self.account.socket {
             cx.close(socket);
             self.account_ws_close(cx, socket);
@@ -831,6 +856,7 @@ impl Kraken {
                 } else if let Some(raw) = msg.orders {
                     let mut orders = vec![];
                     let mut valid = true;
+                    let mut unlisted = vec![];
                     let result = json::each::<OrderWire<'_>>(raw.get(), |r| {
                         if r.symbol.is_empty() {
                             valid = false;
@@ -840,10 +866,13 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
-                        } else if r.symbol.starts_with("PF_") {
+                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
                             valid = false;
+                        } else {
+                            unlisted.push(r.symbol.into_owned());
                         }
                     });
+                    self.account_unlisted(cx, unlisted);
                     if result.is_ok() && valid {
                         self.account.payloads.insert("open_orders".into(), cx.now);
                         if msg.feed == "open_orders_snapshot"
@@ -857,8 +886,9 @@ impl Kraken {
                             self.account_commit_orders(cx, orders, true);
                         }
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "Kraken order snapshot contains an unmappable or invalid row",
                         );
                         self.account_schedule_heal(cx);
@@ -888,6 +918,7 @@ impl Kraken {
                 if let Some(raw) = msg.positions {
                     let mut positions = vec![];
                     let mut valid = true;
+                    let mut unlisted = vec![];
                     let result = json::each::<PositionWire<'_>>(raw.get(), |r| {
                         if r.symbol.is_empty() {
                             valid = false;
@@ -897,10 +928,14 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
-                        } else if r.symbol.starts_with("PF_") && r.balance.or(r.size) != Some(0.0) {
+                        } else if r.balance.or(r.size) == Some(0.0) {
+                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
                             valid = false;
+                        } else {
+                            unlisted.push(r.symbol.into_owned());
                         }
                     });
+                    self.account_unlisted(cx, unlisted);
                     if result.is_ok() && valid {
                         self.account.positions_revision += 1;
                         self.account
@@ -920,8 +955,9 @@ impl Kraken {
                         self.account.snapshot_positions_seen = true;
                         self.account_commit_positions(cx, positions);
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "Kraken position snapshot contains an unmappable or invalid row",
                         );
                         self.account_schedule_heal(cx);
@@ -1167,8 +1203,10 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
-                    } else if row.symbol.starts_with("PF_") {
+                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                         request.valid = false;
+                    } else {
+                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
                 Err(_) => request.valid = false,
@@ -1183,9 +1221,11 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
-                    } else if row.symbol.starts_with("PF_") && row.balance.or(row.size) != Some(0.0)
-                    {
+                    } else if row.balance.or(row.size) == Some(0.0) {
+                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                         request.valid = false;
+                    } else {
+                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
                 Err(_) => request.valid = false,
@@ -1229,7 +1269,10 @@ impl Kraken {
         }
         if !wire::success(response) || !request.valid {
             self.account.read_failures = self.account.read_failures.saturating_add(1);
-            cx.log(LogLevel::Error, "Kraken account reconciliation failed");
+            cx.retried_failure(
+                "kraken.account:1266",
+                "Kraken account reconciliation failed",
+            );
             self.account_schedule_heal(cx);
             return;
         }
@@ -1284,7 +1327,11 @@ impl Kraken {
                     cx.store.set_coin_balances(coins);
                 }
                 Err(_) => {
-                    cx.log(LogLevel::Error, "Kraken malformed account balances");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Kraken malformed account balances",
+                    );
                     self.account_schedule_heal(cx);
                 }
             },
@@ -1298,8 +1345,8 @@ impl Kraken {
     ) {
         self.account.inflight.remove(&(request.scope as u8));
         self.account.read_failures = self.account.read_failures.saturating_add(1);
-        cx.log(
-            LogLevel::Error,
+        cx.retried_failure(
+            "kraken.account:1343",
             "Kraken account reconciliation transport failure",
         );
         self.account_schedule_heal(cx);

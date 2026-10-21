@@ -636,7 +636,7 @@ impl ApexOmni {
                     let error = not_sent("ApeX Omni supports cross margin only");
                     cx.fail(command, error.kind(ErrorKind::Unsupported));
                 } else {
-                    cx.done(command, Ok("null".into()));
+                    cx.done(command, "null".into());
                 }
                 return Ok(());
             }
@@ -646,7 +646,7 @@ impl ApexOmni {
                 symbol: _,
             } => {
                 if hedged {
-                    cx.done(command, Ok("null".into()));
+                    cx.done(command, "null".into());
                 } else {
                     let error = not_sent("ApeX Omni supports hedged position mode only");
                     cx.fail(command, error.kind(ErrorKind::Unsupported));
@@ -654,12 +654,15 @@ impl ApexOmni {
                 return Ok(());
             }
             Command::FetchLeverage { command, symbol } => {
-                let result = cx
+                let result: Result<String, String> = cx
                     .store
                     .setting(&symbol)
                     .map(|s| num::format(s.leverage))
                     .ok_or_else(|| "ApeX Omni leverage is unavailable".into());
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
                 return Ok(());
             }
             command => return Err(command),
@@ -702,7 +705,7 @@ impl ApexOmni {
                 } else {
                     "[]".into()
                 };
-                cx.done(job.command, Ok(result));
+                cx.done(job.command, result);
                 continue;
             };
             match step {

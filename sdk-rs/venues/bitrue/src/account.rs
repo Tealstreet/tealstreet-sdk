@@ -1,8 +1,11 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
@@ -10,7 +13,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -22,14 +25,9 @@ const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
 /// Consecutive event-fenced snapshots discarded before one commits anyway.
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
-const ORDER_RETRY_INITIAL_MS: f64 = 500.0;
-const ORDER_RETRY_CAP_MS: f64 = 30_000.0;
 
 /// Delay before re-reading a symbol whose open-order read failed `failures` times in a row.
-fn order_retry_ms(failures: u32) -> f64 {
-    let steps = failures.saturating_sub(1).min(16) as i32;
-    (ORDER_RETRY_INITIAL_MS * 2f64.powi(steps)).min(ORDER_RETRY_CAP_MS)
-}
+const ORDER_RETRY: Backoff = Backoff::new(500.0, 16, 30_000.0);
 
 enum OrderRead {
     Reconciled,
@@ -94,6 +92,7 @@ pub struct Snapshot {
     settings: Vec<(String, MarketSetting)>,
     invalid: bool,
     valuation_pending: bool,
+    uncatalogued: Vec<String>,
 }
 #[derive(Default)]
 pub struct Account {
@@ -582,8 +581,9 @@ impl Bitrue {
         match read {
             OrderRead::Reconciled => {
                 if let Some(backoff) = self.account.order_backoff.remove(&symbol) {
-                    cx.log(
-                        LogLevel::Info,
+                    cx.notice(
+                        Level::Info,
+                        code::REQUEST_FAILED,
                         format!(
                             "Bitrue order read for {symbol} recovered after {} failures",
                             backoff.failures
@@ -604,8 +604,10 @@ impl Bitrue {
                     .or_default();
                 backoff.failures += 1;
                 if backoff.error != error {
-                    cx.log(
-                        LogLevel::Error,
+                    // Already reported once per distinct error and reset on recovery.
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
                         format!("Bitrue order read for {symbol} failed: {error}"),
                     );
                     backoff.error = error;
@@ -613,7 +615,8 @@ impl Bitrue {
                 if let Some(timer) = backoff.retry.take() {
                     cx.clear_timer(timer);
                 }
-                backoff.retry = Some(cx.set_timer(order_retry_ms(backoff.failures)));
+                let delay = cx.jittered(ORDER_RETRY.delay(backoff.failures.saturating_sub(1)));
+                backoff.retry = Some(cx.set_timer(delay));
             }
         }
         if self.account.initial_orders.is_empty() {
@@ -701,7 +704,7 @@ impl Bitrue {
             definitive,
         })
         .expect("client order lookup");
-        cx.done(command, Ok(result));
+        cx.done(command, result);
     }
     fn fast_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<String>) {
         self.account.settings_revision += 1;
@@ -833,9 +836,13 @@ impl Bitrue {
         ) && message.status != "ok"
             && !matches!(&*message.code, "0" | "200")
         {
-            cx.log(
-                LogLevel::Error,
-                format!("Bitrue private subscription failed: {text}"),
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                private_diagnostic(
+                    &format!("Bitrue private subscription failed ({event})"),
+                    message.code.parse::<i64>().ok(),
+                ),
             );
             self.restart_private(cx);
         }
@@ -1117,11 +1124,18 @@ impl Bitrue {
                 return Err(());
             }
             let Some(market) = cx.store.market(&group.contract_name) else {
-                // Only owned exposure on an uncatalogued contract blocks the snapshot.
+                // Only owned exposure on a contract skipped as malformed blocks the snapshot.
                 if group.positions.iter().all(|row| row.volume.0 == 0.0) {
                     continue;
                 }
-                return Err(());
+                if self
+                    .malformed_markets
+                    .contains(group.contract_name.as_ref())
+                {
+                    return Err(());
+                }
+                data.uncatalogued.push(group.contract_name.to_string());
+                continue;
             };
             for row in group.positions {
                 let side = match &*row.side {
@@ -1342,11 +1356,11 @@ impl Bitrue {
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         if let Command::FetchMaxLeverage { command, symbol } = command {
             let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-                cx.done(*command, Err("Unknown Bitrue market".into()));
+                cx.fail(*command, "Unknown Bitrue market");
                 return true;
             };
             if !self.authenticated() {
-                cx.done(*command, Err("Bitrue private credentials required".into()));
+                cx.fail(*command, "Bitrue private credentials required");
                 return true;
             }
             let contract = &cx.store.market(&symbol).expect("resolved market").id;
@@ -1370,11 +1384,11 @@ impl Bitrue {
             return false;
         };
         let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-            cx.done(*command, Err("Unknown Bitrue market".into()));
+            cx.fail(*command, "Unknown Bitrue market");
             return true;
         };
         if !self.authenticated() {
-            cx.done(*command, Err("Bitrue private credentials required".into()));
+            cx.fail(*command, "Bitrue private credentials required");
             return true;
         }
         self.account.leverage_queries.push((*command, symbol));
@@ -1385,7 +1399,7 @@ impl Bitrue {
     fn report_leverage_error(&self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
         let message = message.into();
         if self.account.leverage_queries.is_empty() {
-            cx.log(LogLevel::Error, message);
+            cx.retried_failure("bitrue.account:1401", message);
         } else {
             for (command, _) in &self.account.leverage_queries {
                 cx.command_error(*command, message.clone());
@@ -1423,12 +1437,13 @@ impl Bitrue {
                         position_mode: PositionMode::Oneway,
                     })
                 });
-            cx.done(
-                command,
-                result
-                    .map(|r| serde_json::to_string(&r).unwrap())
-                    .ok_or_else(|| error.to_owned()),
-            );
+            match result
+                .map(|r| serde_json::to_string(&r).unwrap())
+                .ok_or_else(|| error.to_owned())
+            {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            };
         }
     }
     pub(crate) fn account_item(
@@ -1499,11 +1514,11 @@ impl Bitrue {
             crate::wire::check(&response).is_ok()
         };
         if !valid {
-            self.account_failed(
-                cx,
-                request,
-                &format!("Bitrue account request rejected: {}", response.body),
-            );
+            let code = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body)
+                .ok()
+                .and_then(|envelope| envelope.code.parse::<i64>().ok())
+                .or(Some(i64::from(response.status)));
+            self.account_failed_code(cx, request, code);
             return;
         }
         match request {
@@ -1557,11 +1572,11 @@ impl Bitrue {
                             market.limits.leverage.max = max;
                         }
                     });
-                    cx.done(command, Ok(safe_cex_engine::num::format(max)));
+                    cx.done(command, safe_cex_engine::num::format(max));
                 } else {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Malformed Bitrue leverage brackets; retaining known limit".into()),
+                        "Malformed Bitrue leverage brackets; retaining known limit",
                     );
                 }
             }
@@ -1584,17 +1599,21 @@ impl Bitrue {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'));
                     if !encoded {
-                        self.listen_failed(cx, "Malformed Bitrue listen key");
+                        self.listen_failed(cx, None, true);
                         return;
                     }
                     self.account.listen_key = Some(key.to_owned());
-                    self.account.socket = Some(cx.connect_channel(
-                        format!("{PRIVATE_URL}?listenKey={key}"),
-                        SocketChannel::Private,
-                    ));
+                    self.account.socket = Some(
+                        cx.connect(
+                            safe_cex_engine::SocketSpec::new(format!(
+                                "{PRIVATE_URL}?listenKey={key}"
+                            ))
+                            .channel(SocketChannel::Private),
+                        ),
+                    );
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
                 } else {
-                    self.listen_failed(cx, "Malformed Bitrue futures listen key response");
+                    self.listen_failed(cx, None, true);
                 }
             }
             Request::Keepalive { generation } => {
@@ -1633,9 +1652,17 @@ impl Bitrue {
                     self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
                 } else if admit {
                     if data.valuation_pending {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::VALUATION_UNAVAILABLE,
                             "Bitrue ticker price unavailable; retaining prior position valuation",
+                        );
+                    }
+                    for contract in &data.uncatalogued {
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!("Skipping Bitrue position on uncatalogued contract {contract}"),
                         );
                     }
                     let closed: Vec<String> = cx
@@ -1699,8 +1726,9 @@ impl Bitrue {
                     // TS only checks open orders. A failed read falls
                     // back to the cache, and every miss remains non-definitive.
                     if !schema || invalid {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_MALFORMED,
                             "Malformed Bitrue open-order lookup; using cache",
                         );
                     }
@@ -1787,10 +1815,18 @@ impl Bitrue {
             }
         }
     }
-    fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
-        cx.log(
-            LogLevel::Error,
-            format!("Bitrue futures private stream: {error}"),
+    fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, code: Option<i64>, malformed: bool) {
+        cx.notice(
+            Level::Error,
+            code::STREAM_UNAVAILABLE,
+            private_diagnostic(
+                if malformed {
+                    "Bitrue futures private stream: malformed listen-key response"
+                } else {
+                    "Bitrue futures private stream: request rejected or unavailable"
+                },
+                code,
+            ),
         );
         self.restart_private(cx);
     }
@@ -1800,21 +1836,40 @@ impl Bitrue {
         request: Request,
         error: &str,
     ) {
+        let body = error
+            .strip_prefix("response did not contain the expected list: ")
+            .unwrap_or(error);
+        let code = serde_json::from_str::<crate::wire::Envelope<'_>>(body)
+            .ok()
+            .and_then(|envelope| envelope.code.parse::<i64>().ok());
+        self.account_failed_code(cx, request, code);
+    }
+    fn account_failed_code(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        code: Option<i64>,
+    ) {
         match request {
-            Request::Brackets { command, .. } => cx.done(command, Err(error.into())),
+            Request::Brackets { command, .. } => cx.fail(
+                command,
+                private_diagnostic("Bitrue leverage bracket read failed", code),
+            ),
             Request::Listen { generation } if generation == self.account.generation => {
-                self.listen_failed(cx, error)
+                self.listen_failed(cx, code, false)
             }
             Request::Keepalive { generation } if generation == self.account.generation => {
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue listen key refresh failed: {error}"),
+                cx.notice(
+                    Level::Error,
+                    code::STREAM_UNAVAILABLE,
+                    private_diagnostic("Bitrue listen key refresh failed", code),
                 );
                 self.restart_private(cx);
             }
             Request::Snapshot { .. } => {
-                self.report_leverage_error(cx, format!("Bitrue account read failed: {error}"));
-                self.finish_leverage(cx, None, error);
+                let error = private_diagnostic("Bitrue account read failed", code);
+                self.report_leverage_error(cx, error.clone());
+                self.finish_leverage(cx, None, &error);
                 self.account.snapshot_pending = false;
                 if std::mem::take(&mut self.account.snapshot_again) {
                     self.refresh_account(cx);
@@ -1826,7 +1881,10 @@ impl Bitrue {
                 lookup,
                 ..
             } => {
-                let message = format!("Bitrue order read for {symbol} failed: {error}");
+                let message =
+                    private_diagnostic(&format!("Bitrue order read for {symbol} failed"), code);
+                // Backoff dedupes and logs this reason; it must not carry transport text.
+                let reason = private_diagnostic("request failed", code);
                 if let Some((command, client_order_id)) = lookup {
                     cx.command_error(command, message);
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
@@ -1839,13 +1897,18 @@ impl Bitrue {
                             .order_backoff
                             .entry(symbol.clone())
                             .or_default()
-                            .error = error.to_owned();
+                            .error = reason.clone();
                     }
                     self.trade_census(cx, &symbol, revision, false);
-                    self.order_finished(cx, symbol, OrderRead::Failed(error.to_owned()));
+                    self.order_finished(cx, symbol, OrderRead::Failed(reason));
                 }
             }
             _ => {}
         }
     }
+}
+
+// Only bounded numeric venue codes may cross this private diagnostic boundary.
+fn private_diagnostic(message: &str, code: Option<i64>) -> String {
+    code.map_or_else(|| message.into(), |code| format!("{message} (code {code})"))
 }

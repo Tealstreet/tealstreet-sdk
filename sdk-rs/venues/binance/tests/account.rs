@@ -744,7 +744,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -755,7 +755,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -769,12 +769,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -785,9 +785,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -803,7 +803,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -1159,4 +1159,276 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     };
     assert_eq!(error.message, "Margin is insufficient.");
     assert_eq!(error.outcome, None, "the cancel already took effect");
+}
+
+fn advance_to_position_read(h: &mut Harness, rows: &str) {
+    h.advance(75_000.0);
+    h.respond("/fapi/v3/positionRisk", 200, rows);
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+}
+
+#[test]
+fn an_unreadable_position_amount_keeps_that_leg_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let row = |side: &str, amount: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+        )
+    };
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{}]", row("LONG", "0.010"), row("SHORT", "-0.020")),
+    );
+    let short = h.engine.store().position("BTCUSDT:short").unwrap().clone();
+    assert_eq!(short.contracts, 0.02);
+
+    advance_to_position_read(
+        &mut h,
+        &format!(
+            "[{},{}]",
+            row("LONG", "0.030"),
+            row("SHORT", "garbled-amount")
+        ),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.03);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance positionRisk row BTCUSDT has an unreadable positionAmt")
+    );
+    assert!(!h.logs.iter().any(|m| m.contains("garbled-amount")));
+
+    advance_to_position_read(&mut h, &format!("[{}]", row("LONG", "0.030")));
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.engine.store().positions().len(), 1);
+}
+
+#[test]
+fn a_malformed_position_row_keeps_its_stored_leg_while_valid_peers_commit() {
+    let mut h = ready();
+    let row = |side: &str, amount: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+        )
+    };
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{}]", row("LONG", "0.010"), row("SHORT", "-0.020")),
+    );
+    let short = h.engine.store().position("BTCUSDT:short").unwrap().clone();
+    h.logs.clear();
+
+    let malformed = row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
+    advance_to_position_read(&mut h, &format!("[{},{malformed}]", row("LONG", "0.030")));
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.03);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance skipped malformed positionRisk row BTCUSDT:short")
+    );
+
+    // A row without an identity protects every stored leg but still lets peers commit.
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{{\"positionAmt\":\"1\"}}]", row("LONG", "0.040")),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.04);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance skipped malformed positionRisk row without an identity")
+    );
+
+    advance_to_position_read(&mut h, &format!("[{}]", row("LONG", "0.040")));
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.engine.store().positions().len(), 1);
+}
+
+fn risk_row(side: &str, amount: &str) -> String {
+    format!(
+        r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+    )
+}
+
+#[test]
+fn a_skipped_position_row_with_no_stored_leg_is_an_error_logged_once_until_it_maps() {
+    let mut h = ready();
+    let malformed = risk_row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
+    let message = "Binance skipped malformed positionRisk row BTCUSDT:short";
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.errors, [message]);
+    // The same skip on the next poll is not reported again.
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert_eq!(h.errors.len(), 1);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 1);
+
+    // Once the leg maps, a recurrence is reported again, as a warning over its stored copy.
+    let both = format!(
+        "[{},{}]",
+        risk_row("LONG", "0.010"),
+        risk_row("SHORT", "-0.020")
+    );
+    advance_to_position_read(&mut h, &both);
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert_eq!(h.errors.len(), 1);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 2);
+}
+
+#[test]
+fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_partial() {
+    let mut h = Harness::started(credentials());
+    let partial =
+        support::EXCHANGE_INFO.replacen(r#""symbols":["#, r#""symbols":[{"symbol":1},"#, 1);
+    h.respond("/fapi/v1/exchangeInfo", 200, &partial);
+    h.respond("/fapi/v1/leverageBracket", 200, "[]");
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    let malformed = risk_row("BOTH", "0.050").replace(r#""entryPrice":"95000.0","#, "");
+    h.respond("/fapi/v3/positionRisk", 200, &format!("[{malformed}]"));
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+    assert!(!h.engine.store().loaded().positions);
+    assert!(h.errors.is_empty());
+
+    // Once discovery settles, the row is skipped and, with nothing stored, reported.
+    h.advance(1_000.0);
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    advance_to_position_read(&mut h, &format!("[{malformed}]"));
+    assert!(h.engine.store().loaded().positions);
+    assert_eq!(
+        h.errors,
+        ["Binance skipped malformed positionRisk row BTCUSDT"]
+    );
+}
+
+#[test]
+fn a_repeated_order_skip_logs_once_until_the_order_maps_again() {
+    let mut h = ready();
+    let order = |kind: &str| {
+        format!(
+            r#"[{{"orderId":2,"clientOrderId":"c2","executedQty":"0","origQty":"0.004","price":"89000","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}]"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &str| {
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
+        h.advance(10_000.0);
+        h.respond("/fapi/v1/openOrders", 200, orders);
+        h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    };
+    let message = "Binance open order 2 has an unsupported type";
+    let count = |h: &Harness| h.logs.iter().filter(|m| *m == message).count();
+    refresh(&mut h, &order("FUTURE_KIND"));
+    refresh(&mut h, &order("FUTURE_KIND"));
+    assert_eq!(count(&h), 1);
+    refresh(&mut h, &order("LIMIT"));
+    refresh(&mut h, &order("FUTURE_KIND"));
+    assert_eq!(count(&h), 2);
+}
+
+#[test]
+fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let order = |id: u64, kind: &str, price: &str| {
+        format!(
+            r#"{{"orderId":{id},"clientOrderId":"c{id}","executedQty":"0","origQty":"0.004","price":"{price}","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}"#
+        )
+    };
+    let algo = |id: u64, kind: &str, trigger: &str| {
+        format!(
+            r#"{{"algoId":{id},"orderType":"{kind}","symbol":"BTCUSDT","side":"SELL","quantity":"0.004","triggerPrice":"{trigger}","workingType":"MARK_PRICE","reduceOnly":true,"closePosition":false}}"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &[String], algos: &[String]| {
+        // Any private order event schedules the debounced REST order snapshot.
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
+        h.advance(10_000.0);
+        h.respond(
+            "/fapi/v1/openOrders",
+            200,
+            &format!("[{}]", orders.join(",")),
+        );
+        h.respond(
+            "/fapi/v1/openAlgoOrders",
+            200,
+            &format!("[{}]", algos.join(",")),
+        );
+    };
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90000"), order(2, "LIMIT", "89000")],
+        &[
+            algo(3, "STOP_MARKET", "85000"),
+            algo(4, "STOP_MARKET", "84000"),
+        ],
+    );
+    let stored = ["2", "4"].map(|id| h.engine.store().order(id).unwrap().clone());
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500"), order(2, "FUTURE_KIND", "1")],
+        &[algo(3, "STOP_MARKET", "85500"), algo(4, "FUTURE_KIND", "1")],
+    );
+    let store = h.engine.store();
+    assert_eq!(store.order("1").unwrap().price, 90500.0);
+    assert_eq!(store.order("3").unwrap().price, 85500.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    for id in ["2", "4"] {
+        let expected = format!("Binance open order {id} has an unsupported type");
+        assert!(h.logs.contains(&expected), "{expected}");
+    }
+    assert!(!h.logs.iter().any(|m| m.contains("FUTURE_KIND")));
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500")],
+        &[algo(3, "STOP_MARKET", "85500")],
+    );
+    let ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["1", "3"]);
+}
+
+#[test]
+fn listen_key_failures_back_off_from_5s_to_the_60s_cap() {
+    let mut h = ready();
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.advance(500.0);
+    for delay in [5_000.0, 10_000.0, 20_000.0, 40_000.0, 60_000.0, 60_000.0] {
+        h.respond("/fapi/v1/listenKey", 503, "unavailable");
+        let sent = h.now;
+        assert!(
+            h.timers
+                .iter()
+                .any(|(_, at)| support::jittered(at - sent, delay)),
+            "next listen key retry after a jittered {delay} ms"
+        );
+        h.advance(delay);
+        assert!(h.has_request("/fapi/v1/listenKey"));
+    }
 }

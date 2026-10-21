@@ -29,10 +29,32 @@ fn ready() -> TestEngine {
     e.drain_actions().for_each(drop);
     e
 }
+/// Failures as the plain text the host renders.
+fn drained(e: &mut TestEngine) -> Vec<Action> {
+    e.drain_actions()
+        .map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                Action::Notice(Notice::CommandFailed {
+                    command,
+                    error: error.clone(),
+                })
+            }
+            a => a,
+        })
+        .collect()
+}
+fn failures(e: &mut TestEngine) -> Vec<safe_cex_engine::VenueError> {
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}
 fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
@@ -152,13 +174,11 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
                 orders: vec![order(), second],
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = drained(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                result: Err(error), ..
-            }) if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -176,9 +196,9 @@ fn every_caller_id_rejects_the_whole_batch_before_a_write() {
                 orders: vec![order(), invalid],
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = drained(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(error),..}) if error=="mexc cannot honor a caller clientOrderId")));
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text()=="mexc cannot honor a caller clientOrderId")));
     }
     assert!(serde_json::from_str::<PlaceOrderOpts>(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":60,"price":59000,"clientOrderId":null}"#).is_err());
 }
@@ -201,12 +221,12 @@ fn unsupported_opening_conditional_and_trailing_reject_before_any_batch_write() 
                 200.0,
                 Event::Command(Command::PlaceOrders { command: 1, orders }),
             );
-            let actions: Vec<_> = e.drain_actions().collect();
+            let actions = drained(&mut e);
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(e.store().orders().is_empty());
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error == "MEXC opening conditional and trailing-stop placement is not implemented"
+                Action::Notice(Notice::CommandFailed { error, .. })
+                if error.legacy_text() == "MEXC opening conditional and trailing-stop placement is not implemented"
             )));
         }
     }
@@ -298,19 +318,17 @@ fn lost_write_response_never_retries_and_finishes_the_command() {
             error: "response lost after acceptance",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = drained(&mut e);
     assert!(
         !actions
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 1,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
 }
 
 #[test]
@@ -650,9 +668,9 @@ fn stale_terminal_amend_read_cannot_erase_a_newer_partial_fill_or_replace_it() {
         r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":30,"price":59000,"state":4}}"#,
     );
     assert!((e.store().order("one").unwrap().filled - 0.004).abs() < 1e-12);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(e),..}) if e.contains("Stale"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { error: e, .. }) if e.legacy_text().contains("Stale"))));
 }
 
 #[test]
@@ -689,12 +707,13 @@ fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
         r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -919,7 +938,7 @@ fn definitive_filled_amend_read_updates_local_state_and_withholds_replacement() 
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
     assert_eq!(e.store().order("one").unwrap().filled, 0.006);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 
@@ -1146,7 +1165,7 @@ fn side_leverage_writes_only_the_selected_native_rail_and_keeps_other_setting() 
         );
         assert_eq!(payload["leverage"], 37.);
         reply(&mut e, &first, 300., r#"{"success":true,"code":0}"#);
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = drained(&mut e);
         assert!(
             !actions
                 .iter()
@@ -1156,7 +1175,7 @@ fn side_leverage_writes_only_the_selected_native_rail_and_keeps_other_setting() 
             a,
             Action::Notice(Notice::CommandDone {
                 command: 401,
-                result: Ok(_)
+                result: _
             })
         )));
         let setting = e.store().setting("BTCUSDT").unwrap();
@@ -1347,4 +1366,212 @@ fn full_position_stops_snap_native_volume_to_contract_step() {
         assert_eq!(body["vol"], 60.0);
         assert_eq!(body["volType"], 2);
     }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    for (status, body, classified, text) in [
+        (503, "", (None, Some(Outcome::Unknown)), "MEXC HTTP 503"),
+        (408, "", (None, Some(Outcome::Unknown)), "MEXC HTTP 408"),
+        (401, "", rejected(ErrorKind::AuthInvalid), "MEXC HTTP 401"),
+        (
+            403,
+            "",
+            rejected(ErrorKind::AuthPermission),
+            "MEXC HTTP 403",
+        ),
+        (429, "", rejected(ErrorKind::RateLimited), "MEXC HTTP 429"),
+        (400, "", rejected(ErrorKind::Rejected), "MEXC HTTP 400"),
+        (
+            200,
+            r#"{"success":false,"code":2005,"message":"balance insufficient"}"#,
+            rejected(ErrorKind::Rejected),
+            "MEXC 2005: balance insufficient",
+        ),
+        (
+            200,
+            r#"{"success":false,"code":602,"message":"signature"}"#,
+            rejected(ErrorKind::AuthInvalid),
+            "MEXC 602: signature",
+        ),
+        (
+            200,
+            r#"{"success":false,"code":510,"message":"too frequent"}"#,
+            rejected(ErrorKind::RateLimited),
+            "MEXC 510: too frequent",
+        ),
+        (
+            200,
+            r#"{"success":false,"code":9999,"message":"busy"}"#,
+            (None, Some(Outcome::Unknown)),
+            "MEXC 9999: busy",
+        ),
+        (
+            200,
+            r#"{"success":false,"code":8888,"message":"undocumented"}"#,
+            (None, None),
+            "MEXC 8888: undocumented",
+        ),
+        (
+            200,
+            r#"{"success":true,"code":0}"#,
+            (None, Some(Outcome::Unknown)),
+            "MEXC response has no data",
+        ),
+    ] {
+        let mut e = ready();
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![order()],
+            }),
+        );
+        let r = requests(&mut e).remove(0);
+        e.handle(
+            300.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let [error] = failures(&mut e)
+            .try_into()
+            .unwrap_or_else(|f| panic!("{f:?}"));
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text().as_str()),
+            (classified, text),
+            "{status} {body}"
+        );
+    }
+    // Transport loss on a write is Unknown.
+    let mut e = ready();
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![order()],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    e.handle(
+        300.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "reset",
+        },
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    // Preflight refusals were never sent.
+    let mut e = ready();
+    let mut invalid = order();
+    invalid.client_order_id = Some("mine".into());
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![invalid],
+        }),
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
+    use safe_cex_engine::Outcome;
+    // An explicit per-order refusal in a batch with an accepted leg.
+    let mut e = ready();
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![order(), order()],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &r,
+        300.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0},{"errorCode":600,"errorMsg":"bad volume"}]}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, None);
+    // A batch row without an order id does not prove what happened.
+    let mut e = ready();
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![order(), order()],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &r,
+        300.0,
+        r#"{"success":true,"code":0,"data":[{"errorCode":0},{"errorCode":600,"errorMsg":"bad volume"}]}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    // The replacement is refused after the amend's cancel took effect.
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: Some(58000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &cancel,
+        400.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+    );
+    let read = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &read,
+        450.0,
+        r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":4}}"#,
+    );
+    let place = requests(&mut e).remove(0);
+    e.handle(
+        500.0,
+        Event::HttpResponse {
+            request: place.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, None, "{error:?}");
 }

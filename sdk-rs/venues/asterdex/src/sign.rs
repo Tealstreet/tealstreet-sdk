@@ -24,6 +24,25 @@ impl Version {
     }
 }
 
+/// Match the SDK's explicit override and trimmed auth/account fallbacks.
+pub fn resolve_version(
+    configured: Option<Version>,
+    user: Option<&str>,
+    signer: Option<&str>,
+    private_key: Option<&str>,
+) -> Version {
+    configured.unwrap_or_else(|| {
+        if user.is_some_and(is_address)
+            && signer.is_some_and(is_address)
+            && private_key.is_some_and(is_private_key)
+        {
+            Version::V3
+        } else {
+            Version::V1
+        }
+    })
+}
+
 pub fn is_address(value: &str) -> bool {
     value.starts_with("0x")
         && value.len() == 42
@@ -656,3 +675,5 @@ mod tests {
         assert!(query(&first, 1233.0).contains("nonce=1234002&signature="));
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);

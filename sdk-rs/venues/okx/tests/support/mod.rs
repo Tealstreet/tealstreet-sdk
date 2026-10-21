@@ -1,4 +1,4 @@
-use safe_cex_engine::{Action, Engine, Event, Method, Notice, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, Method, Notice, Response, SocketId, TimerId};
 use safe_cex_venue_okx::{Okx, Options};
 
 // OKX v5 docs: public instruments, tickers and books payload schemas.
@@ -6,15 +6,28 @@ use safe_cex_venue_okx::{Okx, Options};
 pub const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","state":"live","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;
 pub const TICKER: &str = r#"{"instId":"BTC-USDT-SWAP","last":"40000","open24h":"40000","bidPx":"39999.9","askPx":"40000.1","volCcy24h":"123.4","vol24h":"12340"}"#;
 
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+/// The retry timer armed at `sent` plus a jittered `nominal` delay; firing it
+/// at `sent + nominal` is always at or after its due time.
+pub fn retry_timer(out: &[Action], sent: f64, nominal: f64) -> Option<TimerId> {
+    out.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if jittered(at_ms - sent, nominal) => Some(*timer),
+        _ => None,
+    })
+}
+
 /// Actions with structured failures read as their legacy `CommandDone` text.
 pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
     engine
         .drain_actions()
         .map(|action| match action {
             Action::Notice(Notice::CommandFailed { command, error }) => {
-                Action::Notice(Notice::CommandDone {
+                Action::Notice(Notice::CommandFailed {
                     command,
-                    result: Err(error.legacy_text()),
+                    error: error.clone(),
                 })
             }
             action => action,

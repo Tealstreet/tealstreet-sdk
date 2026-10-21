@@ -197,15 +197,12 @@ impl Blofin {
             Query::PublicTrades { .. } | Query::OrderByClientId { .. }
         ) && !self.signed()
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let (symbol, from, to) = match &query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("BloFin client-order-ID lookup is unsupported".into()),
-                );
+                cx.fail(command, "BloFin client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -232,25 +229,22 @@ impl Blofin {
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(f, t)| f > t)
         {
-            cx.done(command, Err("Invalid BloFin history time range".into()));
+            cx.fail(command, "Invalid BloFin history time range");
             return;
         }
         if let Some(s) = symbol
             && cx.store.market(s).is_none()
         {
-            cx.done(command, Err(format!("Unknown market {s}")));
+            cx.fail(command, format!("Unknown market {s}"));
             return;
         }
         if matches!(&query, Query::Fills { symbol: None, .. }) {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let rows = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("BloFin client-order-ID lookup is unsupported".into()),
-                );
+                cx.fail(command, "BloFin client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills { .. } => Rows::Fills(vec![]),
@@ -276,9 +270,9 @@ impl Blofin {
     fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let (endpoint, symbol, from, to, limit) = match &request.query {
             Query::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err("BloFin client-order-ID lookup is unsupported".into()),
+                    "BloFin client-order-ID lookup is unsupported",
                 );
                 return;
             }
@@ -363,7 +357,7 @@ impl Blofin {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.done(request.command, Err(e)),
+            Err(e) => cx.fail(request.command, e),
         }
     }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -541,6 +535,10 @@ impl Blofin {
                 if row.create_time.0 <= 0.0 || !matches!(row.side.as_ref(), "buy" | "sell") {
                     return;
                 }
+                // Sizes are contracts on the wire; like fills, report base units or nothing.
+                let Some(contract_size) = market.map(|m| m.contract_size.unwrap_or(1.0)) else {
+                    return;
+                };
                 rows.push(HistoricalOrder {
                     id,
                     symbol: symbol.clone(),
@@ -557,8 +555,8 @@ impl Blofin {
                     },
                     price: nonzero(row.price.0),
                     average_price: nonzero(row.average_price.0),
-                    amount: row.size.0,
-                    filled: row.filled_size.0,
+                    amount: account::clean(row.size.0 * contract_size),
+                    filled: account::clean(row.filled_size.0 * contract_size),
                     reduce_only: row.reduce_only.0,
                     position_side: position_side(&row.position_side),
                     created_time: row.create_time.0,
@@ -629,11 +627,11 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if let Err(e) = check(&response) {
-            cx.done(request.command, Err(e));
+            cx.fail(request.command, e);
             return;
         }
         if request.failed {
-            cx.done(request.command, Err("Malformed BloFin history row".into()));
+            cx.fail(request.command, "Malformed BloFin history row");
             return;
         }
         let (page_limit, enough) = match (&request.query, &request.rows) {
@@ -661,10 +659,7 @@ impl Blofin {
             }
             CursorStep::Done if !stuck => {}
             _ => {
-                cx.done(
-                    request.command,
-                    Err("BloFin income pagination did not finish".into()),
-                );
+                cx.fail(request.command, "BloFin income pagination did not finish");
                 return;
             }
         }
@@ -692,7 +687,10 @@ impl Blofin {
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
         };
-        cx.done(request.command, result.map_err(|e| e.to_string()));
+        match result.map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(request.command, data),
+            Err(error) => cx.fail(request.command, error),
+        };
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -700,6 +698,6 @@ impl Blofin {
         request: Request,
         error: &str,
     ) {
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
 }

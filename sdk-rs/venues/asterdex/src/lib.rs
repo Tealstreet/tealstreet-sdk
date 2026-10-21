@@ -6,13 +6,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue, json, num,
+    Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -21,7 +23,7 @@ use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -37,6 +39,16 @@ pub struct Options {
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_secret);
+    }
 }
 
 struct Urls {
@@ -129,7 +141,7 @@ struct BookState {
 }
 
 pub struct AsterDex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     version: Version,
     credentials: Option<Credentials>,
     read_credentials: Option<Credentials>,
@@ -154,22 +166,14 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let user = nonempty(options.auth_user_address.as_deref())
             .or_else(|| nonempty(options.application_id.as_deref()));
         let signer = nonempty(options.auth_signer_address.as_deref())
             .or_else(|| nonempty(options.key.as_deref()));
         let secret = nonempty(options.auth_private_key.as_deref())
             .or_else(|| nonempty(options.secret.as_deref()));
-        let version = options.api_version.unwrap_or_else(|| {
-            if user.is_some_and(sign::is_address)
-                && signer.is_some_and(sign::is_address)
-                && secret.is_some_and(sign::is_private_key)
-            {
-                Version::V3
-            } else {
-                Version::V1
-            }
-        });
+        let version = sign::resolve_version(options.api_version, user, signer, secret);
         let credentials = if !options.public_data_only {
             let secret = if version == Version::V3 {
                 secret
@@ -293,7 +297,9 @@ impl AsterDex {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
 
@@ -675,7 +681,7 @@ impl Venue for AsterDex {
         if let Some(credentials) = &self.credentials
             && let Err(error) = credentials.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.start_requests(cx);
@@ -785,7 +791,10 @@ impl Venue for AsterDex {
                         .map_err(|e| e.to_string())
                     })
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Pending::MarketBrackets { rows } => {
                 if account::venue_error(&response).is_none() {
@@ -805,7 +814,7 @@ impl Venue for AsterDex {
             Pending::ExchangeInfo { rows, skipped } => {
                 log_skipped_rows(cx, "market", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.log(LogLevel::Error, "Aster market bootstrap failed");
+                    cx.retried_failure("asterdex.lib:823", "Aster market bootstrap failed");
                     self.startup.failed(cx, true);
                     return;
                 }
@@ -832,7 +841,7 @@ impl Venue for AsterDex {
             Pending::Daily { rows, skipped } => {
                 log_skipped_rows(cx, "ticker", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.log(LogLevel::Error, "Aster ticker bootstrap failed");
+                    cx.retried_failure("asterdex.lib:854", "Aster ticker bootstrap failed");
                     self.startup.failed(cx, false);
                     return;
                 }
@@ -863,7 +872,10 @@ impl Venue for AsterDex {
                         response.status
                     )),
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
         }
     }
@@ -972,7 +984,7 @@ impl Venue for AsterDex {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::DepthRead { command } => cx.done(command, Err(error.into())),
+            Pending::DepthRead { command } => cx.fail(command, error),
             Pending::MarketBrackets { .. } => self.seed_daily(cx),
             Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
@@ -982,7 +994,7 @@ impl Venue for AsterDex {
             Pending::OpenInterest {
                 initial, single, ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, None),
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
             Pending::ExchangeInfo { .. } => self.startup.failed(cx, true),
             Pending::Daily { .. } => self.startup.failed(cx, false),
         }
@@ -1053,7 +1065,11 @@ impl Venue for AsterDex {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("AsterDEX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("AsterDEX"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
@@ -1089,7 +1105,7 @@ impl Venue for AsterDex {
                 to_ms,
             } => {
                 if !supported(interval) {
-                    cx.done(command, Err(interval.unsupported("AsterDEX")));
+                    cx.fail(command, interval.unsupported("AsterDEX"));
                     return;
                 }
                 let mut path = format!(
@@ -1143,7 +1159,10 @@ impl Venue for AsterDex {
                         )
                     })
                     .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             command => self.on_trade_command(cx, command),
@@ -1178,8 +1197,9 @@ fn row_symbol(item: &str) -> String {
 /// A malformed startup row is skipped, not fatal; one summary per read.
 fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
     if !skipped.is_empty() {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
@@ -1191,28 +1211,11 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
 
 fn reset_pending(pending: &mut Pending) {
     match pending {
-        Pending::Account(account::Request::Positions {
-            rows,
-            settings,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
+        Pending::Account(account::Request::Positions { rows, settings, .. }) => {
+            *rows = Default::default();
             settings.clear();
-            skipped.clear();
-            *invalid = false;
         }
-        Pending::Account(account::Request::Orders {
-            rows,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
-            skipped.clear();
-            *invalid = false;
-        }
+        Pending::Account(account::Request::Orders { rows, .. }) => *rows = Default::default(),
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
         Pending::ExchangeInfo { rows, skipped } => {

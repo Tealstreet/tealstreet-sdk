@@ -1,10 +1,12 @@
 //! Route-specific history walkers; query rows never enter the live store.
 use crate::wire::{Envelope, Str, number, optional_number};
 use crate::{Pending, Woo, compact, native};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -503,10 +505,7 @@ impl Woo {
     ) {
         let (route, symbol, order_id, kind, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("WOO remote client order lookup is unsupported".into()),
-                );
+                cx.fail(command, "WOO remote client order lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -548,10 +547,7 @@ impl Woo {
             || from.zip(to).is_some_and(|(a, b)| a > b)
             || limit.is_some_and(|n| n == 0 || n > 100_000)
         {
-            cx.done(
-                command,
-                Err("Invalid WOO history symbol, range or limit".into()),
-            );
+            cx.fail(command, "Invalid WOO history symbol, range or limit");
             return;
         }
         let complete = route == Route::Income && from.is_some() && to.is_some() && limit.is_none();
@@ -562,7 +558,7 @@ impl Woo {
         }) as usize;
         let window = (from, to.or(from.map(|_| cx.now)));
         if window.0.zip(window.1).is_some_and(|(a, b)| a > b) {
-            cx.done(command, Err("Invalid WOO history range".into()));
+            cx.fail(command, "Invalid WOO history range");
             return;
         }
         let walk = if route == Route::Fills {
@@ -606,10 +602,7 @@ impl Woo {
     }
     fn history_page(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request) {
         if r.pages >= MAX_PAGES {
-            cx.done(
-                r.command,
-                Err("WOO history pagination limit exceeded".into()),
-            );
+            cx.fail(r.command, "WOO history pagination limit exceeded");
             return;
         }
         if r.route == Route::Income && cx.now < self.history.ledger_next {
@@ -727,7 +720,7 @@ impl Woo {
         } else {
             match self.signed(cx, Method::Get, path, params, None, Pending::History(r)) {
                 Ok(id) => cx.stream_response(id, at),
-                Err(error) => cx.done(command, Err(error)),
+                Err(error) => cx.fail(command, error),
             }
         }
     }
@@ -745,10 +738,7 @@ impl Woo {
                 Step::ChunkDone => (),
                 Step::Finished => {
                     if r.walk.as_ref().unwrap().truncated {
-                        cx.done(
-                            r.command,
-                            Err("WOO fills range could not be completed".into()),
-                        );
+                        cx.fail(r.command, "WOO fills range could not be completed");
                     } else {
                         Self::history_finish(cx, r);
                     }
@@ -777,11 +767,12 @@ impl Woo {
         }
         if r.skipped > 0 {
             if r.skipped == r.count {
-                cx.done(r.command, Err("Malformed WOO history page".into()));
+                cx.fail(r.command, "Malformed WOO history page");
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "WOO {}: skipped {} unmappable row(s)",
                     r.route.label(),
@@ -798,7 +789,7 @@ impl Woo {
         let page = match meta(response.body) {
             Ok(m) => m,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.fail(r.command, e);
                 return;
             }
         };
@@ -807,7 +798,7 @@ impl Woo {
             .is_some_and(|m| m.current_page != r.page || m.records_per_page == 0)
             && r.route != Route::Fills
         {
-            cx.done(r.command, Err("Invalid WOO history page metadata".into()));
+            cx.fail(r.command, "Invalid WOO history page metadata");
             return;
         }
         let mut fresh = 0;
@@ -849,9 +840,9 @@ impl Woo {
             }
         }
         if r.rows.len() > r.limit && r.complete {
-            cx.done(
+            cx.fail(
                 r.command,
-                Err("WOO income range exceeded the complete-history budget".into()),
+                "WOO income range exceeded the complete-history budget",
             );
             return;
         }
@@ -873,7 +864,7 @@ impl Woo {
             }));
         if !complete {
             if fresh == 0 {
-                cx.done(r.command, Err("WOO history page made no progress".into()));
+                cx.fail(r.command, "WOO history page made no progress");
                 return;
             }
             r.page += 1;
@@ -892,10 +883,14 @@ impl Woo {
             .sort_by(|a, b| b.time.total_cmp(&a.time).then_with(|| a.id.cmp(&b.id)));
         r.rows.truncate(r.limit);
         let rows = r.rows.into_iter().map(|r| r.row).collect::<Vec<_>>();
-        cx.done(
-            r.command,
-            serde_json::to_string(&rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(r.command, data),
+                Err(error) => cx.fail(r.command, error),
+            }
+        };
     }
     // The active TS adapter tries each venue spelling before falling back to
     // the older fills route. These are reads, never retries of ambiguous writes.
@@ -917,7 +912,7 @@ impl Woo {
             r.page = 1;
             self.history_page(cx, r);
         } else if let Some(error) = r.last_fill_error.take() {
-            cx.done(r.command, Err(error));
+            cx.fail(r.command, error);
         } else if r.walk.is_some() {
             r.route = Route::Fills;
             self.history_next_window(cx, r);
@@ -929,7 +924,7 @@ impl Woo {
         if matches!(r.route, Route::Fills | Route::LegacyFills) && r.page == 1 {
             self.history_fill_fallback(cx, r, Some(error));
         } else {
-            cx.done(r.command, Err(error.into()));
+            cx.fail(r.command, error);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

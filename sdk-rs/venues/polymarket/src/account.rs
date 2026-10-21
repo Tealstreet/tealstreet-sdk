@@ -4,11 +4,14 @@
 //! cumulative matched size; only uniquely identified trade executions emit fills.
 use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
+use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, RequestId, Response, Store, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, RequestId, Response, Store, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
@@ -23,6 +26,7 @@ const MAX_PAGES: usize = 10000;
 // page is incomplete, never permission to replace holdings with a prefix.
 const MAX_POSITION_OFFSET: usize = 10000;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 pub enum Request {
     Time,
@@ -35,7 +39,7 @@ pub struct OrderSnapshot {
     revision: u64,
     cursor: String,
     cursors: HashSet<String>,
-    rows: Vec<Order>,
+    rows: SnapshotBuilder<String, Order>,
     coverage: HashMap<String, Vec<String>>,
     ids: HashSet<String>,
     invalid: bool,
@@ -44,10 +48,9 @@ pub struct PositionSnapshot {
     revision: u64,
     offset: usize,
     count: usize,
-    rows: Vec<Position>,
+    rows: SnapshotBuilder<String, Position>,
     holdings: Vec<PredictionHolding>,
     ids: HashSet<String>,
-    skipped: Vec<String>,
     invalid: bool,
 }
 #[derive(Default)]
@@ -66,6 +69,8 @@ pub(crate) struct Account {
     executions: HashMap<String, HashMap<String, f64>>,
     coverage: HashMap<String, Vec<(f64, HashSet<String>)>>,
     unlisted: HashSet<String>,
+    /// Assets (empty for an unidentified row) whose skipped holding was already logged.
+    skip_logged: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -329,8 +334,9 @@ impl Polymarket {
                 p.api_key.is_some() || p.api_secret.is_some() || p.api_passphrase.is_some()
             })
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Polymarket incomplete provided API credentials",
             );
             return;
@@ -344,8 +350,9 @@ impl Polymarket {
                     p.api_key.is_some() || p.api_secret.is_some() || p.api_passphrase.is_some()
                 })
             {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::CONFIG_INVALID,
                     "Polymarket private API requires a valid signer wallet",
                 );
             }
@@ -365,13 +372,18 @@ impl Polymarket {
             || signer != 0 && funder.is_none()
             || funder.is_some_and(|a| safe_cex_crypto::ethereum::get_address(a).is_err())
         {
-            cx.log(LogLevel::Error, "Polymarket invalid signature type/funder");
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Polymarket invalid signature type/funder",
+            );
             return;
         }
         if self.credentials.is_some() {
             if self.signed_headers_valid().is_err() {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::CONFIG_INVALID,
                     "Polymarket invalid provided API credentials",
                 );
                 return;
@@ -476,7 +488,7 @@ impl Polymarket {
                 revision: self.account.revision,
                 cursor: INITIAL.into(),
                 cursors: HashSet::from([INITIAL.into()]),
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 coverage: HashMap::new(),
                 ids: HashSet::new(),
                 invalid: false,
@@ -488,10 +500,9 @@ impl Polymarket {
                 revision: self.account.position_revision,
                 offset: 0,
                 count: 0,
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 holdings: vec![],
                 ids: HashSet::new(),
-                skipped: vec![],
                 invalid: false,
             }),
         );
@@ -514,8 +525,8 @@ impl Polymarket {
         }
     }
     pub(crate) fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.log(
-            LogLevel::Error,
+        cx.retried_failure(
+            "polymarket.account:528",
             "Polymarket private snapshot failed; preserving state",
         );
         match request {
@@ -571,7 +582,32 @@ impl Polymarket {
                     }
                     snapshot.rows.push(order);
                 } else {
-                    snapshot.invalid = true;
+                    #[derive(Deserialize)]
+                    struct Identity<'a> {
+                        #[serde(borrow)]
+                        id: std::borrow::Cow<'a, str>,
+                    }
+                    match serde_json::from_str::<Identity>(item) {
+                        Ok(Identity { id }) if !id.is_empty() => {
+                            if !snapshot.ids.insert(id.to_string()) {
+                                snapshot.invalid = true;
+                            }
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!("Polymarket skipped unmappable order {id}"),
+                            );
+                            snapshot.rows.reject(Some(id.into_owned()));
+                        }
+                        _ => {
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                "Polymarket skipped unmappable order without an id",
+                            );
+                            snapshot.rows.reject(None);
+                        }
+                    }
                 }
             }
             Request::Positions(snapshot) => {
@@ -581,27 +617,34 @@ impl Polymarket {
                     // unidentifiable one cannot prove what it would delete.
                     #[derive(Deserialize)]
                     struct Asset<'a> {
-                        asset: &'a str,
+                        #[serde(borrow)]
+                        asset: std::borrow::Cow<'a, str>,
                     }
                     match serde_json::from_str::<Asset>(item) {
-                        Ok(Asset { asset })
-                            if !asset.is_empty() && snapshot.ids.insert(asset.into()) =>
-                        {
-                            snapshot.skipped.push(asset.into())
+                        Ok(Asset { asset }) if !asset.is_empty() => {
+                            if !snapshot.ids.insert(asset.to_string()) {
+                                snapshot.invalid = true;
+                            }
+                            reject_holding(cx, &mut self.account, snapshot, Some(&asset));
                         }
-                        _ => snapshot.invalid = true,
+                        _ => reject_holding(cx, &mut self.account, snapshot, None),
                     }
                     return;
                 };
-                if row.asset.is_empty() || !snapshot.ids.insert(row.asset.into()) {
+                if row.asset.is_empty() {
+                    reject_holding(cx, &mut self.account, snapshot, None);
+                    return;
+                }
+                if !snapshot.ids.insert(row.asset.into()) {
                     snapshot.invalid = true;
                     return;
                 }
                 if row.size.0 < 0.0 || !(0.0..=1.0).contains(&row.avg_price.0) {
-                    snapshot.skipped.push(row.asset.into());
+                    reject_holding(cx, &mut self.account, snapshot, Some(row.asset));
                     return;
                 }
                 if row.size.0 == 0.0 {
+                    self.account.skip_logged.remove(row.asset);
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
@@ -619,11 +662,12 @@ impl Polymarket {
                     // otherwise its market is unlisted (e.g. closed), as in TS.
                     if self.catalogue_may_hold(row.slug) {
                         snapshot.invalid = true;
-                        cx.log(LogLevel::Warning,
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                             "Polymarket owned holding has unavailable market metadata; preserving previous positions");
                     } else if self.account.unlisted.insert(row.asset.into()) {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "Polymarket holding {} has no loaded market; not shown",
                                 row.asset
@@ -644,17 +688,38 @@ impl Polymarket {
                         })
                 });
                 let Some(price) = price else {
-                    snapshot.invalid = true;
-                    cx.log(
-                        LogLevel::Warning,
-                        "Polymarket owned holding price unavailable; preserving previous positions",
+                    // A seed still loading may price it; a settled one never will.
+                    if !self.discovery_settled() {
+                        snapshot.invalid = true;
+                        cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
+                            "Polymarket owned holding price unavailable; preserving previous positions",
+                        );
+                        return;
+                    }
+                    let symbol = market.symbol.clone();
+                    let level = if cx.store.position(&symbol).is_some() {
+                        Level::Warn
+                    } else {
+                        Level::Error
+                    };
+                    log_skip(
+                        cx,
+                        &mut self.account,
+                        row.asset,
+                        level,
+                        format!(
+                            "Polymarket skipped owned holding {}: price unavailable",
+                            row.asset
+                        ),
                     );
+                    snapshot.rows.reject(Some(symbol));
                     return;
                 };
                 let index = cx
                     .store
                     .market_index_by_id(row.asset)
                     .expect("known market");
+                self.account.skip_logged.remove(row.asset);
                 snapshot.holdings.push(PredictionHolding {
                     market: index,
                     redeemable: row.redeemable,
@@ -816,7 +881,19 @@ impl Polymarket {
                     })
                     .cloned()
                     .collect();
-                for mut row in snapshot.rows {
+                let accepted: HashSet<String> =
+                    snapshot.rows.rows().iter().map(|o| o.id.clone()).collect();
+                let committed = snapshot
+                    .rows
+                    .commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                for mut row in committed {
+                    // A rejected row's stored copy stays as it was; it proves no fill.
+                    if !accepted.contains(&row.id) {
+                        if !rows.iter().any(|kept| kept.id == row.id) {
+                            rows.push(row);
+                        }
+                        continue;
+                    }
                     if self.account.terminal.contains(&row.id)
                         || self.account.versions.get(&row.id).copied().unwrap_or(0)
                             > snapshot.revision
@@ -886,35 +963,31 @@ impl Polymarket {
                     if !current {
                         self.account.dirty = true;
                     }
-                    if !snapshot.skipped.is_empty() {
-                        cx.log(
-                            LogLevel::Warning,
-                            format!(
-                                "Skipped {} malformed Polymarket position rows: {}",
-                                snapshot.skipped.len(),
-                                snapshot.skipped.join(", ")
-                            ),
-                        );
+                    let kept: Vec<PredictionHolding> = cx
+                        .store
+                        .prediction_holdings()
+                        .into_iter()
+                        .flatten()
+                        .filter(|known| {
+                            !snapshot.holdings.iter().any(|h| h.market == known.market)
+                                && cx
+                                    .store
+                                    .markets()
+                                    .get(known.market as usize)
+                                    .is_some_and(|m| !snapshot.rows.allows_absence(&m.symbol))
+                        })
+                        .copied()
+                        .collect();
+                    snapshot.holdings.extend(kept);
+                    if snapshot.rows.rejected() == 0 {
+                        self.account.skip_logged.clear();
                     }
-                    for asset in &snapshot.skipped {
-                        let Some(index) = cx.store.market_index_by_id(asset) else {
-                            continue;
-                        };
-                        let symbol = &cx.store.markets()[index as usize].symbol;
-                        if let Some(known) =
-                            cx.store.positions().iter().find(|p| &p.symbol == symbol)
-                        {
-                            snapshot.rows.push(known.clone());
-                        }
-                        if let Some(known) = cx
-                            .store
-                            .prediction_holdings()
-                            .and_then(|h| h.iter().find(|h| h.market == index))
-                        {
-                            snapshot.holdings.push(*known);
-                        }
-                    }
-                    cx.store.set_positions(snapshot.rows);
+                    let rows = snapshot
+                        .rows
+                        .commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
+                    cx.store.set_positions(rows);
+                    // Committed rows include retained copies; a rejected row with none is
+                    // the only unknown PnL, and it is absent from the sum.
                     if cx.store.loaded().balance {
                         let mut balance = cx.store.balance().clone();
                         balance.upnl = cx.store.positions().iter().map(|p| p.unrealized_pnl).sum();
@@ -1189,6 +1262,60 @@ impl Polymarket {
                 self.account_placed(cx, live);
             }
         }
+    }
+}
+
+/// Rejects a holding row; a known market keys its stored copy, while an unknown
+/// one has no stored copy to keep. A row with nothing stored to keep is an error.
+fn reject_holding(
+    cx: &mut Cx<'_, Pending>,
+    account: &mut Account,
+    snapshot: &mut PositionSnapshot,
+    asset: Option<&str>,
+) {
+    let level = |stored: bool| {
+        if stored { Level::Warn } else { Level::Error }
+    };
+    let Some(asset) = asset else {
+        let level = level(!cx.store.positions().is_empty());
+        log_skip(
+            cx,
+            account,
+            "",
+            level,
+            "Polymarket skipped malformed holding without an asset",
+        );
+        snapshot.rows.reject(None);
+        return;
+    };
+    let symbol = cx.store.market_by_id(asset).map(|m| m.symbol.clone());
+    let stored = symbol
+        .as_ref()
+        .is_some_and(|symbol| cx.store.position(symbol).is_some());
+    log_skip(
+        cx,
+        account,
+        asset,
+        level(stored),
+        format!("Polymarket skipped malformed holding {asset}"),
+    );
+    snapshot
+        .rows
+        .reject(Some(symbol.unwrap_or_else(|| asset.to_owned())));
+}
+/// Logs a skipped holding once per asset until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    account: &mut Account,
+    asset: &str,
+    level: Level,
+    message: impl Into<String>,
+) {
+    if account.skip_logged.len() >= SKIP_LOG_LIMIT {
+        account.skip_logged.clear();
+    }
+    if account.skip_logged.insert(asset.to_owned()) {
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 

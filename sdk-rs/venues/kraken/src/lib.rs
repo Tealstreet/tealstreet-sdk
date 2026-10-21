@@ -6,17 +6,19 @@ mod history;
 pub mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -24,6 +26,17 @@ pub struct Options {
     pub key: Option<String>,
     pub secret: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
@@ -93,7 +106,7 @@ struct CandleState {
     next_poll: f64,
 }
 pub struct Kraken {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
@@ -109,10 +122,15 @@ pub struct Kraken {
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
     markets_in_flight: bool,
+    /// PF_ symbols the last catalogue read skipped as malformed; their rows hold snapshots.
+    skipped_markets: HashSet<String>,
+    skipping_markets: HashSet<String>,
+    reread_stalls: u8,
     poll: Option<TimerId>,
 }
 impl Kraken {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let signer =
             if !options.public_data_only && options.key.as_ref().is_some_and(|k| !k.is_empty()) {
                 options
@@ -143,6 +161,9 @@ impl Kraken {
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
             markets_in_flight: false,
+            skipped_markets: HashSet::new(),
+            skipping_markets: HashSet::new(),
+            reread_stalls: 0,
             poll: None,
         }
     }
@@ -165,6 +186,7 @@ impl Kraken {
             return;
         }
         self.markets_in_flight = true;
+        self.skipping_markets.clear();
         cx.request_streamed(
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
@@ -199,7 +221,9 @@ impl Kraken {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.ws_url()).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, event: &str, feed: &str, products: &[&str]) {
@@ -338,13 +362,13 @@ impl Kraken {
     ) {
         if cx.store.market(&symbol).is_none() {
             if let Some(c) = command {
-                cx.done(c, Err("Unknown Kraken market".into()));
+                cx.fail(c, "Unknown Kraken market");
             }
             return;
         }
         if resolution(interval).is_none() {
             if let Some(c) = command {
-                cx.done(c, Err(interval.unsupported("Kraken")));
+                cx.fail(c, interval.unsupported("Kraken"));
             }
             return;
         }
@@ -353,7 +377,7 @@ impl Kraken {
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
             if let Some(c) = command {
-                cx.done(c, Err("Invalid Kraken candle range".into()));
+                cx.fail(c, "Invalid Kraken candle range");
             }
             return;
         }
@@ -430,7 +454,7 @@ impl Kraken {
                 ..
             } => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()));
+                    cx.fail(c, error);
                 } else if let Some(s) = self
                     .candles
                     .get_mut(&(symbol, interval))
@@ -442,8 +466,27 @@ impl Kraken {
             }
             _ => {}
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
+}
+/// The PF_ symbol of an undecodable instrument row that was not marked untradeable.
+fn malformed_perpetual(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Other(serde::de::IgnoredAny),
+    }
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: std::borrow::Cow<'a, str>,
+        #[serde(default)]
+        tradeable: Option<Flag>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (row.symbol.starts_with("PF_") && !matches!(row.tradeable, Some(Flag::Bool(false))))
+        .then(|| row.symbol.into_owned())
 }
 // Kraken Futures chart resolutions are the TS spellings.
 fn resolution(interval: Interval) -> Option<&'static str> {
@@ -466,7 +509,7 @@ impl Venue for Kraken {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if !self.options.public_data_only
@@ -478,14 +521,16 @@ impl Venue for Kraken {
             && self.options.secret.is_some()
             && self.signer.is_none()
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Kraken secret must be nonempty valid base64",
             );
         }
         if self.options.read_credentials.is_some() && self.read_signer.is_none() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Kraken secondary secret must be nonempty valid base64",
             );
             return;
@@ -521,7 +566,11 @@ impl Venue for Kraken {
         self.public.supervisor.received(cx.now);
         if !msg.event.is_empty() {
             if msg.event == "error" {
-                cx.log(LogLevel::Warning, "Kraken public subscription error");
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Kraken public subscription error",
+                );
             }
             return;
         }
@@ -618,6 +667,7 @@ impl Venue for Kraken {
                         let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
                         if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
                             safe_cex_engine::startup::skipped_row(cx);
+                            self.skipping_markets.insert(m.symbol.into_owned());
                             return;
                         }
                         rows.push(Market {
@@ -668,10 +718,14 @@ impl Venue for Kraken {
                     }
                     Err(error) => {
                         safe_cex_engine::startup::skipped_row(cx);
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Kraken invalid public row: {error}"),
                         );
+                        if let Some(symbol) = malformed_perpetual(item) {
+                            self.skipping_markets.insert(symbol);
+                        }
                     }
                 }
             }
@@ -711,8 +765,9 @@ impl Venue for Kraken {
                 }
                 Err(error) => {
                     safe_cex_engine::startup::skipped_row(cx);
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("Kraken invalid public row: {error}"),
                     );
                 }
@@ -722,8 +777,9 @@ impl Venue for Kraken {
                     Ok(row) => rows.push(row.candle()),
                     Err(error) => {
                         *failed = true;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_MALFORMED,
                             format!("Kraken invalid public row: {error}"),
                         );
                     }
@@ -758,11 +814,11 @@ impl Venue for Kraken {
                 self.markets_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, false);
-                    cx.log(LogLevel::Warning, "Invalid Kraken markets");
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, "Invalid Kraken markets");
                     return;
                 }
                 let mut seen = HashSet::new();
-                let rows = rows
+                let rows: Vec<_> = rows
                     .into_iter()
                     .filter(|m| {
                         if seen.insert(m.symbol.clone()) {
@@ -773,8 +829,26 @@ impl Venue for Kraken {
                         }
                     })
                     .collect();
-                self.discovery.succeeded(cx, &false);
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 cx.store.set_markets(rows);
+                let mut skipped = std::mem::take(&mut self.skipping_markets);
+                skipped.retain(|symbol| cx.store.market(symbol).is_none());
+                let before = self.skipped_markets.len();
+                // A partial catalogue commits so private reads start, and is re-read.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, skipped.len()) {
+                    self.discovery.failed(cx, false);
+                } else {
+                    self.discovery.succeeded(cx, &false);
+                }
+                self.skipped_markets = skipped;
+                if refresh {
+                    return;
+                }
                 self.connect(cx);
                 self.account_start(cx);
                 self.tickers_request(cx);
@@ -787,7 +861,11 @@ impl Venue for Kraken {
                 self.ticker_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, true);
-                    cx.log(LogLevel::Warning, "Invalid or empty Kraken tickers");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Invalid or empty Kraken tickers",
+                    );
                     return;
                 }
                 self.discovery.succeeded(cx, &true);
@@ -899,7 +977,14 @@ impl Venue for Kraken {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.in_flight = false;
                     s.next_poll = cx.now + 5_000.0;
@@ -1017,7 +1102,11 @@ impl Venue for Kraken {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if resolution(interval).is_none() {
-                    cx.log(LogLevel::Error, interval.unsupported("Kraken"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Kraken"),
+                    );
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
@@ -1064,6 +1153,59 @@ impl Venue for Kraken {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            format!("Kraken stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

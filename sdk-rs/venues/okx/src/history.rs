@@ -1,9 +1,11 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -335,7 +337,13 @@ impl Request {
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
         };
-        cx.done(self.command, json.map_err(|e| e.to_string()));
+        {
+            let result: Result<String, String> = json.map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(self.command, data),
+                Err(error) => cx.fail(self.command, error),
+            }
+        };
     }
 }
 
@@ -360,7 +368,7 @@ impl Okx {
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
             )
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
@@ -373,7 +381,7 @@ impl Okx {
                 limit,
             } => {
                 if symbol.is_none() {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 }
                 (
@@ -436,7 +444,7 @@ impl Okx {
         if [from, to].into_iter().flatten().any(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(from, to)| from > to)
         {
-            cx.done(command, Err("invalid OKX history time bounds".into()));
+            cx.fail(command, "invalid OKX history time bounds");
             return;
         }
         let instrument = symbol
@@ -444,7 +452,7 @@ impl Okx {
             .and_then(|s| cx.store.market(s))
             .map(|m| m.id.clone());
         if symbol.is_some() && instrument.is_none() {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let inst_type = instrument
@@ -489,11 +497,11 @@ impl Okx {
             || client_order_id.len() > 32
             || !client_order_id.bytes().all(|b| b.is_ascii_alphanumeric())
         {
-            cx.done(command, Err("Invalid OKX client order ID".into()));
+            cx.fail(command, "Invalid OKX client order ID");
             return;
         }
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, Ok(UNKNOWN.into()));
+            cx.done(command, UNKNOWN.into());
             return;
         };
         // Secondary GET snapshots may belong to another account. Their cached
@@ -503,14 +511,17 @@ impl Okx {
                 order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
-            cx.done(command, found(order.clone(), None));
+            {
+                let result: Result<String, String> = found(order.clone(), None);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            };
             return;
         }
         if self.credentials.is_none() || self.options.public_data_only {
-            cx.done(
-                command,
-                Err("OKX client order lookup requires credentials".into()),
-            );
+            cx.fail(command, "OKX client order lookup requires credentials");
             return;
         }
         let instrument = market.id.clone();
@@ -678,7 +689,10 @@ impl Okx {
             };
             found(order, Some(rows[0]))
         })();
-        cx.done(r.command, result);
+        match result {
+            Ok(data) => cx.done(r.command, data),
+            Err(error) => cx.fail(r.command, error),
+        };
     }
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut r: Request) {
@@ -1003,14 +1017,15 @@ impl Okx {
         }
         if r.pages >= cap {
             if self.options.eea && r.instrument.is_none() {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("OKX composite history hit page cap; incomplete source".into()),
+                    "OKX composite history hit page cap; incomplete source",
                 );
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
             );
             r.finish(cx);
@@ -1023,14 +1038,15 @@ impl Okx {
                 .is_some_and(|old| !id_cmp(next, old).is_lt())
         }) {
             if self.options.eea && r.instrument.is_none() {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("OKX composite history cursor did not advance; incomplete source".into()),
+                    "OKX composite history cursor did not advance; incomplete source",
                 );
                 return;
             }
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 "OKX history cursor did not advance; older rows were not fetched",
             );
             r.finish(cx);
@@ -1043,14 +1059,17 @@ impl Okx {
 
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
         cx.command_error(r.command, format!("OKX history: {error}"));
-        cx.done(
-            r.command,
-            if r.is_lookup() {
+        {
+            let result: Result<String, String> = if r.is_lookup() {
                 Err(error.into())
             } else {
                 Ok("[]".into())
-            },
-        );
+            };
+            match result {
+                Ok(data) => cx.done(r.command, data),
+                Err(error) => cx.fail(r.command, error),
+            }
+        };
     }
 
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

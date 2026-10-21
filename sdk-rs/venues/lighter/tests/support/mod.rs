@@ -47,7 +47,10 @@ pub fn ready() -> (Engine<Lighter>, SocketId) {
     ready_with(options())
 }
 pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
-    let (e, socket, _) = ready_tracked(options);
+    ready_with_meta(options, META)
+}
+pub fn ready_with_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId) {
+    let (e, socket, _) = ready_tracked_meta(options, meta);
     (e, socket)
 }
 pub type Timers = Vec<(TimerId, f64)>;
@@ -78,6 +81,9 @@ pub fn advance(e: &mut Engine<Lighter>, timers: &mut Timers, until: f64) -> Vec<
     out
 }
 pub fn ready_tracked(options: Options) -> (Engine<Lighter>, SocketId, Timers) {
+    ready_tracked_meta(options, META)
+}
+pub fn ready_tracked_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId, Timers) {
     let mut timers = Timers::new();
     let mut e = Engine::new(Lighter::new(options));
     e.start(NOW);
@@ -94,7 +100,7 @@ pub fn ready_tracked(options: Options) -> (Engine<Lighter>, SocketId, Timers) {
                 Action::Http(r) => {
                     let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
                     {
-                        META
+                        meta
                     } else if r.url.contains("exchangeStats") {
                         r#"{"code":200,"order_book_stats":[{"market_id":1,"last_trade_price":"100","mark_price":"100","index_price":"100"},{"market_id":2,"last_trade_price":"200","mark_price":"200","index_price":"200"}]}"#
                     } else if r.url.contains("accountActiveOrders") {
@@ -127,4 +133,9 @@ pub fn fill_count(frame: &[u8]) -> u32 {
         at += 8 + size;
     }
     0
+}
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
 }

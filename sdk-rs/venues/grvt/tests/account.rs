@@ -104,11 +104,6 @@ impl Harness {
                 socket,
                 channel: Some(SocketChannel::Private),
                 ..
-            }
-            | Action::WsConnectWithHeaders {
-                socket,
-                channel: Some(SocketChannel::Private),
-                ..
             } => Some(*socket),
             _ => None,
         });
@@ -381,7 +376,7 @@ fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut proxy = Harness::new(true);
     proxy.authenticate();
     let socket = proxy.socket.unwrap();
-    assert!(proxy.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws")));
+    assert!(proxy.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.is_empty())));
     proxy.engine.handle(proxy.now, Event::WsOpened { socket });
     proxy.collect();
     let messages: Vec<_> = proxy
@@ -409,7 +404,7 @@ fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut native = Harness::with_options(Options::default());
     native.authenticate();
     let socket = native.socket.unwrap();
-    assert!(native.actions.iter().any(|a|matches!(a,Action::WsConnectWithHeaders {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.iter().any(|(k,v)|*k=="Cookie" && v=="rm=true; gravity=fixture-session"))));
+    assert!(native.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.iter().any(|(k,v)|*k=="Cookie" && v=="rm=true; gravity=fixture-session"))));
     native.open();
     let messages: Vec<_> = native
         .actions
@@ -874,7 +869,10 @@ fn stale_headers_cannot_resurrect_session_while_refresh_login_is_incomplete() {
         Action::Notice(safe_cex_engine::Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
 }
 #[test]
@@ -897,7 +895,10 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
         Action::Notice(safe_cex_engine::Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     let retry = h
         .actions
@@ -945,11 +946,6 @@ fn private_pings(h: &Harness) -> Vec<SocketId> {
 fn use_latest_private_socket(h: &mut Harness) {
     h.socket = h.actions.iter().rev().find_map(|action| match action {
         Action::WsConnect {
-            socket,
-            channel: Some(SocketChannel::Private),
-            ..
-        }
-        | Action::WsConnectWithHeaders {
             socket,
             channel: Some(SocketChannel::Private),
             ..
@@ -1271,7 +1267,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {
@@ -1434,7 +1430,7 @@ fn skip_warnings(h: &Harness, kind: &str) -> usize {
             matches!(a, Action::Notice(safe_cex_engine::Notice::Log {
                 level: safe_cex_engine::LogLevel::Warning,
                 message,
-            }) if message.contains(&format!("GRVT {kind} row")))
+            }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
         })
         .count()
 }
@@ -1531,4 +1527,18 @@ fn readable_unmatched_order_row_retains_orders_while_a_native_id_is_unknown() {
         .collect();
     ids.sort();
     assert_eq!(ids, ["55", "9223372036854775807"]);
+}
+
+#[test]
+fn ip_whitelist_rejection_keeps_its_actionable_message() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.ws(r#"{"code":1008,"message":"IP not whitelisted","status":403}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.level == safe_cex_engine::Level::Error
+                && event.message.starts_with("GRVT IP is not whitelisted")
+    )));
 }

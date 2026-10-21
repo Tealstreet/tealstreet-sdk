@@ -241,15 +241,12 @@ impl BitgetFutures {
     ) {
         let public = matches!(query, Query::PublicTrades { .. });
         if !public && !self.private_enabled() {
-            cx.done(command, Err("Bitget credentials are required".into()));
+            cx.fail(command, "Bitget credentials are required");
             return;
         }
         let (from, to) = match &query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Bitget client-order-id query is not supported".into()),
-                );
+                cx.fail(command, "Bitget client-order-id query is not supported");
                 return;
             }
             Query::Fills { from_ms, to_ms, .. }
@@ -263,7 +260,7 @@ impl BitgetFutures {
             .any(|n| !n.is_finite() || n < 0.0)
             || matches!((from,to),(Some(a),Some(b)) if a>b)
         {
-            cx.done(command, Err("invalid Bitget history range".into()));
+            cx.fail(command, "invalid Bitget history range");
             return;
         }
         // Supplying one boundary still produces a bounded native request.
@@ -281,7 +278,7 @@ impl BitgetFutures {
             to
         };
         if matches!((from,to),(Some(a),Some(b)) if a>b) {
-            cx.done(command, Err("invalid Bitget history range".into()));
+            cx.fail(command, "invalid Bitget history range");
             return;
         }
         let mut windows: VecDeque<_> = if let (Some(a), Some(b)) = (from, to) {
@@ -291,10 +288,7 @@ impl BitgetFutures {
                     .map(|(a, b)| (Some(a), Some(b)))
                     .collect(),
                 None => {
-                    cx.done(
-                        command,
-                        Err("Bitget history range exceeds 1000 windows".into()),
-                    );
+                    cx.fail(command, "Bitget history range exceeds 1000 windows");
                     return;
                 }
             }
@@ -330,10 +324,7 @@ impl BitgetFutures {
         r.uta = self.account.uta;
         let (endpoint, symbol, order, limit) = match &r.query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    r.command,
-                    Err("Bitget client-order-id query is not supported".into()),
-                );
+                cx.fail(r.command, "Bitget client-order-id query is not supported");
                 return;
             }
             Query::Fills {
@@ -424,7 +415,7 @@ impl BitgetFutures {
             match self.signed_headers(cx.now, Method::Get, &path, "") {
                 Ok(h) => h,
                 Err(e) => {
-                    cx.done(r.command, Err(e));
+                    cx.fail(r.command, e);
                     return;
                 }
             }
@@ -834,16 +825,16 @@ impl BitgetFutures {
         r.pages += 1;
         if let Some(cursor) = cursor {
             if !r.cursors.insert(cursor.clone()) {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("Bitget history cursor did not advance; result incomplete".into()),
+                    "Bitget history cursor did not advance; result incomplete",
                 );
                 return;
             }
             if r.pages >= MAX_PAGES {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("Bitget history page cap reached; result incomplete".into()),
+                    "Bitget history page cap reached; result incomplete",
                 );
                 return;
             }
@@ -860,17 +851,14 @@ impl BitgetFutures {
         }
         r.rows
             .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
-        cx.done(
-            r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(r.command, data),
+            Err(error) => cx.fail(r.command, error),
+        };
     }
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
         if r.retries >= 3 {
-            cx.done(
-                r.command,
-                Err(format!("Bitget history incomplete: {error}")),
-            );
+            cx.fail(r.command, format!("Bitget history incomplete: {error}"));
             return;
         }
         r.retries += 1;
@@ -886,10 +874,7 @@ impl BitgetFutures {
             let (_, r) = self.history.waiting.swap_remove(i);
             if !matches!(r.query, Query::PublicTrades { .. }) && !self.account.detected {
                 if cx.now >= r.detect_deadline {
-                    cx.done(
-                        r.command,
-                        Err("Bitget account detection did not complete".into()),
-                    );
+                    cx.fail(r.command, "Bitget account detection did not complete");
                     return;
                 }
                 self.history.waiting.push((cx.set_timer(100.0), r));

@@ -8,10 +8,11 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -27,6 +28,16 @@ pub struct Options {
     pub key: Option<String>,
     pub secret: Option<String>,
     pub recv_window: Option<f64>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -131,13 +142,15 @@ enum SeedRead {
 }
 
 pub struct Backpack {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
     seed: Seed,
     /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
     skipped_markets: HashMap<String, bool>,
+    unlisted_logged: std::collections::HashSet<String>,
+    reread_stalls: u8,
     account: account::Account,
     trading: trading::Trading,
     generation: u64,
@@ -150,8 +163,12 @@ impl Backpack {
             if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                 self.public.supervisor.connecting(cx);
             }
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+            self.public.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(WS)
+                        .channel(safe_cex_engine::SocketChannel::Public),
+                ),
+            );
         }
     }
     fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
@@ -185,7 +202,7 @@ impl Backpack {
     }
 
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead, error: &str) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
         if kind == SeedRead::Marks && matches!(self.seed.marks, MarkSeed::Waiting) {
             self.seed.marks = MarkSeed::Unavailable;
             self.finish_seed(cx);
@@ -193,6 +210,7 @@ impl Backpack {
         self.seed.backoff.failed(cx, kind);
     }
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             public: Connection::default(),
@@ -200,6 +218,8 @@ impl Backpack {
             candles: HashMap::new(),
             seed: Seed::default(),
             skipped_markets: Default::default(),
+            unlisted_logged: Default::default(),
+            reread_stalls: 0,
             account: account::Account::default(),
             trading: trading::Trading::default(),
             generation: 0,
@@ -264,24 +284,35 @@ impl Backpack {
         if let MarkSeed::Loaded(marks) = std::mem::take(&mut self.seed.marks) {
             Self::apply_marks(cx, marks);
         }
+        self.relabel_unpriced_triggers(cx);
         self.connect_public(cx);
     }
 
-    /// Account rows on a market skipped at load are dropped; say so once per symbol.
-    /// False means the market was never in the catalogue at all.
+    /// Account rows on a market skipped as malformed hold their snapshot; say so once
+    /// per symbol. False means the market was filtered or never listed.
     pub(crate) fn report_skipped_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
         let Some(reported) = self.skipped_markets.get_mut(symbol) else {
             return false;
         };
         if !std::mem::replace(reported, true) {
-            cx.log(
-                LogLevel::Error,
-                format!(
-                    "Backpack account data for {symbol} is hidden: its market row was malformed"
-                ),
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::ROW_SKIPPED,
+                format!("Backpack account data for {symbol} is held: its market row was malformed"),
             );
         }
         true
+    }
+
+    /// Account rows on a filtered or delisted market are skipped; say so once per symbol.
+    pub(crate) fn report_unlisted_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if self.unlisted_logged.insert(symbol.into()) {
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::ROW_SKIPPED,
+                format!("Backpack {symbol} is not a listed market; its account rows are skipped"),
+            );
+        }
     }
 
     fn apply_marks(cx: &mut Cx<'_, Pending>, marks: Vec<(String, [f64; 4])>) {
@@ -331,8 +362,9 @@ impl Backpack {
             state.sync = Sync::Failed;
             state.book.clear();
             cx.book_changed(symbol);
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::STREAM_UNAVAILABLE,
                 format!("Backpack depth recovery exhausted for {symbol}"),
             );
             return;
@@ -390,8 +422,9 @@ impl Backpack {
                 state.sync = Sync::Failed;
                 state.book.clear();
                 cx.book_changed(&event.s);
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    safe_cex_engine::Level::Error,
+                    code::STREAM_UNAVAILABLE,
                     format!("Backpack depth buffer overflow for {}", event.s),
                 );
             }
@@ -491,28 +524,33 @@ impl Backpack {
 }
 
 impl Venue for Backpack {
-    fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities {
-            account: safe_cex_engine::AccountLookup::Query,
-            ..safe_cex_engine::Capabilities::BASE
-        }
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
     }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            host_clock: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = sign::Credentials::new(read.key.clone(), &read.secret)
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.seed_read(cx, SeedRead::Markets);
@@ -553,7 +591,7 @@ impl Venue for Backpack {
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account.socket.socket == Some(socket) {
             if let Err(e) = self.private_message(cx, text) {
-                cx.log(LogLevel::Error, e);
+                cx.notice(safe_cex_engine::Level::Error, code::STREAM_UNAVAILABLE, e);
             }
             return;
         }
@@ -576,7 +614,7 @@ impl Venue for Backpack {
             Ok(())
         })();
         if let Err(e) = result {
-            cx.log(LogLevel::Error, e);
+            cx.notice(safe_cex_engine::Level::Error, code::STREAM_MALFORMED, e);
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -612,7 +650,7 @@ impl Venue for Backpack {
                         || r.market_type != "PERP"
                         || !r.symbol.contains('_')
                     {
-                        return;
+                        return true;
                     }
                     let mut split = r.symbol.split('_');
                     let base = split.next().unwrap_or("").to_owned();
@@ -621,7 +659,7 @@ impl Venue for Backpack {
                         let n = safe_cex_engine::num::parse(&f.base);
                         if n > 0.0 { (1.0 / n).round() } else { 1.0 }
                     });
-                    rows.push(Market {
+                    let market = Market {
                         id: r.symbol.to_string(),
                         symbol: r.symbol.into_owned(),
                         pretty_symbol: None,
@@ -662,9 +700,14 @@ impl Venue for Backpack {
                         is_read_only: None,
                         taker_fee: None,
                         maker_fee: None,
-                    });
+                    };
+                    let tradable = market.precision.is_tradable();
+                    if tradable {
+                        rows.push(market);
+                    }
+                    tradable
                 });
-                if r.is_err() {
+                if !r.unwrap_or(false) {
                     safe_cex_engine::startup::skipped_row(cx);
                     skipped.push(row_symbol(item));
                 }
@@ -722,7 +765,11 @@ impl Venue for Backpack {
             _ => Ok(()),
         };
         if let Err(e) = result {
-            cx.log(LogLevel::Error, format!("Backpack decode: {e}"));
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::STREAM_MALFORMED,
+                format!("Backpack decode: {e}"),
+            );
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -755,8 +802,9 @@ impl Venue for Backpack {
         | Pending::Marks { skipped, .. } = &pending
             && !skipped.is_empty()
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "Skipped {} malformed Backpack {} rows: {}",
                     skipped.len(),
@@ -775,13 +823,32 @@ impl Venue for Backpack {
                     self.seed.backoff.failed(cx, SeedRead::Markets);
                     return;
                 }
-                self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
+                cx.store.set_markets(rows);
+                let previous = std::mem::take(&mut self.skipped_markets);
                 self.skipped_markets = skipped
                     .into_iter()
-                    .filter(|s| s.ends_with("_PERP"))
-                    .map(|s| (s, false))
+                    .filter(|s| s.ends_with("_PERP") && cx.store.market(s).is_none())
+                    .map(|s| {
+                        let reported = previous.get(&s).copied().unwrap_or(false);
+                        (s, reported)
+                    })
                     .collect();
-                cx.store.set_markets(rows);
+                let after = self.skipped_markets.len();
+                // Only named malformed perps make a catalogue partial and re-read it.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, previous.len(), after) {
+                    self.seed.backoff.failed(cx, SeedRead::Markets);
+                } else {
+                    self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                }
+                if refresh {
+                    return;
+                }
                 self.seed.live.begin();
                 self.connect_public(cx);
                 self.account_start(cx);
@@ -910,11 +977,13 @@ impl Venue for Backpack {
                 command,
                 rows,
                 invalid: false,
-            } => cx.done(command, Ok(serde_json::to_string(&rows).unwrap())),
-            Pending::Candles { command, .. } => {
-                cx.done(command, Err("Backpack invalid candles".into()))
-            }
-            _ => cx.log(LogLevel::Error, "Backpack invalid REST list"),
+            } => cx.done(command, serde_json::to_string(&rows).unwrap()),
+            Pending::Candles { command, .. } => cx.fail(command, "Backpack invalid candles"),
+            _ => cx.notice(
+                safe_cex_engine::Level::Error,
+                code::STREAM_MALFORMED,
+                "Backpack invalid REST list",
+            ),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -930,7 +999,7 @@ impl Venue for Backpack {
                     .outcome(safe_cex_engine::Outcome::Unknown);
                 self.trade_failed(cx, request, error)
             }
-            Pending::History(request) => cx.done(request.command, Err(error.into())),
+            Pending::History(request) => cx.fail(request.command, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -939,11 +1008,11 @@ impl Venue for Backpack {
             {
                 self.recover_book(cx, &symbol)
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
             Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
             Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
-            _ => cx.log(LogLevel::Error, error),
+            _ => cx.retried_failure("backpack.lib:990", error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1018,7 +1087,11 @@ impl Venue for Backpack {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Backpack"));
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Backpack"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
@@ -1046,7 +1119,7 @@ impl Venue for Backpack {
                 ..
             } => {
                 if !supported(interval) {
-                    cx.done(command, Err(interval.unsupported("Backpack")));
+                    cx.fail(command, interval.unsupported("Backpack"));
                     return;
                 }
                 let mut params: sign::Params = [
@@ -1088,6 +1161,59 @@ impl Venue for Backpack {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.notice(
+            safe_cex_engine::Level::Warn,
+            code::REQUEST_FAILED,
+            format!("Backpack stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

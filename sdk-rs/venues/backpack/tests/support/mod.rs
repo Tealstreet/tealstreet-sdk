@@ -2,6 +2,10 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_backpack::{Backpack, Options};
 pub type Driver = Engine<Backpack>;
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 pub const SYMBOL: &str = "SOL_USDC_PERP";
 pub const POSITIONS: &str = r#"[{"symbol":"SOL_USDC_PERP","netQuantity":"5","entryPrice":"140","netExposureNotional":"705","pnlUnrealized":"5","estLiquidationPrice":"100"}]"#;
 pub const BALANCE: &str = r#"{"netEquity":"1005","netEquityAvailable":"905","netEquityLocked":"100","pnlUnrealized":"5"}"#;
@@ -51,19 +55,25 @@ pub fn ready_window(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
 ) -> (Driver, SocketId) {
-    let (e, socket, _) = ready_snapshot(MARKETS, position_status, position_body, auth_window, "[]");
+    let (e, socket, _, _) =
+        ready_snapshot(MARKETS, position_status, position_body, auth_window, "[]");
     (e, socket)
 }
 pub fn ready_orders(orders: &str) -> (Driver, SocketId) {
-    let (e, socket, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders);
+    let (e, socket, _, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders);
     (e, socket)
 }
-/// Startup against a custom market catalogue; also returns the startup logs.
+/// Startup against a custom market catalogue; also returns the startup logs and timers.
 pub fn ready_catalogue(
     markets: &str,
     positions: &str,
     orders: &str,
-) -> (Driver, SocketId, Vec<String>) {
+) -> (
+    Driver,
+    SocketId,
+    Vec<String>,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
     ready_snapshot(markets, 200, positions, None, orders)
 }
 pub const MARKETS: &str = r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"}]"#;
@@ -73,7 +83,12 @@ fn ready_snapshot(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
     orders: &str,
-) -> (Driver, SocketId, Vec<String>) {
+) -> (
+    Driver,
+    SocketId,
+    Vec<String>,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
@@ -88,6 +103,7 @@ fn ready_snapshot(
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, 200, markets);
     let mut logs = vec![];
+    let mut timers = vec![];
     let mut private = None;
     for _ in 0..6 {
         let actions: Vec<_> = e.drain_actions().collect();
@@ -139,10 +155,15 @@ fn ready_snapshot(
                     channel: Some(safe_cex_engine::SocketChannel::Private),
                     ..
                 } => private = Some(socket),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => logs.push(message),
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }
         }
     }
-    (e, private.expect("private socket"), logs)
+    (e, private.expect("private socket"), logs, timers)
 }

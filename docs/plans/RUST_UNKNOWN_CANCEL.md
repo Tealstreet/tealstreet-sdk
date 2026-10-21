@@ -1,6 +1,6 @@
 # Unknown order cancellation audit
 
-Scope: `CancelOrders` on all 26 Rust venue crates and their registered exchange
+Scope: `CancelOrders` on all 27 Rust venue crates and their registered exchange
 aliases. A nonempty ID absent from the store must produce a native cancellation
 request or an explicit command error. Store absence is not proof that an order is
 absent at the exchange. Empty requested lists remain valid no-ops.
@@ -18,6 +18,7 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 | OKX: `okx`, `okxeu`, `okxdemo`, `okxeudemo` | **Fixed:** explicit error; instrument and algo family require stored order | `okx/src/trading.rs` `plan_cancel`; new `okx/tests/trading.rs` regression |
 | BloFin: `blofin` | **Fixed:** explicit error; symbol and trigger provenance are required | `blofin/src/trading.rs` `cancel_targets`; new `blofin/tests/trading.rs` regression |
 | Bitget: `bitget`, `bitgetusdc`, `bitgetinverse` | **Fixed:** explicit error before expanding shared native identities | `bitget/src/trading.rs` `CancelOrders`; new `bitget/tests/trading.rs` regression |
+| Bitunix: `bitunix` | Explicit missing-order error before batch planning; native symbol/protection identity requires reconciliation | `bitunix/src/trading.rs` `plan_cancel`; `bitunix/tests/trading.rs` unknown/mixed and empty-list controls |
 | Bitrue: `bitrue` | **Fixed:** known IDs are cancelled, then the command reports `Order … not found` for the unknown ones | `bitrue/src/trading.rs` `CancelOrders`; `bitrue/tests/trading.rs::cancellation_missing_from_store_reports_error_and_attempts_known_mixed_targets` |
 | Crypto.com: `cryptocom` | **Fixed:** explicit error; ordinary and advanced requests require different paths | `cryptocom/src/trading.rs` `CancelOrders`; new `cryptocom/tests/trading.rs` regression |
 | Hyperliquid: `hyperliquid`, `hyperliquidspot` | **Fixed:** explicit error; native action requires asset identity | `hyperliquid/src/trading.rs` `CancelOrders`; new `hyperliquid/tests/trading.rs` regression |
@@ -45,8 +46,8 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 The table has separate rows for Kraken/KuCoin spot implementations inside their
 parent crates; all paths refer to `sdk-rs/venues/`. Unsupported shared commands
 (such as `CancelOrdersWithSymbols` on venues that cannot honor it) continue to
-return explicit unsupported-command errors. Bitunix has no separate registered
-Rust venue; the WEEX crate is the registered implementation audited here.
+return explicit unsupported-command errors. Bitunix has its own registered
+futures crate and is audited separately from WEEX.
 
 ## Regression evidence
 
@@ -67,3 +68,24 @@ empty-symbol account-wide command deletes it. The Rust SDK routes true
 `cancelSymbolOrders(symbol)` retains symbol scope. Regressions cover both scopes,
 stop-book failure reporting, uncached-ID direct dispatch followed by a known ID
 on both successful and rejected responses, and rejection of empty identities.
+
+## Acknowledged placements the store has not seen
+
+A placement resolves with venue ids before the private stream or the next
+reconciliation stores those orders. On venues whose cancellation needs a stored
+order, an immediate cancel or amend of a returned id used to fail with the
+explicit missing-order error above, and a chaser stopped mid-placement left its
+order live. Such venues declare `Venue::cancel_needs_stored_order`; the engine
+(`engine/src/placement_acks.rs`) then holds a `CancelOrders` or `AmendOrder`
+naming an acknowledged, still-unstored id until the store has it, or for at most
+10 seconds on an engine-owned timer, and dispatches it unchanged. An id that
+never appears still fails explicitly at the venue; unrelated unknown ids are
+never held. A stored virtual leg (`{id}_sl`), a group child whose `parent_id` is
+the id ends the wait; a fill of the id shortens it to 1.5 seconds, since a
+venue may drop a filled order while a partial fill's row may still follow. A
+later write to a held order waits behind it, so writes to one order keep their
+arrival order. Opted in: Binance,
+Bybit, Crypto.com, Hyperliquid, Backpack, BingX, GRVT, Lighter, MEXC, Orderly,
+TxFlow, WOO. BloFin, Bitget, Bitrue, OKX and Phemex route acknowledged ids from
+their own acknowledgement caches; AsterDEX and KuCoin spot cancel with symbols;
+the remaining venues send the supplied id directly.

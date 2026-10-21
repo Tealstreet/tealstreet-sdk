@@ -68,6 +68,11 @@ fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<Strin
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) if command == command_id => {
+                let result: Result<String, String> = Ok(result);
+                done.push(result)
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) if command == command_id => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 done.push(result)
             }
             Action::Notice(Notice::CommandError { command, .. }) if command == command_id => {

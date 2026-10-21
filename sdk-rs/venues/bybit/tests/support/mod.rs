@@ -26,7 +26,11 @@ pub struct Harness {
     pub closed: Vec<SocketId>,
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
+    /// Commands completed with `outcome: Unknown`.
+    pub unknown: Vec<u32>,
+    pub outcomes: Vec<(u32, Option<safe_cex_engine::Outcome>)>,
     pub logs: Vec<String>,
+    pub notices: Vec<Notice>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
@@ -57,7 +61,10 @@ impl Harness {
             closed: Vec::new(),
             timers: Vec::new(),
             done: Vec::new(),
+            unknown: Vec::new(),
+            outcomes: Vec::new(),
             logs: Vec::new(),
+            notices: Vec::new(),
             command_errors: Vec::new(),
             command_notices: Vec::new(),
             progress: Vec::new(),
@@ -86,6 +93,9 @@ impl Harness {
 
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
+            if let Action::Notice(notice) = &action {
+                self.notices.push(notice.clone());
+            }
             match action {
                 Action::Http(request) => {
                     self.progress_at_request
@@ -95,6 +105,9 @@ impl Harness {
                 Action::SignPayload { .. } => {
                     panic!("Bybit signs requests locally")
                 }
+                Action::WsConnect { headers, .. } if !headers.is_empty() => {
+                    panic!("Bybit authenticates sockets with an auth message")
+                }
                 Action::WsConnect {
                     socket,
                     url,
@@ -103,9 +116,6 @@ impl Harness {
                 } => {
                     self.sockets.push((socket, url));
                     self.socket_channels.push((socket, channel));
-                }
-                Action::WsConnectWithHeaders { .. } => {
-                    panic!("Bybit authenticates sockets with an auth message")
                 }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
@@ -122,12 +132,18 @@ impl Harness {
                 }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.command_notices.push((command, "done"));
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
+                    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                        self.unknown.push(command);
+                    }
+                    self.command_notices.push((command, "done"));
+                    self.outcomes.push((command, error.outcome));
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::StartupFailed { error }) => {
                     self.startup_failures.push(error)
                 }

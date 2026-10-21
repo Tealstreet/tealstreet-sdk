@@ -5,12 +5,14 @@ use crate::account::{PmOrderSource, venue_error};
 use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -250,6 +252,17 @@ impl BinanceFutures {
                 return;
             }
         }
+        // A limit-execution stop would be re-placed as a market stop at its limit price.
+        if let Command::AmendOrder { command, id, .. } = &command
+            && self.account.limit_stops.contains(id)
+        {
+            cx.fail(
+                *command,
+                not_sent("Binance stop-limit orders cannot be amended; cancel and place a new one")
+                    .kind(ErrorKind::Unsupported),
+            );
+            return;
+        }
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
@@ -464,10 +477,7 @@ impl BinanceFutures {
                 // Its requests (splits, brackets) do not map back to the caller's orders.
                 Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
                 Some(error) => cx.fail(command, error),
-                None => cx.done(
-                    command,
-                    Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                ),
+                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
             return;
         };
@@ -760,8 +770,9 @@ impl BinanceFutures {
             }
         }
         if !replaced.is_empty() {
-            cx.log(
-                LogLevel::Info,
+            cx.notice(
+                Level::Info,
+                code::ORDERS_REPLACED,
                 format!(
                     "Canceling {} existing closePosition order(s) before placing new one",
                     replaced.len()

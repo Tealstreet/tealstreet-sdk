@@ -139,8 +139,8 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
                 .any(|action| matches!(action, Action::Http(_)))
         );
         assert!(actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
-                if error.starts_with("Coinbase does not support"))));
+            Action::Notice(Notice::CommandFailed { command: 42, error })
+                if error.legacy_text().starts_with("Coinbase does not support"))));
     }
 }
 #[test]
@@ -277,7 +277,7 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
                 result,
             }) = a
             {
-                Some(result.unwrap())
+                Some(result)
             } else {
                 None
             }
@@ -838,7 +838,7 @@ fn repeated_product_cursor_cannot_commit_a_partial_market_list() {
     );
     assert!(e.store().markets().is_empty());
     assert!(e.drain_actions().any(
-        |a| matches!(a,Action::Notice(Notice::Log {message,..}) if message.contains("cursor"))
+        |a| matches!(a,Action::Notice(Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("cursor"))
     ));
 }
 #[test]
@@ -1072,7 +1072,7 @@ fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
     assert_eq!(e.store().markets()[0].symbol, "BTC-USD");
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -1095,7 +1095,7 @@ fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
     );
     assert!(!e.store().loaded().markets);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
     let timer = actions
         .into_iter()
         .find_map(|action| match action {
@@ -1149,10 +1149,7 @@ fn valid_catalogue_with_rejected_quotes_starts_markets_and_retries_without_clear
         let timer = e
             .drain_actions()
             .find_map(|action| match action {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 2000.0,
-                } => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - 1000., 1000.) => Some(timer),
                 _ => None,
             })
             .unwrap();

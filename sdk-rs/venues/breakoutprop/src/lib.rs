@@ -5,12 +5,13 @@ mod session;
 mod trading;
 pub(crate) mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, Cx, ErrorKind, LogLevel, Method, Outcome, Response, SocketId, TimerId, Venue,
-    VenueError,
+    Command, Cx, ErrorKind, Method, Outcome, Response, SocketId, TimerId, Venue, VenueError,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -19,7 +20,7 @@ pub use session::timeout_ms as parse_session_timeout_ms;
 
 const BASE_URL: &str = "https://breakout.prosp.devexperts.com/dxsca-web";
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub key: String,
     pub secret: String,
@@ -28,6 +29,14 @@ pub struct Options {
     pub tick_interval: f64,
     pub timeout_ms: u32,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -42,7 +51,7 @@ impl Default for Options {
 }
 
 pub struct BreakoutProp {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) session: session::Session,
     auth_failed: bool,
     auth_error: String,
@@ -180,10 +189,10 @@ struct EventType<'a> {
 }
 
 impl BreakoutProp {
-    pub fn new(mut options: Options) -> Self {
-        if options.tick_interval.is_nan() || options.tick_interval <= 0.0 {
-            options.tick_interval = 2_000.0;
-        }
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
+        options.tick_interval =
+            safe_cex_engine::engine::bounded_tick_interval(options.tick_interval);
         Self {
             options,
             session: session::Session::default(),
@@ -578,7 +587,11 @@ impl BreakoutProp {
             {
                 self.instruments = None;
                 self.details = None;
-                cx.log(LogLevel::Error, "Invalid DXtrade instrument details");
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
+                    "Invalid DXtrade instrument details",
+                );
                 self.arm_poll(cx);
                 return;
             }
@@ -618,7 +631,11 @@ impl BreakoutProp {
         if markets.is_empty() {
             self.instruments = None;
             self.details = None;
-            cx.log(LogLevel::Error, "DXtrade returned no matching instruments");
+            cx.notice(
+                Level::Error,
+                code::REQUEST_FAILED,
+                "DXtrade returned no matching instruments",
+            );
             self.arm_poll(cx);
             return;
         }
@@ -687,12 +704,16 @@ impl BreakoutProp {
             Operation::Trade(request) => return self.on_trade_failed(cx, request, error),
             operation => operation,
         };
+        let session_code = match error.kind {
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission) => code::AUTH_REJECTED,
+            _ => code::REQUEST_FAILED,
+        };
         let error = error.message.as_str();
         match operation {
             Operation::Trade(_) => unreachable!("trade failures return above"),
             Operation::Portfolio { .. } => {
                 self.portfolio_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 if !self.auth_failed && !self.auth_draining {
                     self.fetch_quotes(cx);
                 }
@@ -702,7 +723,7 @@ impl BreakoutProp {
                 if !cx.store.loaded().markets {
                     self.auth_failed = true;
                     let message = format!("DXtrade startup failed: {error}");
-                    cx.log(LogLevel::Error, &message);
+                    cx.notice(Level::Error, session_code, &message);
                     cx.startup_failed(message);
                 }
                 if matches!(operation, Operation::Login) {
@@ -717,7 +738,7 @@ impl BreakoutProp {
                     self.fail_operation(cx, pending.operation, not_sent(error));
                 }
                 self.auth_draining = was_draining;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, session_code, error);
                 if self.auth_failed {
                     self.session.token = None;
                     self.session.expires_at = 0.0;
@@ -735,20 +756,20 @@ impl BreakoutProp {
             }
             Operation::Instruments { .. } => {
                 self.instruments_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
             Operation::Details { .. } => {
                 self.details_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
             Operation::Quotes { .. } => {
                 self.quotes_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
-            Operation::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Operation::Candles { command, .. } => cx.fail(command, error),
         }
     }
 }
@@ -831,8 +852,9 @@ impl Venue for BreakoutProp {
             } => {
                 self.portfolio_pending = false;
                 if invalid || snapshot.is_none() {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
                         "Invalid or missing selected DXtrade portfolio",
                     );
                 } else if revision == self.order_revision {
@@ -927,12 +949,16 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if invalid {
-                    cx.done(command, Err("Invalid DXtrade candles response".into()));
+                    cx.fail(command, "Invalid DXtrade candles response");
                 } else {
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|_| "Invalid DXtrade candles".into()),
-                    );
+                    {
+                        let result: Result<String, String> = serde_json::to_string(&rows)
+                            .map_err(|_| "Invalid DXtrade candles".into());
+                        match result {
+                            Ok(data) => cx.done(command, data),
+                            Err(error) => cx.fail(command, error),
+                        }
+                    };
                 }
             }
         }
@@ -1110,10 +1136,7 @@ impl Venue for BreakoutProp {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1135,7 +1158,11 @@ impl Venue for BreakoutProp {
                 if wire::synthetic_interval_seconds(interval).is_some() {
                     *self.candles.entry((symbol, interval)).or_default() += 1;
                 } else {
-                    cx.log(LogLevel::Error, interval.unsupported("DXtrade"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("DXtrade"),
+                    );
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1156,11 +1183,11 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if wire::interval(interval).is_none() {
-                    cx.done(command, Err(interval.unsupported("DXtrade")));
+                    cx.fail(command, interval.unsupported("DXtrade"));
                 } else if from_ms.is_some_and(|value| wire::iso_time(value).is_err())
                     || to_ms.is_some_and(|value| wire::iso_time(value).is_err())
                 {
-                    cx.done(command, Err("Invalid DXtrade candle request".into()));
+                    cx.fail(command, "Invalid DXtrade candle request");
                 } else {
                     self.schedule(
                         cx,
@@ -1187,17 +1214,17 @@ impl Venue for BreakoutProp {
                 self.on_trade_command(cx, command);
             }
             Command::Query { command, query } => history::query(cx, command, query),
-            Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
-            Command::FetchMaxLeverage { command, .. } => cx.done(
+            Command::FetchLeverage { command, .. } => cx.done(command, "null".into()),
+            Command::FetchMaxLeverage { command, .. } => cx.fail(
                 command,
-                Err("Maximum leverage queries are unavailable for DXtrade".into()),
+                "Maximum leverage queries are unavailable for DXtrade",
             ),
             Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. } => {
-                cx.done(command, Err("Unsupported BreakoutProp command".into()));
+                cx.fail(command, "Unsupported BreakoutProp command");
             }
         }
     }
@@ -1241,5 +1268,24 @@ fn http_failure(status: u16) -> VenueError {
         408 => error.outcome(Outcome::Unknown),
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
+    }
+}
+
+#[cfg(test)]
+mod security_poll_interval {
+    use super::*;
+    #[test]
+    fn native_constructor_clamps_polling_before_any_timer_is_scheduled() {
+        for (value, expected) in [
+            (0.001, 1000.0),
+            (1e20, 120000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            let venue = BreakoutProp::new(Options {
+                tick_interval: value,
+                ..Options::default()
+            });
+            assert_eq!(venue.options.tick_interval, expected);
+        }
     }
 }
