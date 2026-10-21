@@ -40,9 +40,10 @@ import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
 
-import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
+import type { ExchangeErrorKind } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
@@ -800,7 +801,8 @@ export class RustEngineExchange extends BaseExchange {
           this.emitter.emit('deactivate');
         },
         onStartupFailed: (detail) => {
-          this.startupFailure ??= new Error(detail.message);
+          // Keeps kind/venueCode so start() and validateAccount can branch on them.
+          this.startupFailure ??= new ExchangeError(detail.message, detail);
           for (const wake of this.startupWaiters) wake();
         },
       },
@@ -1262,10 +1264,17 @@ export class RustEngineExchange extends BaseExchange {
         clearTimeout(timeout);
         resolve(result);
       };
+      // Venues log the reason just before StartupFailed in the same batch; let the typed failure win.
       const onError = (message: unknown) =>
-        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        queueMicrotask(() => {
+          if (this.startupFailure) return loaded();
+          finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        });
       const loaded = () => {
-        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.startupFailure) {
+          const { kind } = this.startupFailure as { kind?: ExchangeErrorKind };
+          return finish(kind ? { error: this.startupFailure.message, kind } : { error: this.startupFailure.message });
+        }
         if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
         if (
           started &&
