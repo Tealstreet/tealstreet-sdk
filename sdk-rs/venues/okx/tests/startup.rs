@@ -369,7 +369,7 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
 }
 
 #[test]
-fn failed_account_config_is_retried_by_the_account_timer() {
+fn failed_account_config_is_retried_by_the_startup_backoff() {
     let mut engine = Engine::new(Okx::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -394,12 +394,12 @@ fn failed_account_config_is_retried_by_the_account_timer() {
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
-                at_ms: 5_002.,
+                at_ms: 1_002.,
             } => Some(timer),
             _ => None,
         })
         .unwrap();
-    engine.handle(5_002., Event::TimerFired { timer });
+    engine.handle(1_002., Event::TimerFired { timer });
     let config = actions(&mut engine)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
