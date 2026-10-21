@@ -692,8 +692,10 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 
 - High: cancel sends ids only and venues drop ids not yet in their store, so a
   chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
-  `bybit/src/trading.rs:422`); ~~`setLeverage` drops side (see Bitget)~~; a wasm
-  panic freezes the account silently — no containment in `host.mjs:131,175`;
+  `bybit/src/trading.rs:422`); ~~`setLeverage` drops side (see Bitget)~~; ~~a wasm
+  panic freezes the account silently — no containment in `host.mjs:131,175`~~
+  (a trap disposes the host, settles pending commands with unknown write
+  outcomes and rejects with `ENGINE_DEAD`, `kind: 'internal'`);
   ~~`fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
   `PublicExchangeFactory` caches it (`rust.exchange.ts:856`)~~ (reads start the
   engine and wait for native data, #1375; the factory throws on an empty list;

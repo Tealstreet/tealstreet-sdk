@@ -32,8 +32,12 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   all-notice credential/URL regressions. Current reqwest body-stream errors
   already omit URLs; that path is regression coverage, not a reproduced fix.
   Ordinary business rejection messages remain actionable.
-- Native and Durable Object hosts drop logs with no client attached; an
-  oversized native broadcast disconnects every peer (`server.rs:386`).
+- Native and Durable Object hosts drop logs with no client attached. ~~An
+  oversized native broadcast disconnects every peer (`server.rs:386`).~~ An
+  oversized delta frame is sent as ordered segments that share its string
+  table; oversized notices are replaced by a bounded warning, and an oversized
+  completion settles its command with an error. Only a single section larger
+  than the limit still makes peers resnapshot, and that is logged.
 
 ## Error handling
 
@@ -73,8 +77,8 @@ shared parser per venue family, replacing `malformed` flags; (3) TS toast on
 rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
 `StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
 `StartupFailed`, BreakoutProp and Bybit landed); (6)
-app and chaser read `kind`/`outcome`; (7) wasm panic disposes the engine and
-surfaces `Internal`.
+app and chaser read `kind`/`outcome`; ~~(7) wasm panic disposes the engine and
+surfaces `Internal`~~ (`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),
