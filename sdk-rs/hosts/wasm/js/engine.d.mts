@@ -4,6 +4,7 @@ import type { WasmEngineLike } from './host.mjs';
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
   construction(): string;
+  /** Native construction failures throw Error with JSON-encoded venueError detail. */
   constructor(venue: string, optionsJson: string);
   /** JSON-encoded health counters. */
   health(): string;

@@ -32,3 +32,16 @@ Verification: existing venue-wrapper regressions, focused registry/wasm and
 Binance tests, feature-only builds, typecheck/lint, and a compiled parity matrix
 for every registered name in CI. Pin remote versus payload signers, Hyperliquid
 versus Spot, explicit-private Paradex refusal, and untrimmed string presence.
+
+## Phase 3: remaining host construction rules
+
+Forward raw Hyro production/simulator network URL maps and mode; the registry
+selects endpoints with existing fallback semantics. Preserve native explicit
+endpoints when that config is absent. Move private non-Paradex payload-signer
+refusal before generic native credential validation, keeping Unsupported/NotSent
+with a generic typed WASM constructor-error bridge. Keep factory routing and
+Paradex signing transport intact. Hyperliquid's old spot refusal is already gone.
+
+Verify raw config forwarding, native selection and precedence, structured
+startup/validateAccount refusal before I/O, public and Paradex bypasses, and the
+existing factory/spot/polling regressions. Run focused Rust/TS checks and CI.
