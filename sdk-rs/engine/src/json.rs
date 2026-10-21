@@ -120,6 +120,7 @@ pub enum ArrayAt {
     /// A direct array or one of several accepted nested array names.
     EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
     /// First matching array field at any depth in a versioned envelope.
+    #[cfg(feature = "any-field-envelope")]
     AnyFieldEnvelope(&'static [&'static str]),
 }
 
@@ -317,28 +318,30 @@ impl ArraySplitter {
                                 .zip(&self.keys)
                                 .all(|(name, key)| name.as_bytes() == key)
                     };
-                    self.armed = match self.at {
-                        // Versioned envelopes may wrap the target in arrays.
-                        ArrayAt::AnyFieldEnvelope(names) => {
-                            self.containers.last() == Some(&b'{')
-                                && names.iter().any(|name| name.as_bytes() == self.key)
-                        }
-                        _ => self.containers.iter().all(|&kind| kind == b'{'),
-                    } && match self.at {
-                        ArrayAt::Root => false,
-                        ArrayAt::AnyFieldEnvelope(_) => true,
-                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
-                            self.depth == 1 && name.as_bytes() == self.key
-                        }
-                        ArrayAt::Path(path) | ArrayAt::PathOmitLists(path) => matches(path),
-                        ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
-                        ArrayAt::EnvelopeFieldOrNested(field, nested) => {
-                            matches(&[field]) || matches(&[field, nested])
-                        }
-                        ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
-                            matches(&[field]) || nested.iter().any(|name| matches(&[field, name]))
-                        }
-                    };
+                    self.armed = self.containers.iter().all(|&kind| kind == b'{')
+                        && match self.at {
+                            ArrayAt::Root => false,
+                            ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                                self.depth == 1 && name.as_bytes() == self.key
+                            }
+                            ArrayAt::Path(path) | ArrayAt::PathOmitLists(path) => matches(path),
+                            ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
+                            ArrayAt::EnvelopeFieldOrNested(field, nested) => {
+                                matches(&[field]) || matches(&[field, nested])
+                            }
+                            ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
+                                matches(&[field])
+                                    || nested.iter().any(|name| matches(&[field, name]))
+                            }
+                            #[cfg(feature = "any-field-envelope")]
+                            ArrayAt::AnyFieldEnvelope(_) => false,
+                        };
+                    // Versioned envelopes may wrap the target in arrays.
+                    #[cfg(feature = "any-field-envelope")]
+                    if let ArrayAt::AnyFieldEnvelope(names) = self.at {
+                        self.armed = self.containers.last() == Some(&b'{')
+                            && names.iter().any(|name| name.as_bytes() == self.key);
+                    }
                     continue;
                 }
                 b'[' | b'{' => {
@@ -360,8 +363,9 @@ impl ArraySplitter {
                                         || (self.depth == 1 && paths.iter().any(|p| p.is_empty()))
                                 }
                                 ArrayAt::EnvelopeFieldOrNested(..)
-                                | ArrayAt::EnvelopeFieldOrNestedAny(..)
-                                | ArrayAt::AnyFieldEnvelope(_) => self.armed,
+                                | ArrayAt::EnvelopeFieldOrNestedAny(..) => self.armed,
+                                #[cfg(feature = "any-field-envelope")]
+                                ArrayAt::AnyFieldEnvelope(_) => self.armed,
                             };
                         self.armed = false;
                         if found {
@@ -1096,6 +1100,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "any-field-envelope")]
     #[test]
     fn any_field_selector_preserves_array_wrapped_versioned_envelopes() {
         let body = br#"{"version":[{"rows":[1,2],"cursor":"next"}],"code":0}"#;
