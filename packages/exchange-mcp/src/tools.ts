@@ -12,6 +12,7 @@ import {
 import { z } from 'zod';
 
 import { prepareCliAmendPrice, prepareCliOrder } from '@tealstreet/cli-core/src/order/prepareCliOrder';
+import { copyHistoryCompleteness } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { CAPABILITY_METHODS } from '@tealstreet/safe-cex/src/exchanges/base';
 import { roundOrderSizeToNearest } from '@tealstreet/script-api-core/src/order/orderPricing';
 
@@ -44,16 +45,19 @@ const isoDate = (ms: number) => new Date(ms).toISOString();
  * which fields safe-cex keeps in seconds and which in milliseconds.
  */
 const withUtc = <T extends object>(rows: T[], fields: Record<string, 's' | 'ms'>): T[] =>
-  rows.map((row) => {
-    const out = { ...row } as Record<string, unknown>;
-    for (const [field, unit] of Object.entries(fields)) {
-      const value = (row as Record<string, unknown>)[field];
-      if (typeof value === 'number' && value > 0) {
-        out[`${field}Utc`] = new Date(unit === 's' ? value * 1000 : value).toISOString();
+  copyHistoryCompleteness(
+    rows,
+    rows.map((row) => {
+      const out = { ...row } as Record<string, unknown>;
+      for (const [field, unit] of Object.entries(fields)) {
+        const value = (row as Record<string, unknown>)[field];
+        if (typeof value === 'number' && value > 0) {
+          out[`${field}Utc`] = new Date(unit === 's' ? value * 1000 : value).toISOString();
+        }
       }
-    }
-    return out as T;
-  });
+      return out as T;
+    }),
+  );
 
 const inMarkets = <T extends { symbol: string }>(rows: T[], wanted?: string[]): T[] =>
   wanted?.length ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
@@ -161,7 +165,7 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_order_history',
-    description: 'Past orders, including filled and cancelled ones.',
+    description: 'Past orders, including filled and cancelled ones. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchHistoricalOrders',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
     run: async (exchange, args) =>
@@ -169,21 +173,21 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_fills',
-    description: 'Trade executions (fills).',
+    description: 'Trade executions (fills). Known partial history includes rows and incompleteness metadata.',
     method: 'fetchHistoricalFills',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
     run: async (exchange, args) => withUtc(await exchange.fetchHistoricalFills(args), { timestamp: 's' }),
   }),
   tool({
     name: 'get_closed_pnl',
-    description: 'Realised PnL of closed positions for one market.',
+    description: 'Realised PnL of closed positions for one market. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchClosedPnl',
     input: { symbol, from, to, limit },
     run: async (exchange, args) => withUtc(await exchange.fetchClosedPnl(args), { time: 'ms', closedTime: 'ms' }),
   }),
   tool({
     name: 'get_income',
-    description: 'Account income records: funding, fees, realised PnL and transfers.',
+    description: 'Account income records: funding, fees, realised PnL and transfers. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchIncomeHistory',
     input: {
       symbol: symbol.optional(),

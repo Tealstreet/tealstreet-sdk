@@ -252,8 +252,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1606 / `363139a6c` | Orderly margin-mode lists retain a rejected symbol's old default while valid peers commit; an unidentified row protects the old defaults scope. Clean empty lists still clear, structural failures and settings-revision fences still hold, and this path emits Warn-level `row.skipped`. No new caller shape. |
 | #1608 / `f55918d23` | Bybit discovery retains typed HTTP-200 `retCode: 10006` evidence and headers, including missing-list error envelopes, and delays retries using the later usable reset/Retry-After hint and existing deadline. Missing hints fall back to 10 s; hints are bounded by the shared 1 h cap and HTTP403 keeps its 10 min floor. Already-waiting categories are extended without extra attempts. No new caller API or private/write retry behavior. |
 | #1487 / `1fb3c64d9` | Optional typed `accountAuth` feedback carries credential slot, read scope and accepted/rejected outcome across matching hosts; the SDK consumes it for isolated polling-backoff streaks. Native/DO clients opt in, preserving older clients. Rust Coinbase ignores defined saved read-credential fields and their proxy in an effective option copy; caller/saved options stay unchanged. See [Credential feedback and saved options](#credential-feedback-and-saved-options-1487). |
-| #1593 / `559a633a2` | Native/DO command diagnostics remap `fields.command` to the owning client's ID and target that owner. Command-correlated `history.incomplete` survives an Error minimum level as metadata; direct JSON consumers must correlate it before the result and carry completeness onward. Worker/hosted array-flag forwarding remains open (B11). |
-| #1591 / `083dbb512` | Direct SDK journal folding rejects flagged fills and symbol-scoped income. With complete account-wide fills it discards flagged income enrichment and leaves funding unattributed. This guards direct folds; forwarding flags and NX historical coverage remain caller work (B11). |
+| #1593 / `559a633a2` | Native/DO command diagnostics remap `fields.command` to the owning client's ID and target that owner. Command-correlated `history.incomplete` survives an Error minimum level as metadata; direct JSON consumers must correlate it before the result and carry completeness onward. SDK worker/hosted result metadata now preserves the flag as described in B11; NX ingestion/coverage remains open. |
+| #1591 / `083dbb512` | Direct SDK journal folding rejects flagged fills and symbol-scoped income. With complete account-wide fills it discards flagged income enrichment and leaves funding unattributed. This guards direct folds; SDK result forwarding now preserves the flag; NX historical coverage remains caller work (B11). |
 | #1589 / `ef3627083` | Bitunix command failures gain the existing classified-error/partial-detail contract while preserving native text/codes. Dispatched uncertain writes stay `unknown`; observed effective legs/IDs survive later batch failure, and only definitive rejections enter existing recovery writes. B9 callers must inspect fields and reconcile effects before retrying; no new API shape. |
 | #1611 / `a07b6b35c` | For eligible signed BingX/MEXC/WEEX list reads, a typed success response (BingX/MEXC envelope; WEEX root array) with its required list proves Accepted even when rows are skipped, uncatalogued or held. Malformed/missing required envelope data supplies no outcome before grouped auth state changes; typed credential rejection retains precedence. Row diagnostics/financial retention, classifier scope and caller shapes stay unchanged. |
 | #1590 / `15434894b` | A startup fee-read 10003 on eligible built-in live linear/demo Bybit can add an opposite-environment key hint after one bounded signed diagnostic GET using the rejected credential. Failure/timeout retains the original rejection; native code, credential role and deactivation policy stay intact. No automatic environment switch or trading retry. |
@@ -305,14 +305,16 @@ execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 | B8 | **Resolved; no tealstreet-next edit** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | none |
 | B9 | **Resolved in the SDK; caller migration remains** | #1377, #1383, #1401, #1424, #1482, #1483, #1484, #1583 (merged); venue PRs merged for the listed families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix (#1589), blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a specific classified kind over text patterns. **Left (tealstreet-next):** pass `opts.classified` for ordinary command/legacy errors; for coded diagnostics, adopt #1583's `engine-event`/metadata, `processEvent` and `processHealth`. Suppress a duplicate legacy diagnostic only when its matching event metadata is present. Preserve auth/reload behavior and the caller inventory below. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
 | B10 | **Resolved, given B1** | #1375 (merged `b6c4f006a6`) | **candle-server public exchanges never started.** `fetchMarkets` (`exchange-pool.ts:265`) now starts the engine and waits ≤30 s for native data; it still needs the engine loadable in that image (B1). See [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
-| B11 | **Open: history completeness forwarding and ingest** | #1542, #1554, #1593, #1591 (host flag, notice ownership and direct SDK fold guard merged; forwarding/coverage remain) | **Partial history must not become complete coverage.** Kraken futures' saturated income page and Binance's exhausted income chunks resolve with available rows and a non-enumerable `incomplete: true` in the JS WASM host. Worker/JSON hops lose that property; collection and derived history can also discard it. Carry completeness explicitly through each hop and consume it before recording coverage. See [Incomplete history](#incomplete-history-1542-1554). | SDK `CallMethodHandler`/Rust mirror; NX `ExchangeServerWorker`, `collectAccountAxes`, `runHistoricalWindow` | affected Rust income reads and any fill/position axis derived from them |
+| B11 | **Open: NX history ingestion and coverage** | #1542, #1554, #1593, #1591; SDK transport/mapping #1666 | **Partial history must not become complete coverage.** Command-owned partial arrays now retain their assertion through SDK worker/hosted JSON, SDK derived history and MCP serialization. Upgrade SDK sender and receiver together. NX must inspect completeness before transforming rows, preserve incomplete derived axes and leave coverage uncompleted. See [Incomplete history](#incomplete-history-1542-1554). | NX `ExchangeServerWorker` (matching SDK upgrade), `collectAccountAxes`, `runHistoricalWindow`; MCP consumers (flagged envelope) | affected Rust history reads and any fill/position axis derived from them |
 
 ### What remains before cutover (beyond owner decisions B1–B3)
 
-Remaining SDK/host work: preserve #1554's incomplete-history metadata across
-worker/hosted forwarding and any SDK reshaping of history results (for example,
-exchange-mcp `withUtc`) (B11). #1593 fixes native/DO notice ownership and #1591
-guards direct SDK journal folds; neither completes those boundaries or NX coverage.
+SDK history transport/mapping is implemented in #1666 (B11): worker/hosted
+replies carry request-owned completeness, derived SDK histories preserve it,
+and MCP serializes known partial rows explicitly. Upgrade SDK sender and
+receiver together. NX ingestion and coverage tracking remain required; raw
+native/DO clients still correlate their command-owned notices. #1593 supplies
+that ownership and #1591 guards direct SDK journal folds.
 B2's engine port is costed in
 [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md) and undecided; hosted accounts
 keep working without it.
@@ -324,16 +326,17 @@ tealstreet-next edits, shipped with the cutover (listed in [tealstreet-next call
 3. `callMethodInWorkerFireAndForget.ts:3-7` also accepts `code === 'COMMAND_TIMEOUT'`.
 4. Root `CLAUDE.md:662` names `isBaseCapabilityFallback` as the brand check; point it at `exchange.capabilities`.
 5. Pass typed detail for ordinary errors (#1484); migrate coded diagnostics to `processEvent`/`processHealth` (#1583), forwarding `engine-event` and suppressing duplicate legacy delivery only by event metadata. See [Coded diagnostic callers](#coded-diagnostic-caller-cutover-pr5).
-6. Preserve/read history completeness through the worker/hosted response and
-   journal collection; incomplete windows never call `completeWindow` (B11).
+6. Upgrade SDK worker sender/receiver together; inspect request-owned history
+   completeness before NX collection transforms and preserve derived incomplete
+   axes. Incomplete windows never call `completeWindow` (B11).
 7. **Required:** forward startup event codes, show per-exchange degraded state
    independently of reconnect-toast suppression, clear it on recovery, deduplicate
    legacy delivery and attach CLI listeners before starting. See
    [Required startup degradation visibility](#required-startup-degradation-visibility).
 
-Cutover item, `collectAccountAxes`: #1554 supplies an incomplete-history flag,
-but its forwarding/coverage work is still open (B11). The exact transport and
-ingest requirements are in [Incomplete history](#incomplete-history-1542-1554).
+Cutover item, `collectAccountAxes`: #1666 preserves the incomplete-history flag
+through SDK forwarding/mapping, but NX ingestion/coverage work stays open (B11).
+The exact transport and ingest requirements are in [Incomplete history](#incomplete-history-1542-1554).
 
 Owner item, one-off at cutover: `historical_orders` (created by `supabase/historical_data.sql`) already holds BloFin order rows that TS wrote in contract units. Rust writes base units, so the table would mix both. The fix is to **multiply** `amount`/`filled` by the instrument's `contractValue` (base = contracts × contractValue, e.g. 1000 × 0.001 = 1 BTC). Do not select rows by `ingested_at`: an upsert keeps the original timestamp, so a TS-era row that Rust later rewrites in base units would be converted twice. Run the backfill with BloFin order ingestion paused, before Rust writes any BloFin order row, or make it idempotent: convert only rows whose `filled` far exceeds the summed base `qty` of the matching `historical_fills` (TS fills were already base units). The owner runs it; there is no SQL in this repo.
 
@@ -1353,7 +1356,8 @@ The SDK journal fold checks the host-style marker before consuming income
 symbols/funding or folding fills. Flagged fills and symbol-scoped income reject;
 complete account-wide fills remain usable while all flagged income enrichment is
 discarded and funding stays unattributed. This protects direct SDK consumers;
-worker/hosted propagation and NX coverage tracking below remain cutover work.
+SDK worker/hosted result forwarding now preserves that assertion as described below;
+NX ingestion and coverage tracking remain cutover work.
 
 Native sessions and Workers now translate event command IDs through the pending
 owner and send those notices only to that client. Retired, disconnected, malformed
@@ -1405,14 +1409,45 @@ caller before rejection and owning-client command translation, keeping a
 concurrent query unflagged. Existing host tests separately cover result-array
 marking. These proofs cover SDK/native-event/DO boundaries, not NX worker/hosted hops.
 
-**Required NX query association:** consume completeness on the result of the
-specific pending call. A direct JS SDK consumer reads `rows.incomplete` before
-transforming that array. Worker/hosted adapters must carry a serializable
-completeness field alongside the rows and existing `requestId`, restoring it
-on that call's result. The current `callMethod:done` array does not preserve the
-non-enumerable flag across structured clone/JSON; forwarding the event alone
-does not fix that result boundary. This is required caller work, not a schema
-already added by these venue PRs.
+**SDK query-scoped result transport:** `CallMethodHandler` now adds optional
+`data.completeness: { incomplete: true }` beside the existing `requestId`,
+`result` and `success` fields on a marked successful array response. The shared
+`BaseExchange.callMethodInWorker` receiver restores the non-enumerable array
+flag only after matching its pending `requestId`, before both resolving and
+`afterMethodCalledInWorker`. Rust forwarded methods use this same receiver.
+Concurrent unflagged requests remain unflagged; late/unknown IDs cannot mark
+another request, and terminal failures remain failures. The record is plain
+serializable data, so both structured clone and the hosted JSON hop preserve it.
+There is no global warning latch or warning-text matching.
+
+The public SDK exports `HistoryCompleteness`, `HistoricalRows`,
+`historyCompletenessOf`, `withHistoryCompleteness` and
+`copyHistoryCompleteness` (also available from `src/historyCompleteness`). The
+record is a positive incompleteness assertion only. An absent, false or malformed
+record does not promise complete history. SDK Rust Bybit/OKX/BloFin/WOO derived
+position histories and reported closed-PnL mapping preserve the assertion;
+Bybit's derived result retains it when either the closed-PnL or order axis is
+incomplete. Existing failed-read policies and financial mappings are unchanged.
+
+MCP UTC mapping preserves the marker for `get_order_history`, `get_fills`,
+`get_closed_pnl` and `get_income`. A flagged response's text JSON is now
+`{ requestId, rows, completeness: { incomplete: true } }`, where `requestId` is
+that call's JSON-RPC ID. Unflagged responses retain their existing array shape;
+there is no new assertion that they are exhaustive. Empty flagged rows remain
+visibly incomplete, and terminal tool failures remain errors.
+
+**Required NX consumption (B11 remains open):** consume completeness on the
+result of the specific pending call before `map`/`filter`/spread or aggregation.
+Upgrade SDK sender and receiver together. At read-only NX `65e086a3c90`, VWC
+serializes the whole message (adding only outer account context), and
+ExchangeServerWorker, hostedClient, hostedFrameClient and the web controller
+forward the whole `callMethod:done` data. No field-picking adapter edit is
+indicated; both sides must run the matching SDK for restoration. This source
+audit is not a deployed-runtime or NX test proof. Direct JS consumers can read
+`historyCompletenessOf(rows)` or `rows.incomplete` before transforming rows.
+NX must still distinguish incomplete outcomes and leave coverage uncompleted.
+Its records route currently writes no coverage, so coverage gating alone does
+not require a records schema change.
 
 For a raw native/DO client, associate `history.incomplete` by the translated
 `fields.command` with that session's pending query before its `done`; retire
@@ -1426,21 +1461,21 @@ can lose metadata, and `runHistoricalWindow.ts:101,108-109` completes only `ok`
 windows. Preserve incomplete status through those steps and leave coverage
 uncompleted for that query/window.
 
-The following boundaries still need implementation before affected Rust
-history can claim journal coverage. NX references in this subsection were
-checked at `fdd2389a825`, with query/result handling rechecked at `65e086a3c90`:
+The following responsibilities distinguish implemented SDK transport from the
+remaining caller work before affected history can claim journal coverage.
+NX references in this subsection were checked at `fdd2389a825`, with query/result handling rechecked at `65e086a3c90`:
 
 | Boundary | Required edit / proof |
 | --- | --- |
-| SDK `webworker/handlers/CallMethodHandler.ts` → `RustEngineExchange.forwardToWorker` (`WORKER_FORWARDED_METHODS`); NX `services/exchange-server` VWC → `apps/web/src/utils/shim/worker/ExchangeServerWorker.ts` | Carry completeness as an explicit serializable field beside the rows, and restore it at the receiving API boundary. The current `callMethod:done` sends the array directly: structured clone drops the non-enumerable property, as does the hosted JSON hop. Prove both worker and hosted round trips, including an unflagged concurrent request. Deploy the sender and receiver together. |
-| SDK/MCP history reshaping: `packages/exchange-mcp/src/tools.ts:46-47,175,195` (`withUtc`) | Preserve completeness explicitly through `rows.map` and MCP serialization for fills/income; a non-enumerable array property does not survive either boundary. Prove flagged and unflagged results remain distinct rather than presenting partial rows as complete. |
+| SDK `webworker/handlers/CallMethodHandler.ts` → `BaseExchange.callMethodInWorker` / Rust forwarding; NX VWC → ExchangeServerWorker | SDK now sends optional `data.completeness` beside the existing `requestId` and restores it on that request’s array. SDK regressions cover structured clone, hosted JSON, concurrent peers, timeout/late IDs and errors. NX adapters already pass whole data in the read-only audit; upgrade SDK sender and receiver together. NX ingestion/coverage tests remain required. |
+| SDK/MCP history reshaping: `tools.ts` (`withUtc`) → `server.ts` | SDK now preserves the marker through UTC mapping and serializes flagged history as `{requestId, rows, completeness}`. Real MCP protocol regressions distinguish concurrent flagged, empty flagged and unflagged calls; JSON-RPC IDs match their owning responses and failures stay errors. MCP consumers must accept the flagged envelope rather than treating all history results as arrays. |
 | NX `apps/web/src/utils/historical/collectAccountAxes.ts` (`runAxis`, `enumerateTradedSymbols`, symbol-scoped fill aggregation) and derived-history adapters | Inspect the flag before `map`/`filter`/spread/folding/enumeration can drop it. A truncated income symbol list also makes the derived fill/position axis incomplete, even if each subsequent fill read succeeds. Preserve that state in `CollectedAxis`/`AxisOutcome`; do not return `status: 'ok'` for it. #1591 already guards direct SDK journal folds as described above; NX derived axes must still preserve their own completeness state. |
 | NX `apps/web/src/utils/historical/runHistoricalWindow.ts` (`collectAccountAxis` → `postHistoricalRecords` → `completeWindow`) | Leave `historical_coverage` uncompleted for incomplete results. Currently only `status: 'ok'` reaches `completeWindow`, so the collection outcome must distinguish partial data from a successful empty/full window. Keep the available rows distinct from a claim of complete coverage; persisting partial rows must not complete that claim. Add a truncated-window regression. |
 | Native sessions / Durable Object clients, if adopted (`sdk-rs/hosts/native/src/server.rs`, `sdk-rs/hosts/wasm/js/workers.mjs`) | The array flag is attached by `EngineHost`, not encoded as a new frame or `done` field. A direct session client must correlate `history.incomplete` itself and carry completeness onward. Both hosts now remap the event's `fields.command` through the same pending owner as `done` and target the owning client; remote consumers must correlate the translated marker before consuming rows. No current NX `NativeFrameSession` caller was found. |
 
 The BloFin `historical_orders` base-unit backfill (#1529) is a separate
-owner-run data migration, described above. Neither this metadata propagation
-nor the backfill is implemented by this documentation refresh.
+owner-run data migration, described above. The SDK metadata transport does not
+perform that backfill or implement the remaining NX collection/coverage changes.
 
 ## Shared helpers that a venue-directory deletion would otherwise remove
 

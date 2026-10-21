@@ -7,6 +7,15 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## History result completeness
+
+Successful `callMethod:done` replies include optional `data.completeness:
+{ incomplete: true }` beside `requestId` and `result` when the returned array
+has the host marker. Array properties do not survive clone/JSON transports.
+The matching BaseExchange receiver restores it before resolving or notifying
+result observers; senders and receivers must upgrade together. Never infer a
+complete window from missing metadata or attach a notice to another request.
+
 ## Time synchronization
 
 The browser main thread owns public time polling. It synchronizes once per

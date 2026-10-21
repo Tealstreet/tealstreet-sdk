@@ -130,3 +130,11 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     }
   });
 });
+
+
+it.each(['bybit', 'okx', 'blofin'] as const)('%s retains capped empty reported closed-PnL metadata', async (name) => {
+  const { exchange } = make(name, Object.defineProperty([], 'incomplete', { value: true }));
+  const rows = await exchange.fetchClosedPnl({ symbol: 'BTCUSDT' });
+  expect(rows).toEqual([]);
+  expect(rows).toHaveProperty('incomplete', true);
+});

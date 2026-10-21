@@ -3,6 +3,7 @@ import type { ServerConfig } from './config';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createExchange } from '@tealstreet/safe-cex/src/index';
+import { historyCompletenessOf } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 
 import { supportedTools } from './tools';
@@ -53,9 +54,11 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
   // call, which retries with a fresh account; tools then use the base answers.
   await exchange.loadCapabilities().catch(() => undefined);
   for (const tool of supportedTools(exchange, { options: Boolean(options.enableOptionMarkets) })) {
-    server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args) => {
+    server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args, extra) => {
       const result = await tool.run(await ready(), args as never);
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      const completeness = historyCompletenessOf(result);
+      const serialized = completeness ? { requestId: extra.requestId, rows: result, completeness } : result;
+      return { content: [{ type: 'text', text: JSON.stringify(serialized) }] };
     });
   }
   return {

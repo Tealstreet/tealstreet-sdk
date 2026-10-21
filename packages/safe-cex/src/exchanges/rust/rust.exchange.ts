@@ -1,3 +1,4 @@
+import { copyHistoryCompleteness } from '../../historyCompleteness';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   AccountAuthResult,
@@ -643,11 +644,12 @@ export class RustEngineExchange extends BaseExchange {
     const to = opts.to ?? Date.now();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
     const orders = await this.fetchHistoricalOrders({ from, to });
-    return wooOrdersToPositionRecords(orders, {
+    const records = wooOrdersToPositionRecords(orders, {
       account: opts.account,
       from,
       resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
     });
+    return copyHistoryCompleteness(orders, records);
   };
 
   get isPublicDataOnly(): boolean {
@@ -2037,18 +2039,21 @@ export class RustEngineExchange extends BaseExchange {
     const rows = await this.fetchClosedPositionRows({ from, to }, false);
     // Closed-PnL rows carry no hedge leg; the order axis does (see bybit.exchange.ts).
     const legs = new Map<string, PositionSide | 'both'>();
+    let orders: HistoricalOrder[];
     try {
-      for (const order of await this.fetchHistoricalOrders({ from, to })) {
+      orders = await this.fetchHistoricalOrders({ from, to });
+      for (const order of orders) {
         if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
       }
     } catch {
       throw new Error('bybit: could not read the order axis to resolve hedge legs');
     }
-    return aggregateBybitClosedPnl(rows, {
+    const records = aggregateBybitClosedPnl(rows, {
       account: opts.account,
       resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
       resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
     });
+    return copyHistoryCompleteness(orders, copyHistoryCompleteness(rows, records));
   };
 
   private okxJournal = async (opts: { account: string; from?: number; to?: number }) => {
@@ -2068,7 +2073,7 @@ export class RustEngineExchange extends BaseExchange {
       });
       if (record) records.push(record);
     }
-    return records;
+    return copyHistoryCompleteness(rows, records);
   };
 
   private blofinJournal = async (opts: { account: string; from?: number; to?: number }) => {
@@ -2083,7 +2088,7 @@ export class RustEngineExchange extends BaseExchange {
       });
       if (record) records.push(record);
     }
-    return records;
+    return copyHistoryCompleteness(rows, records);
   };
 
   /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
@@ -2114,7 +2119,7 @@ export class RustEngineExchange extends BaseExchange {
       }
       if (entry) entries.push(entry);
     }
-    return entries.sort((a, b) => b.closedTime - a.closedTime);
+    return copyHistoryCompleteness(rows, entries.sort((a, b) => b.closedTime - a.closedTime));
   };
 
   /**
