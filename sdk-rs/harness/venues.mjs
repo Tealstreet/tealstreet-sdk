@@ -92,6 +92,7 @@ const typedRequest = function (method, url, body, callerIds) {
 };
 
 const bybit = (name, className) => ({
+  virtualPrivateClock: true,
   compareInstrumentClassification: true,
   compareOptionTerms: true,
   rust: name,
