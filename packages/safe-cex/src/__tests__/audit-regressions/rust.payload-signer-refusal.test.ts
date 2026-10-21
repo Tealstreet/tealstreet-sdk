@@ -1,7 +1,7 @@
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
@@ -11,7 +11,10 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../../exchanges/rust/rust.exchange';
+import { isKeylessRemoteSigned } from '../../exchanges/hostedSigningVenues';
+import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
+import { virtualClock } from '../../utils/virtualClock';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const running: RustEngineExchange[] = [];
@@ -118,14 +121,48 @@ it('reports the structured refusal through start and validateAccount', async () 
   expect(transport).not.toHaveBeenCalled();
 });
 
-it('routes payload-signed accounts to TS before a Rust instance exists', () => {
-  for (const name of ['hyperliquid', 'coinbase', 'polymarket', 'binance', 'bybit'] as const) {
+it('routes only TS venues that sign with a payload signer to TS', () => {
+  for (const name of ['bybit', 'bybitspot', 'hyrotrader', 'binance', 'binancepm', 'binanceinverse'] as const) {
     expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(false);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(false);
     expect(runsOnRustEngine(name, { engine: 'rust', payloadSigner, publicDataOnly: true }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's' }), name).toBe(true);
   }
-  expect(runsOnRustEngine('paradex', { engine: 'rust', payloadSigner })).toBe(true);
-  // Lighter keeps its engine contract: payload-only is public, a secret is refused at startup.
-  expect(runsOnRustEngine('lighter', { engine: 'rust', secret: '', payloadSigner })).toBe(true);
+  // Their TS venues ignore a payload signer too, so the engine's startup refusal is the outcome.
+  for (const name of ['hyperliquid', 'coinbase', 'polymarket', 'lighter', 'paradex'] as const) {
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(true);
+  }
+});
+
+describe('factory and worker loaders', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
+    ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
+
+  it('createExchange builds the TS venue for Bybit and Binance payload signers', async () => {
+    vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
+    for (const name of ['bybit', 'binance'] as const) {
+      const exchange = await createExchange(name, signed());
+      try {
+        expect(exchange, name).not.toBeInstanceOf(RustEngineExchange);
+      } finally {
+        exchange.dispose();
+      }
+    }
+  }, 60_000);
+
+  it('a default-Rust name never falls back to its hosted TS class, which cannot payload-sign', async () => {
+    vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
+    for (const name of ['coinbase', 'tealstreet-dex'] as const) {
+      // The hosted loader serves keyless remote signing only.
+      expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
+      for (const options of [signed(), signed({ engine: undefined })]) {
+        recordEngine(name);
+        const exchange = await createExchange(name, options);
+        running.push(exchange as RustEngineExchange);
+        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
+        await expect(exchange.start(), name).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+      }
+    }
+  }, 60_000);
 });

@@ -164,16 +164,27 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
 /**
- * Only Paradex consumes a payload signer natively; other engine venues would ignore it.
- * Lighter is excluded: its payload-only accounts start public on the engine by contract.
+ * TS venues whose signing honours `payloadSigner` (Bybit's API factory, Binance's signer).
+ * Other TS venues, including the kept hosted Coinbase/Orderly classes, ignore it while
+ * `canSign` still counts it, so routing those to TS would start a venue that cannot sign.
  */
+const TS_PAYLOAD_SIGNER_VENUES = new Set<ExchangeName>([
+  'bybit',
+  'bybitinverse',
+  'bybitspot',
+  'bybitdemo',
+  'hyrotrader',
+  'binance',
+  'binancepm',
+  'binancespot',
+  'binanceinverse',
+]);
+
+/** A payload-signed account the engine would ignore but a TS venue signs through. */
 const needsTsPayloadSigner = (
   name: ExchangeName,
   options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
-) =>
-  Boolean(options.payloadSigner) &&
-  !['paradex', 'lighter', 'lighter-robinhood'].includes(name) &&
-  options.publicDataOnly !== true;
+) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
 
 /**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
@@ -696,8 +707,8 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Factories route these to TS. A private engine account would otherwise ignore the
-    // signer and send unsigned requests, even on venues exempt from the guard below.
+    // Factories route TS payload-signer venues to TS; elsewhere no implementation signs
+    // with it, so refuse rather than ignore it, even on venues exempt from the guard below.
     if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
