@@ -582,6 +582,13 @@ Remaining resilience and completeness findings are independent of request parity
   NotSent and never replays a write. Sanitized coded diagnostics preserve native
   and rate metadata. Regression coverage includes malformed lists/rows, stale
   callbacks,40 settings symbols, both shared-expiry orders and owned no-write.
+- Medium: ~~per-symbol settings reads starve under any position notification,
+  hiding leverage/margin updates and scoped refusal/backoff evidence~~. Settings
+  attempts now retain their symbol serial and accepted settings-write revision;
+  WS-only routing-ID notifications cannot supersede them. Accepted leverage,
+  margin and position-mode ACKs still fence old metadata and auth evidence;
+  refused/unproved writes do not. Current failures retain ordinary bounded
+  retries, and grouped per-symbol credential refusals remain independent.
 - Medium (unverified venue behaviour): leverage serialized as `30.0`
   (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
   requires order detail to be final immediately (`trading.rs:1437`); ~~a login
