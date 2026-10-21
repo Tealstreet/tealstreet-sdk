@@ -1696,6 +1696,22 @@ are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberate
 keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
 caller signatures are unchanged.
 
+### MEXC port-review snapshot and plan corrections
+
+Rust MEXC `fetchOrderBook(symbol, limit)` now returns an independent public REST
+snapshot without requiring a feed subscription. Existing callers keep the same
+shape: sorted bids/asks with base-asset `amount`, cumulative base `total`, and
+an exact string `lastUpdateId`. Default depth is 100; the SDK accepts 1–1000
+levels. Query results never replace subscribed books. Rate limits fail with a
+retry delay; callers choose whether to retry. Public endpoint refusals cannot
+invalidate private account credentials.
+
+Plan orders now expose the native reduce-only flag or closing-side semantics;
+opening plans no longer appear reduce-only. Position stops stay reduce-only.
+Order overlays and reduce-only sizing consumers receive corrected flags; no
+placement units or signatures change. Native fill-fee sign remains unchanged
+pending independent debit/rebate evidence.
+
 ### Coinbase port-review retained read semantics
 
 Coinbase Rust spot currency balances continue using native total/free and their
