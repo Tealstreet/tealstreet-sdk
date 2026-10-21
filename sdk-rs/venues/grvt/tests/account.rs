@@ -373,7 +373,7 @@ fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut proxy = Harness::new(true);
     proxy.authenticate();
     let socket = proxy.socket.unwrap();
-    assert!(proxy.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws")));
+    assert!(proxy.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.is_empty())));
     proxy.engine.handle(proxy.now, Event::WsOpened { socket });
     proxy.collect();
     let messages: Vec<_> = proxy
