@@ -364,3 +364,26 @@ increments for later IDs; the separate production TS risk was reported.
 Remove only four unobserved keys: checkpoint-0 total/upnl on each private
 tape (13 to 11 each). Preserve public and Robinhood declarations, fixture
 bytes, independent signatures and strict FAIL for remaining differences.
+
+## Lighter-Robinhood phase
+
+Extend the shared Lighter tape-clock flag and the already-approved private TS
+replay random source to Robinhood. Keep the entropy algorithm, tape-SHA seed,
+post-crypto installation, signature verifier and existing canonicalization
+unchanged. Extend the real collision regression to the Robinhood deployment;
+the prior Lighter-only initializer must fail that case. Production stays intact.
+
+Generate Robinhood mainnet and testnet exactly as CI, including its shared
+testnet filename. Preserve epoch 1792454400000, mainnet domain 466324, testnet
+domain 300 and absence of Lighter integrator attribution. Use a matching CI
+engine for five private pairs per tape, compare all twenty complete nonmetric
+outputs and prune only exact unobserved tape-bound declarations. Require
+independent reviews, focused harness tests, current-head CI proof and mandatory
+three-case verification with zero unexpected/unused private declarations.
+Merge only on full green CI with a fresh separate dependency guard, then audit
+and report the actual merge before Bitrue. Ordinary CI still runs one pair.
+
+The focused proof retains eleven exact keys per private tape. Remove only
+checkpoint-0 balance.total and balance.upnl on each, preserving every other
+manifest entry and both fixture byte streams. The Robinhood collision case
+passes with the extended hook and fails under the prior Lighter-only hook.

@@ -54,7 +54,7 @@ const root = '../../packages/safe-cex/src/exchanges';
 const lighter = (name) => {
   let verifier;
   return {
-    virtualPrivateClock: name === 'lighter',
+    virtualPrivateClock: true,
     rust: name,
     ts: { module: `${root}/lighter/lighter.exchange.ts`, className: 'LighterExchange', name },
     replayCredentials: { applicationId: '42', apiKeyIndex: '3', secret: '01' + '00'.repeat(39), key: '' },
@@ -64,7 +64,7 @@ const lighter = (name) => {
       const oracle = await initializeLighterCrypto(impl);
       // Install after crypto initialization, only in this private TS child.
       // The production generator and independent duplicate-ID verifier stay intact.
-      if (impl === 'ts' && name === 'lighter') Math.random = createLighterReplayRandom(tapeSha256);
+      if (impl === 'ts') Math.random = createLighterReplayRandom(tapeSha256);
       verifier = createLighterVerifier(options, oracle, name);
     },
     tsBooksSubscribed: (exchange, count) =>
