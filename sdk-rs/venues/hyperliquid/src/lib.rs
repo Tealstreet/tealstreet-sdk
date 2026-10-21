@@ -26,6 +26,8 @@ pub struct Options {
     pub application_id: Option<String>,
     pub vault: Option<String>,
     pub builder: Option<Builder>,
+    /// TS `enableSpotMarkets`: spot pairs, holdings and orders in the perp account.
+    pub enable_spot_markets: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
 impl safe_cex_crypto::secrets::EraseSecrets for Options {
@@ -39,6 +41,39 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 pub struct Builder {
     pub b: String,
     pub f: u32,
+}
+
+/// Discovery retry key for the merged spot catalogue; no dex is named `@`.
+const SPOT_SCOPE: &str = "@spot";
+
+/// TS `resolveSpotDisplayName`: Unit-bridged tokens (`UBTC`, fullName `Unit …`)
+/// display without the `U`, unless another token already owns that name.
+fn spot_display_name(token: &SpotToken, tokens: &[&SpotToken]) -> String {
+    let bridged = token
+        .full_name
+        .as_deref()
+        .is_some_and(|name| name.starts_with("Unit "));
+    let mut chars = token.name.chars();
+    let prefixed = chars.next() == Some('U')
+        && chars
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    if !bridged || !prefixed {
+        return token.name.clone();
+    }
+    let stripped = &token.name[1..];
+    if tokens.iter().any(|t| t.name == stripped) {
+        token.name.clone()
+    } else {
+        stripped.to_owned()
+    }
+}
+
+struct SpotCatalog {
+    meta: SpotMeta,
+    markets: Vec<Market>,
+    tickers: Vec<Ticker>,
+    excluded: Vec<String>,
 }
 
 pub enum Pending {
@@ -108,7 +143,19 @@ struct Ladder {
 }
 pub struct Hyperliquid {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
+    /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
+    /// Spot markets merged into the perp account (`enable_spot_markets`).
+    spot_markets: bool,
+    /// A merged spot catalogue read before the perp and HIP-3 catalogue was
+    /// published; TS lists spot after both.
+    spot_catalog: Option<SpotCatalog>,
+    perps_published: bool,
+    /// The merged spot catalogue is in the store; until then spot rows are skipped.
+    pub(crate) spot_committed: bool,
+    /// Merged spot pair symbol -> venue token (name, fullName), published as the
+    /// TS `info.hlTokenName`/`hlTokenFullName` disclosure.
+    underlying: HashMap<String, (String, Option<String>)>,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
@@ -129,10 +176,16 @@ pub struct Hyperliquid {
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
+        let spot_markets = options.enable_spot_markets;
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             spot: false,
+            spot_markets,
+            spot_catalog: None,
+            perps_published: false,
+            spot_committed: false,
+            underlying: HashMap::new(),
             spot_tokens: HashMap::new(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -155,6 +208,7 @@ impl Hyperliquid {
             || options.secret.as_deref().is_none_or(str::is_empty);
         Self {
             spot: true,
+            spot_markets: false,
             ..Self::new(options)
         }
     }
@@ -176,6 +230,112 @@ impl Hyperliquid {
                 stage: 0,
             },
         );
+    }
+    /// Spot asset ids, coin handles and each token's valuation pair.
+    fn register_spot(&mut self, cx: &Cx<'_, Pending>, meta: &SpotMeta, markets: &[Market]) {
+        for native in meta.universe.iter().filter_map(|row| row.0.as_ref()) {
+            if let Some(m) = markets.iter().find(|m| m.id == native.name) {
+                self.assets.insert(m.symbol.clone(), 10_000 + native.index);
+                if let Some(token) = native.tokens.first() {
+                    let replace = self
+                        .spot_tokens
+                        .get(token)
+                        .and_then(|s| {
+                            markets
+                                .iter()
+                                .find(|m| &m.symbol == s)
+                                .or_else(|| cx.store.market(s))
+                        })
+                        .is_none_or(|existing| existing.quote != "USDC" && m.quote == "USDC");
+                    if replace {
+                        self.spot_tokens.insert(*token, m.symbol.clone());
+                    }
+                }
+                self.coins
+                    .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
+            }
+        }
+    }
+    /// Spot pairs merged into the perp account, as TS `fetchSpotMarketsAndTickers`:
+    /// best effort, so a failure never holds back the perp catalogue.
+    fn merged_spot_meta(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        meta: Option<SpotMeta>,
+        mut markets: Vec<Market>,
+        mut tickers: Vec<Ticker>,
+        excluded: Vec<String>,
+    ) {
+        let Some(meta) = meta else {
+            self.spot_markets_failed(cx, "Malformed Hyperliquid spot metadata");
+            return;
+        };
+        let tokens: Vec<&SpotToken> = meta
+            .tokens
+            .iter()
+            .filter_map(|row| row.0.as_ref())
+            .collect();
+        for market in &mut markets {
+            let Some(token) = tokens.iter().find(|t| t.name == market.base) else {
+                continue;
+            };
+            self.underlying.insert(
+                market.symbol.clone(),
+                (token.name.clone(), token.full_name.clone()),
+            );
+            let display = spot_display_name(token, &tokens);
+            if display != token.name {
+                market.pretty_symbol = Some(format!("{display}/{}", market.quote));
+                market.base = display;
+            }
+        }
+        // Spot publishes no oracle or funding (TS zeroes both).
+        for ticker in &mut tickers {
+            ticker.index = 0.0;
+            ticker.funding_rate = 0.0;
+        }
+        self.startup.succeeded(cx, &(SPOT_SCOPE.into(), 0));
+        let catalog = SpotCatalog {
+            meta,
+            markets,
+            tickers,
+            excluded,
+        };
+        if self.perps_published {
+            self.commit_spot_catalog(cx, catalog);
+        } else {
+            self.spot_catalog = Some(catalog);
+        }
+    }
+    fn commit_spot_catalog(&mut self, cx: &mut Cx<'_, Pending>, catalog: SpotCatalog) {
+        let SpotCatalog {
+            meta,
+            markets,
+            tickers,
+            excluded,
+        } = catalog;
+        self.register_spot(cx, &meta, &markets);
+        let count = markets.len();
+        self.commit_discovery(cx, markets, tickers, excluded);
+        self.spot_committed = true;
+        cx.log(
+            LogLevel::Info,
+            format!("Loaded {count} Hyperliquid spot markets"),
+        );
+        self.account_prices(cx);
+        // A late catalogue: spot rows read before it were skipped. A scheduled
+        // refresh cannot be swallowed by an orders read already in flight.
+        if self.account.started && !self.options.public_data_only && self.user().is_some() {
+            self.schedule_orders(cx);
+            self.refresh_spot_holdings(cx);
+        }
+    }
+    fn spot_markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(
+            LogLevel::Warning,
+            format!("Failed to load Hyperliquid spot markets; retrying: {error}"),
+        );
+        self.startup.failed(cx, (SPOT_SCOPE.into(), 0));
     }
     fn rest(&self) -> &'static str {
         if self.options.testnet {
@@ -238,6 +398,10 @@ impl Hyperliquid {
         if let Some((dex, offset)) = self.dex_queue.pop_front() {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
+            self.perps_published = true;
+            if let Some(catalog) = self.spot_catalog.take() {
+                self.commit_spot_catalog(cx, catalog);
+            }
             self.account_start(cx);
             self.connect(cx);
         }
@@ -291,7 +455,10 @@ impl Hyperliquid {
         for market in &markets {
             self.excluded.remove(&market.id.to_ascii_lowercase());
             // Account start seeded only the markets known then.
-            if self.account.started && cx.store.setting(&market.symbol).is_none() {
+            if self.account.started
+                && self.has_setting(market)
+                && cx.store.setting(&market.symbol).is_none()
+            {
                 let seed = self.seed_setting(market);
                 cx.store.update_setting(&market.symbol, |s| *s = seed);
             }
@@ -305,6 +472,24 @@ impl Hyperliquid {
             }
         }
         cx.store.set_markets(all);
+        // `set_markets` clears the table; its rows index the new market snapshot.
+        if !self.underlying.is_empty() {
+            let rows = cx
+                .store
+                .markets()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, market)| {
+                    let (name, full_name) = self.underlying.get(&market.symbol)?;
+                    Some(safe_cex_engine::model::UnderlyingToken {
+                        market: index as u32,
+                        name: name.clone(),
+                        full_name: full_name.clone(),
+                    })
+                })
+                .collect();
+            cx.store.set_underlying_tokens(rows);
+        }
         let mut all = cx.store.tickers().to_vec();
         for ticker in tickers {
             // Discovery retries hydrate missing contexts, preserving live quotes.
@@ -905,6 +1090,9 @@ impl Venue for Hyperliquid {
             self.spot_meta(cx);
         } else {
             self.meta(cx, String::new(), 0);
+            if self.spot_markets {
+                self.spot_meta(cx);
+            }
         }
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1001,6 +1189,23 @@ impl Venue for Hyperliquid {
                 excluded,
                 valid,
                 stage,
+                ..
+            } if !self.spot => {
+                self.merged_spot_meta(
+                    cx,
+                    meta.filter(|_| valid && stage == 2),
+                    markets,
+                    tickers,
+                    excluded,
+                );
+            }
+            Pending::SpotMeta {
+                meta,
+                markets,
+                tickers,
+                excluded,
+                valid,
+                stage,
                 attempt,
             } => {
                 if !valid || stage != 2 {
@@ -1028,31 +1233,8 @@ impl Venue for Hyperliquid {
                     })
                 });
                 self.core_discovery_incomplete = !complete;
-                if let Some(meta) = meta {
-                    for native in meta.universe.into_iter().filter_map(|row| row.0) {
-                        if let Some(m) = markets.iter().find(|m| m.id == native.name) {
-                            self.assets.insert(m.symbol.clone(), 10_000 + native.index);
-                            if let Some(token) = native.tokens.first() {
-                                let replace = self
-                                    .spot_tokens
-                                    .get(token)
-                                    .and_then(|s| {
-                                        markets
-                                            .iter()
-                                            .find(|m| &m.symbol == s)
-                                            .or_else(|| cx.store.market(s))
-                                    })
-                                    .is_none_or(|existing| {
-                                        existing.quote != "USDC" && m.quote == "USDC"
-                                    });
-                                if replace {
-                                    self.spot_tokens.insert(*token, m.symbol.clone());
-                                }
-                            }
-                            self.coins
-                                .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
-                        }
-                    }
+                if let Some(meta) = &meta {
+                    self.register_spot(cx, meta, &markets);
                 }
                 if complete || !markets.is_empty() {
                     self.commit_discovery(cx, markets, tickers, excluded);
@@ -1269,6 +1451,9 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::SpotMeta { .. } if !self.spot => {
+                self.spot_markets_failed(cx, error);
+            }
             Pending::SpotMeta { .. } => self.startup.failed(cx, (String::new(), 0)),
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
@@ -1294,7 +1479,7 @@ impl Venue for Hyperliquid {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset)) = self.startup.on_timer(timer) {
-            if self.spot {
+            if self.spot || dex == SPOT_SCOPE {
                 self.spot_meta(cx);
             } else {
                 self.meta(cx, dex, offset);

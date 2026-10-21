@@ -28,8 +28,7 @@ on initial connection and reconnect. Public subscription commands are intercepte
 by the engine for both policies; unsolicited public payloads on the private socket
 are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
-revaluation so UPNL and available margin follow provider prices. This does not
-add spot support to Rust.
+revaluation so UPNL and available margin follow provider prices.
 
 ## Rust margin settings and standalone spot orders
 
@@ -833,8 +832,9 @@ The alias lands on **`base` and `prettySymbol`**; `symbol` and `id` keep the ven
 
 ### Rust standalone spot product
 
-`hyperliquidspot` selects `Hyperliquid::new_spot` in the existing Rust crate;
-it does not enable combined spot/perpetual accounts in `hyperliquid`.
+`hyperliquidspot` selects `Hyperliquid::new_spot` in the existing Rust crate.
+Combined spot/perpetual accounts are the `hyperliquid` engine with
+`enable_spot_markets` (below).
 Native spot asset IDs are `10000 + universe.index`, with eight-minus-size
 price decimals and fixed 1x/cross settings. Both token indices determine the
 display symbol and actual quote: `HYPE/USDC` and `HYPE/USDH` must stay distinct.
@@ -859,6 +859,43 @@ Other spot invariants worth keeping:
 - **Pairs with a null `midPx`, or with no matching asset context at all, are skipped** (`if (!sourceTicker?.midPx) continue`) rather than published as unpriceable markets. The no-context case is the likelier one given the 316-universe-vs-707-contexts shape.
 - **Spot loading is best-effort**, bounded by `SPOT_MARKETS_LOAD_TIMEOUT_MS` and swallowing its own errors. A slow or failing spot call must never delay or break perp startup.
 - `getSpotCollateralMarkPrice()` now prefers the real `{COIN}/USDC` spot ticker and falls back to the perp ticker, fixing spot-only tokens that previously contributed **0 notional** to a unified-account balance. Note this only helps accounts that opted into spot — with the toggle off no spot tickers exist, so the 0-notional gap remains for them. The field preference within a ticker is deliberately unchanged (`mark -> last -> index`), because this balance path is NOT gated by `enableSpotMarkets` and re-ordering would re-value collateral for users who never opted in.
+
+### Rust merged spot markets (`enable_spot_markets`)
+
+The perp engine's `spot_markets` mode mirrors `fetchSpotMarketsAndTickers`;
+the standalone `spot` mode is unchanged. Every per-order decision reads
+`market.is_spot`, never the venue mode.
+
+- **Discovery**: `spotMetaAndAssetCtxs` runs alongside the perp read. Its
+  result is held until the perp and HIP-3 catalogue is published, so spot lists
+  after both, as in TS. The Unit alias goes on `base`/`pretty_symbol` only.
+  Spot tickers carry no oracle or funding. A failed read logs a warning and
+  retries on the discovery backoff (key `@spot`); perps never wait on it.
+- **Settings and streams**: spot pairs seed 1x cross and get no
+  `activeAssetData`. `setLeverage`/`setMarginType` on a spot pair are no-ops.
+  `spotState` is subscribed and REST-refreshed whenever spot holdings are
+  tracked (`tracks_spot_holdings`: unified/portfolio or spot enabled).
+- **Balance**: standard accounts keep perp-only totals; holdings publish as
+  coin balances valued by the TS `getSpotCollateralMarkPrice` ladder, written
+  only when the valuation changes.
+- **Orders and fills**: spot rows from `frontendOpenOrders`/`orderUpdates` are
+  kept. Cancels use the spot asset id (10000 + index). A spot fill emits a fill
+  event and refreshes holdings, never a position.
+- **Trading**: 8 - szDecimals price decimals; never reduce-only; base price
+  last, mid, mark, index.
+
+- **Underlying token disclosure**: each merged spot pair publishes its venue
+  token name and full name in the typed `UNDERLYING_TOKENS` frame section; the
+  bridge applies them as TS's `info.hlTokenName`/`hlTokenFullName`, which the
+  web Margin "Underlying Token" row reads (e.g. `UBTC (Unit Bitcoin)` behind
+  `BTC/USDC`). This is a risk disclosure for a wrapped asset behind a familiar
+  name; keep it whenever the display alias exists.
+- Until the spot catalogue is committed, spot open-order rows are skipped
+  rather than invalidating the snapshot, so a failing spot read never hides
+  perp orders; standard accounts never value spot as collateral.
+
+Gated by `sdk-rs/venues/hyperliquid/tests/spot_markets.rs` and the
+`hyperliquid-spot` private replay (`rust:private-tape-hyperliquid --spot`).
 
 ### Case-Insensitive Lookup
 
