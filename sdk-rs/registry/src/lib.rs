@@ -410,7 +410,10 @@ pub fn build<T: Visit>(
         feature = "okx"
     ))]
     local_signing_rules(venue, &options)?;
-    if let Some(read) = &options.read_credentials {
+    // AsterDEX's read agent travels in `asterdex.readKey`/`readSecret`; it ignores these.
+    if let Some(read) = &options.read_credentials
+        && venue != "asterdex"
+    {
         read.validate().map_err(invalid)?;
     }
     #[cfg(feature = "weex")]
@@ -1518,8 +1521,15 @@ mod tests {
         assert_eq!(read.key, "read");
         assert_eq!(read.secret, "read-secret");
         assert_eq!(read.passphrase.as_deref(), Some("read-pass"));
+        let missing: EngineOptions =
+            serde_json::from_str(r#"{"readCredentials":{"key":"read"}}"#).unwrap();
         assert!(
-            serde_json::from_str::<EngineOptions>(r#"{"readCredentials":{"key":"read"}}"#).is_err()
+            missing
+                .read_credentials
+                .as_ref()
+                .unwrap()
+                .validate()
+                .is_err()
         );
     }
 }
