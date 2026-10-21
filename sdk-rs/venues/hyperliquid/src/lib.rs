@@ -842,6 +842,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

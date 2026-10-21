@@ -690,13 +690,16 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 Verdict: reads and streaming match; writes and lifecycle do not yet. Blocks
 further cutover and warrants re-checking coinbase, Orderly, txflow.
 
-- High: cancel sends ids only and venues drop ids not yet in their store, so a
+- High: ~~cancel sends ids only and venues drop ids not yet in their store, so a
   chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
-  `bybit/src/trading.rs:422`); ~~`setLeverage` drops side (see Bitget)~~; a wasm
+  `bybit/src/trading.rs:422`)~~ (unknown ids fail explicitly, RUST_UNKNOWN_CANCEL;
+  a cancel or amend naming an acknowledged placement waits in the engine until
+  the store has it, `engine/src/placement_acks.rs`); ~~`setLeverage` drops side (see Bitget)~~; a wasm
   panic freezes the account silently — no containment in `host.mjs:131,175`;
   `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
   `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
-  subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
+  ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
+  (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
@@ -706,8 +709,10 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
   engine (needs a resync command); `validateAccount` leaves a started engine.
 - Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
-  `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
-  on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
+  `num::adjust` with step ≤ 0; ~~no command deadline, `execute` drops the batch tail
+  on an unknown action~~ (wasm host: 120 s deadline with unknown write outcome,
+  `hostcommand.test.mjs`; batch tail kept, "unknown actions preserve batch tail
+  completions"; the undeployed native host has no command deadline); candles drop `lastSide`, orders lack generic `triggerType`.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.

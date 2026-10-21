@@ -552,6 +552,10 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

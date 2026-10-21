@@ -591,6 +591,10 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
         self.account_tick_interval(cx, interval_ms);
     }

@@ -383,7 +383,7 @@ pub enum Command {
 
 #[cfg(feature = "order-locks")]
 impl Command {
-    fn completion_id(&self) -> Option<CommandId> {
+    pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
             | Self::AmendOrderWithSymbol { command, .. }
@@ -561,6 +561,7 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
     actions: Vec<Action>,
+    placement_acks: crate::placement_acks::PlacementAcks,
     public_feed_policy: PublicFeedPolicy,
     pending: HashMap<RequestId, P>,
     signatures: Vec<(RequestId, PendingSignature)>,
@@ -589,6 +590,7 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             order_response_token: None,
             actions: Vec::new(),
+            placement_acks: Default::default(),
             public_feed_policy: PublicFeedPolicy::Direct,
             pending: HashMap::new(),
             signatures: Vec::new(),
@@ -951,6 +953,9 @@ impl<P> Cx<'_, P> {
             self.io.active_commands.remove(&command);
         }
         self.io
+            .placement_acks
+            .finished(command, result.as_deref().ok(), self.now);
+        self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
     }
@@ -989,6 +994,7 @@ impl<P> Cx<'_, P> {
             self.io.order_locks.finish(command, true);
             self.io.active_commands.remove(&command);
         }
+        self.io.placement_acks.finished(command, None, self.now);
         self.io.actions.push(Action::Notice(Notice::CommandFailed {
             command,
             error: error.into(),
@@ -1042,6 +1048,11 @@ pub trait Venue {
     }
     /// Prevent overlapping precomputed amendments and cancellations.
     fn guard_order_mutations(&self) -> bool {
+        false
+    }
+    /// Cancel and amend route only through stored orders: hold one naming an
+    /// acknowledged placement until the store has it (`placement_acks`).
+    fn cancel_needs_stored_order(&self) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -1173,6 +1184,8 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
+    /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
+    ack_timer: Option<(TimerId, f64)>,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
     account_startup: bool,
     shared_books: HashMap<String, Book>,
@@ -1205,6 +1218,7 @@ impl<V: Venue> Engine<V> {
             io: Io::default(),
             started: false,
             startup_watch_at: None,
+            ack_timer: None,
             account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -1424,6 +1438,53 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        if let Event::TimerFired { timer } = &event
+            && self.ack_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.ack_timer = None;
+        } else {
+            self.handle_event(now, event);
+        }
+        if self.venue.cancel_needs_stored_order() {
+            self.release_held(now);
+        }
+    }
+
+    /// Dispatch held cancellations whose acknowledged ids are now stored, or
+    /// whose wait expired, then re-arm the wake-up for the remaining ones.
+    fn release_held(&mut self, now: f64) {
+        for command in self.io.placement_acks.release(&self.store, now) {
+            self.handle_event(now, Event::Command(command));
+        }
+        let next = self.io.placement_acks.next_deadline();
+        if self.ack_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.ack_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.ack_timer = Some((timer, at_ms));
+        }
+    }
+
+    fn handle_event(&mut self, now: f64, event: Event<'_>) {
+        if self.venue.cancel_needs_stored_order()
+            && let Event::Command(command) = &event
+        {
+            match command {
+                Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
+                Command::CancelOrders { .. } | Command::AmendOrder { .. }
+                    if self.io.placement_acks.hold(&self.store, command, now) =>
+                {
+                    self.release_held(now);
+                    return;
+                }
+                _ => {}
+            }
+        }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
             && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
             | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
@@ -4130,5 +4191,246 @@ mod startup_watch_tests {
         store.set_orders(vec![]);
         store.set_positions(vec![]);
         assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod placement_ack_tests {
+    use super::*;
+    use crate::model::{Order, OrderSide, OrderStatus, OrderType};
+    use crate::placement_acks::ACK_WAIT_MS;
+
+    /// Routes cancellation only through stored orders, like Bybit or Binance.
+    struct StoredOnly {
+        needs_stored: bool,
+        sent: Vec<String>,
+    }
+
+    fn order(id: &str) -> Order {
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    impl Venue for StoredOnly {
+        type Pending = ();
+        fn cancel_needs_stored_order(&self) -> bool {
+            self.needs_stored
+        }
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        /// The private stream reports the order named by the message.
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
+            cx.store.upsert_order(order(text));
+        }
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {
+            panic!("the venue sets no timers");
+        }
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+            match command {
+                Command::PlaceOrders { command, .. } => cx.done(command, Ok(r#"["7"]"#.into())),
+                Command::CancelOrders { command, ids } => {
+                    if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
+                        cx.done(command, Err(format!("Order {id} not found")));
+                    } else {
+                        self.sent.extend(ids);
+                        cx.done(command, Ok("null".into()));
+                    }
+                }
+                Command::AmendOrder { command, id, .. } => {
+                    if cx.store.order(&id).is_none() {
+                        cx.done(command, Err(format!("Order {id} not found")));
+                    } else {
+                        self.sent.push(format!("amend {id}"));
+                        cx.done(command, Ok(format!(r#"["{id}"]"#)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn engine(needs_stored: bool) -> Engine<StoredOnly> {
+        let mut engine = Engine::new(StoredOnly {
+            needs_stored,
+            sent: Vec::new(),
+        });
+        engine.start(0.);
+        engine
+    }
+
+    fn place(engine: &mut Engine<StoredOnly>, now: f64) {
+        engine.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: Vec::new(),
+            }),
+        );
+    }
+
+    fn cancel(engine: &mut Engine<StoredOnly>, now: f64, command: CommandId, id: &str) {
+        engine.handle(
+            now,
+            Event::Command(Command::CancelOrders {
+                command,
+                ids: vec![id.into()],
+            }),
+        );
+    }
+
+    fn results(engine: &mut Engine<StoredOnly>) -> Vec<(CommandId, Result<String, String>)> {
+        engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandDone { command, result }) => Some((command, result)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn own_timer(engine: &mut Engine<StoredOnly>) -> Option<(TimerId, f64)> {
+        engine
+            .drain_actions()
+            .fold(None, |armed, action| match action {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                Action::ClearTimer { .. } => None,
+                _ => armed,
+            })
+    }
+
+    #[test]
+    fn cancel_of_an_acknowledged_placement_waits_for_the_stream_then_reaches_the_venue() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        assert_eq!(results(&mut engine), [(1, Ok(r#"["7"]"#.into()))]);
+        // A chaser stopped mid-placement cancels the returned id at once.
+        cancel(&mut engine, 1., 2, "7");
+        assert!(
+            engine.venue.sent.is_empty(),
+            "held until the store has the order"
+        );
+        assert!(results(&mut engine).is_empty());
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert_eq!(engine.venue.sent, ["7"]);
+        assert_eq!(results(&mut engine), [(2, Ok("null".into()))]);
+    }
+
+    #[test]
+    fn an_amendment_of_an_acknowledged_placement_waits_too() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "7".into(),
+                price: Some(2.),
+                amount: None,
+            }),
+        );
+        assert!(engine.venue.sent.is_empty());
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert_eq!(engine.venue.sent, ["amend 7"]);
+    }
+
+    #[test]
+    fn a_held_cancel_is_dispatched_at_its_deadline_and_fails_explicitly() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        let (timer, at_ms) = own_timer(&mut engine).expect("an engine wake-up is armed");
+        assert_eq!(at_ms, 1. + ACK_WAIT_MS);
+        engine.handle(at_ms, Event::TimerFired { timer });
+        assert_eq!(
+            results(&mut engine),
+            [(2, Err("Order 7 not found".into()))],
+            "the stream never reported the order: the venue answers, never silence"
+        );
+        // The expired id is not held again.
+        cancel(&mut engine, at_ms + 1., 3, "7");
+        assert_eq!(results(&mut engine), [(3, Err("Order 7 not found".into()))]);
+    }
+
+    #[test]
+    fn released_cancel_disarms_the_wake_up() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        let (timer, _) = own_timer(&mut engine).unwrap();
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert!(engine.drain_actions().any(
+            |action| matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)
+        ));
+    }
+
+    #[test]
+    fn unrelated_ids_and_opted_out_venues_are_never_held() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "unknown");
+        assert_eq!(
+            results(&mut engine),
+            [(2, Err("Order unknown not found".into()))]
+        );
+
+        let mut engine = engine_without_hold();
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    fn engine_without_hold() -> Engine<StoredOnly> {
+        engine(false)
     }
 }

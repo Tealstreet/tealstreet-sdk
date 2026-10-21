@@ -1900,6 +1900,10 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
