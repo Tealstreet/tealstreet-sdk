@@ -148,6 +148,7 @@ history ownership checks #1593 at `559a633a2c5`, and the direct SDK journal guar
 checks #1591 at `083dbb5121b`. Focused NX hook checks use `65e086a3c90`.
 The typed-error catch-up checks #1589 at `ef362708305`; the incoming venue
 read/display notes are retained, and #1607/#1610 only change harness proof.
+The envelope-only credential-evidence follow-up checks #1611 at `a07b6b35c87`.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -213,6 +214,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1593 / `559a633a2` | Native/DO command diagnostics remap `fields.command` to the owning client's ID and target that owner. Command-correlated `history.incomplete` survives an Error minimum level as metadata; direct JSON consumers must correlate it before the result and carry completeness onward. Worker/hosted array-flag forwarding remains open (B11). |
 | #1591 / `083dbb512` | Direct SDK journal folding rejects flagged fills and symbol-scoped income. With complete account-wide fills it discards flagged income enrichment and leaves funding unattributed. This guards direct folds; forwarding flags and NX historical coverage remain caller work (B11). |
 | #1589 / `ef3627083` | Bitunix command failures gain the existing classified-error/partial-detail contract while preserving native text/codes. Dispatched uncertain writes stay `unknown`; observed effective legs/IDs survive later batch failure, and only definitive rejections enter existing recovery writes. B9 callers must inspect fields and reconcile effects before retrying; no new API shape. |
+| #1611 / `a07b6b35c` | For eligible signed BingX/MEXC/WEEX list reads, a typed success envelope with its required list proves Accepted even when rows are skipped, uncatalogued or held. Malformed/missing required envelope data supplies no outcome before grouped auth state changes; typed credential rejection retains precedence. Row diagnostics/financial retention, classifier scope and caller shapes stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -552,6 +554,23 @@ Evidence is account-scoped, not owned by a pending command; older clients are
 not sent the new notice. Matching WASM/JS hosts use the additive action/callback.
 This does not replace PR6's native coded-event deployment prerequisite.
 
+#1611 separates credential acceptance from row quality. For already eligible,
+tagged signed BingX/MEXC/WEEX list reads, a typed success envelope containing
+its valid required list (including an empty list) proves Accepted even if rows
+are skipped, uncatalogued or held. Missing, null, wrongly shaped or truncated
+required envelope/list data supplies no outcome before grouped auth state can
+change; typed credential rejection still takes precedence. A malformed success
+cannot clear a rejected grouped endpoint, and a sibling's success cannot clear
+an endpoint that still rejects. Non-list mode/metadata reads retain their typed
+validation; existing tagging, resend and cycle fences remain.
+
+Row rejection remains a data diagnostic, never credential Rejected. Financial
+reducers keep their existing policy: a BingX bad balance list can retain the old
+snapshot while reporting Accepted; MEXC/WEEX can commit valid peers and report
+`row.skipped` while accepting credentials. Auth acceptance therefore does not
+prove snapshot freshness or completeness. No new venue classifier, caller shape
+or explicit network resync is introduced.
+
 For Rust `coinbase`/`coinbasespot`, any defined saved secondary credential field
 (including empty/partial fields) causes the secondary credential fields and
 `secondaryProxyUrl` to be removed from an effective options copy. Private JWT
@@ -573,8 +592,7 @@ a new write was sent.
 Batch failure retains observed accepted IDs and confirmed effects. After partial
 batch-place acknowledgement failures, independent later legs may still run before
 the aggregate rejects once; transport, HTTP, envelope and cancel failures reject
-immediately. An effective leg
-clears an aggregate `notSent`/`rejected` label, while an uncertain leg keeps
+immediately. An effective leg clears an aggregate `notSent`/`rejected` label, while an uncertain leg keeps
 `unknown`. Reconcile partial IDs/effects before retrying. Only definitive
 rejection may enter the existing recovery-write path; no automatic caller retry
 is introduced. This extends B9's field-based integration to Bitunix, with no
@@ -653,7 +671,8 @@ venue messages they replace. Codes available on landing: `ExchangeError`
 (#1424) on rejected **command promises**, with `kind` (`rejected`,
 `invalidInput`, `authInvalid`, `authExpired`, `authPermission`, `rateLimited`,
 `network`, `timeout`, `venueUnavailable`, `unsupported`, `internal`), `outcome`
-(`notSent`, `rejected`, `unknown`) and `venueCode`, for the classified venue families listed in B9; host `error.code` (`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`,
+(`notSent`, `rejected`, `unknown`) and `venueCode`, for the classified venue
+families listed in B9; host `error.code` (`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`,
 `ENGINE_PROTOCOL_ERROR`, `ENGINE_DISPOSED`, `ENGINE_DEAD`, #1375). Through the
 web worker the error is a plain `Error` carrying those fields, so match
 `(err as { kind?: string }).kind`, never `instanceof ExchangeError`. The
