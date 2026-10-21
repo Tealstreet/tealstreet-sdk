@@ -26,11 +26,15 @@ afterEach(() => {
 
 const payloadSigner = vi.fn(async () => ({ signature: 'never-requested' }));
 
-const recordEngine = (name: string) => {
+const recordEngine = (name: string, nativeFailure = false) => {
   const construct = vi.fn();
   class Engine {
     constructor(venue: string, options: string) {
       construct(venue, JSON.parse(options));
+      if (nativeFailure) {
+        const message = `Rust ${venue} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
+        throw Object.assign(new Error(message), { venueError: JSON.stringify({ message, kind: 'unsupported', outcome: 'notSent' }) });
+      }
     }
     capabilities() {
       return engineCapabilities(name);
@@ -38,11 +42,14 @@ const recordEngine = (name: string) => {
     free() {}
   }
   setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
-  const transport = vi.fn(() => {
-    throw new Error('transport must not start');
-  });
+  const io = vi.fn(() => { throw new Error('I/O must not start'); });
+  const transport = vi.fn(() => ({
+    now: () => Date.now(), connect: io, request: io,
+    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clearTimeout: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
+  }));
   setRustEngineTransport(transport as never);
-  return { construct, transport };
+  return { construct, transport, io };
 };
 
 const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
@@ -67,10 +74,10 @@ it.each([
   'lighter-robinhood',
   'binance',
   'bybit',
-] as const)('refuses a payloadSigner on private %s before the engine or transport starts', async (name) => {
+] as const)('keeps native payloadSigner refusal classification on private %s before I/O', async (name) => {
   // Lighter signs locally, and a payload-only Lighter account starts public by contract.
   for (const secret of name.startsWith('lighter') ? ['local-secret'] : ['', 'local-secret']) {
-    const { construct, transport } = recordEngine(name);
+    const { construct, transport, io } = recordEngine(name, true);
     const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
       kind: 'unsupported',
@@ -78,8 +85,9 @@ it.each([
       message: expect.stringContaining(`Rust ${name} does not support payloadSigner`),
     });
     expect((failure as Error).message).toContain('remote signing is unsupported');
-    expect(construct).not.toHaveBeenCalled();
-    expect(transport).not.toHaveBeenCalled();
+    expect(construct).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledOnce();
+    expect(io).not.toHaveBeenCalled();
   }
   expect(payloadSigner).not.toHaveBeenCalled();
 });
@@ -90,7 +98,7 @@ it('keeps Paradex delegated signing and explicitly public-only accounts', async 
     ['bybit', { payloadSigner, publicDataOnly: true }],
   ] as const) {
     const { transport } = recordEngine(name);
-    // The recording transport throws once reached, which proves startup passed the refusal.
+    // Host creation reaches the constructor; only native policy can refuse it.
     const failure = await start(name, options as Partial<ExchangeOptions>).catch((error: unknown) => error);
     expect(String((failure as Error)?.message)).not.toContain('does not support payloadSigner');
     expect(transport).toHaveBeenCalled();
@@ -98,7 +106,7 @@ it('keeps Paradex delegated signing and explicitly public-only accounts', async 
 });
 
 it('reports the structured refusal through start and validateAccount', async () => {
-  const { construct, transport } = recordEngine('hyperliquid');
+  const { construct, transport, io } = recordEngine('hyperliquid', true);
   const hyperliquid = new RustEngineExchange(
     'hyperliquid',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
@@ -117,8 +125,9 @@ it('reports the structured refusal through start and validateAccount', async () 
     kind: 'unsupported',
     error: expect.stringContaining('Rust coinbase does not support payloadSigner'),
   });
-  expect(construct).not.toHaveBeenCalled();
-  expect(transport).not.toHaveBeenCalled();
+  expect(construct).toHaveBeenCalledTimes(2);
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(io).not.toHaveBeenCalled();
 });
 
 it('routes only TS venues that sign with a payload signer to TS', () => {
@@ -157,7 +166,7 @@ describe('factory and worker loaders', () => {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {
-        recordEngine(name);
+        recordEngine(name, true);
         const exchange = await createExchange(name, options);
         running.push(exchange as RustEngineExchange);
         expect(exchange, name).toBeInstanceOf(RustEngineExchange);

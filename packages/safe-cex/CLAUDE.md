@@ -146,6 +146,13 @@ Aster API-version metadata. `resolveConstruction` exposes the same resolution
 without engine construction or I/O. CI compares both evaluators for every
 registered name. Explicit-private Paradex validation belongs to the registry.
 
+The bridge forwards raw Hyro mode and production/simulator URL maps; the
+registry selects network endpoints. Native callers can retain explicit
+`endpoints` when the raw `hyrotrader` config is absent. Private non-Paradex
+`payloadSigner` refusal also belongs to the registry. WASM constructor errors
+carry JSON `venueError` detail, which the bridge wraps as `ExchangeError` to
+preserve `unsupported`/`notSent` through startup and account validation.
+
 ## Rust engine capabilities
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,

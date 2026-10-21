@@ -8,6 +8,7 @@ import type {
   EngineHost as EngineHostType,
   Transport,
   WasmEngineLike,
+  VenueErrorDetail,
 } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -295,6 +296,21 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 export type WasmEngineModule = {
   resolveConstruction?: (venue: string, optionsJson: string) => string;
   WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike;
+};
+
+/** Preserve native constructor classification at the same boundary as command failures. */
+const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string): WasmEngineLike => {
+  try {
+    return new Constructor(venue, options);
+  } catch (error) {
+    const encoded = (error as { venueError?: unknown } | null)?.venueError;
+    let detail: VenueErrorDetail | undefined;
+    if (typeof encoded === 'string') {
+      try { detail = JSON.parse(encoded) as VenueErrorDetail; } catch { /* Older or custom loaders retain their original error. */ }
+    }
+    if (detail && typeof detail.message === 'string') throw new ExchangeError(detail.message, detail);
+    throw error;
+  }
 };
 
 /**
@@ -695,12 +711,6 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Factories route these to TS. A private engine account would otherwise ignore the
-    // signer and send unsigned requests, even on venues exempt from the Rust local-credential rule.
-    if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
-      const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
-      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
         if (!this.isDisposed) return;
@@ -732,13 +742,12 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
     let transport = createEngineTransport(this.name, this.options, engineTransport());
     if (this.name === 'paradex') {
       transport = paradexSigningTransport(this.options, transport);
       if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
     }
-    const engine = new WasmEngine(
+    const engine = constructEngine(WasmEngine,
       this.name,
       JSON.stringify({
         key,
@@ -763,7 +772,19 @@ export class RustEngineExchange extends BaseExchange {
         },
         remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         extra: { kucoinBroker: this.options.extra?.kucoinBroker },
-        endpoints,
+        hyrotrader: {
+          mode: this.options.extra?.hyrotraderMode,
+          production: {
+            rest: HYROTRADER_PROD_URL,
+            publicWs: HYROTRADER_PROD_WS_URL.public.linear,
+            privateWs: HYROTRADER_PROD_WS_URL.private,
+          },
+          simulator: {
+            rest: HYROTRADER_SIMULATOR_URL,
+            publicWs: HYROTRADER_SIMULATOR_WS_URL.public.linear,
+            privateWs: HYROTRADER_SIMULATOR_WS_URL.private,
+          },
+        },
         recvWindow: this.options.extra?.recvWindow,
         applicationId,
         subaccount: this.options.subaccount,
@@ -1064,17 +1085,6 @@ export class RustEngineExchange extends BaseExchange {
     } catch {
       // The engine reports tier-read failures itself; the last known tier stays.
     }
-  };
-
-  private hyroEndpoints = () => {
-    const simulator = this.options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
-    const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
-    const ws = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
-    const network = this.options.testnet ? 'testnet' : 'livenet';
-    if (!rest[network] || !ws.public.linear[network] || !ws.private[network]) {
-      throw new Error('HyroTrader REST/public/private URLs are not configured');
-    }
-    return { rest: rest[network], publicWs: ws.public.linear[network], privateWs: ws.private[network] };
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
