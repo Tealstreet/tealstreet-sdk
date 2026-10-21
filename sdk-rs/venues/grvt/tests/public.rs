@@ -711,3 +711,133 @@ fn suppressed_public_feed_is_not_supervised() {
     );
     assert_eq!(fired, 1, "only the unanswered catalog refresh fires");
 }
+
+#[test]
+fn rest_queries_do_not_publish_or_repair_live_book_or_account_state() {
+    let (mut e, s) = boot();
+    let symbol = "BTC_USDT_PERP";
+    e.handle(
+        1700000000003.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: symbol.into(),
+        }),
+    );
+    ws(
+        &mut e,
+        s,
+        r#"{"s":"v1.book.s","s1":"BTC_USDT_Perp","sn":"0","f":{"i":"BTC_USDT_Perp","b":[{"p":"99","s":"4"}],"a":[]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let before = (
+        e.store().tickers().to_vec(),
+        e.store().balance().clone(),
+        e.store().positions().to_vec(),
+        e.store().orders().to_vec(),
+    );
+    for (command, status, body) in [
+        (7, 200, r#"{"r":{"b":[{"p":"1","s":"2"}],"a":[]}}"#),
+        (8, 200, r#"{"c":1000,"m":"invalid session"}"#),
+    ] {
+        e.handle(
+            1700000000011.0,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: symbol.into(),
+                limit: None,
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(actions.len(), 1);
+        let Action::Http(request) = &actions[0] else {
+            panic!("public REST query")
+        };
+        e.handle(
+            1700000000012.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "Set-Cookie: gravity=foreign; Path=/\nX-Grvt-Account-Id: foreign",
+                    body,
+                },
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        if command == 7 {
+            assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:7,result}) if serde_json::from_str::<serde_json::Value>(result).unwrap()["bids"][0]["price"]==1.0)));
+        } else {
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 8, .. })
+            )));
+        }
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_)
+                | Action::WsConnect { .. }
+                | Action::WsClose { .. }
+                | Action::SetTimer { .. }
+                | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        )));
+        assert_eq!(e.venue().book(symbol).unwrap().bids(), [(99.0, 4.0)]);
+        assert_eq!(
+            (
+                e.store().tickers().to_vec(),
+                e.store().balance().clone(),
+                e.store().positions().to_vec(),
+                e.store().orders().to_vec()
+            ),
+            before
+        );
+    }
+    e.handle(
+        1700000000013.0,
+        Event::Command(Command::FetchOrderBook {
+            command: 9,
+            symbol: symbol.into(),
+            limit: None,
+        }),
+    );
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        1700000000014.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: symbol.into(),
+        }),
+    );
+    e.handle(
+        1700000000015.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: symbol.into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1700000000016.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"r":{"b":[{"p":"1","s":"2"}],"a":[]}}"#,
+            },
+        },
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 9, .. })
+    )));
+    assert!(e.venue().book(symbol).is_none());
+    ws(
+        &mut e,
+        s,
+        r#"{"s":"v1.book.s","s1":"BTC_USDT_Perp","sn":"0","f":{"i":"BTC_USDT_Perp","b":[{"p":"98","s":"5"}],"a":[]}}"#,
+    );
+    assert_eq!(e.venue().book(symbol).unwrap().bids(), [(98.0, 5.0)]);
+}
