@@ -2,6 +2,7 @@
 use crate::wire::*;
 use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
@@ -12,6 +13,9 @@ use std::collections::{HashMap, HashSet};
 pub const PRIVATE: usize = 1;
 const CONFIG_POLL_MS: f64 = 30_000.0;
 const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order_stop"];
+const SKIP_LOG_LIMIT: usize = 4_096;
+/// Store-id suffixes one native order row may expand into.
+const ORDER_SUFFIXES: [&str; 4] = ["", "_sl", "_tp", "_tsl"];
 
 // Match the SDK's decimal arithmetic without reducing native coin precision.
 fn decimal_result(a: f64, b: f64, result: f64) -> f64 {
@@ -45,6 +49,44 @@ fn reserve_leverage(value: &str) -> f64 {
         .max(1.0)
 }
 
+/// What a list row that failed to decode still says about its identity.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct RowIdentity {
+    #[serde(deserialize_with = "lenient")]
+    inst_id: String,
+    #[serde(deserialize_with = "lenient")]
+    inst_type: String,
+    #[serde(deserialize_with = "lenient")]
+    ord_id: String,
+    #[serde(deserialize_with = "lenient")]
+    algo_id: String,
+    #[serde(deserialize_with = "lenient")]
+    state: String,
+}
+
+/// A string field, or empty when it holds anything else; one bad field keeps the rest.
+fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Field<'a> {
+        Text(#[serde(borrow)] std::borrow::Cow<'a, str>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Field::deserialize(d)? {
+        Field::Text(text) => text.into_owned(),
+        Field::Other(_) => String::new(),
+    })
+}
+
+fn terminal_state(state: &str) -> bool {
+    matches!(
+        state,
+        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
+    )
+}
+
 pub enum Request {
     Config {
         mode_version: u64,
@@ -58,7 +100,7 @@ pub enum Request {
     Balance {
         generation: u64,
         version: u64,
-        equity: Vec<(String, f64)>,
+        equity: SnapshotBuilder<String, (String, f64)>,
         risk_rows: usize,
         invalid: bool,
     },
@@ -66,7 +108,7 @@ pub enum Request {
         generation: u64,
         version: u64,
         product: usize,
-        rows: Vec<(Position, RiskValues)>,
+        rows: SnapshotBuilder<String, (Position, RiskValues)>,
         invalid: bool,
     },
     Orders {
@@ -74,7 +116,7 @@ pub enum Request {
         version: u64,
         kind: usize,
         product: usize,
-        rows: Vec<Order>,
+        rows: SnapshotBuilder<String, Order>,
         margins: HashMap<String, (f64, String)>,
         page_count: usize,
         cursor: String,
@@ -93,8 +135,8 @@ pub struct RiskValues {
 }
 struct Join {
     generation: u64,
-    positions: Option<Vec<(Position, RiskValues)>>,
-    equity: Option<Vec<(String, f64)>>,
+    positions: Option<SnapshotBuilder<String, (Position, RiskValues)>>,
+    equity: Option<SnapshotBuilder<String, (String, f64)>>,
     position_version: u64,
     balance_version: u64,
 }
@@ -109,6 +151,8 @@ pub struct AccountState {
     pub leverage_versions: HashMap<String, u64>,
     skipped_instruments_logged: HashSet<String>,
     unlisted_logged: HashSet<String>,
+    /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
+    skip_logged: HashSet<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -123,6 +167,8 @@ pub struct AccountState {
     order_leverage: HashMap<String, (f64, String)>,
     equity: Vec<(String, f64)>,
     total_equity: Option<f64>,
+    /// A currency row was rejected: retained stale equity cannot be summed with fresh rows.
+    aggregate_held: bool,
     equity_loaded: bool,
     valuation_pending: bool,
     fills: HashMap<String, f64>,
@@ -251,7 +297,7 @@ impl Okx {
                 Pending::Account(Request::Balance {
                     generation,
                     version,
-                    equity: Vec::new(),
+                    equity: SnapshotBuilder::default(),
                     risk_rows: 0,
                     invalid: false,
                 }),
@@ -264,7 +310,7 @@ impl Okx {
                     generation,
                     version,
                     product: 0,
-                    rows: Vec::new(),
+                    rows: SnapshotBuilder::default(),
                     invalid: false,
                 }),
             );
@@ -280,7 +326,7 @@ impl Okx {
                     version: self.account.revision,
                     kind: 0,
                     product: 0,
-                    rows: Vec::new(),
+                    rows: SnapshotBuilder::default(),
                     margins: HashMap::new(),
                     page_count: 0,
                     cursor: String::new(),
@@ -433,7 +479,14 @@ impl Okx {
                         {
                             equity.push((e.ccy.into(), eq));
                         } else {
-                            *invalid = true;
+                            // A currency row that cannot be read keeps its stored equity.
+                            let message = if e.ccy.is_empty() {
+                                "OKX skipped balance row without a currency".into()
+                            } else {
+                                format!("OKX skipped malformed {} balance row", e.ccy)
+                            };
+                            self.log_skip(cx, format!("coin:{}", e.ccy), Level::Warn, message);
+                            equity.reject((!e.ccy.is_empty()).then(|| e.ccy.to_owned()));
                         }
                     }
                 }
@@ -463,11 +516,31 @@ impl Okx {
                     }
                     if let Some(row) = self.position(cx, &p) {
                         rows.push(row);
-                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                    } else if mark_pending(cx, &p) {
+                        // No price can value it yet; the account snapshot waits for one.
                         *invalid = true;
+                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                        let owned = p.pos.parse::<f64>().ok() != Some(0.0);
+                        self.reject_position(cx, rows, p.inst_id, owned);
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
+                    if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
+                        *invalid = true;
+                        return;
+                    }
+                    let inst_id = row.inst_id.as_str();
+                    if !inst_id.is_empty() && cx.store.market_by_id(inst_id).is_none() {
+                        if self.unlisted_exposure(cx, inst_id) {
+                            *invalid = true;
+                        } else {
+                            self.unlisted_skipped(cx, inst_id);
+                        }
+                        return;
+                    }
+                    self.reject_position(cx, rows, inst_id, true);
+                }
             },
             Request::Orders {
                 product,
@@ -485,29 +558,18 @@ impl Okx {
                     } else {
                         o.algo_id.into()
                     };
-                    if !self.account_scope(*product, o.inst_id, o.inst_type)
-                        || o.inst_id.is_empty()
-                        || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
-                    {
+                    if !self.account_scope(*product, o.inst_id, o.inst_type) {
                         *invalid = true;
                         return;
                     }
-                    if cx.store.market_by_id(o.inst_id).is_none()
-                        && !matches!(
-                            o.state,
-                            "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
-                        )
+                    if o.inst_id.is_empty()
+                        || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
-                        if self.unlisted_exposure(cx, o.inst_id) {
-                            *invalid = true;
-                            cx.notice(
-                                Level::Warn,
-                                code::SNAPSHOT_DISCARDED,
-                                "OKX working order market unavailable; preserving order snapshot",
-                            );
-                        } else {
-                            self.unlisted_skipped(cx, o.inst_id);
-                        }
+                        self.reject_order(cx, rows, o.ord_id, o.algo_id);
+                        return;
+                    }
+                    if cx.store.market_by_id(o.inst_id).is_none() && !terminal_state(o.state) {
+                        self.unlisted_order(cx, o.inst_id, invalid);
                         return;
                     }
                     for order in self.orders(cx, &o) {
@@ -518,8 +580,130 @@ impl Okx {
                         rows.push(order);
                     }
                 }
-                Err(_) => *invalid = true,
+                // Still a page row: paging counts it and resumes after its id when readable.
+                Err(_) => {
+                    *page_count += 1;
+                    let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
+                    let id = if row.algo_id.is_empty() {
+                        &row.ord_id
+                    } else {
+                        &row.algo_id
+                    };
+                    if !id.is_empty() {
+                        cursor.clone_from(id);
+                    }
+                    if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
+                        *invalid = true;
+                        return;
+                    }
+                    if !row.inst_id.is_empty() && cx.store.market_by_id(&row.inst_id).is_none() {
+                        // An unreadable state may be working, so it is held like one.
+                        if !terminal_state(&row.state) {
+                            self.unlisted_order(cx, &row.inst_id, invalid);
+                        }
+                        return;
+                    }
+                    self.reject_order(cx, rows, &row.ord_id, &row.algo_id);
+                }
             },
+        }
+    }
+
+    /// Rejects every leg id a position row on `inst_id` may carry; an empty id protects all.
+    /// An owned row with no stored copy is reported as an error: it commits as flat.
+    fn reject_position(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &mut SnapshotBuilder<String, (Position, RiskValues)>,
+        inst_id: &str,
+        owned: bool,
+    ) {
+        let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
+            let level = if cx.store.positions().is_empty() {
+                Level::Error
+            } else {
+                Level::Warn
+            };
+            let message = "OKX skipped position row without an instrument";
+            self.log_skip(cx, "position:".into(), level, message);
+            rows.reject(None);
+            return;
+        };
+        let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
+        let level = if owned && !stored {
+            Level::Error
+        } else {
+            Level::Warn
+        };
+        let message = format!("OKX skipped unmappable {symbol} position row");
+        self.log_skip(cx, format!("position:{symbol}"), level, message);
+        for id in [
+            symbol.clone(),
+            format!("{symbol}:long"),
+            format!("{symbol}:short"),
+        ] {
+            rows.reject(Some(id));
+        }
+    }
+
+    /// Rejects every store id an order row may expand into; a row with no id protects all.
+    fn reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &mut SnapshotBuilder<String, Order>,
+        ord_id: &str,
+        algo_id: &str,
+    ) {
+        let ids: Vec<&str> = [ord_id, algo_id]
+            .into_iter()
+            .filter(|id| !id.is_empty())
+            .collect();
+        let Some(first) = ids.first() else {
+            let message = "OKX skipped order row without an id";
+            self.log_skip(cx, "order:".into(), Level::Warn, message);
+            rows.reject(None);
+            return;
+        };
+        let message = format!("OKX skipped unmappable order {first}");
+        self.log_skip(cx, format!("order:{first}"), Level::Warn, message);
+        for id in ids {
+            for suffix in ORDER_SUFFIXES {
+                rows.reject(Some(format!("{id}{suffix}")));
+            }
+        }
+    }
+
+    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    fn log_skip(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        key: String,
+        level: Level,
+        message: impl Into<String>,
+    ) {
+        let logged = &mut self.account.skip_logged;
+        if logged.len() >= SKIP_LOG_LIMIT {
+            logged.clear();
+        }
+        if logged.insert(key) {
+            cx.notice(level, code::ROW_SKIPPED, message);
+        }
+    }
+
+    /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
+    fn rearm_skips<'a>(
+        &mut self,
+        prefix: &str,
+        clean: bool,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) {
+        let logged = &mut self.account.skip_logged;
+        if clean {
+            logged.retain(|key| !key.starts_with(prefix));
+        } else {
+            for id in ids {
+                logged.remove(&format!("{prefix}{id}"));
+            }
         }
     }
 
@@ -711,7 +895,17 @@ impl Okx {
                     return;
                 }
                 self.account.orders_in_flight = false;
+                let clean = rows.rejected() == 0;
+                let mapped: Vec<String> = rows
+                    .rows()
+                    .iter()
+                    .filter(|o| rows.allows_absence(&o.id))
+                    .map(|o| o.id.clone())
+                    .collect();
+                self.rearm_skips("order:", clean, mapped.iter().map(String::as_str));
+                // Rejected rows keep their stored copies; versions and terminals still apply.
                 let mut rows: Vec<_> = rows
+                    .commit(cx.store.orders().iter().cloned(), |o| o.id.clone())
                     .into_iter()
                     .filter(|o| {
                         !self
@@ -744,7 +938,10 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
-                cx.orders_reconciled(None);
+                // A rejected row may be an uncertain placement; it proves nothing.
+                if clean {
+                    cx.orders_reconciled(None);
+                }
                 self.trading
                     .acknowledged
                     .retain(|_, order| order.version > version);
@@ -773,7 +970,29 @@ impl Okx {
         }
         let join = self.account.join.take().expect("join ready");
         let mut positions = Vec::new();
-        let rows = join.positions.expect("positions ready");
+        let builder = join.positions.expect("positions ready");
+        let mapped: Vec<String> = builder
+            .rows()
+            .iter()
+            .filter(|(p, _)| builder.allows_absence(&p.id))
+            .map(|(p, _)| p.symbol.clone())
+            .collect();
+        self.rearm_skips(
+            "position:",
+            builder.rejected() == 0,
+            mapped.iter().map(String::as_str),
+        );
+        // Rejected rows keep their stored copies, with the risk counted for them.
+        let current: Vec<_> = cx
+            .store
+            .positions()
+            .iter()
+            .map(|p| {
+                let risk = self.account.risk.get(&p.id).cloned().unwrap_or_default();
+                (p.clone(), risk)
+            })
+            .collect();
+        let rows = builder.commit(current, |(p, _)| p.id.clone());
         let changed: HashSet<_> = self
             .account
             .position_versions
@@ -801,7 +1020,21 @@ impl Okx {
         );
         cx.store.set_positions(positions);
         if self.account.balance_version <= join.balance_version {
-            self.account.equity = join.equity.expect("equity ready");
+            let equity = join.equity.expect("equity ready");
+            let mapped: Vec<String> = equity
+                .rows()
+                .iter()
+                .filter(|(ccy, _)| equity.allows_absence(ccy))
+                .map(|(ccy, _)| ccy.clone())
+                .collect();
+            self.rearm_skips(
+                "coin:",
+                equity.rejected() == 0,
+                mapped.iter().map(String::as_str),
+            );
+            self.account.aggregate_held = equity.rejected() > 0;
+            let current = std::mem::take(&mut self.account.equity);
+            self.account.equity = equity.commit(current, |(ccy, _)| ccy.clone());
             self.account.total_equity = None;
         }
         self.account.equity_loaded = true;
@@ -1049,6 +1282,20 @@ impl Okx {
         true
     }
 
+    /// A working order on a catalogue-malformed market holds the snapshot; others are skipped.
+    fn unlisted_order(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str, invalid: &mut bool) {
+        if self.unlisted_exposure(cx, inst_id) {
+            *invalid = true;
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "OKX working order market unavailable; preserving order snapshot",
+            );
+        } else {
+            self.unlisted_skipped(cx, inst_id);
+        }
+    }
+
     fn unlisted_skipped(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
         if self.account.unlisted_logged.insert(inst_id.into()) {
             cx.notice(
@@ -1231,6 +1478,10 @@ impl Okx {
             return;
         }
         self.publish_currencies(cx);
+        // The USD balance keeps its previous value until every currency row reads again.
+        if self.account.aggregate_held {
+            return;
+        }
         let collateral = self
             .account
             .total_equity
@@ -1335,6 +1586,7 @@ impl Okx {
         if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
             entry.insert(cx.now);
             cx.fill(Fill {
+                id: None,
                 order_id: row.ord_id.into(),
                 symbol: m.symbol.clone(),
                 side: side(row.side),
@@ -1546,6 +1798,7 @@ impl Okx {
                 self.account.revision += 1;
                 self.account.balance_version = self.account.revision;
                 self.account.total_equity = Some(equity);
+                self.account.aggregate_held = false;
                 self.account.equity_loaded = true;
                 self.recalculate(cx);
             }
@@ -1897,6 +2150,22 @@ pub(crate) fn trigger(value: &str) -> StopTriggerType {
         "index" => StopTriggerType::IndexPrice,
         _ => StopTriggerType::LastPrice,
     }
+}
+
+/// An open position row on a listed market whose only missing input is a price.
+fn mark_pending(cx: &Cx<'_, Pending>, p: &PositionRow<'_>) -> bool {
+    let Some(m) = cx.store.market_by_id(p.inst_id) else {
+        return false;
+    };
+    let priced = |price: f64| price.is_finite() && price > 0.0;
+    p.pos
+        .parse::<f64>()
+        .is_ok_and(|pos| pos.is_finite() && pos != 0.0)
+        && !p.mark_px.parse::<f64>().is_ok_and(priced)
+        && !cx
+            .store
+            .ticker(&m.symbol)
+            .is_some_and(|t| priced(t.mark) || priced(t.last))
 }
 
 fn valid_order(o: &OrderRow<'_>) -> bool {

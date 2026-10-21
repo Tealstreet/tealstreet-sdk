@@ -1,6 +1,6 @@
 //! Scripted info reads only: no transport, credentials or real trading account.
 use super::*;
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest};
 
 const UNIVERSE: &str = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":20}]}"#;
 const GOOD: &str = r#"[{"midPx":"100","markPx":"100"},{"midPx":"200","markPx":"200"}]"#;
@@ -77,7 +77,7 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
 fn notice(actions: &[Action], text: &str) -> bool {
     actions
         .iter()
-        .any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(text)))
+        .any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(text)))
 }
 #[test]
 fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {

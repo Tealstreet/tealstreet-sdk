@@ -1427,6 +1427,7 @@ impl Orderly {
         }
         self.account.positions_revision += 1;
         cx.fill(Fill {
+            id: None,
             order_id: order.id.clone(),
             symbol: order.symbol.clone(),
             side: order.side,

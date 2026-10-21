@@ -1039,22 +1039,6 @@
       "tape": "sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Native time-in-force is absent or differs in the TS/Rust order views.",
-          "keys": [
-            "account orders[0].timeInForce",
-            "account orders[1].timeInForce",
-            "checkpoint 3 account.orders[0].timeInForce",
-            "checkpoint 4 account.orders[0].timeInForce",
-            "checkpoint 4 account.orders[1].timeInForce",
-            "checkpoint 5 account.orders[0].timeInForce",
-            "checkpoint 5 account.orders[1].timeInForce",
-            "checkpoint 6 account.orders[0].timeInForce",
-            "checkpoint 6 account.orders[1].timeInForce",
-            "checkpoint 7 account.orders[0].timeInForce",
-            "checkpoint 7 account.orders[1].timeInForce"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "account orders[0].clientOrderId",
@@ -1087,46 +1071,6 @@
             "checkpoint 5 account.fills[1].price",
             "checkpoint 6 account.fills[1].price",
             "checkpoint 7 account.fills[1].price"
-          ]
-        },
-        {
-          "divergence": "Native time-in-force is absent or differs in the TS/Rust order views.",
-          "keys": [
-            "account orders[0].timeInForce",
-            "account orders[2].timeInForce",
-            "account orders[3].timeInForce",
-            "account orders[4].timeInForce",
-            "account orders[5].timeInForce",
-            "checkpoint 0 account.orders[1].timeInForce",
-            "checkpoint 1 account.orders[1].timeInForce",
-            "checkpoint 1 account.orders[2].timeInForce",
-            "checkpoint 2 account.orders[1].timeInForce",
-            "checkpoint 2 account.orders[2].timeInForce",
-            "checkpoint 2 account.orders[3].timeInForce",
-            "checkpoint 3 account.orders[1].timeInForce",
-            "checkpoint 3 account.orders[2].timeInForce",
-            "checkpoint 3 account.orders[3].timeInForce",
-            "checkpoint 3 account.orders[4].timeInForce",
-            "checkpoint 4 account.orders[0].timeInForce",
-            "checkpoint 4 account.orders[2].timeInForce",
-            "checkpoint 4 account.orders[3].timeInForce",
-            "checkpoint 4 account.orders[4].timeInForce",
-            "checkpoint 4 account.orders[5].timeInForce",
-            "checkpoint 5 account.orders[0].timeInForce",
-            "checkpoint 5 account.orders[2].timeInForce",
-            "checkpoint 5 account.orders[3].timeInForce",
-            "checkpoint 5 account.orders[4].timeInForce",
-            "checkpoint 5 account.orders[5].timeInForce",
-            "checkpoint 6 account.orders[0].timeInForce",
-            "checkpoint 6 account.orders[2].timeInForce",
-            "checkpoint 6 account.orders[3].timeInForce",
-            "checkpoint 6 account.orders[4].timeInForce",
-            "checkpoint 6 account.orders[5].timeInForce",
-            "checkpoint 7 account.orders[0].timeInForce",
-            "checkpoint 7 account.orders[2].timeInForce",
-            "checkpoint 7 account.orders[3].timeInForce",
-            "checkpoint 7 account.orders[4].timeInForce",
-            "checkpoint 7 account.orders[5].timeInForce"
           ]
         },
         {
@@ -1465,20 +1409,6 @@
             "rust: Binance Spot subscription never acknowledged",
             "ts: Binance Spot request never acknowledged",
             "ts: Binance Spot subscription never acknowledged"
-          ]
-        },
-        {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
-          "keys": [
-            "checkpoint 0 account.balance.coins.BTC",
-            "checkpoint 0 account.balance.coins.ETH",
-            "checkpoint 0 account.balance.coins.USDT",
-            "checkpoint 0 account.balance.currencies.BTC",
-            "checkpoint 0 account.balance.currencies.ETH",
-            "checkpoint 0 account.balance.currencies.USDT",
-            "checkpoint 0 account.balance.free",
-            "checkpoint 0 account.balance.total",
-            "checkpoint 0 account.balance.used"
           ]
         }
       ]
@@ -17673,21 +17603,6 @@
       "tape": "sdk-rs/harness/tapes/hyperliquid-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 10 account.fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 9 account.fills[0].executionId"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "checkpoint 7 account.orders[0].clientOrderId"
@@ -17721,24 +17636,6 @@
       "tape": "sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 1 account.fills[0].executionId",
-            "checkpoint 10 account.fills[0].executionId",
-            "checkpoint 11 account.fills[0].executionId",
-            "checkpoint 12 account.fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 9 account.fills[0].executionId"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "checkpoint 6 account.orders[0].clientOrderId"
@@ -17764,25 +17661,6 @@
           "keys": [
             "checkpoint 0 account.positions.length",
             "checkpoint 0 account.positions[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyperliquidspot",
-      "tapeSha256": "178577316af9b4bfb6ac3a120ba6b1eac4e53acca9baff015d57b9a3d0a0b96f",
-      "tape": "sdk-rs/harness/tapes/hyperliquidspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId"
           ]
         }
       ]
@@ -52605,25 +52483,6 @@
             "checkpoint 9 account.flatPositionPnl.length",
             "checkpoint 9 account.flatPositionPnl[0]",
             "checkpoint 9 account.flatPositionPnl[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyperliquidspot",
-      "tapeSha256": "3a8228d2b2fca265f48998796e7406a4146bae9b0ea6a247ad8f60448ceec843",
-      "tape": "sdk-rs/harness/tapes/hyperliquidspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId"
           ]
         }
       ]

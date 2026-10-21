@@ -65,8 +65,8 @@ test('pure validation rejection creates no fabricated diagnostic or extra error 
 
 test('warning-only success and background errors retain their ordinary levels', async () => {
   const r = rig(({ command }) => [
-    { op: 'log', level: 'warning', message: 'Read repair scheduled' },
-    { op: 'log', level: 'error', message: 'Unrelated background failure' },
+    { op: 'event', code: 'test.diagnostic', level: 'warn', message: 'Read repair scheduled' },
+    { op: 'event', code: 'test.diagnostic', level: 'error', message: 'Unrelated background failure' },
     done(command, { result: '[]' }),
   ]);
   assert.deepEqual(await r.host.command({ op: 'getAccount' }), []);

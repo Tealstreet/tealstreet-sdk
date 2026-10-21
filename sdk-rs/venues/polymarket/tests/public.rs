@@ -70,8 +70,7 @@ impl H {
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
                     self.done.push(Err(error.legacy_text()))
                 }
-                Action::Notice(Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => self.logs.push(message),

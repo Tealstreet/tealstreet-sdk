@@ -452,9 +452,6 @@ fn candle_interest_without_credentials_reads_no_symbol_settings() {
     );
     assert!(!actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("credentials")
-    ) || matches!(
-        a,
         Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("credentials")
     )));
 }

@@ -1,5 +1,5 @@
 //! Funded private snapshots must remain usable before public prices arrive.
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response, TimerId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, TimerId};
 use safe_cex_venue_bitrue::{Bitrue, Options};
 
 const MARKETS: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
@@ -43,8 +43,7 @@ impl Harness {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
-                Action::Notice(Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => self.logs.push(message),

@@ -6,7 +6,9 @@ use safe_cex_engine::model::{
     OrderType, Position, PositionMode, PositionSide, Precision, StopTriggerType, Ticker,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Command, Cx, Engine, Event, Fill, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, Engine, Event, Fill, FillFinancials, Response, SocketId, TimerId, Venue,
+};
 
 fn market(symbol: &str, pretty: Option<&str>) -> Market {
     Market {
@@ -84,13 +86,24 @@ fn position(symbol: &str) -> Position {
 
 fn executions(cx: &mut Cx<'_, ()>) {
     for (symbol, order_id) in [("A", "tracked-order"), ("ORPHAN", "orphan-order")] {
-        cx.fill(Fill {
-            order_id: order_id.into(),
-            symbol: symbol.into(),
-            side: OrderSide::Buy,
-            price: 101.,
-            amount: 0.25,
-        });
+        cx.fill_with_financials(
+            Fill {
+                id: (symbol == "A").then(|| "9007199254740997".into()),
+                order_id: order_id.into(),
+                symbol: symbol.into(),
+                side: OrderSide::Buy,
+                price: 101.,
+                amount: 0.25,
+            },
+            if symbol == "A" {
+                FillFinancials {
+                    realized_pnl: Some(-3.5),
+                    fee: Some(-0.25),
+                }
+            } else {
+                FillFinancials::default()
+            },
+        );
     }
 }
 
