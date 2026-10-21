@@ -877,6 +877,7 @@ export const VENUES = {
     };
     const attempts = new Map();
     return {
+      virtualPrivateClock: true,
       rust: 'grvt',
       initializeReplay(_impl, options) {
         if (!options.publicDataOnly) initializeCrypto();
@@ -1806,6 +1807,7 @@ export const VENUES = {
     },
   },
   cryptocom: {
+    virtualPrivateClock: true,
     rust: 'cryptocom',
     requestKey: typedRequest,
     ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },

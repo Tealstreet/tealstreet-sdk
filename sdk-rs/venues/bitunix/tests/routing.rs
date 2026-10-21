@@ -64,7 +64,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             response: Response {
                 status: 200,
                 headers: "",
-                body: r#"{"code":0,"data":[]}"#,
+                body: r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"#,
             },
         },
     );
