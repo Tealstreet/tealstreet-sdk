@@ -501,3 +501,95 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
     );
     assert_eq!(resolve("txflow", r#"{"publicMode":{}}"#), (false, false));
 }
+
+#[test]
+fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
+    use safe_cex_engine::Outcome;
+    for venue in [
+        "binance",
+        "bybit",
+        "asterdex",
+        "coinbase",
+        "hyperliquid",
+        "lighter",
+        "polymarket",
+        "txflow",
+    ] {
+        for local in ["", "local"] {
+            let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
+            assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
+            assert!(
+                error
+                    .message
+                    .starts_with(&format!("Rust {venue} does not support payloadSigner"))
+            );
+        }
+    }
+    construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap();
+    construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
+    // Aster and Lighter payload-only SDK accounts retain their public fallback.
+    for venue in ["asterdex", "lighter"] {
+        construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
+    }
+}
+
+#[test]
+fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
+    use safe_cex_venues::HyroConfig;
+    let config = |mode, production_rest: &str| {
+        serde_json::json!({
+            "mode": mode,
+            "production": {
+                "rest": {"livenet":production_rest,"testnet":"https://prod-test.example"},
+                "publicWs": {"livenet":"wss://prod.example/public","testnet":"wss://prod-test.example/public"},
+                "privateWs": {"livenet":"wss://prod.example/private","testnet":"wss://prod-test.example/private"}
+            },
+            "simulator": {
+                "rest": {"livenet":"https://sim.example","testnet":"https://sim-test.example"},
+                "publicWs": {"livenet":"wss://sim.example/public","testnet":"wss://sim-test.example/public"},
+                "privateWs": {"livenet":"wss://sim.example/private","testnet":"wss://sim-test.example/private"}
+            }
+        })
+    };
+    for (mode, prod, testnet, expected) in [
+        (None, "https://prod.example", false, "prod"),
+        (None, "https://prod.example", true, "prod-test"),
+        (Some("demo"), "https://prod.example", false, "sim"),
+        (Some("demo"), "https://prod.example", true, "sim-test"),
+        (None, "", false, "sim"),
+        (None, "", true, "sim-test"),
+    ] {
+        let raw = config(mode, prod);
+        let selected = serde_json::from_value::<HyroConfig>(raw.clone())
+            .unwrap()
+            .resolve(testnet)
+            .unwrap();
+        assert_eq!(selected.rest, format!("https://{expected}.example"));
+        assert_eq!(
+            selected.public_ws,
+            format!("wss://{expected}.example/public")
+        );
+        assert_eq!(
+            selected.private_ws,
+            format!("wss://{expected}.example/private")
+        );
+        construct(
+            "hyrotrader",
+            &serde_json::json!({"publicDataOnly":true,"testnet":testnet,"hyrotrader":raw})
+                .to_string(),
+        )
+        .unwrap();
+    }
+    let mut incomplete = config(None, "https://prod.example");
+    incomplete["production"]["publicWs"]["livenet"] = "".into();
+    assert_eq!(
+        rejected("hyrotrader", &serde_json::json!({
+            "publicDataOnly":true,"hyrotrader":incomplete,
+            "endpoints":{"rest":"https://legacy.example","publicWs":"wss://legacy.example/public","privateWs":"wss://legacy.example/private"}
+        }).to_string()),
+        "HyroTrader REST/public/private URLs are not configured"
+    );
+    // Existing native endpoint inputs remain valid when the SDK raw config is absent.
+    construct("hyrotrader", r#"{"publicDataOnly":true,"endpoints":{"rest":"https://legacy.example","publicWs":"wss://legacy.example/public","privateWs":"wss://legacy.example/private"}}"#).unwrap();
+}
