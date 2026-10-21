@@ -11,15 +11,9 @@ describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-  const independentVenues: ExchangeName[] = [
-    'bitget',
-    'bitgetinverse',
-    'bitgetusdc',
-    'bingx',
-    'mexc',
-    'phemex',
-    'weex',
-  ];
+  // Venues answering leverage reads from their published rails. BingX and WEEX
+  // read the venue (`onRead`); their crates test per-leg reads and write fencing.
+  const independentVenues: ExchangeName[] = ['bitget', 'bitgetinverse', 'bitgetusdc', 'mexc', 'phemex'];
   it.each(independentVenues)('keeps confirmed %s leg settings when leverage is read', async (name) => {
     const store = new DefaultStore();
     const market: Market = {
@@ -85,6 +79,8 @@ describe('Rust leverage command side boundary', () => {
     exchanges.push(exchange);
     const command = vi.fn().mockResolvedValue(null);
     Object.defineProperty(exchange, 'command', { value: command });
+    // Positions come from the authoritative native read; this test pins the legs' sides.
+    Object.defineProperty(exchange, 'fetchPositions', { value: async () => store.positions });
     await exchange.setAllLeverage(8);
     expect(command.mock.calls.map(([body]) => body)).toEqual([
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 8, side: PositionSide.Long },

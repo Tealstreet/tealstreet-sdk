@@ -32,7 +32,7 @@ import type {
   Order,
   OrderBook,
   OrderHistoryOptions,
-  PositionSide,
+  PlaceOrderOpts,
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
@@ -56,7 +56,8 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
-import { LogSeverity } from '../../types';
+import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
+import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
@@ -339,6 +340,8 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukePositions',
   'nukeOrders',
 ]);
+const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
+type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
@@ -447,6 +450,7 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
+  private syncingAccountState = false;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
   /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
   changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
@@ -897,11 +901,12 @@ export class RustEngineExchange extends BaseExchange {
         .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
         .map(([, method]) => method),
     );
-    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const];
+    // Native account reads start an engine, so a mirror asks the worker's instead.
+    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const, ...NATIVE_ACCOUNT_READS];
     for (const method of methods) {
       if (inert.has(method)) continue;
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions', unknown>)[method] = async (
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions' | NativeAccountRead, unknown>)[method] = async (
         ...args: unknown[]
       ) => {
         if (!this.routesToWorker) return local(...args);
@@ -1511,6 +1516,74 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
 
+  nuke = async (_tries = 0) => this.runNativeNuke(true);
+
+  nukePositions = async (_tries = 0) => this.runNativeNuke(false);
+
+  private runNativeNuke = async (cancelOrders: boolean): Promise<void> => {
+    this.assertEngineAlive();
+    if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
+    this.isNuking = true;
+    let failed = false;
+    let failure: unknown;
+    try {
+      try {
+        const orders: PlaceOrderOpts[] = [];
+        // One unusable position (an unlisted market, a missing inverse notional)
+        // must not stop the others from closing; it fails the nuke afterwards.
+        const skipped: string[] = [];
+        for (const position of await this.fetchPositions()) {
+          const market = this.store.marketsBySymbol[position.symbol];
+          if (!market) {
+            if (position.contracts !== 0) skipped.push(`${position.symbol}: market not found`);
+            continue;
+          }
+          const sized = market.isInverse ? position.notional : position.contracts;
+          const native = position.extra?.contractsNative;
+          if (
+            sized === undefined ||
+            !Number.isFinite(sized) ||
+            (native !== undefined && !Number.isFinite(native)) ||
+            (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
+          ) {
+            skipped.push(`${position.symbol}: invalid close size`);
+            continue;
+          }
+          const amount = nativePositionSize(position, market);
+          if (!Number.isFinite(amount) || amount < 0) {
+            skipped.push(`${position.symbol}: invalid close size`);
+            continue;
+          }
+          if (amount > 0) orders.push({
+            symbol: position.symbol,
+            side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+            type: OrderType.Market,
+            amount,
+            reduceOnly: true,
+          });
+        }
+        // One batch retains native partial/unknown outcomes without replaying
+        // a close against positions that have not yet reconciled.
+        if (orders.length) await this.placeOrders(orders);
+        if (skipped.length) throw new Error(`Nuke could not close ${skipped.join('; ')}`);
+      } catch (error) {
+        this.reportCommandError(error);
+        failed = true;
+        failure = error;
+      }
+      if (cancelOrders) {
+        try {
+          await this.cancelAllOrders();
+        } catch (error) {
+          this.reportCommandError(error);
+          if (!failed) throw error;
+        }
+      }
+      if (failed) throw failure;
+    } finally {
+      this.isNuking = false;
+    }
+  };
   /** Engine health counters; undefined before the engine starts or after disposal. */
   getHealth = (): EngineHealth | undefined => (this.host && !this.isDisposed ? this.host.health() : undefined);
 
@@ -1524,7 +1597,16 @@ export class RustEngineExchange extends BaseExchange {
     const mode = this.requireCapabilities().cancelAll;
     if (mode === 'native') await this.command({ op: 'cancelSymbolOrders', symbol: '' });
     else if (mode === 'eachPlacedSymbol') await this.cancelEachPlacedSymbol();
-    else await this.cancelEachOrderSymbol();
+    else await this.cancelEachNativeOrderSymbol();
+  };
+
+  // Native current orders, not a JS store that can lag the engine's flush.
+  private cancelEachNativeOrderSymbol = async () => {
+    const symbols = new Set((await this.fetchOrders()).map((order) => order.symbol));
+    for (const symbol of symbols) {
+      if (this.isDisposed) break;
+      await this.cancelSymbolOrders(symbol);
+    }
   };
 
   private cancelEachPlacedSymbol = async () => {
@@ -1556,7 +1638,7 @@ export class RustEngineExchange extends BaseExchange {
   setAllLeverage = async (leverage: number) => {
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
-      for (const position of this.store.positions) {
+      for (const position of await this.fetchPositions()) {
         if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
       }
     }
@@ -1598,7 +1680,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   // The engine reconciles orders and positions itself; reads serve its state.
-  /** Public reads wait for native data, independently of private reconciliation. */
+  /** Reads wait only for their native sections, independently of unrelated reconciliation. */
   private untilNativeData = (flag: number, label: string): Promise<void> => {
     const ready = new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
@@ -1609,7 +1691,12 @@ export class RustEngineExchange extends BaseExchange {
       };
       const wake = () => {
         const failure = this.engineFailure ?? this.startupFailure;
-        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during public read'));
+        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during native read'));
+        else if (
+          this.isPublicDataOnly &&
+          this.nativeLoaded & LOADED_FLAG.MARKETS &&
+          (flag & (LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) & ~this.nativeLoaded) !== 0
+        ) finish(new Error(`Native ${label} is unavailable for a public-data-only account`));
         else if (
           (this.nativeLoaded & flag) === flag &&
           (!(flag & LOADED_FLAG.TICKERS) || !this.sharedPublicFeed || this.sharedPublicReady)
@@ -1620,7 +1707,7 @@ export class RustEngineExchange extends BaseExchange {
       this.startupWaiters.add(wake);
       wake();
     });
-    // Own the background startup rejection even when a public read finishes first.
+    // Own the background startup rejection even when one native section finishes first.
     void this.start().catch((error: unknown) => {
       this.startupFailure ??= error instanceof Error ? error : new Error(String(error));
       for (const wake of this.startupWaiters) wake();
@@ -1645,8 +1732,30 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) throw new Error('Exchange disposed');
   };
 
-  /** Native reconciliation owns refresh; account consumers read the current balance. */
-  fetchBalance = async () => this.store.balance;
+  /** Read native account state without consuming deltas or requesting network reconciliation. */
+  override syncAccountState = (): void => {
+    // A bridged mirror's store is kept current by the worker's frames.
+    if (this.routesToWorker) return;
+    this.assertEngineAlive();
+    if (!this.host) throw new Error('Rust engine is not started');
+    if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) throw new Error('Native market catalog is not ready');
+    // Store state commits before notification; nested decision readers can use
+    // that state without recursively publishing another account snapshot.
+    if (this.syncingAccountState) return;
+    this.syncingAccountState = true;
+    try {
+      this.receiveFrame(this.host.accountSnapshot());
+    } finally {
+      this.syncingAccountState = false;
+    }
+    this.assertEngineAlive();
+  };
+
+  fetchBalance = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.BALANCE, 'balance');
+    this.syncAccountState();
+    return this.store.balance;
+  };
 
   fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
     this.assertOptionQueries();
@@ -1673,13 +1782,23 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.capabilityRecord?.options) this.rejectPreflight('Options are not enabled on this account');
   };
 
-  fetchOrders = async (symbols?: string[]) =>
-    symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;
+  fetchOrders = async (symbols?: string[]) => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.ORDERS, 'orders');
+    this.syncAccountState();
+    return symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;
+  };
 
-  fetchPositions = async (symbols?: string[]) =>
-    symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+  fetchPositions = async (symbols?: string[]) => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.POSITIONS, 'positions');
+    this.syncAccountState();
+    return symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+  };
 
-  fetchPositionMode = async () => Boolean(this.store.options.isHedged);
+  fetchPositionMode = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.POSITIONS, 'position mode');
+    this.syncAccountState();
+    return Boolean(this.store.options.isHedged);
+  };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
     const source = this.requireCapabilities().maxLeverage;
@@ -1752,18 +1871,17 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       this.host?.flush();
-      let leverage: FetchedLeverage;
-      if (this.requireCapabilities().leverageQuery === 'onRead')
-        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
-      else {
-        const cached = this.store.fetchedLeverage[symbol];
-        if (
-          !cached ||
-          !Number.isFinite(cached.buyLeverage) || cached.buyLeverage <= 0 ||
-          !Number.isFinite(cached.sellLeverage) || cached.sellLeverage <= 0
-        ) return null;
-        return cached;
-      }
+      const query = this.requireCapabilities().leverageQuery;
+      const cached = this.store.fetchedLeverage[symbol];
+      const usable =
+        cached &&
+        Number.isFinite(cached.buyLeverage) && cached.buyLeverage > 0 &&
+        Number.isFinite(cached.sellLeverage) && cached.sellLeverage > 0;
+      if (query === 'settings') return usable ? cached : null;
+      // Metadata-refreshed rails answer from settings once loaded; before the
+      // first refresh (a flat, freshly selected symbol) the venue is read.
+      if (query === 'onMetadata' && usable) return cached;
+      const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
       this.applier.applyLeverage(symbol, leverage);
       return leverage;

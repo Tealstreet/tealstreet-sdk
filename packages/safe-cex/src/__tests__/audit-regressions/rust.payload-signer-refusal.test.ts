@@ -32,7 +32,7 @@ const recordEngine = (name: string, nativeFailure = false) => {
     constructor(venue: string, options: string) {
       construct(venue, JSON.parse(options));
       if (nativeFailure) {
-        const message = `Rust ${venue} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
+        const message = `Rust ${venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials.`;
         throw Object.assign(new Error(message), { venueError: JSON.stringify({ message, kind: 'unsupported', outcome: 'notSent' }) });
       }
     }
@@ -85,6 +85,7 @@ it.each([
       message: expect.stringContaining(`Rust ${name} does not support payloadSigner`),
     });
     expect((failure as Error).message).toContain('remote signing is unsupported');
+    expect((failure as Error).message).toContain('remove payloadSigner and configure local signing credentials');
     expect(construct).toHaveBeenCalledOnce();
     expect(transport).toHaveBeenCalledOnce();
     expect(io).not.toHaveBeenCalled();

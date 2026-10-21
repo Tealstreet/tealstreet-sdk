@@ -1,6 +1,7 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
 mod account;
 mod history;
+mod identity;
 mod limits;
 pub mod sign;
 mod trading;
@@ -72,6 +73,7 @@ impl Default for Options {
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
+    Identity(identity::Request),
     Trade(trading::Request),
     Markets {
         fallback: bool,
@@ -607,6 +609,7 @@ impl Lighter {
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
@@ -658,6 +661,7 @@ impl Venue for Lighter {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account_tier: true,
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -870,7 +874,7 @@ impl Venue for Lighter {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Trade(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets { rows, metadata, .. } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
@@ -1049,6 +1053,10 @@ impl Venue for Lighter {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::Identity(request) => {
+                self.identity_response(cx, request, response);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 return;
@@ -1073,7 +1081,10 @@ impl Venue for Lighter {
             return;
         }
         match pending {
-            Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
+            Pending::Account(_)
+            | Pending::Trade(_)
+            | Pending::History(_)
+            | Pending::Identity(_) => unreachable!(),
             Pending::Markets {
                 fallback,
                 rows,
@@ -1344,6 +1355,7 @@ impl Venue for Lighter {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchAccount { command } => self.fetch_identity(cx, command),
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
