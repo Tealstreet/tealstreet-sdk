@@ -1388,6 +1388,14 @@ keep their API and can retry a read invalidated by a concurrent settings change;
 or write retry is added. Malformed position-stream rows retain prior exposure
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
+### Phemex explicit index triggers and daily cutoff
+
+Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
+wire value instead of native refusal or TS's mark/last fallback. Default sources
+are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
+keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
+caller signatures are unchanged.
+
 ### Coinbase port-review retained read semantics
 
 Coinbase Rust spot currency balances continue using native total/free and their

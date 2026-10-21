@@ -362,6 +362,14 @@ pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, J
     Ok(serde_json::to_string(&options.construction(venue))?)
 }
 
+fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
+    let error = js_sys::Error::new(&detail.message);
+    if let Ok(json) = serde_json::to_string(&detail) {
+        let _ = js_sys::Reflect::set(error.as_ref(), &"venueError".into(), &json.into());
+    }
+    error
+}
+
 #[wasm_bindgen]
 pub struct WasmEngine {
     construction: String,
@@ -401,12 +409,12 @@ impl WasmEngine {
         feature = "okx"
     ))]
     #[wasm_bindgen(constructor)]
-    pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
+    pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, js_sys::Error> {
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
-            .map_err(|_| JsError::new("Invalid engine options"))?;
-        let construction = serde_json::to_string(&options.construction(venue))?;
-        let inner = safe_cex_venues::build(venue, options, Boxed)
-            .map_err(|error| JsError::new(&error.message))?;
+            .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+        let construction = serde_json::to_string(&options.construction(venue))
+            .map_err(|error| js_sys::Error::new(&error.to_string()))?;
+        let inner = safe_cex_venues::build(venue, options, Boxed).map_err(construction_error)?;
         Ok(Self {
             inner,
             construction,
