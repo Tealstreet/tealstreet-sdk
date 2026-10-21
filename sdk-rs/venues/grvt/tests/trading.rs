@@ -1748,3 +1748,117 @@ fn write_failures_carry_grvt_outcomes_without_changing_their_text() {
         assert_eq!(failure(&actions).outcome, outcome, "{status} {body}");
     }
 }
+
+fn structured_failure(actions: &[Action], id: u32) -> serde_json::Value {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+                Some(serde_json::to_value(error).unwrap())
+            }
+            _ => None,
+        })
+        .expect("expected structured GRVT failure")
+}
+#[test]
+fn typed_builder_approval_failure_survives_placement_and_amend_inspection() {
+    for (builders, expected) in [
+        (
+            r#"{"r":[]}"#,
+            serde_json::json!({"code":"GRVT_BUILDER_UNAUTHORIZED","reason":"unauthorized","requiredRaw":300}),
+        ),
+        (
+            r#"{"r":[{"ba":"0xee8f3559f298fffa79b8253437969d15b5dccff3","mfr":"0.01"}]}"#,
+            serde_json::json!({"code":"GRVT_BUILDER_UNAUTHORIZED","reason":"cap-too-low","requiredRaw":300,"authorizedRaw":100}),
+        ),
+    ] {
+        for amend in [false, true] {
+            let (mut e, _, _) = boot_with_builders(CATALOG, Some(builders));
+            seed(&mut e);
+            let mut actions = command(
+                &mut e,
+                if amend {
+                    Command::AmendOrder {
+                        command: 92,
+                        id: "42".into(),
+                        price: Some(110.),
+                        amount: None,
+                    }
+                } else {
+                    Command::PlaceOrders {
+                        command: 92,
+                        orders: vec![opts()],
+                    }
+                },
+            );
+            if amend {
+                let read = http(actions, "/order");
+                actions = reply(&mut e, &read, 200, OPEN);
+            }
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order"))));
+            let error = structured_failure(&actions, 92);
+            assert_eq!(error["builderAuthorization"], expected, "amend={amend}");
+            assert_eq!(error["outcome"], if amend { "unknown" } else { "notSent" });
+            assert_eq!(e.store().order("42").unwrap().status, OrderStatus::Open);
+        }
+    }
+}
+#[test]
+fn earlier_grvt_order_validation_does_not_become_an_approval_error() {
+    let (mut e, _, _) = boot_with_builders(CATALOG, Some(r#"{"r":[]}"#));
+    let mut order = opts();
+    order.kind = OrderType::StopLoss;
+    order.trigger_price = Some(90.);
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 93,
+            orders: vec![order],
+        },
+    );
+    let error = structured_failure(&actions, 93);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("plain Limit/Market")
+    );
+    assert!(error.get("builderAuthorization").is_none());
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+#[test]
+fn failed_grvt_builder_checks_never_claim_missing_approval() {
+    for (status, body) in [(403, PROXY_REJECTED), (200, r#"{"r":[null]}"#)] {
+        let (mut e, _, held) = boot_with_builders(CATALOG, None);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 94,
+                orders: vec![opts()],
+            },
+        );
+        assert!(done(&actions, 94).is_none());
+        let mut check = held.unwrap();
+        for delay in [2_000., 4_000.] {
+            let actions = reply(&mut e, &check, status, body);
+            assert!(done(&actions, 94).is_none());
+            let timer = timer_at(&actions, NOW + 3. + delay);
+            e.handle(NOW + 3. + delay, Event::TimerFired { timer });
+            check = http(e.drain_actions().collect(), "get_authorized_builders");
+        }
+        let actions = reply(&mut e, &check, status, body);
+        let error = structured_failure(&actions, 94);
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("could not be checked")
+        );
+        assert!(error.get("builderAuthorization").is_none());
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}

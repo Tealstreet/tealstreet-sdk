@@ -67,11 +67,14 @@ not a deployed-runtime or npm-publication claim.
   through native capability policies and #1445/#1447/#1453/#1501; preserve
   supported-product limits and explicit unsupported-axis refusals (B8).
   **Still SDK-owned:** REST `fetchOrderBook` for Backpack/Crypto.com/GRVT/
-  Paradex/WEEX; Hyperliquid `scheduleCancel`; typed GRVT builder rejection.
+  Paradex/WEEX; Hyperliquid `scheduleCancel`.
+  ~~Typed GRVT builder rejection~~ now preserves definitive code/reason/caps
+  through the engine, host and worker/hosted command replies; failed checks stay
+  nonmodal. [Regressions and required NX migration](RUST_GRVT_BUILDER_ERROR.md).
   ~~WEEX metadata refresh~~ now uses the shared `onReadAndMetadata` policy;
   [regressions](RUST_WEEX_METADATA_REFRESH.md) cover cached flat symbols,
   repeated reads, malformed-response retention and public-only isolation.
-  Streaming books and generic errors do not close the remaining gaps.
+  Streaming books do not close the remaining REST/dead-man gaps.
 - ~~`instanceof BlofinExchange` as an active downstream cutover blocker.~~
   Pinned NX read-only audit finds the class check in an unused helper, with no
   production import/render; active generic helpers have no guard. It remains
