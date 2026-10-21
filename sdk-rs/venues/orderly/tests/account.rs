@@ -7,6 +7,65 @@ use support::*;
 const POLL_MS: f64 = 2_000.0;
 
 #[test]
+fn trailing_display_uses_order_side_callback_value_or_rate_and_explicit_trigger() {
+    for (side, fields, expected) in [
+        (
+            "SELL",
+            r#""extreme_price":50000,"callback_value":500"#,
+            49500.0,
+        ),
+        (
+            "BUY",
+            r#""extreme_price":50000,"callback_value":500"#,
+            50500.0,
+        ),
+        (
+            "SELL",
+            r#""extremePrice":50000,"callbackRate":0.01"#,
+            49500.0,
+        ),
+        (
+            "BUY",
+            r#""extremePrice":50000,"callbackRate":0.01"#,
+            50500.0,
+        ),
+        (
+            "BUY",
+            r#""extreme_price":50000,"callback_value":500,"callback_rate":0.02"#,
+            50500.0,
+        ),
+        (
+            "SELL",
+            r#""extreme_price":50000,"callback_value":500,"trigger_price":49000"#,
+            49000.0,
+        ),
+        (
+            "SELL",
+            r#""extreme_price":50000,"callback_value":500,"is_activated":false"#,
+            0.0,
+        ),
+        ("BUY", r#""activatedPrice":50000,"callbackValue":500"#, 0.0),
+    ] {
+        let algos = format!(
+            r#"[{{"algo_order_id":301,"root_algo_order_id":301,"symbol":"PERP_BTC_USDC","algo_type":"TRAILING_STOP","algo_status":"NEW","side":"{side}","type":"MARKET","quantity":1,"margin_mode":"CROSS",{fields}}}]"#
+        );
+        let (mut e, socket) = ready_with(ORDER, &algos, POSITIONS);
+        let trailing = e.store().orders().iter().find(|o| o.id == "301").unwrap();
+        assert_eq!(trailing.price, expected, "{side} {fields}");
+        // The stream uses camelCase, independently of REST's snake_case fields.
+        let report = format!(
+            r#"{{"topic":"algoexecutionreportv2","ts":3000,"data":{{"algoOrderId":301,"rootAlgoOrderId":301,"symbol":"PERP_BTC_USDC","algoType":"TRAILING_STOP","algoStatus":"NEW","side":"{side}","type":"MARKET","quantity":1,"marginMode":"CROSS","extremePrice":60000,"callbackValue":1000,"isActivated":true}}}}"#
+        );
+        ws(&mut e, socket, &report);
+        let trailing = e.store().orders().iter().find(|o| o.id == "301").unwrap();
+        assert_eq!(
+            trailing.price,
+            if side == "BUY" { 61000.0 } else { 59000.0 }
+        );
+    }
+}
+
+#[test]
 fn bootstrap_signed_headers_and_dual_margin_positions() {
     let (mut e, _) = ready();
     assert!(
