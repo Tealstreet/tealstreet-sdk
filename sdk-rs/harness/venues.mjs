@@ -1243,6 +1243,9 @@ export const VENUES = {
   paradex: {
     ...paradexProtocol,
     rust: 'paradex',
+    // Order refresh debounces and REST reconciliation run on timers; at wall time a
+    // checkpoint races them (canceled-row retention at checkpoints 5-7).
+    virtualPrivateClock: true,
     ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
     // Effective position leverage differs from configured cross-margin leverage.
     tsSettings: (exchange, store) =>
@@ -1933,6 +1936,9 @@ export const VENUES = {
   polymarket,
   kucoin: {
     ...kucoin,
+    // TS keeps canceled rows until a REST order poll replaces them; at wall time a
+    // checkpoint races that poll (checkpoints 6-7). Run the polls on tape time.
+    virtualPrivateClock: true,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
   kucoinspot,
