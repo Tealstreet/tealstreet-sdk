@@ -1724,7 +1724,9 @@ async fn routed_signed_network_notices(
             }
             Notice::CommandError { message, .. } => message.clone(),
             // Debug rendering above inspects every remaining field.
-            Notice::CommandProgress { .. } | Notice::Deactivate => String::new(),
+            Notice::CommandProgress { .. } | Notice::Deactivate | Notice::AccountAuth { .. } => {
+                String::new()
+            }
         };
         for forbidden in [
             NOTICE_API_KEY,
