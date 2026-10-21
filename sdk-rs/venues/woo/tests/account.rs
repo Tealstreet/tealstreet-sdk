@@ -1482,3 +1482,28 @@ fn partial_catalogue_is_reread_and_releases_the_repaired_market() {
     response(&mut e, &pos, 2020.0, &positions_with_eth());
     assert!(e.store().positions().iter().any(|p| p.symbol == "ETHUSDT"));
 }
+
+#[test]
+fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
+    let (mut e, _, mut reads, timer) = start();
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, INFO);
+    reads.extend(requests(&mut e));
+    let pos = take(&mut reads, "/v3/positions");
+    let isolated = POS.replace("CROSS", "ISOLATED");
+    response(&mut e, &pos, 40.0, &isolated);
+    let out = e.drain_actions().collect::<Vec<_>>();
+    let warnings=out.iter().filter(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID&&event.message.contains("isolated")&&event.message.contains("BTCUSDT"))).count();
+    assert_eq!(warnings, 1);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(
+        e.store().positions()[0].margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    e.handle(2010.0, Event::TimerFired { timer });
+    let mut reads = requests(&mut e);
+    let pos = take(&mut reads, "/v3/positions");
+    response(&mut e, &pos, 2020.0, &isolated);
+    assert!(!e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID)));
+    assert_eq!(e.store().positions().len(), 1);
+}

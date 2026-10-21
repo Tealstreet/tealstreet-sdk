@@ -1741,6 +1741,16 @@ unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
 
+### WOO port-review warnings and confirmation
+
+Rust WOO keeps isolated exposure visible and logs one coded warning per symbol
+that isolated margin settings cannot be changed. Exhausted leverage readback
+reports an accepted write with unconfirmed setting and Unknown outcome, keeping
+cached settings until authoritative confirmation. No write is replayed and no
+unconfirmed success is returned. Caller method signatures and quantities remain
+unchanged; native algo reduce-only defaults and protective trigger semantics stay
+as documented.
+
 ## Coded diagnostic caller cutover (PR5)
 
 The SDK exposes `engine-event` (`EngineEvent`), also forwarded by ExchangeWorker

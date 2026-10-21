@@ -1004,9 +1004,16 @@ No confirmed highs; valid data matches TS.
   fill/order-history/instrument/ticker row fails the read or startup.~~
   Children inherit missing parent fields (snapshot and stream); bad rows are
   skipped keeping stored copies; hidden exposure on unknown markets warns once.
-- Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
-  readback can report a false error; isolated warning; stop without reference
-  price rejects the snapshot.
+- Low: ~~SL trigger falls back to `triggerType`~~ (standalone precedence matches
+  TS); ~~algo reduceOnly default~~ (native default is false; children inherit
+  parent fields); ~~leverage readback can report a false error~~ (exhausted reads
+  now explain accepted write/unconfirmed setting, retain Unknown outcome and
+  never replay the write); ~~isolated warning~~ (one coded warning per symbol,
+  exposure remains visible); ~~stop without reference price rejects the snapshot~~
+  (row isolation and re-read after ticker seed already preserve valid peers).
+  **RISKY — retained:** changing attached-bracket generic trigger fallback
+  without verified per-leg semantics, or guessing SL/TP for a STOP without
+  a reliable reference. Readback confirmation remains required.
 
 ### AsterDEX
 No confirmed highs.
