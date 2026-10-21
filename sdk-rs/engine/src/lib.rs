@@ -32,10 +32,10 @@ pub use capabilities::{
 };
 pub use credentials::ReadCredentials;
 pub use engine::{
-    Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, Method, Notice,
-    PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget,
-    SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
-    unsupported_venue_action,
+    Action, Command, CommandId, Cx, Engine, Event, Fill, FillFinancials, HttpRequest, Method,
+    Notice, PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response,
+    SignatureTarget, SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue,
+    VenueAction, unsupported_venue_action,
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
 pub use log::{Health, Level, LogEvent, Redacted, Value};

@@ -155,7 +155,12 @@ impl PlacementAcks {
     /// Track this event's placement outcomes and fills. Non-generic and out of
     /// line, so the opted-in venue engines share one copy in a combined wasm.
     #[inline(never)]
-    pub fn observe(&mut self, actions: &[Action], fills: &[Fill], now: f64) {
+    pub fn observe(
+        &mut self,
+        actions: &[Action],
+        fills: &[(Fill, Option<crate::engine::FillFinancials>)],
+        now: f64,
+    ) {
         for action in actions {
             match action {
                 Action::Notice(Notice::CommandDone { command, result }) => {
@@ -167,7 +172,7 @@ impl PlacementAcks {
                 _ => {}
             }
         }
-        for fill in fills {
+        for (fill, _) in fills {
             self.filled(&fill.order_id, now);
         }
     }

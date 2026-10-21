@@ -1,7 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
-use crate::capabilities::Capabilities;
+use crate::capabilities::{AccountLookup, Capabilities};
 use crate::error::{ErrorKind, VenueError};
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::log::{Health, Level, LogEvent, Value, code as log_code};
@@ -194,6 +194,14 @@ pub struct Fill {
     pub side: OrderSide,
     pub price: f64,
     pub amount: f64,
+}
+
+/// Optional financial values for a live execution, in its venue's event
+/// convention. This is separate from historical execution PnL normalization.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FillFinancials {
+    pub realized_pnl: Option<f64>,
+    pub fee: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -834,7 +842,7 @@ struct Io<P> {
     changed_books: Vec<String>,
     changed_books_active: usize,
     candles: Vec<(String, Interval, Candle)>,
-    fills: Vec<Fill>,
+    fills: Vec<(Fill, Option<FillFinancials>)>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
     /// Retry-jitter state; advanced only by `Cx::jittered`, so replays repeat it.
@@ -1359,7 +1367,17 @@ impl<P> Cx<'_, P> {
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.fills.push(fill);
+        self.io.fills.push((fill, None));
+    }
+
+    /// Preserve optional per-execution financials without inventing values for
+    /// cumulative/order-derived fills. Missing/nonfinite values stay absent.
+    pub fn fill_with_financials(&mut self, fill: Fill, mut financials: FillFinancials) {
+        financials.realized_pnl = financials.realized_pnl.filter(|v| v.is_finite());
+        financials.fee = financials.fee.filter(|v| v.is_finite());
+        let financials =
+            (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
+        self.io.fills.push((fill, financials));
     }
 }
 
@@ -2015,6 +2033,11 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::Venue { command, action }) => {
                 self.venue.on_venue_action(&mut cx, command, action);
             }
+            Event::Command(Command::FetchAccount { command })
+                if self.venue.capabilities().account == AccountLookup::Unsupported =>
+            {
+                unsupported_venue_action(&mut cx, command);
+            }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
@@ -2301,6 +2324,8 @@ impl<V: Venue> Engine<V> {
         let mut writer = FrameWriter::new(buffer, now);
         self.store
             .write(&self.store.account_snapshot(), &mut writer);
+        writer.begin(section::ACCOUNT_READ);
+        writer.end();
         self.io.snapshot = writer.finish();
         &self.io.snapshot
     }
@@ -2440,21 +2465,32 @@ impl<V: Venue> Engine<V> {
         if !fills.is_empty() {
             w.begin_revision(section::FILLS, 1);
             w.u32(fills.len() as u32);
-            let orders: Vec<u32> = fills.iter().map(|f| w.string(&f.order_id)).collect();
+            let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
             w.u32s(orders);
-            w.u32s(fills.iter().map(|f| {
+            w.u32s(fills.iter().map(|(f, _)| {
                 self.store
                     .market_index(&f.symbol)
                     .unwrap_or(crate::wire::NONE)
             }));
-            w.u32s(fills.iter().map(|f| f.side as u32));
+            w.u32s(fills.iter().map(|(f, _)| f.side as u32));
             w.pad();
-            for f in &fills {
+            for (f, _) in &fills {
                 w.f64s([f.price, f.amount]);
             }
-            for fill in &fills {
+            for (fill, _) in &fills {
                 let symbol = w.string(&fill.symbol);
                 w.u32(symbol);
+            }
+            if fills.iter().any(|(_, financials)| financials.is_some()) {
+                w.pad();
+                w.f64s(fills.iter().map(|(_, financials)| {
+                    financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
+                }));
+                w.f64s(
+                    fills
+                        .iter()
+                        .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
+                );
             }
             w.end();
         }
@@ -2634,6 +2670,123 @@ fn push_event(
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
+
+    fn execution() -> Fill {
+        Fill {
+            order_id: "9007199254740995".into(),
+            symbol: "A".into(),
+            side: OrderSide::Buy,
+            price: 99.,
+            amount: 1.,
+        }
+    }
+
+    #[test]
+    fn fill_financials_leave_revision_one_bytes_identical_when_absent() {
+        for financials in [
+            None,
+            Some(FillFinancials::default()),
+            Some(FillFinancials {
+                realized_pnl: Some(f64::NAN),
+                fee: Some(f64::INFINITY),
+            }),
+        ] {
+            let mut engine = frame_engine();
+            engine.store.set_markets(vec![market("A")]);
+            engine.take_frame(0.);
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            if let Some(financials) = financials {
+                cx.fill_with_financials(execution(), financials);
+            } else {
+                cx.fill(execution());
+            }
+            let frame = engine.take_frame(1.).unwrap();
+            let fills = crate::wire::sections(frame)
+                .find(|(kind, _)| *kind == section::FILLS)
+                .unwrap()
+                .1;
+            let mut expected = Vec::new();
+            for word in [1u32, 0, 0, OrderSide::Buy as u32] {
+                expected.extend(word.to_le_bytes());
+            }
+            for value in [99f64, 1.] {
+                expected.extend(value.to_le_bytes());
+            }
+            expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
+            expected.extend(0u32.to_le_bytes()); // Section padding.
+            assert_eq!(
+                fills, expected,
+                "absent financials must preserve the symbol-bearing revision-one payload"
+            );
+            assert!(engine.take_frame(1.).is_none(), "fill must flush once");
+        }
+    }
+
+    #[test]
+    fn fill_financial_columns_preserve_missing_zero_and_negative_values_once() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.fill(execution());
+            cx.fill_with_financials(
+                execution(),
+                FillFinancials {
+                    realized_pnl: Some(0.),
+                    fee: Some(0.),
+                },
+            );
+            cx.fill_with_financials(
+                execution(),
+                FillFinancials {
+                    realized_pnl: Some(-3.5),
+                    fee: Some(f64::NAN),
+                },
+            );
+        }
+        assert!(
+            crate::wire::sections(engine.account_snapshot_frame(1.))
+                .all(|(kind, _)| kind != section::FILLS)
+        );
+        let frame = engine.take_market_frame(1.).unwrap();
+        let fills = crate::wire::sections(frame)
+            .find(|(kind, _)| *kind == section::FILLS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 3);
+        assert_eq!(fills.len(), 152);
+        let rows: Vec<_> = fills[40..88]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|value| f64::from_le_bytes(*value))
+            .collect();
+        assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
+        assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(&fills[100..104], &[0; 4]);
+        let floats: Vec<_> = fills[104..]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|value| f64::from_le_bytes(*value))
+            .collect();
+        assert!(floats[0].is_nan());
+        assert_eq!(&floats[1..3], &[0., -3.5]);
+        assert!(floats[3].is_nan());
+        assert_eq!(floats[4], 0.);
+        assert!(floats[5].is_nan());
+        assert!(engine.take_market_frame(1.).is_none());
+        assert!(engine.take_frame(1.).is_none());
+    }
 
     #[test]
     fn command_errors_are_attributed_before_done_but_replyless_errors_stay_visible() {
@@ -3409,7 +3562,8 @@ mod streaming_tests {
                 section::POSITIONS,
                 section::BALANCE,
                 section::SETTINGS,
-                section::STATUS
+                section::STATUS,
+                section::ACCOUNT_READ
             ]
         );
         for kind in [section::ORDERS, section::POSITIONS, section::SETTINGS] {
@@ -3598,6 +3752,20 @@ mod streaming_tests {
     }
 
     #[test]
+    fn account_identity_on_a_venue_without_it_fails_at_once() {
+        let mut engine = frame_engine();
+        engine.handle(0.0, Event::Command(Command::FetchAccount { command: 8 }));
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error.message),
+            _ => None,
+        });
+        assert_eq!(
+            result.as_deref(),
+            Some("This action is not supported on this venue")
+        );
+    }
+
+    #[test]
     fn venue_actions_default_to_one_shared_rejection() {
         let mut engine = frame_engine();
         engine.handle(
@@ -3647,13 +3815,16 @@ mod streaming_tests {
         assert_eq!(engine.io.changed_books_active, 1);
         assert_eq!(engine.io.candles.len(), 1);
         // A pending fill would promote the flush to a full frame (MARKETS first).
-        engine.io.fills.push(Fill {
-            order_id: "filled-order".into(),
-            symbol: "ORPHAN".into(),
-            side: OrderSide::Buy,
-            price: 7.,
-            amount: 0.25,
-        });
+        engine.io.fills.push((
+            Fill {
+                order_id: "filled-order".into(),
+                symbol: "ORPHAN".into(),
+                side: OrderSide::Buy,
+                price: 7.,
+                amount: 0.25,
+            },
+            None,
+        ));
         let frame = engine.take_frame(2.).unwrap().to_vec();
         let sections: Vec<_> = crate::wire::sections(&frame).collect();
         assert!(sections.iter().any(|(kind, _)| *kind == section::MARKETS));

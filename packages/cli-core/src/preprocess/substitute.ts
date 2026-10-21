@@ -512,6 +512,7 @@ function resolveUIConstant(base: string, quickN: string | undefined, ctx: Prepro
 }
 
 function resolveSizeConstant(tok: string, ctx: PreprocessContext): number {
+  ctx.exchange?.syncAccountState?.();
   if (!ctx.exchange) {
     throw new Error(`${tok}: not connected to an exchange`);
   }
@@ -533,6 +534,7 @@ function resolveSizeConstant(tok: string, ctx: PreprocessContext): number {
 }
 
 function resolvePriceAnchor(tok: string, ctx: PreprocessContext): number {
+  if (!TICKER_PRICE_CONSTANTS.has(tok)) ctx.exchange?.syncAccountState?.();
   if (isRoeToken(tok)) {
     return resolveRoePrice(tok, ctx);
   }
@@ -699,6 +701,7 @@ const BALANCE_FIELD_BY_TOKEN: Record<string, 'free' | 'used' | 'total' | 'upnl'>
 };
 
 function resolveAccountNumber(tok: string, ctx: PreprocessContext): number {
+  ctx.exchange?.syncAccountState?.();
   if (!ctx.exchange) {
     throw new Error(`${tok}: not connected to an exchange`);
   }

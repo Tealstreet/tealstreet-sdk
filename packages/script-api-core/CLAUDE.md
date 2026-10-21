@@ -317,7 +317,8 @@ the `?? position.contracts` fallback was BASE, carried over verbatim from the
 old web adapter. They differ by `market.contractSize`, so a bare
 `api.orders.closePosition(position)` asked for a thousandfold on OKX's
 `DOGE-USDT-SWAP` and a fraction of the position on a Bybit inverse market. It
-goes through `nativePositionSize` now, and `createCoreAdapter.test.ts` pins
+goes through `nativePositionSize` now (the SDK utility re-exported from
+`src/order/positionSizing.ts`), and `createCoreAdapter.test.ts` pins
 both halves — the fallback converts, an explicit `amount` does not.
 
 `resolveOemsPlan` only routed to this verb when `contractSize === 1 && !isInverse`,

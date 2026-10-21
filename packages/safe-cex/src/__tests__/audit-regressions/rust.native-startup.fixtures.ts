@@ -31,4 +31,9 @@ export function installNativeStartupFrames(
     return new Uint8Array(consumerFrame({ ...store.serialize(), ...overrides }));
   };
   engine.snapshotFrame = () => new Uint8Array(consumerFrame({ ...store.serialize(), ...structuredClone(native()) }));
+  // Current native account state, read without advancing freshness IDs.
+  engine.accountSnapshotFrame = () =>
+    new Uint8Array(
+      consumerFrame({ ...store.serialize(), ...structuredClone(native()) }, undefined, false, undefined, 0, true),
+    );
 }

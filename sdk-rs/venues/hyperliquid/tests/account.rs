@@ -656,6 +656,77 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(120000.0));
 }
 
+#[test]
+fn live_close_fill_financials_are_net_and_do_not_invent_opening_values() {
+    let (mut e, socket) = ready("disabled");
+    let fills = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"BTC","side":"B","px":"100","sz":"0.1","time":2000,"tid":71,"oid":9007199254740995,"dir":"Open Long","startPosition":"2","closedPnl":"99","fee":"99"},{"coin":"BTC","side":"A","px":"101","sz":"0.1","time":2001,"tid":72,"oid":9007199254740996,"dir":"Close Long","startPosition":"2.1","closedPnl":"4","fee":"0.25"},{"coin":"BTC","side":"B","px":"102","sz":"0.1","time":2002,"tid":73,"oid":9007199254740997,"dir":"Close Short","startPosition":"-0.1","closedPnl":"0","fee":"0"}]}}"#;
+    message(&mut e, socket, 2100., fills);
+    message(&mut e, socket, 2100., fills);
+    let frame = e.take_frame(2100.).unwrap();
+    let payload = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 3);
+    assert_eq!(payload.len(), 152);
+    let symbol_refs: Vec<_> = payload[88..100]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|value| u32::from_le_bytes(*value))
+        .collect();
+    assert_eq!(symbol_refs.len(), 3);
+    assert!(
+        symbol_refs
+            .iter()
+            .all(|value| *value != u32::MAX && *value == symbol_refs[0])
+    );
+    let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+    assert_eq!([value(40), value(56), value(72)], [100., 101., 102.]);
+    assert!(
+        value(104).is_nan(),
+        "opening executions do not carry close PnL"
+    );
+    assert_eq!([value(112), value(120)], [3.75, 0.]);
+    assert!(
+        value(128).is_nan(),
+        "opening executions do not carry close fees"
+    );
+    assert_eq!([value(136), value(144)], [0.25, 0.]);
+    assert!(e.take_market_frame(2100.).is_none());
+}
+
+#[test]
+fn close_fill_missing_financial_fields_remain_absent_instead_of_becoming_zero() {
+    for (fields, has_fee) in [
+        ("", false),
+        (r#","closedPnl":"4""#, false),
+        (r#","fee":"0""#, true),
+    ] {
+        let (mut e, socket) = ready("disabled");
+        let fill = format!(
+            r#"{{"channel":"userFills","data":{{"isSnapshot":false,"fills":[{{"coin":"BTC","side":"A","px":"100","sz":"0.1","time":2000,"tid":81,"oid":99,"dir":"Close Long","startPosition":"2"{fields}}}]}}}}"#
+        );
+        message(&mut e, socket, 2100., &fill);
+        let frame = e.take_frame(2100.).unwrap();
+        let payload = safe_cex_engine::wire::sections(frame)
+            .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
+        assert_eq!(payload.len(), if has_fee { 56 } else { 40 });
+        assert_ne!(
+            u32::from_le_bytes(payload[32..36].try_into().unwrap()),
+            u32::MAX
+        );
+        assert_eq!(&payload[36..40], &[0; 4]);
+        if has_fee {
+            assert!(f64::from_le_bytes(payload[40..48].try_into().unwrap()).is_nan());
+            assert_eq!(f64::from_le_bytes(payload[48..56].try_into().unwrap()), 0.);
+        }
+    }
+}
+
 /// Reconnects and answers each account read by kind; returns the warnings logged.
 fn resync(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_hyperliquid::Hyperliquid>,
