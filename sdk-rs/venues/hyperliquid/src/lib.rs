@@ -254,7 +254,8 @@ impl Hyperliquid {
         {
             self.connection.supervisor.connecting(cx);
         }
-        self.connection.socket = Some(cx.connect_channel(self.ws(), channel));
+        self.connection.socket =
+            Some(cx.connect(safe_cex_engine::SocketSpec::new(self.ws()).channel(channel)));
     }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {

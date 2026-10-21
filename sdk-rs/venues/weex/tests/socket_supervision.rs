@@ -79,7 +79,9 @@ impl Harness {
                     channel: Some(SocketChannel::Public),
                     ..
                 } => self.public.push(socket),
-                Action::WsConnectWithHeaders { socket, .. } => self.private.push(socket),
+                Action::WsConnect {
+                    socket, headers, ..
+                } if !headers.is_empty() => self.private.push(socket),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 _ => (),

@@ -32,7 +32,7 @@ pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
     PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
-    SocketContext, SocketId, TimerId, Venue, VenueAction, unsupported_venue_action,
+    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};

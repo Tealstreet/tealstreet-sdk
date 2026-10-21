@@ -226,8 +226,12 @@ impl PhemexPerpetuals {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket =
-            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);

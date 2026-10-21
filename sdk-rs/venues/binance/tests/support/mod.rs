@@ -93,10 +93,10 @@ impl Harness {
                         .push((request.id, self.progress.len()));
                     self.requests.push(request);
                 }
-                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
-                Action::WsConnectWithHeaders { .. } => {
+                Action::WsConnect { headers, .. } if !headers.is_empty() => {
                     panic!("Binance authenticates sockets with listen keys")
                 }
+                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),

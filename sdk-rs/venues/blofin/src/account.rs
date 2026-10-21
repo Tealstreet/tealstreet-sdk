@@ -426,8 +426,9 @@ impl Blofin {
         } else {
             "wss://openapi.blofin.com/ws/private"
         };
-        self.account.connection.socket =
-            Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Private));
+        self.account.connection.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Private),
+        ));
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
     }
