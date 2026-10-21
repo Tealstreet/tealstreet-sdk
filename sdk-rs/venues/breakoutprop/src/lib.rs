@@ -785,6 +785,7 @@ impl Venue for BreakoutProp {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            public_catalogue_validation: true,
             cancel_all: safe_cex_engine::CancelAll::Native,
             max_leverage: safe_cex_engine::MaxLeverage::Unsupported,
             ..safe_cex_engine::Capabilities::NO_HISTORY

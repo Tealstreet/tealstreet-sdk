@@ -627,6 +627,8 @@ impl Venue for Woo {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::WooOrders,
+            fill_history_time: safe_cex_engine::FillHistoryTime::NonnegativeSecondsOrMilliseconds,
             cancel_all: safe_cex_engine::CancelAll::Native,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
             account: safe_cex_engine::AccountLookup::Query,

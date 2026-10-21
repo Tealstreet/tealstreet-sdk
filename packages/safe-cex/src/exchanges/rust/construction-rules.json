@@ -4,17 +4,21 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
-    "coinbase": { "canSign": [["key"]] },
-    "coinbasespot": { "canSign": [["key"]] },
-    "txflow": { "canSign": [["secret"], ["applicationId"]], "privateEligible": [] },
-    "polymarket": { "privateEligible": [["key"]] },
-    "paradex": {
-      "privateEligible": [["key"], ["paradexAddress"], ["subkeyAddress"]],
-      "explicitPrivateError": "Rust Paradex private accounts require a key, Paradex address and subkey address"
-    },
-    "lighter": { "privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]] },
-    "lighter-robinhood": { "privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]] },
-    "hyperliquid": { "privateEligible": [["vault", "applicationId", "key"]] },
-    "asterdex": { "canSign": [["key"], ["remoteSigner", "asterLocalAuth"]] }
+    "coinbase": {"canSign": [["key"]], "bridge": {"primaryCredentialsOnly": true}},
+    "coinbasespot": {"canSign": [["key"]], "bridge": {"spot": true, "primaryCredentialsOnly": true}},
+    "txflow": {"canSign": [["secret"], ["applicationId"]], "privateEligible": []},
+    "polymarket": {"privateEligible": [["key"]]},
+    "paradex": {"privateEligible": [["key"], ["paradexAddress"], ["subkeyAddress"]], "explicitPrivateError": "Rust Paradex private accounts require a key, Paradex address and subkey address", "bridge": {"payloadSigning": true}},
+    "lighter": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
+    "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
+    "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
+    "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
+    "bybitspot": {"bridge": {"spot": true}},
+    "binancespot": {"bridge": {"spot": true}},
+    "kucoinspot": {"bridge": {"spot": true}},
+    "hyperliquidspot": {"bridge": {"spot": true}},
+    "krakenspot": {"bridge": {"spot": true}},
+    "bybitdemo": {"bridge": {"demo": "always"}},
+    "hyrotrader": {"bridge": {"demo": "hyroMode"}}
   }
 }

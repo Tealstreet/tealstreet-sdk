@@ -15,7 +15,7 @@ import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const origin = 'https://api-evm.orderly.org';
@@ -229,7 +229,8 @@ describe('Orderly Rust transport boundary', () => {
     '%s refuses unsupported order history filters before dispatching a command',
     async (name) => {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
-      // No host is started: dispatch would reject with "engine is not started".
+      adoptEngineCapabilities(exchange);
+      // Supply the engine record without starting a host; the capability guard must prevent dispatch.
       for (const filter of [{ orderId: '42' }, { status: [OrderStatus.Closed] }, { status: [] }]) {
         await expect(exchange.fetchHistoricalOrders(filter)).rejects.toThrow(
           'does not support orderId or status filters',
@@ -242,6 +243,7 @@ describe('Orderly Rust transport boundary', () => {
   it('preserves history dispatch for supported Orderly options and other venues', async () => {
     for (const name of ['mode', 'binance'] as const) {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
+      adoptEngineCapabilities(exchange);
       try {
         await expect(
           exchange.fetchHistoricalOrders({ symbol: 'BTCUSDC', from: 1000, to: 2000, limit: 5 }),

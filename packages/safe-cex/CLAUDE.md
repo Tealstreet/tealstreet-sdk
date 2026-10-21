@@ -146,6 +146,13 @@ Aster API-version metadata. `resolveConstruction` exposes the same resolution
 without engine construction or I/O. CI compares both evaluators for every
 registered name. Explicit-private Paradex validation belongs to the registry.
 
+The table's compact `bridge` policy also resolves spot/demo identity, primary-only
+read credentials, payload-signing transport, API-index validation and isolated
+book subscriptions before WASM loads. Native `construction().bridge` reports the
+same choices; runtime behavior uses the engine capability record. Do not add a
+venue-name fallback for either path. FrameApplier quantity units continue to
+come from MARKETS flags; native sizing computations remain unchanged.
+
 The bridge forwards raw Hyro mode and production/simulator URL maps; the
 registry selects network endpoints. Native callers can retain explicit
 `endpoints` when the raw `hyrotrader` config is absent. Private non-Paradex
@@ -175,6 +182,22 @@ once the engine exists. `account` also gates the engine: `FetchAccount` to a
 venue whose record says `unsupported` is refused before the venue runs, so a
 venue answering identity for only some products (Binance USD-M/PM, Bybit
 except HyroTrader) reports it per product.
+
+Journal adapters, closed-position formats, history-bound normalization, filter
+refusals, STP/execution controls, numeric validation and book callback isolation
+also use engine policies. Capability flags and enum fields append to the existing
+two-word snapshot record without changing quantity units or older discriminants.
+
+Capability-dependent calls made during startup wait for that existing startup
+before validating or dispatching. Internal startup commands do not wait on
+themselves, and ready accounts retain immediate placement/cancel-all dispatch.
+With no capability record and no pending startup, or after failed startup, calls
+reject with a method-specific `ExchangeError` (`invalidInput`, `notSent`) and
+exactly-once reporting. A queued write that never dispatched remains `notSent`
+even if startup traps. Worker forwarding still runs before local policy checks;
+never start a second mirror engine to obtain capabilities. Explicit worker-aware
+readiness is recommended before local history/preflight work; cached markets
+alone do not establish it. Callers must handle typed readiness failures.
 
 ## Rust main-thread trading
 
