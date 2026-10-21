@@ -51,6 +51,21 @@ pub(crate) struct Request {
     rows: Vec<Row>,
     staged: Vec<Row>,
 }
+/// Request-level failures fail the read; row-level ones skip only that row.
+enum Rejected {
+    Request(String),
+    Row(String),
+}
+impl From<String> for Rejected {
+    fn from(error: String) -> Self {
+        Self::Request(error)
+    }
+}
+impl From<&str> for Rejected {
+    fn from(error: &str) -> Self {
+        Self::Request(error.into())
+    }
+}
 impl Request {
     pub(crate) fn array_at(&self) -> Option<ArrayAt> {
         (self.kind != Kind::Lookup).then_some(ArrayAt::Envelope(&[&["r"], &["result"]]))
@@ -504,9 +519,17 @@ impl Grvt {
             r.failed = Some("Malformed GRVT history page exceeds the native limit".into());
             return;
         }
-        let result = self.history_decode(cx, r, item);
-        if let Err(error) = result {
-            r.failed = Some(error);
+        match self.history_decode(cx, r, item) {
+            Ok(()) => {}
+            Err(Rejected::Request(error)) => r.failed = Some(error),
+            Err(Rejected::Row(error)) => {
+                // The raw text stands in for the identity, so paging still sees a fresh row.
+                r.page_raw.insert(format!("skipped:{item}"));
+                cx.log(
+                    safe_cex_engine::LogLevel::Warning,
+                    format!("Skipped malformed GRVT historical order: {error}"),
+                );
+            }
         }
     }
     fn history_decode(
@@ -514,7 +537,7 @@ impl Grvt {
         cx: &Cx<'_, Pending>,
         r: &mut Request,
         item: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), Rejected> {
         match r.kind {
             Kind::Fills | Kind::IncomeFills => {
                 let f: FillWire<'_> =
@@ -676,19 +699,19 @@ impl Grvt {
                 }
             }
             Kind::Orders => {
-                let o = decode_order(item, cx.store, cx.now)?;
+                let o = decode_order(item, cx.store, cx.now).map_err(Rejected::Row)?;
                 r.page_raw.insert(
                     o.native_id
                         .clone()
                         .unwrap_or_else(|| format!("{}:{}", o.order.id, o.created_ns)),
                 );
-                let extra: OrderExtras<'_> =
-                    serde_json::from_str(item).map_err(|_| "Invalid GRVT historical order")?;
+                let extra: OrderExtras<'_> = serde_json::from_str(item)
+                    .map_err(|_| Rejected::Row("Invalid GRVT historical order".into()))?;
                 if !extra.account.is_empty() && Some(&*extra.account) != r.account.as_deref() {
                     return Err("GRVT order belongs to another subaccount".into());
                 }
                 if o.created_ns == 0 {
-                    return Err("Missing GRVT order creation time".into());
+                    return Err(Rejected::Row("Missing GRVT order creation time".into()));
                 }
                 if o.order.status == OrderStatus::Open || !r.accepts(&o.order.symbol, o.created_ns)
                 {

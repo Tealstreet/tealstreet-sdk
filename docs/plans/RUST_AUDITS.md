@@ -1017,9 +1017,11 @@ Signing and integer scaling exact; no highs.
   "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).~~
   Builder check retried (TS budget) with orders held FIFO; rows skipped keeping
   stored copies; venue code/message surfaced, reconcile advice only when unknown.
-- Low: order history fails on one bad row; signer mismatch blocks trading;
-  1008 loses the proxy-whitelist message; amend may cancel without replacing if
-  cancels are asynchronous (verify live).
+- Low: ~~order history fails on one bad row; signer mismatch blocks trading;
+  1008 loses the proxy-whitelist message~~ (bad history rows skip with a
+  warning, a mismatched configured signer warns at startup as TS does, 1008 keeps
+  TS's whitelist guidance); amend may cancel without replacing if cancels are
+  asynchronous (verify live).
 
 ### Polymarket (development-only)
 CLOB V2 signing and amounts match the official client.
