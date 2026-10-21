@@ -153,6 +153,9 @@ pub struct Hyperliquid {
     perps_published: bool,
     /// The merged spot catalogue is in the store; until then spot rows are skipped.
     pub(crate) spot_committed: bool,
+    /// Merged spot pair symbol -> venue token (name, fullName), published as the
+    /// TS `info.hlTokenName`/`hlTokenFullName` disclosure.
+    underlying: HashMap<String, (String, Option<String>)>,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
@@ -182,6 +185,7 @@ impl Hyperliquid {
             spot_catalog: None,
             perps_published: false,
             spot_committed: false,
+            underlying: HashMap::new(),
             spot_tokens: HashMap::new(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -275,6 +279,10 @@ impl Hyperliquid {
             let Some(token) = tokens.iter().find(|t| t.name == market.base) else {
                 continue;
             };
+            self.underlying.insert(
+                market.symbol.clone(),
+                (token.name.clone(), token.full_name.clone()),
+            );
             let display = spot_display_name(token, &tokens);
             if display != token.name {
                 market.pretty_symbol = Some(format!("{display}/{}", market.quote));
@@ -464,6 +472,24 @@ impl Hyperliquid {
             }
         }
         cx.store.set_markets(all);
+        // `set_markets` clears the table; its rows index the new market snapshot.
+        if !self.underlying.is_empty() {
+            let rows = cx
+                .store
+                .markets()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, market)| {
+                    let (name, full_name) = self.underlying.get(&market.symbol)?;
+                    Some(safe_cex_engine::model::UnderlyingToken {
+                        market: index as u32,
+                        name: name.clone(),
+                        full_name: full_name.clone(),
+                    })
+                })
+                .collect();
+            cx.store.set_underlying_tokens(rows);
+        }
         let mut all = cx.store.tickers().to_vec();
         for ticker in tickers {
             // Discovery retries hydrate missing contexts, preserving live quotes.

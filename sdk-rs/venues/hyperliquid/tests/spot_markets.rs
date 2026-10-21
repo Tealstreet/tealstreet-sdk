@@ -126,6 +126,22 @@ fn spot_pairs_list_after_perps_with_the_unit_alias_and_real_quotes() {
     let upump = m("UPUMP/USDC");
     assert_eq!((upump.base.as_str(), upump.pretty_symbol), ("UPUMP", None));
     assert_eq!(m("HYPE/USDH").quote, "USDH");
+    // TS `info.hlTokenName`/`hlTokenFullName`: the venue token behind each spot pair.
+    let tokens = r.e.store().underlying_tokens().unwrap().to_vec();
+    let token = |symbol: &str| {
+        let index = r.e.store().market_index(symbol).unwrap();
+        let row = tokens.iter().find(|t| t.market == index).unwrap();
+        (row.name.clone(), row.full_name.clone())
+    };
+    assert_eq!(
+        token("UBTC/USDC"),
+        ("UBTC".into(), Some("Unit Bitcoin".into()))
+    );
+    assert_eq!(
+        token("HYPE/USDH"),
+        ("HYPE".into(), Some("Hyperliquid".into()))
+    );
+    assert_eq!(tokens.len(), 3, "spot pairs only");
     let t = r.e.store().ticker("UBTC/USDC").unwrap();
     assert_eq!(
         (t.last, t.mark, t.index, t.funding_rate),
