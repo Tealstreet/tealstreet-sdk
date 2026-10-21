@@ -115,10 +115,11 @@ impl Okx {
             return Self::finish_closed(cx, request);
         }
         if request.pages >= MAX_PAGES {
-            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
                 format!(
                     "OKX closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"
                 ),
+                vec![("command", safe_cex_engine::Value::Num(f64::from(request.command)))],
             );
             return Self::finish_closed(cx, request);
         }

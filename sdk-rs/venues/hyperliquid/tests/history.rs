@@ -117,6 +117,63 @@ fn order_transition_collapse_terminal_wins_ties_and_filters_creation_time() {
     assert_eq!(rows[0]["filled"], 2.0);
     assert!(rows[0].get("averagePrice").is_none());
 }
+
+#[test]
+fn rolling_order_retention_marker_owns_its_result_before_done_at_error_only_level() {
+    let (mut e, _) = ready("disabled");
+    e.set_log_level(safe_cex_engine::Level::Error);
+    query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: Some(5000.0),
+            limit: None,
+        },
+    );
+    let request = read(&mut e);
+    assert_eq!(kind(&request), "historicalOrders");
+    let rows: Vec<_> = (1..=2000).map(|id| format!(r#"{{"order":{{"coin":"BTC","oid":{id},"side":"B","limitPx":"90","origSz":"2","sz":"0","orderType":"Limit","timestamp":2000}},"status":"filled","statusTimestamp":2000}}"#)).collect();
+    reply(&mut e, &request, 200, &format!("[{}]", rows.join(",")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (index, event) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("semantic retention marker survives Error-only logging");
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(1.0))]
+    );
+    assert!(event.message.contains("rolling retention limit"));
+    let (done_index, result) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some((i, result)),
+            _ => None,
+        })
+        .expect("retained history completes");
+    assert!(index < done_index);
+    let rows: Vec<Value> = serde_json::from_str(result).unwrap();
+    assert_eq!(rows.len(), 2000);
+    assert!(
+        rows.iter()
+            .all(|row| row["status"] == "closed" && row["amount"] == 2.0 && row["filled"] == 2.0)
+    );
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+    )));
+}
 #[test]
 fn income_splits_fill_pnl_and_rebate_and_reads_nested_funding() {
     let (mut e, _) = ready("disabled");

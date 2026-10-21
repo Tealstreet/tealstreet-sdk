@@ -455,6 +455,11 @@ per-venue canary holding the formerly circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### Bitunix
+
+- ~~Bitunix's query page-cap ownership omission~~ now carries the actual request
+  command before partial completion, as do duplicate/nonadvancing-page markers.
+  Failed pages reject rather than masquerading as complete empty/partial history.
+
 Originally reviewed on `feat/rust-bitunix` at `846f285d13`; #1309 merged as
 `3acf9e46392`. Paths below are relative to `sdk-rs/venues/bitunix/src`.
 Remaining resilience and completeness findings are independent of request parity.
@@ -480,11 +485,15 @@ Remaining resilience and completeness findings are independent of request parity
 - Medium: every WS position/order/tpsl event bumps the snapshot generation and the
   in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
   events do not update positions; under steady activity positions never commit.
-- Medium: history failures return success with empty or partial rows
-  (`history.rs:526,554`). TS historical fills warn and return empty rows; orders
-  toast and return empty rows, and income toasts and returns collected rows.
-  Neither comparison establishes completeness: Rust partial income ledgers look
-  complete without an owned semantic marker.
+- Medium: ~~history failures return success with empty or partial rows~~.
+  Rust now rejects failed first/later pages (transport, HTTP/native, malformed
+  rows/envelopes), so a failed read cannot establish complete history. Full
+  duplicate/nonadvancing pages and caps retain validated rows only with an owned
+  `history.incomplete` marker before completion. Empty end pages and proved
+  requested-start crossings remain complete. TS historical fills warn and return
+  empty rows; orders toast and return empty rows, and income toasts and returns
+  collected rows. Those fallbacks do not establish completeness or justify a
+  clean native success on a failed page.
 - Medium: ~~one failed `batch_order` chunk drops IDs already placed by earlier
   chunks~~. #1589 (`ef362708305`) preserves acknowledged IDs and effective legs
   in one classified failure, with Unknown sticky across later refusals. Native
@@ -518,6 +527,12 @@ Remaining resilience and completeness findings are independent of request parity
   unsubscribes actually sent.
 
 ### OKX
+
+- ~~OKX's three request-associated cap/cursor ownership omissions~~ now carry
+  the actual closed-position or history query command before retained rows
+  complete. Native regressions cover exact Warn ownership/order at Error-only
+  logging; EEA composite-source failures remain failures.
+
 - ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
@@ -544,6 +559,11 @@ Remaining resilience and completeness findings are independent of request parity
   position under the documented conditional-order contract.
 
 ### Hyperliquid
+
+- ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
+  actual query command before completion. A native 2,000-row regression checks
+  retained financial rows, Warn ownership/order and Error-only delivery.
+
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
@@ -615,6 +635,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+
+- ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
+  carry the actual request command before retained rows complete. Both native
+  regressions check exact ownership and order at Error-only logging, preserving
+  row counts and existing window/cap policy.
+
 - ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
   and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
   their headers; reset and Retry-After hints extend all waiting category retries
@@ -695,6 +721,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   are resent.
 
 ### BloFin
+
+- ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
+  request command before retained rows complete. Its native cap regression
+  checks exact ownership and ordering even at Error-only log level.
+
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
   after usable markets and retries ticker discovery; #1615 (`c63acfc19c2`)
@@ -955,15 +986,22 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Rejected WS identities protect pending REST joins without globally starving
   unrelated rows, with coalesced read repair. Regression coverage includes both
   structural/numeric failures, missing IDs, duplicate keys, option update/close,
-  mode coherence and repeated WS rejects during REST walks. Remaining: Bitget
-  structural WS order/position array rejection. Preserve actual revision/mode
-  fences, strict financial execution coverage and Hyro's atomic handshake.
+  mode coherence and repeated WS rejects during REST walks.
+  ~~Bitget structural WS order/position array rejection~~: valid Classic/UTA
+  peers advance with identity/scope retention and coalesced read repair. Native
+  rejection observation times remain separate from financial timestamps; earlier
+  clean snapshots still fence older reads, while fresh REST-only peers can heal.
+  Partial/mixed account modes cannot corrupt global routing or manufacture initial
+  readiness. Plans/trailing metadata retain native cancel routes through the
+  existing revision/terminal fence. Regressions cover each boundary.
+  Preserve actual revision/mode fences, strict financial execution coverage and
+  Hyro's atomic handshake.
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
@@ -1193,6 +1231,12 @@ Signing and payloads match; no confirmed highs.
   next balance fetch; Rust uses reported PnL until a real price arrives.
 
 ### Paradex
+
+- ~~Paradex's bounded history-cap ownership omission~~ now carries the actual
+  request command before retained rows complete. Its native regression covers
+  exact Warn ownership/order at Error-only logging; unbounded caps and other
+  stalls still fail.
+
 StarkNet typed data, JWT, payloads and SBE decoding match.
 - High: ~~one blank ticker field halts the venue including its private side~~
   (#1356, `d65119bea35`: nullable summary/default regressions and independent

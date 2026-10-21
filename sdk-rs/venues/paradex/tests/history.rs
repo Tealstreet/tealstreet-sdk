@@ -546,6 +546,69 @@ fn a_page_cap_with_a_pending_cursor_is_incomplete_not_partial_success() {
 }
 
 #[test]
+fn bounded_history_page_cap_owns_warning_before_retained_rows_at_error_only_level() {
+    let mut h = private();
+    h.actions.clear();
+    h.e.set_log_level(safe_cex_engine::Level::Error);
+    read(
+        &mut h,
+        37,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(100),
+        },
+    );
+    for page in 0..50 {
+        let row = ORDER.replace(r#""id":"123""#, &format!(r#""id":"o{page}""#));
+        h.reply(
+            "/orders-history?",
+            &format!(r#"{{"next":"c{page}","results":[{row}]}}"#),
+        );
+    }
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(37).unwrap()).unwrap();
+    assert_eq!(rows.len(), 50);
+    assert!(
+        rows.iter()
+            .all(|row| row["amount"] == 2.0 && row["filled"] == 1.5)
+    );
+    let (index, event) = h
+        .actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("semantic bounded-history cap marker");
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(37.0))]
+    );
+    let done = h
+        .actions
+        .iter()
+        .position(|action| {
+            matches!(
+                action,
+                safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {
+                    command: 37,
+                    ..
+                })
+            )
+        })
+        .unwrap();
+    assert!(index < done);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
+}
+
+#[test]
 fn a_limited_order_history_stops_at_its_limit_instead_of_paging_to_the_cap() {
     let mut h = private();
     read(

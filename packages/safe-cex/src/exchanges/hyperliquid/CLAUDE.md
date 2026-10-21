@@ -1277,6 +1277,10 @@ Four properties, every one of them measured, and each silently wrong if assumed:
   degenerate to one call. The **2000-row ceiling is a retention limit, not a page size** —
   there is no cursor past it, so unlike every other private read on this venue, order
   history is NOT address-queryable-complete.
+  Rust emits `history.incomplete` with the actual query command before returning
+  this retained history, so the host flags the owning array and routes its
+  warning only to that caller. Transition collapse, time/limit filtering and
+  strict history failures retain their existing behavior.
 - **`sz` is REMAINING, `origSz` is original.** A `filled` row carries `sz: "0.0"`; a
   cancelled one carries `sz === origSz`. Reading `sz` as the amount reports every completed
   order as size zero.

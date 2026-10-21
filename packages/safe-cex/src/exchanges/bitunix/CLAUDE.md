@@ -531,6 +531,15 @@ Similarly, TP/SL orders may be direct arrays or wrapped in `orderList`.
 
 ## Order history (`/api/v1/futures/trade/get_history_orders`)
 
+Rust history queries reject failed transport, HTTP/native, malformed-row or
+malformed-envelope pages, including after earlier valid pages. They no longer
+return clean empty/partial history on failure. Page caps and full duplicate or
+nonadvancing walks retain validated rows with an actual-command-owned
+`history.incomplete` Warn before completion, including a full order page stuck
+at the inclusive start time. Empty end pages and rows crossing the requested
+start remain complete. The host flags and warns only the owning caller; trading
+writes, live execution baselines and background coverage policies are unchanged.
+
 `fetchHistoricalOrders` reads this endpoint. Mapper: `bitunix.order-history.ts`, pure and
 exported. Rows nest under **`data.orderList`** — the row key is per-endpoint here
 (`orderList`, `tradeList`, `positionList`).

@@ -1023,10 +1023,11 @@ impl Okx {
                 );
                 return;
             }
-            cx.notice(
+            cx.event(
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
+                vec![("command", safe_cex_engine::Value::Num(f64::from(r.command)))],
             );
             r.finish(cx);
             return;
@@ -1044,10 +1045,11 @@ impl Okx {
                 );
                 return;
             }
-            cx.notice(
+            cx.event(
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 "OKX history cursor did not advance; older rows were not fetched",
+                vec![("command", safe_cex_engine::Value::Num(f64::from(r.command)))],
             );
             r.finish(cx);
             return;

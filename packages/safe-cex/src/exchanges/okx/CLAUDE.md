@@ -1219,3 +1219,9 @@ are not raw equity conversion rates. Native `totalEq` remains authoritative.
 The first real public price supersedes a startup native mark and converts inverse
 exposure, native IMR and native PnL consistently. Missing-market currencies remain
 visible and require native aggregate equity rather than a one-dollar fallback.
+
+Rust closed-position caps and ordinary history caps/cursor stalls emit
+`history.incomplete` with their actual query command before partial completion.
+The host flags only the owning result and routes its warning to that caller.
+EEA composite-source cap/cursor failures still reject; strict financial rows,
+caps, cursors and retained-row policies are unchanged.

@@ -190,6 +190,8 @@ fn a_venue_rejection_fails_the_whole_read_instead_of_returning_a_partial_history
 #[test]
 fn the_page_cap_keeps_rows_and_warns() {
     let mut h = startup(Variant::Linear, true);
+    h.notices.clear();
+    h.engine.set_log_level(safe_cex_engine::Level::Error);
     fetch(&mut h, 6, None, Some(1.0), Some(2.0));
     for i in 0..20 {
         h.respond(
@@ -203,6 +205,35 @@ fn the_page_cap_keeps_rows_and_warns() {
         serde_json::from_str(h.result(6).unwrap().as_ref().unwrap()).unwrap();
     assert_eq!(rows.len(), 20);
     assert!(h.logs.iter().any(|message| message.contains("20-page cap")));
+    let (index, event) = h
+        .notices
+        .iter()
+        .enumerate()
+        .find_map(|(i, notice)| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("owned semantic page-cap warning");
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(6.0))]
+    );
+    let done = h
+        .notices
+        .iter()
+        .position(|notice| {
+            matches!(
+                notice,
+                safe_cex_engine::Notice::CommandDone { command: 6, .. }
+            )
+        })
+        .unwrap();
+    assert!(index < done, "marker must precede retained rows");
 }
 
 #[test]

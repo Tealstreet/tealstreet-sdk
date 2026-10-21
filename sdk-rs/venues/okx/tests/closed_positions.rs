@@ -151,6 +151,7 @@ fn a_page_without_usable_close_times_stops_and_a_rejection_fails() {
 #[test]
 fn the_page_cap_warns_and_keeps_rows() {
     let mut e = trading_engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
     fetch(&mut e, None, None, None);
     let mut time = 1_709_900_000_000u64;
     let mut out = Vec::new();
@@ -176,6 +177,27 @@ fn the_page_cap_warns_and_keeps_rows() {
     );
     assert!(out.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.level == safe_cex_engine::Level::Warn && event.message.contains("100-page cap"))));
+    let (index, event) = out
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("owned semantic closed-position warning");
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(77.0))]
+    );
+    let done = out
+        .iter()
+        .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 77, .. })))
+        .unwrap();
+    assert!(index < done);
 }
 
 #[test]
