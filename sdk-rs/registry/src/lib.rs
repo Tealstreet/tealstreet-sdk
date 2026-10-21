@@ -452,7 +452,7 @@ pub fn build<T: Visit>(
         options.account_startup = !mode.public_data_only;
     }
     if options.payload_signer && venue != "paradex" && !options.public_data_only {
-        return Err(VenueError::new(format!("Rust {venue} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret."))
+        return Err(VenueError::new(format!("Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."))
             .kind(ErrorKind::Unsupported)
             .outcome(safe_cex_engine::Outcome::NotSent));
     }
