@@ -1060,11 +1060,10 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     for _ in 0..2 {
         e.handle(NOW, Event::WsMessage { socket, text });
     }
-    assert!(
-        e.take_market_frame(NOW).is_none(),
-        "pending catalog identity fences market-only emission"
-    );
-    let frame = e.take_frame(NOW).unwrap();
+    // A pending fill promotes the market flush to a full frame (MARKETS first).
+    let frame = e
+        .take_market_frame(NOW)
+        .expect("a pending fill promotes the flush to a full frame");
     let payload = safe_cex_engine::wire::sections(frame)
         .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
         .unwrap()
