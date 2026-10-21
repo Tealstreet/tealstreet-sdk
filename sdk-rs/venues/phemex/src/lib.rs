@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod history;
+mod identity;
 mod income;
 mod sign;
 mod trading;
@@ -37,6 +38,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Markets(Vec<Market>, bool),
     Tickers(Vec<Ticker>, bool),
     Depth {
@@ -346,6 +348,7 @@ impl PhemexPerpetuals {
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
@@ -394,6 +397,7 @@ impl Venue for PhemexPerpetuals {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -632,6 +636,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         match p {
+            Pending::Identity(command) => self.identity_response(cx, command, r),
             bad @ (Pending::Markets(_, true)
             | Pending::Tickers(_, true)
             | Pending::Candles { invalid: true, .. }) => {
@@ -753,6 +758,10 @@ impl Venue for PhemexPerpetuals {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         let Some(command) = self.trade_command(cx, command) else {
             return;
         };

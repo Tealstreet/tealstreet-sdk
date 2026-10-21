@@ -6,3 +6,4 @@ pub const MARKETS: &str = "/openApi/swap/v2/quote/contracts";
 pub const DAILY: &str = "/openApi/swap/v2/quote/ticker";
 pub const PREMIUM: &str = "/openApi/swap/v2/quote/premiumIndex";
 pub const KLINES: &str = "/openApi/swap/v3/quote/klines";
+pub const LEVERAGE: &str = "/openApi/swap/v2/trade/leverage";
