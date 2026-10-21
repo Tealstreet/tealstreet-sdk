@@ -1,5 +1,12 @@
 # Explicit host entropy
 
+WASM production provider lookup prefers `globalThis.crypto`, then callable
+WebCrypto providers on `self`/`window`. Partial Node/Bun DOM shims must not shadow
+the realm's cryptographic source. Missing providers still fail construction with
+a typed error. The actual-WASM regression installs empty `self` and `window`
+before the first engine construction; the existing SDK Node suites also cover
+their shared empty-window setup without a test-only entropy workaround.
+
 Scope: host-owned entropy at the EngineHost/Engine/Cx boundary. Fresh landing
 c63acfc19c2; overseer assignment and construction/signing requirements approved.
 

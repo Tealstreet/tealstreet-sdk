@@ -38,6 +38,37 @@ function orders(source) {
 }
 const ids = (actions) => actions.filter((a) => a.op === 'http').map((a) => new URL(a.url).searchParams.get('newClientOrderId'));
 
+// Must precede the first construction: js-sys caches its chosen global object.
+test('real WASM does not inspect shim getters when realm WebCrypto is available', () => {
+  const descriptors = ['self', 'window'].map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
+  for (const key of ['self', 'window'])
+    Object.defineProperty(globalThis, key, { configurable: true, get() { throw new Error('Unexpected shim access'); } });
+  try {
+    const engine = new WasmEngine('binance', '{"publicDataOnly":true}');
+    engine.free();
+  } finally {
+    ['self', 'window'].forEach((key, index) => {
+      if (descriptors[index]) Object.defineProperty(globalThis, key, descriptors[index]);
+      else delete globalThis[key];
+    });
+  }
+});
+
+test('real WASM uses realm WebCrypto when self and window are empty shims', () => {
+  const descriptors = ['self', 'window'].map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
+  for (const key of ['self', 'window'])
+    Object.defineProperty(globalThis, key, { configurable: true, value: {} });
+  try {
+    const engine = new WasmEngine('binance', '{"publicDataOnly":true}');
+    engine.free();
+  } finally {
+    ['self', 'window'].forEach((key, index) => {
+      if (descriptors[index]) Object.defineProperty(globalThis, key, descriptors[index]);
+      else delete globalThis[key];
+    });
+  }
+});
+
 test('real WASM client IDs repeat with a source and remain random in production', () => {
   const first = ids(orders(seeded(7)));
   assert.equal(first.length, 1);

@@ -391,12 +391,30 @@ fn entropy_configuration_error() -> safe_cex_engine::VenueError {
 
 #[cfg(target_arch = "wasm32")]
 fn crypto_entropy() -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
-    let crypto = js_sys::Reflect::get(&js_sys::global(), &"crypto".into())
-        .map_err(|_| entropy_configuration_error())?;
-    let fill = js_sys::Reflect::get(&crypto, &"getRandomValues".into())
-        .map_err(|_| entropy_configuration_error())?
-        .dyn_into::<js_sys::Function>()
-        .map_err(|_| entropy_configuration_error())?;
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(thread_local_v2, js_name = globalThis)]
+        static GLOBAL_THIS: Option<js_sys::Object>;
+        #[wasm_bindgen(thread_local_v2, js_name = self)]
+        static SELF: Option<js_sys::Object>;
+        #[wasm_bindgen(thread_local_v2, js_name = window)]
+        static WINDOW: Option<js_sys::Object>;
+    }
+    // js_sys::global() prefers self/window, which may be incomplete Node/Bun
+    // shims. Prefer the real realm's crypto and only accept callable providers.
+    let (crypto, fill) = std::iter::once_with(|| GLOBAL_THIS.with(Option::clone))
+        .chain(std::iter::once_with(|| SELF.with(Option::clone)))
+        .chain(std::iter::once_with(|| WINDOW.with(Option::clone)))
+        .flatten()
+        .find_map(|global| {
+            let crypto = js_sys::Reflect::get(&global, &"crypto".into()).ok()?;
+            let fill = js_sys::Reflect::get(&crypto, &"getRandomValues".into())
+                .ok()?
+                .dyn_into::<js_sys::Function>()
+                .ok()?;
+            Some((crypto, fill))
+        })
+        .ok_or_else(entropy_configuration_error)?;
     Ok(Box::new(move |bytes| {
         let size = u32::try_from(bytes.len()).map_err(|_| "Entropy request is too large")?;
         // Separate storage: arbitrary JS callbacks must never see a Rust memory view.
