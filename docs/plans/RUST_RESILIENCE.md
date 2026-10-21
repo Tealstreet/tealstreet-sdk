@@ -37,3 +37,25 @@ production-impact rule the work has no user impact (overseer, 2026-10-21).
 
 Each fix has a reproducing regression; each PR gets adversarial sub-agent
 reviews posted on it.
+
+## Remaining resilience fixes (Codex, 2026-10-21)
+
+One PR each from current `feat/rust-rewrite`, in this order:
+
+1. Rejected-row severity: Binance/Coinbase/WEEX/Kraken futures order rows,
+   plus Coinbase spot holdings, report coded `row.skipped` at Error when no
+   stored copy is retained and Warn when one is kept. Preserve reconciliation,
+   terminal fences and identity matching. Keep bounded once-per-identity
+   reporting, permitting one escalation if a warned row loses its stored copy;
+   a mapped row or clean snapshot re-arms it. Rebuild on `Cx::notice`, treating
+   the pre-log-removal sketch as reference only. Regression tests exercise mixed
+   retained/missing rows, repeat suppression, recovery and terminal identity.
+2. Orderly margin-mode lists: isolate rejected rows and retain their symbol's
+   old value, with a coded skip notice; valid peer rows still commit.
+3. Bybit discovery: honour HTTP-200 retCode 10006 and its reset-timestamp
+   cooldown without shortening existing Retry-After/backoff protections.
+
+Each phase gets a failing regression before implementation, focused touched
+venue plus Binance tests, scoped formatting/Clippy, independent review, fresh
+CI and a separate fail-closed revert guard before its merge. No local release
+WASM builds, deployments or downstream application edits.
