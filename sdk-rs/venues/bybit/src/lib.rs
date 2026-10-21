@@ -2152,7 +2152,9 @@ impl Venue for BybitLinear {
                 _ => None,
             };
             if let Some(id) = id {
-                cx.done(id, Err("Bybit product is not enabled".into()));
+                let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
+                    .outcome(safe_cex_engine::Outcome::NotSent);
+                cx.fail(id, error);
             } else {
                 cx.log(LogLevel::Warning, "Bybit product is not enabled");
             }

@@ -1421,6 +1421,14 @@ fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
         200,
         r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
     );
+    // An explicit retCode before any create landed is a refusal.
+    assert_eq!(
+        h.outcomes,
+        [
+            (91, Some(safe_cex_engine::Outcome::Rejected)),
+            (92, Some(safe_cex_engine::Outcome::Rejected))
+        ]
+    );
     assert_eq!(h.command_errors.len(), 2);
     assert_eq!(h.command_errors[0].0, 91);
     assert_eq!(h.command_errors[1].0, 92);
