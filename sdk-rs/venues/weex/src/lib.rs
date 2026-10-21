@@ -66,6 +66,11 @@ enum Task {
         command: CommandId,
         rows: Vec<Candle>,
     },
+    Leverage {
+        command: CommandId,
+        symbol: String,
+        revision: u64,
+    },
 }
 struct DeferredGet {
     timer: TimerId,
@@ -257,6 +262,111 @@ impl WeexFutures {
             cx.request_streamed(Method::Get, url, vec![], at, pending);
         } else {
             cx.request(Method::Get, url, vec![], None, pending);
+        }
+    }
+    /// A fresh symbol configuration read, as the TS adapter's leverage query does.
+    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
+        let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
+            cx.fail(command, format!("unknown market {symbol}"));
+            return;
+        };
+        if cx.now < self.paused_until {
+            cx.fail(command, String::from("WEEX account reads are rate limited"));
+            return;
+        }
+        let task = Task::Leverage {
+            command,
+            symbol,
+            revision: self.account.settings_revision(),
+        };
+        let query = format!("symbol={market_id}");
+        if !self.signed_request(
+            cx,
+            Method::Get,
+            "/capi/v3/account/symbolConfig",
+            &query,
+            None,
+            task,
+            None,
+        ) {
+            cx.fail(command, String::from("WEEX leverage requires credentials"));
+        }
+    }
+    fn leverage_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: &str,
+        revision: u64,
+        response: Response<'_>,
+    ) {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fetched {
+            buy_leverage: f64,
+            sell_leverage: f64,
+            margin_type: safe_cex_engine::model::MarginType,
+        }
+        let market_id = cx.store.market(symbol).map(|m| m.id.clone());
+        let config = serde_json::from_str::<Vec<account_wire::ConfigRow<'_>>>(response.body)
+            .map_err(|e| format!("invalid WEEX symbol configuration: {e}"))
+            .and_then(|rows| {
+                rows.into_iter()
+                    .find(|row| Some(&*row.symbol) == market_id.as_deref())
+                    .ok_or_else(|| format!("WEEX symbol configuration omitted {symbol}"))
+            })
+            .and_then(|row| {
+                let setting = row.setting();
+                match (
+                    setting.buy_leverage,
+                    setting.sell_leverage,
+                    setting.margin_type,
+                ) {
+                    (Some(buy), Some(sell), Some(margin_type)) if buy > 0.0 && sell > 0.0 => Ok((
+                        account::Config {
+                            setting,
+                            hedged: row.separated_type == "SEPARATED",
+                            isolated_long_leverage: row.isolated_long_leverage,
+                            isolated_short_leverage: row.isolated_short_leverage,
+                        },
+                        Fetched {
+                            buy_leverage: buy,
+                            sell_leverage: sell,
+                            margin_type,
+                        },
+                    )),
+                    _ => Err("invalid WEEX symbol configuration: non-positive leverage".into()),
+                }
+            });
+        let (config, fetched) = match config {
+            Ok(config) => config,
+            Err(error) => {
+                cx.fail(command, error);
+                return;
+            }
+        };
+        // A settings write since issue supersedes this snapshot: answer the
+        // current settings instead, so the caller's store cannot regress either.
+        let fetched = if revision == self.account.settings_revision() {
+            cx.store
+                .update_setting(symbol, |setting| *setting = config.setting);
+            self.account.configs.insert(symbol.to_owned(), config);
+            fetched
+        } else {
+            cx.store
+                .setting(symbol)
+                .and_then(|s| {
+                    Some(Fetched {
+                        buy_leverage: s.buy_leverage?,
+                        sell_leverage: s.sell_leverage?,
+                        margin_type: s.margin_type?,
+                    })
+                })
+                .unwrap_or(fetched)
+        };
+        match serde_json::to_string(&fetched) {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error.to_string()),
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -531,6 +641,7 @@ impl WeexFutures {
                 }
             }
             Task::Candles { command, .. } => cx.fail(command, error),
+            Task::Leverage { command, .. } => cx.fail(command, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -580,6 +691,7 @@ impl Venue for WeexFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -844,6 +956,11 @@ impl Venue for WeexFutures {
             );
         }
         match p.task {
+            Task::Leverage {
+                command,
+                symbol,
+                revision,
+            } => self.leverage_response(cx, command, &symbol, revision, response),
             Task::Identity(command) => self.identity_response(cx, command, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
@@ -1124,6 +1241,7 @@ impl Venue for WeexFutures {
                     Some(ArrayAt::Root),
                 );
             }
+            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             _ => cx.notice(
                 safe_cex_engine::Level::Warn,
                 code::COMMAND_UNSUPPORTED,

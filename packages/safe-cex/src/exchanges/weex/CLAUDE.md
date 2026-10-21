@@ -227,3 +227,8 @@ Rust `changePositionMode(hedged, symbol)` sends only the selected symbol's margi
 configuration, retaining its existing margin type. Omitting symbol retains the
 legacy positions-first, otherwise all-markets scope. Confirmed per-symbol modes
 remain in their own configuration caches for subsequent order and margin calls.
+
+`FetchLeverage` is a fresh symbol-scoped `GET /capi/v3/account/symbolConfig`
+(as the TS adapter's `fetchLeverageForSymbol`), so WEEX reports
+`leverageQuery: onRead`. It answers the margin-type rails and commits the
+configuration unless a settings write or newer read landed meanwhile.
