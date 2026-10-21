@@ -1,8 +1,9 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::log::{MAX_LOG_BYTES, REDACTED, code};
 use safe_cex_engine::{
-    Action, Command, Cx, Engine, Event, Health, Level, LogEvent, LogLevel, Method, Notice,
-    Redacted, RequestId, Response, SocketId, TimerId, Value, Venue,
+    Action, Command, Cx, Engine, ErrorKind, Event, Health, Level, LogEvent, LogLevel, Method,
+    Notice, Redacted, RequestId, Response, SocketChannel, SocketId, SocketSpec, TimerId, Value,
+    Venue, VenueError,
 };
 
 /// Turns each socket message into one notice so tests drive `Cx` directly.
@@ -24,6 +25,32 @@ impl Venue for Logger {
                     (),
                 );
             }
+            Some(("connect", role)) => {
+                let channel = match role {
+                    "private" => SocketChannel::Private,
+                    "business" => SocketChannel::Business,
+                    _ => SocketChannel::Public,
+                };
+                cx.connect(SocketSpec::new("wss://example.test").channel(channel));
+            }
+            Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
+            Some(("deactivate", _)) => cx.deactivate(),
+            Some(("rejectlogged", _)) => {
+                cx.notice(Level::Error, code::AUTH_REJECTED, "key rejected");
+                cx.deactivate();
+            }
+            Some(("rejectboth", _)) => {
+                cx.startup_failed(VenueError::new("refused").kind(ErrorKind::AuthInvalid));
+                cx.deactivate();
+            }
+            Some(("fail", kind)) => cx.fail(
+                1,
+                VenueError::new("refused").kind(if kind == "auth" {
+                    ErrorKind::AuthInvalid
+                } else {
+                    ErrorKind::Rejected
+                }),
+            ),
             Some(("log", message)) => cx.log(LogLevel::Info, message),
             Some(("warn", message)) => cx.log(LogLevel::Warning, message),
             Some((level, message)) => {
@@ -215,4 +242,115 @@ fn socket_and_http_failures_are_counted_without_quoting_transport_errors() {
             ..Health::default()
         }
     );
+}
+
+fn connected(engine: &mut Engine<Logger>, role: &str) -> SocketId {
+    engine.handle(
+        0.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: &format!("connect:{role}"),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    match actions.as_slice() {
+        [Action::WsConnect { socket, .. }] => *socket,
+        other => panic!("expected one connect, got {other:?}"),
+    }
+}
+
+#[test]
+fn reconnects_count_a_role_reopened_after_a_close_never_a_first_or_parallel_connect() {
+    let mut engine = engine();
+    let private = connected(&mut engine, "private");
+    connected(&mut engine, "public");
+    connected(&mut engine, "public");
+    assert_eq!(engine.health().reconnects, 0, "first and parallel connects");
+
+    engine.handle(
+        0.,
+        Event::WsClosed {
+            socket: private,
+            code: 1006,
+        },
+    );
+    connected(&mut engine, "public");
+    assert_eq!(
+        engine.health().reconnects,
+        0,
+        "another role's connect is not this reconnect"
+    );
+    let replacement = connected(&mut engine, "private");
+    assert_eq!(engine.health().reconnects, 1);
+
+    // An engine-initiated close is deliberate: it counts as a close, and the
+    // venue's next connect on that role (a new feed, say) is not a reconnect.
+    send(&mut engine, &format!("close:{}", replacement.0));
+    assert_eq!(engine.health().ws_closed, 2);
+    connected(&mut engine, "private");
+    assert_eq!(engine.health().reconnects, 1);
+}
+
+#[test]
+fn only_private_socket_frames_advance_the_last_private_message() {
+    let mut engine = engine();
+    let public = connected(&mut engine, "public");
+    let private = connected(&mut engine, "private");
+    engine.handle(
+        5.,
+        Event::WsMessage {
+            socket: public,
+            text: "log:quiet",
+        },
+    );
+    assert_eq!(engine.health().last_private_message_ms, None);
+    engine.handle(
+        7.,
+        Event::WsMessage {
+            socket: private,
+            text: "log:quiet",
+        },
+    );
+    assert_eq!(engine.health().last_private_message_ms, Some(7.));
+    engine.handle(
+        9.,
+        Event::WsClosed {
+            socket: private,
+            code: 1000,
+        },
+    );
+    engine.handle(
+        11.,
+        Event::WsMessage {
+            socket: private,
+            text: "log:late",
+        },
+    );
+    assert_eq!(
+        engine.health().last_private_message_ms,
+        Some(7.),
+        "a closed socket is no longer private"
+    );
+}
+
+#[test]
+fn deactivation_and_auth_kind_failures_count_as_auth_failures() {
+    let mut engine = engine();
+    send(&mut engine, "fail:rejected");
+    assert_eq!(engine.health().auth_failures, 0);
+    send(&mut engine, "fail:auth");
+    send(&mut engine, "deactivate:");
+    assert_eq!(engine.health().auth_failures, 2);
+    // One rejection reported both ways in one event counts once.
+    send(&mut engine, "rejectboth:");
+    assert_eq!(engine.health().auth_failures, 3);
+}
+
+#[test]
+fn an_auth_rejected_event_and_a_deactivation_in_one_event_count_once() {
+    let mut engine = engine();
+    send(&mut engine, "rejectlogged:");
+    assert_eq!(engine.health().auth_failures, 1);
+    send(&mut engine, "rejectlogged:");
+    assert_eq!(engine.health().auth_failures, 2);
 }

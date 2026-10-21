@@ -1081,6 +1081,12 @@ fn write_failures_are_classified_without_changing_their_text() {
             "Kraken HTTP 429",
         ),
         (
+            400,
+            r#"{"result":"error","error":"invalidArgument"}"#.to_owned(),
+            rejected(ErrorKind::Rejected),
+            "Kraken HTTP 400: invalidArgument",
+        ),
+        (
             200,
             r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
             rejected(ErrorKind::RateLimited),

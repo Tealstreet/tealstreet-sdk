@@ -41,7 +41,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     start,
     command: (json) => {
       const command = JSON.parse(json);
-      if (command.op === 'setTickerSymbols') return noActions();
+      if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return noActions();
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
     },
@@ -104,6 +104,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
       omniKeySeed: '11'.repeat(65),
       testnet: true,
       publicDataOnly: false,
+      remoteSigning: false,
       enableSpotMarkets: false,
       publicFeed: { mode: 'direct' },
       accountStartup: true,

@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { RustEngineExchange, runsOnRustEngine } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
 import { virtualClock } from '../../utils/virtualClock';
 
 describe('spot-enabled Hyperliquid accounts run on the engine', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('the spot toggle no longer routes any venue away from the engine', () => {
+    expect(runsOnRustEngine('hyperliquid', { engine: 'rust' })).toBe(true);
+    expect(runsOnRustEngine('hyperliquid', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
+    expect(runsOnRustEngine('hyperliquid', {})).toBe(false);
+    expect(runsOnRustEngine('bybit', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
+    expect(runsOnRustEngine('bitunix', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
+    expect(runsOnRustEngine('bitunix', {})).toBe(false);
+  });
 
   it('createExchange builds the engine with or without spot markets', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);

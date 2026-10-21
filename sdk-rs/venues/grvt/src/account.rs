@@ -1412,7 +1412,7 @@ impl Grvt {
                     self.sync_balance_upnl(cx);
                 }
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions {
@@ -1763,7 +1763,7 @@ impl Grvt {
                 cx.store.set_balance(cx.store.balance().clone());
                 self.start_private_account(cx);
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions { .. } => {
@@ -1833,6 +1833,13 @@ impl Grvt {
             if !self.account.authenticated {
                 self.subscribe_private(cx);
             }
+            return true;
+        }
+        if code == "1008" {
+            cx.log(
+                LogLevel::Error,
+                "GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).",
+            );
             return true;
         }
         if !code.is_empty() && code != "0" {

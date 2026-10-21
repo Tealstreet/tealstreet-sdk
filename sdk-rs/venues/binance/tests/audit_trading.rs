@@ -724,3 +724,32 @@ fn usdm_stale_open_orders_snapshot_cannot_reopen_an_acked_cancel() {
         "post-ack snapshot reopened the canceled order"
     );
 }
+
+#[test]
+fn stop_limit_orders_from_the_binance_ui_refuse_amend_instead_of_becoming_stop_market() {
+    for (native, stop) in [
+        ("STOP", "96"),
+        ("TAKE_PROFIT", "104"),
+        ("STOP_MARKET", "96"),
+    ] {
+        let mut h = ready(Variant::UsdM);
+        h.message(socket(Variant::UsdM), &format!(r#"{{"e":"ORDER_TRADE_UPDATE","T":1000,"E":1000,"o":{{"s":"BTCUSDT","c":"ui","i":77,"S":"SELL","o":"{native}","ot":"{native}","f":"GTC","q":"1","p":"95","sp":"{stop}","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}}}"#));
+        assert!(h.engine.store().order("77").is_some(), "{native}");
+        let before = h.requests.len();
+        h.event(Event::Command(Command::AmendOrder {
+            command: 31,
+            id: "77".into(),
+            price: Some(94.0),
+            amount: None,
+        }));
+        let refused = h.failures.iter().any(|(command, error)| {
+            *command == 31 && error.kind == Some(safe_cex_engine::ErrorKind::Unsupported)
+        });
+        if native == "STOP_MARKET" {
+            assert!(!refused, "market stops still amend");
+        } else {
+            assert!(refused, "{native}");
+            assert_eq!(h.requests.len(), before, "no write for {native}");
+        }
+    }
+}

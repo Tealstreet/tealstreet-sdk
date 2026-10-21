@@ -5,13 +5,15 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, PublicFeedPolicy, Response, SocketId,
-    TimerId, Venue, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue, VenueError, num,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -460,7 +462,7 @@ impl Venue for Blofin {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
             cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));
             return;
@@ -508,7 +510,11 @@ impl Venue for Blofin {
         };
         if !m.event.is_empty() {
             if m.event == "error" {
-                cx.log(LogLevel::Error, format!("BloFin socket error {}", m.code));
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("BloFin socket error {}", m.code),
+                );
             }
             return;
         }
@@ -520,8 +526,9 @@ impl Venue for Blofin {
                     for raw in rows.data {
                         match serde_json::from_str::<Tick<'_>>(raw.get()) {
                             Ok(row) => self.ticker(cx, &row, m.arg.channel == "funding-rate"),
-                            Err(_) => cx.log(
-                                LogLevel::Error,
+                            Err(_) => cx.notice(
+                                Level::Error,
+                                code::ROW_SKIPPED,
                                 "Malformed BloFin ticker row; retaining known ticker",
                             ),
                         }
@@ -682,8 +689,9 @@ impl Venue for Blofin {
                 Err(_) => {
                     *failed = true;
                     safe_cex_engine::startup::skipped_row(cx);
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::ROW_SKIPPED,
                         "Malformed BloFin ticker row; omitted from initial tickers",
                     );
                 }
@@ -881,7 +889,11 @@ impl Venue for Blofin {
                 interval: i,
             } => {
                 let Some(bar) = interval(i) else {
-                    cx.log(LogLevel::Error, i.unsupported("BloFin"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("BloFin"),
+                    );
                     return;
                 };
                 let state = self.candles.entry((symbol.clone(), i)).or_default();
@@ -1012,8 +1024,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("BloFin stops re-reading a catalogue with {after} malformed markets"),
         );
     }

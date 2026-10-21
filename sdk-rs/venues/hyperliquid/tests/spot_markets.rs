@@ -156,20 +156,21 @@ fn a_failed_spot_read_warns_retries_and_never_holds_back_perps() {
             .iter()
             .any(|m| m.starts_with("Failed to load Hyperliquid spot markets; retrying"))
     );
-    // The retry fires on the discovery backoff (1 s first) and merges the spot pairs.
-    let (timer, at) = *r
-        .timers
-        .iter()
-        .find(|(_, at)| (*at - 2000.0).abs() < 1.0)
-        .expect("a 1 s discovery retry");
-    r.e.handle(at, Event::TimerFired { timer });
-    let retry =
-        r.e.drain_actions()
-            .find_map(|a| match a {
-                Action::Http(req) if kind(&req) == "spotMetaAndAssetCtxs" => Some(req),
-                _ => None,
-            })
-            .expect("spot discovery retried");
+    // The retry fires on the discovery backoff and merges the spot pairs.
+    let mut timers = r.timers.clone();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut retry = None;
+    for (timer, at) in timers {
+        r.e.handle(at, Event::TimerFired { timer });
+        retry = r.e.drain_actions().find_map(|a| match a {
+            Action::Http(req) if kind(&req) == "spotMetaAndAssetCtxs" => Some(req),
+            _ => None,
+        });
+        if retry.is_some() {
+            break;
+        }
+    }
+    let retry = retry.expect("spot discovery retried on the backoff");
     reply(&mut r.e, &retry, 200, SPOT_META);
     assert_eq!(
         symbols(&r.e),

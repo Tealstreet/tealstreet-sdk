@@ -6,6 +6,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
 use serde_json::{Value, json};
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 5_000.0;
+
 const MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"},{"symbol":"ETH-USDT","baseCurrency":"ETH","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.01","priceIncrement":"0.01","baseMinSize":"0.01","baseMaxSize":"1000"}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":{"time":1700000000000,"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101","changeRate":"0.02","vol":"10","volValue":"1000"},{"symbol":"ETH-USDT","last":"10","buy":"9","sell":"11"}]}}"#;
 const ORDER: &str = r#"{"id":"order-1","symbol":"BTC-USDT","clientOid":"caller-1","type":"limit","side":"buy","price":"90","size":"2","dealSize":"0.5","remainSize":"1.5","status":"open","createdAt":1700000000000}"#;
@@ -1360,7 +1363,7 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
         }));
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Secondary read credentials"))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Secondary read credentials"))));
         assert!(
             !actions
                 .iter()
@@ -1437,11 +1440,176 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         "owner mapping must still exist when diagnostic arrives"
     );
     assert!(!h.actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed write transport")
+        |a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed write transport")
     ));
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = H::new(true);
+    let now = h.now;
+    let engine = &mut h.e;
+    let (now, mut reads) = policy_poll_read(engine, now, "/accounts?type=trade");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("/accounts?") {
+                r#"{"code":"200000","data":[]}"#
+            } else {
+                r#"{"code":"200000","data":{"symbols":[]}}"#
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
 fn spot_bullet_body(token: &str, interval: f64, timeout: f64) -> String {
     json!({"code":"200000","data":{"token":token,"instanceServers":[{"endpoint":"wss://spot.example.test/recovered","pingInterval":interval,"pingTimeout":timeout}]}}).to_string()
 }

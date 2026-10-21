@@ -2,6 +2,9 @@ mod support;
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_kraken::Kraken;
 use support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 5_000.0;
+
 const ORDER: &str = r#"{"instrument":"PF_XBTUSD","order_id":"order-1","qty":2,"filled":0.5,"type":"stop","direction":1,"stop_price":90,"reduce_only":true,"triggerSignal":"last","last_update_time":1700000000000}"#;
 fn snapshot(e: &mut Engine<Kraken>, socket: SocketId) {
     message(
@@ -881,6 +884,127 @@ fn local_price_ack_preserves_the_last_native_execution_clock() {
 }
 
 #[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (mut e, _) = ready();
+    let now = NOW + 1000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.contains("/accounts")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.contains("/accounts") {
+                ACCOUNT
+            } else if r.url.contains("/openorders") {
+                OPEN
+            } else if r.url.contains("leveragepreferences") {
+                r#"{"result":"success","leveragePreferences":[]}"#
+            } else {
+                r#"{"result":"success","openPositions":[]}"#
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+#[test]
 fn filtered_market_rows_are_skipped_while_listed_rows_commit() {
     let (mut e, s) = ready();
     // PF_UNKNOWNUSD stands for a market the catalogue filtered (untradeable) or delisted.
@@ -911,7 +1035,11 @@ fn filtered_market_rows_are_skipped_while_listed_rows_commit() {
     let logs: Vec<_> = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
             _ => None,
         })
         .collect();
@@ -1011,7 +1139,7 @@ fn partial_catalogue_is_reread_and_the_repaired_market_releases_its_rows() {
     let (mut e, s, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == NOW + 1000.0)
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -1070,7 +1198,7 @@ fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
     let listed = e.store().market("PF_XBTUSD").cloned().unwrap();
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == NOW + 1000.0)
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -1094,7 +1222,10 @@ fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let (mut e, _, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
-    let mut retry = timers.iter().find(|(_, at)| *at == NOW + 1000.0).copied();
+    let mut retry = timers
+        .iter()
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
+        .copied();
     let (mut rereads, mut warned) = (0, false);
     while let Some((timer, at)) = retry.take() {
         e.handle(at, Event::TimerFired { timer });
@@ -1106,10 +1237,10 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
             match action {
                 Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
                 Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-                    if message.contains("stops re-reading") =>
-                {
-                    warned = true
-                }
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) if message.contains("stops re-reading") => warned = true,
                 _ => {}
             }
         }
@@ -1117,4 +1248,56 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     }
     assert_eq!(rereads, 5);
     assert!(warned);
+}
+
+#[test]
+fn failed_reconciliation_heals_are_jittered_while_event_heals_keep_their_debounce() {
+    let (mut e, s) = ready();
+    message(&mut e, s, NOW, r#"{"feed":"fills","fills":[]}"#);
+    let debounce: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms > NOW && at_ms <= NOW + 1001.0 => {
+                Some((timer, at_ms - NOW))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(debounce.len(), 1);
+    assert_eq!(debounce[0].1, 1000.0, "event heal is a fixed debounce");
+    let mut now = NOW + 1000.0;
+    e.handle(
+        now,
+        Event::TimerFired {
+            timer: debounce[0].0,
+        },
+    );
+    let mut reads = requests(&mut e);
+    let (mut failures, mut delays) = (0u32, vec![]);
+    for _ in 0..6 {
+        assert!(!reads.is_empty());
+        // The first failure in a batch schedules the heal at its failure count.
+        let nominal = (1000.0 * 2f64.powi((failures + 1).min(5) as i32)).min(30_000.0);
+        for read in &reads {
+            reply_at(&mut e, now, read, 500, "{}");
+        }
+        failures += reads.len() as u32;
+        let (timer, at_ms) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if at_ms > now + 1001.0 => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("failed read schedules a heal");
+        assert!(
+            jittered(at_ms - now, nominal),
+            "{} vs {nominal}",
+            at_ms - now
+        );
+        delays.push((at_ms - now, nominal));
+        now = at_ms;
+        e.handle(now, Event::TimerFired { timer });
+        reads = requests(&mut e);
+    }
+    assert!(delays.iter().any(|(delay, nominal)| delay < nominal));
 }

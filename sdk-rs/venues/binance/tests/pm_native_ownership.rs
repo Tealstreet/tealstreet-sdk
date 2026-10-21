@@ -714,3 +714,82 @@ fn invalid_snapshot_handoff_cannot_retire_the_current_owner() {
         }
     }
 }
+
+#[test]
+fn one_unmappable_pm_order_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let order = |client: &str, native: u64, kind: &str, price: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","orderId":{native},"clientOrderId":"{client}","price":"{price}","origQty":"9","executedQty":"0","type":"{kind}","side":"BUY"}}"#
+        )
+    };
+    let strategy = |client: &str, native: u64, kind: &str, stop: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","strategyId":{native},"newClientStrategyId":"{client}","price":"0","origQty":"3","strategyType":"{kind}","side":"SELL","stopPrice":"{stop}"}}"#
+        )
+    };
+    let read = |h: &mut Harness, poke: u64, orders: &[String], strategies: &[String]| {
+        h.message("/pm/ws", &regular("BTCUSDT", poke, "NEW", false));
+        snapshot(
+            h,
+            &format!("[{}]", orders.join(",")),
+            &format!("[{}]", strategies.join(",")),
+        );
+    };
+    let mut h = ready(Variant::PortfolioMargin);
+    read(
+        &mut h,
+        1,
+        &[
+            order("a", 10, "LIMIT", "100"),
+            order("b", 11, "LIMIT", "101"),
+        ],
+        &[
+            strategy("s", 20, "STOP_MARKET", "90"),
+            strategy("t", 21, "STOP_MARKET", "91"),
+        ],
+    );
+    let stored = ["b", "t"].map(|id| h.engine.store().order(id).unwrap().clone());
+    h.logs.clear();
+
+    read(
+        &mut h,
+        2,
+        &[
+            order("a", 10, "LIMIT", "102"),
+            order("b", 11, "FUTURE_KIND", "1"),
+        ],
+        &[
+            strategy("s", 20, "STOP_MARKET", "92"),
+            strategy("t", 21, "STOP_MARKET", "-1"),
+        ],
+    );
+    let store = h.engine.store();
+    assert_eq!(store.order("a").unwrap().price, 102.0);
+    assert_eq!(store.order("s").unwrap().price, 92.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    for message in [
+        "Binance open order b has an unsupported type",
+        "Binance conditional order t has invalid economics",
+    ] {
+        assert!(h.logs.iter().any(|l| l == message), "{message}");
+    }
+    assert!(!h.logs.iter().any(|l| l.contains("FUTURE_KIND")));
+
+    read(
+        &mut h,
+        3,
+        &[order("a", 10, "LIMIT", "102")],
+        &[strategy("s", 20, "STOP_MARKET", "92")],
+    );
+    let mut ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["a", "s"]);
+}

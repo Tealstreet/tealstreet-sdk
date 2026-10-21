@@ -97,7 +97,7 @@ pub fn private_started_with_retry(
     response(&mut e, &r, markets);
     let mut actions: Vec<_> = e.drain_actions().collect();
     let retry = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == 1100.0 => Some(*timer),
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 100.0, 1000.0) => Some(*timer),
         _ => None,
     });
     let ticker = actions
@@ -161,4 +161,9 @@ pub fn private_started_with_retry(
         },
     );
     (e, private_socket, reads, timer, retry)
+}
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
 }

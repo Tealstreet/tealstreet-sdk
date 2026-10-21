@@ -1,6 +1,11 @@
 //! Scripted discovery regressions; no network or account credentials.
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_weex::{Options, WeexFutures};
+
+/// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":1e-06,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"###;
 fn public_engine() -> Engine<WeexFutures> {
     Engine::new(WeexFutures::new(Options {
@@ -38,7 +43,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -254,10 +259,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -333,10 +335,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
         let timer = engine
             .drain_actions()
             .find_map(|a| match a {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 1000.0,
-                } => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                 _ => None,
             })
             .expect("empty seed retries");

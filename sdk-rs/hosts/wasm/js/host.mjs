@@ -227,7 +227,7 @@ export class EngineHost {
     let timeoutMs;
     try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
     catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -320,6 +320,15 @@ export class EngineHost {
   snapshot() {
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const frame = this.invoke(this.engine.snapshotFrame, this.transport.now());
+    if (this.deadError) throw this.deadError;
+    return frame.buffer;
+  }
+
+  /** Current private state and unflushed catalog; caller applies/forwards it. */
+  accountSnapshot() {
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.accountSnapshotFrame !== 'function') throw new Error('Engine does not support private account snapshots');
+    const frame = this.invoke(this.engine.accountSnapshotFrame, this.transport.now());
     if (this.deadError) throw this.deadError;
     return frame.buffer;
   }
