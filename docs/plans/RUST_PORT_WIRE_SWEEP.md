@@ -49,9 +49,19 @@ new authenticated live captures.
 | Bitunix clock, login controls and forced route | #1648 (`205ceb3fe8d`), #1649 (`fc5ab92248a`), #1650 (`b2059cce998`). |
 | Bitunix scheduling/keyed reads and scoped account recovery/balance progress | #1655 (`ba3d5bc69ee`), #1658 (`67e81cfc13b`), #1662 (`501fb664edb`), #1665 (`8f7b0cee3ff`). Write/prerequisite fences and no-write-retry policy remain. |
 
-The final remaining-defect recheck found two additional routine repairs:
-Bitunix per-symbol settings progress (#1668) and WEEX skipped empty-fill-identity
-visibility (#1670). Both remain open and are not included in the merged receipt.
+The final remaining-defect recheck found two additional routine repairs.
+WEEX empty-fill-identity visibility landed in #1670 (`ce906e1368e`): valid fills
+remain available while unidentified rows are skipped with one owned incomplete
+marker and coded missing-ID warning per query. No identity is invented.
+Bitunix per-symbol settings progress landed in #1668 (`7fd70c13e34`): ordinary
+metadata/auth/backoff uses its symbol-attempt serial and accepted settings-write
+revision, so routing-ID notifications cannot starve it. Accepted settings writes
+still fence older metadata; command-owned prerequisites keep their generation
+fence. Both final repairs are included in the 27-merge receipt.
+
+No additional non-owner/non-live production defect remained in this Port reviews
+and Wire contract scope after the source/regression recheck. The exclusions below
+remain open; this is not a cutover-readiness or authenticated-live claim.
 
 No production defect is established by cache-only `removeOrders`, caller-owned
 post-validation engine lifetime, optional candle `lastSide` without a mirrored
@@ -66,7 +76,7 @@ was tested live. Existing decisions remain in force.
 
 | Family / issue | Evidence or decision needed before changing behavior |
 | --- | --- |
-| Bitunix signature resend / same-socket terminal auth | Endpoint-specific signature/rejection and login-control evidence; do not infer permanent WS refusal from HTTP codes. |
+| Bitunix signature resend / same-socket terminal auth | Endpoint-specific signature/rejection and terminal login-refusal evidence; do not infer permanent WS refusal from HTTP codes. Malformed login controls/retry ownership are already repaired by #1649. |
 | Bitunix null success, floating leverage, protective ACK identity | Captured endpoint response/lexical/identity contract; do not accept unidentified protection or round values. |
 | Bitunix protective sibling scope / TP-SL side / first-session cumulative fills | Explicit native leg/scope and execution-baseline policy; no guessed hedge side or fabricated historical fill. |
 | Bitunix silent private sessions | Authenticated watchdog capture; retain explicit legacy first-pong compatibility. |
@@ -77,7 +87,7 @@ was tested live. Existing decisions remain in force.
 | Kraken income over 500 | Live cursor probe from RUST_LIVE_GATE; newest-page partial contract remains explicit. |
 | KuCoin numeric placement leverage | Native endpoint rejection/lexical contract; existing polling cadence is accepted. |
 | Phemex unknown-ID cancel / additional lifecycle read | Preserve explicit identity proof; existing read lifecycle is accepted. |
-| WEEX Index triggers / missing income asset / empty fill identity | Native reference, asset and execution identity evidence; do not substitute Mark, assume USDT or fabricate an ID. |
+| WEEX Index triggers / missing income asset | Native reference and asset evidence; do not substitute Mark or assume USDT. Empty fill identity visibility is repaired by #1670 without inventing an ID. |
 | MEXC and Hyperliquid signed fill fees | Verified debit/rebate convention before changing sign; absolute values can convert rebates to charges. |
 | Coinbase browser signing | Existing owner decision 2 and payload-signing migration boundary; do not restore secret-bearing compatibility implicitly. |
 | Coinbase CFM equity/uPnL | Authoritative accounting evidence and owner decision; no invented aggregation. |
