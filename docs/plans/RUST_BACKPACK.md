@@ -374,3 +374,18 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   (2.82x), memory 4.3/2.4 MB (1.77x), private14. Secret scan clean. Pushing the
   reviewed candidate while auxiliary replays finish; all twenty-one CI gates
   and repository jobs must pass before merging PR #1299 into feat/rust-rewrite.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Make REST order quantity nullable/missing with strict present-value decoding.
+   Permit omission only when positive triggerPrice and triggerQuantity prove size;
+   reject blank/malformed numbers and unproven ordinary orders. This deliberately
+   tightens the prior missing ordinary quantity default of zero.
+2. Share that admission rule across account/history/trigger repair/replacement
+   ACK mapping. Preserve present-quantity precedence and the separate WS q/Y
+   schema, child/trigger identity, cancellation provenance and terminal guards.
+3. Validate before staging a repair cancellation or removing the old order on
+   replacement. Reproduce null-trigger failure; test valid mixed reads, malformed
+   fallback/no-write, history and replacement already filled before ACK.
+4. Focused Backpack/Binance tests, touched fmt/strict Clippy/bans, independent
+   review, audit/spec/caller notes, exact-head CI and separate final merge guard.
