@@ -5,6 +5,7 @@
 //   corepack yarn rust:gate --tape sdk-rs/harness/tapes/binance.jsonl
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { validateCiWasm } from './ci-wasm.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
@@ -28,9 +29,12 @@ const { values } = parseArgs({
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string' },
     report: { type: 'string' },
+    'ci-wasm': { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
   },
 });
+// Validate before spawning either implementation; a bad artifact has no fallback.
+const ciWasm = values['ci-wasm'] !== undefined ? validateCiWasm({ directory: values['ci-wasm'], venue: values.venue }) : null;
 const tapeBytes = readFileSync(values.tape);
 const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
@@ -70,6 +74,7 @@ const replay = (impl, run, performanceRun = false) => {
     '--out',
     out,
   );
+  if (impl === 'rust' && ciWasm) args.push('--wasm', ciWasm.path);
   if (values['no-egress']) args.push('--no-egress');
   if (performanceRun) args.push('--performance');
   // TSX's compiler worker retains shared buffers independently of engine work.
@@ -134,6 +139,7 @@ if (!isPrivate) {
   // completed parity/performance evidence, distinct from a runner crash.
   writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
     schema: 1, venue: values.venue, tape: values.tape, books: values.books,
+    ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
     tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
     private: isPrivate, status: 'FAIL', failures: [error.message], replayFailure: error.failure,
     coverage: { correctness: 'incomplete', performance: 'not-run' },
@@ -362,6 +368,7 @@ if (!isPrivate) failures.push(...performanceFailures(
   performanceResults.ts.map((output) => output.metrics), performanceResults.rust.map((output) => output.metrics)));
 writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   schema: 1, venue: values.venue, tape: values.tape,
+  ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
   tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
