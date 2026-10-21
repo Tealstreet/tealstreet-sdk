@@ -17532,8 +17532,7 @@
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "checkpoint 2 account.orders[1].clientOrderId",
-            "checkpoint 4 account.orders[1].clientOrderId",
-            "checkpoint 7 account.orders[0].clientOrderId"
+            "checkpoint 4 account.orders[1].clientOrderId"
           ]
         },
         {
@@ -17546,11 +17545,7 @@
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[1].id",
             "checkpoint 4 account.orders[1].symbol",
-            "checkpoint 4 account.orders[2]",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[0].id",
-            "checkpoint 7 account.orders[0].symbol",
-            "checkpoint 7 account.orders[1]"
+            "checkpoint 4 account.orders[2]"
           ]
         },
         {

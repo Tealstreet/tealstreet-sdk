@@ -877,6 +877,7 @@ export const VENUES = {
     };
     const attempts = new Map();
     return {
+      virtualPrivateClock: true,
       rust: 'grvt',
       initializeReplay(_impl, options) {
         if (!options.publicDataOnly) initializeCrypto();
