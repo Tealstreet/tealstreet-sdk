@@ -637,6 +637,8 @@ struct Io<P> {
     min_level: Level,
     health: Health,
     sockets: SocketRoles,
+    /// One rejection often arrives as an auth-kind failure plus `deactivate`.
+    auth_failure_counted: bool,
 }
 
 impl<P> Default for Io<P> {
@@ -667,6 +669,7 @@ impl<P> Default for Io<P> {
             min_level: Level::Info,
             health: Health::default(),
             sockets: SocketRoles::default(),
+            auth_failure_counted: false,
         }
     }
 }
@@ -734,7 +737,8 @@ impl<P> Cx<'_, P> {
             return;
         }
         // The host drops engine-initiated closes without reporting them back.
-        if self.io.sockets.closed(socket) {
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.sockets.closed(socket, false) {
             self.io.health.count(log_code::WS_CLOSED);
         }
         self.io.actions.push(Action::WsClose { socket });
@@ -964,7 +968,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn deactivate(&mut self) {
-        self.io.health.count(log_code::AUTH_REJECTED);
+        count_auth_failure(self.io, None);
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
@@ -1003,7 +1007,7 @@ impl<P> Cx<'_, P> {
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
         let error = error.into();
-        count_auth_failure(&mut self.io.health, &error);
+        count_auth_failure(self.io, Some(&error));
         self.io
             .actions
             .push(Action::Notice(Notice::StartupFailed { error }));
@@ -1016,7 +1020,7 @@ impl<P> Cx<'_, P> {
             self.io.active_commands.remove(&command);
         }
         let error = error.into();
-        count_auth_failure(&mut self.io.health, &error);
+        count_auth_failure(self.io, Some(&error));
         self.io
             .actions
             .push(Action::Notice(Notice::CommandFailed { command, error }));
@@ -1483,6 +1487,7 @@ impl<V: Venue> Engine<V> {
         {
             self.io.order_response_token = None;
         }
+        self.io.auth_failure_counted = false;
         #[cfg(feature = "command-tracking")]
         if matches!(&event, Event::Command(_)) {
             self.commands_received = true;
@@ -1545,7 +1550,7 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_message(&mut cx, socket, text)
             }
             Event::WsClosed { socket, code } => {
-                cx.io.sockets.closed(socket);
+                cx.io.sockets.closed(socket, true);
                 cx.io.health.count(log_code::WS_CLOSED);
                 self.venue.on_close(&mut cx, socket, code)
             }
@@ -2176,14 +2181,17 @@ impl SocketRoles {
         }
     }
 
-    /// Whether `socket` was a live role socket.
-    fn closed(&mut self, socket: SocketId) -> bool {
+    /// Whether `socket` was a live role socket. Only an unexpected close makes
+    /// the role's next connect a reconnect.
+    fn closed(&mut self, socket: SocketId, unexpected: bool) -> bool {
         let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
             return false;
         };
         let (_, role) = self.live.swap_remove(index);
-        self.awaiting_reconnect[role as usize] =
-            self.awaiting_reconnect[role as usize].saturating_add(1);
+        if unexpected {
+            self.awaiting_reconnect[role as usize] =
+                self.awaiting_reconnect[role as usize].saturating_add(1);
+        }
         self.private.retain(|id| *id != socket);
         true
     }
@@ -2195,12 +2203,17 @@ impl SocketRoles {
     }
 }
 
-fn count_auth_failure(health: &mut Health, error: &VenueError) {
-    if matches!(
-        error.kind,
-        Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
-    ) {
-        health.count(log_code::AUTH_REJECTED);
+/// At most one per engine event; `error: None` is a definitive deactivation.
+fn count_auth_failure<P>(io: &mut Io<P>, error: Option<&VenueError>) {
+    let auth = error.is_none_or(|error| {
+        matches!(
+            error.kind,
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+        )
+    });
+    if auth && !io.auth_failure_counted {
+        io.auth_failure_counted = true;
+        io.health.count(log_code::AUTH_REJECTED);
     }
 }
 

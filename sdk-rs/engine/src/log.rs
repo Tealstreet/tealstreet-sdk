@@ -147,7 +147,8 @@ pub struct Health {
     pub rate_limited: u32,
     pub snapshots_discarded: u32,
     pub rows_skipped: u32,
-    /// Engine clock time of the newest frame on a private socket.
+    /// Engine clock time of the newest frame on a private-role socket. Venues
+    /// that carry public feeds on that socket (Hyperliquid) advance it with them.
     pub last_private_message_ms: Option<f64>,
 }
 

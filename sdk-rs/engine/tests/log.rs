@@ -35,6 +35,10 @@ impl Venue for Logger {
             }
             Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
             Some(("deactivate", _)) => cx.deactivate(),
+            Some(("rejectboth", _)) => {
+                cx.startup_failed(VenueError::new("refused").kind(ErrorKind::AuthInvalid));
+                cx.deactivate();
+            }
             Some(("fail", kind)) => cx.fail(
                 1,
                 VenueError::new("refused").kind(if kind == "auth" {
@@ -275,11 +279,12 @@ fn reconnects_count_a_role_reopened_after_a_close_never_a_first_or_parallel_conn
     let replacement = connected(&mut engine, "private");
     assert_eq!(engine.health().reconnects, 1);
 
-    // An engine-initiated close never comes back from the host; it still counts.
+    // An engine-initiated close is deliberate: it counts as a close, and the
+    // venue's next connect on that role (a new feed, say) is not a reconnect.
     send(&mut engine, &format!("close:{}", replacement.0));
     assert_eq!(engine.health().ws_closed, 2);
     connected(&mut engine, "private");
-    assert_eq!(engine.health().reconnects, 2);
+    assert_eq!(engine.health().reconnects, 1);
 }
 
 #[test]
@@ -332,4 +337,7 @@ fn deactivation_and_auth_kind_failures_count_as_auth_failures() {
     send(&mut engine, "fail:auth");
     send(&mut engine, "deactivate:");
     assert_eq!(engine.health().auth_failures, 2);
+    // One rejection reported both ways in one event counts once.
+    send(&mut engine, "rejectboth:");
+    assert_eq!(engine.health().auth_failures, 3);
 }
