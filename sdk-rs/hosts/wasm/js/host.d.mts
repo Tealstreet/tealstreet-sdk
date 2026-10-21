@@ -255,6 +255,8 @@ export interface EngineHealth {
   rateLimited: number;
   snapshotsDiscarded: number;
   rowsSkipped: number;
+  /** Engine clock of the newest private-socket frame; null before the first. */
+  lastPrivateMessage: number | null;
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */

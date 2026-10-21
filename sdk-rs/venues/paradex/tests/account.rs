@@ -1424,3 +1424,38 @@ fn duplicated_out_of_scope_order_rows_do_not_invalidate_the_snapshot() {
     assert!(h.e.store().order("124").is_none());
     assert!(h.e.store().order("126").is_none());
 }
+
+#[test]
+fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit() {
+    let (mut h, _) = loaded();
+    assert_eq!(h.e.store().setting("BTC-USD-PERP").unwrap().leverage, 20.);
+    h.timer(h.now + 10_000.);
+    h.reply("/positions", &format!("{{\"results\":[{POSITION}]}}"));
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#,
+    );
+    h.reply("/orders", &format!("{{\"results\":[{ORDER}]}}"));
+    h.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"ETH-USD-PERP","leverage":5},{"market":"BTC-USD-PERP","leverage":-3},{"leverage":7}]}"#,
+    );
+    let store = h.e.store();
+    assert_eq!(store.setting("ETH-USD-PERP").unwrap().leverage, 5.);
+    assert_eq!(store.setting("BTC-USD-PERP").unwrap().leverage, 20.);
+    let logs: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    for message in [
+        "Paradex skipped malformed margin row BTC-USD-PERP",
+        "Paradex skipped malformed margin row without a market",
+    ] {
+        assert!(logs.contains(&message), "{message}");
+    }
+    assert!(!logs.iter().any(|l| l.contains("-3")));
+}
