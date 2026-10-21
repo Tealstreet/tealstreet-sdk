@@ -98,6 +98,7 @@ export function validateMeasurements(assets, samples) {
     requireValue(rows.length === SAMPLE_COUNT && new Set(rows.map((s) => s.sample)).size === SAMPLE_COUNT && rows.every((s) => Number.isInteger(s.sample) && s.sample >= 0 && s.sample < SAMPLE_COUNT), `Incomplete samples for ${asset.key}`);
     for (const row of rows) {
       requireValue(row.realm === 'DedicatedWorkerGlobalScope' && row.secureContext === true && typeof row.userAgent === 'string' && row.userAgent.includes('Chrome/'), 'Measurement did not run in a secure Chrome worker');
+      requireValue(typeof row.browser === 'string' && row.browser.includes('Chrome/') && typeof row.jsVersion === 'string' && row.jsVersion.length > 0, 'Missing browser version provenance');
       for (const key of ['chromeLaunchMs', 'bootstrapMs', 'loaderImportMs', 'initializeMs', 'moduleReadyMs', 'roundTripMs'])
         requireValue(Number.isFinite(row[key]) && row[key] >= 0, `Invalid measurement ${asset.key}.${key}`);
       const expected = `/sdk-rs/hosts/wasm/pkg/${asset.stem}_bg.wasm`;
@@ -124,6 +125,26 @@ export function debuggingPort(text) {
   return Number(port);
 }
 
+export async function stopChrome(child, cdp, signalGroup = process.kill) {
+  // Chrome's parent may exit before its renderers/zygotes stop writing. Every
+  // launch owns a separate POSIX process group; close gracefully, then reap the
+  // entire group even if the parent has already exited.
+  const exited = child.exitCode !== null || child.signalCode !== null
+    ? Promise.resolve() : new Promise((resolve) => child.once('exit', resolve));
+  try {
+    if (cdp && !cdp.closed) await Promise.race([cdp.send('Browser.close').catch(() => {}), pause(1000)]);
+  } finally { cdp?.close(); }
+  if (!child.pid) return; // spawn failure created no process/group.
+  const signal = (name) => {
+    try { signalGroup(-child.pid, name); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+  };
+  signal('SIGTERM');
+  await Promise.race([exited, pause(1000)]);
+  signal('SIGKILL');
+  await Promise.race([exited, pause(1000)]);
+}
+
 async function sampleChrome(origin, asset) {
   const profile = mkdtempSync(join(tmpdir(), 'wasm-browser-cold-'));
   const start = performance.now();
@@ -131,7 +152,7 @@ async function sampleChrome(origin, asset) {
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking',
     '--no-first-run', '--no-default-browser-check', '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  ], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   let failure;
   let cdp;
@@ -166,14 +187,8 @@ async function sampleChrome(origin, asset) {
     return { ...measurement, chromeLaunchMs, browser: version.product, jsVersion: version.jsVersion };
   } catch (error) { throw new Error(`${asset.key}: ${error.message}\n${stderr}`, { cause: error }); }
   finally {
-    cdp?.close();
-    const exited = new Promise((resolve) => child.once('exit', resolve));
-    if (child.exitCode === null && child.signalCode === null && !failure) {
-      child.kill('SIGTERM');
-      await Promise.race([exited, pause(2000)]);
-      if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await Promise.race([exited, pause(1000)]); }
-    }
-    rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    await stopChrome(child, cdp);
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

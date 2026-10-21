@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import {
   archiveBrowserAssets, assetSpecs, browserServer, debuggingPort, measurementTable,
-  readBrowserInputs, validateMeasurements,
+  readBrowserInputs, stopChrome, validateMeasurements,
 } from './browser-cold-start.mjs';
 import { Cdp, evaluateWorker } from './browser-cdp.mjs';
 
@@ -34,7 +35,7 @@ function fixture(t) {
 function samplesFor(assets) {
   return assets.flatMap((asset) => [0, 1, 2].map((sample) => ({
     key: asset.key, sample, realm: 'DedicatedWorkerGlobalScope', secureContext: true,
-    userAgent: 'HeadlessChrome/123', chromeLaunchMs: 20, bootstrapMs: 2,
+    userAgent: 'HeadlessChrome/123', browser: 'Chrome/123', jsVersion: '12.3', chromeLaunchMs: 20, bootstrapMs: 2,
     loaderImportMs: 3, initializeMs: 4, moduleReadyMs: 7, roundTripMs: 10,
     wasmRequests: [{ path: `/sdk-rs/hosts/wasm/pkg/${asset.stem}_bg.wasm`, status: 200, sha256: asset.files['_bg.wasm'].sha256 }],
   })));
@@ -81,6 +82,8 @@ test('rejects wrong realms, invalid timers and missing/wrong/duplicate WASM fetc
     (r) => { r.realm = 'Window'; },
     (r) => { r.secureContext = false; },
     (r) => { r.userAgent = 'Node'; },
+    (r) => { delete r.browser; },
+    (r) => { delete r.jsVersion; },
     (r) => { r.moduleReadyMs = NaN; },
     (r) => { r.roundTripMs = -1; },
     (r) => { r.wasmRequests = []; },
@@ -119,6 +122,26 @@ test('Chrome debugging metadata rejects nonlocal/malformed ports and paths', () 
   assert.equal(debuggingPort('12345\n/devtools/browser/test-123\n'), 12345);
   for (const value of ['0\n/devtools/browser/id', '65536\n/devtools/browser/id', '123\nhttp://remote', '123\n/devtools/browser/id\nextra'])
     assert.throws(() => debuggingPort(value), /Invalid DevToolsActivePort/);
+});
+
+test('Chrome cleanup stops surviving children even after parent exit', async () => {
+  for (const exitCode of [0, null]) {
+    const child = Object.assign(new EventEmitter(), { pid: 1234, exitCode, signalCode: null });
+    const signals = [];
+    let disposed = false;
+    await stopChrome(child, {
+      send: async (method) => { assert.equal(method, 'Browser.close'); throw new Error('Socket closed during shutdown'); },
+      close: () => { disposed = true; },
+    }, (pid, signal) => {
+      signals.push([pid, signal]);
+      child.exitCode = 0;
+      child.emit('exit');
+    });
+    assert.equal(disposed, true);
+    assert.deepEqual(signals, [[-1234, 'SIGTERM'], [-1234, 'SIGKILL']]);
+  }
+  await stopChrome({ pid: undefined, exitCode: null, signalCode: null, once() {} }, undefined, () => assert.fail('No spawned group'));
+  await stopChrome({ pid: 1234, exitCode: 0, signalCode: null }, undefined, () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
 });
 
 class Socket extends EventTarget {
