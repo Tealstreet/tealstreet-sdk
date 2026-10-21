@@ -515,8 +515,11 @@ byte; positions, aggregate balance and history paging are at parity.
   bad rows are skipped and counted in a warning; `fetchLeverage` reads
   `leverage-info` (it previously never answered); config is re-read every 30 s
   and a changed mode/level reconciles positions.
-- Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
-  rejected; income limit truncates.
+- Low: ~~`mmp`/`elp` order types get an empty id; conditional `price: 0`
+  rejected~~ (regular types keep their `ordId`; `price: 0` sends `orderPx: -1`,
+  market once triggered, as TS); income limit truncates (kept: Rust returns the
+  newest `limit` whole bills where TS returns up to a page more, and the EEA
+  SWAP+FUTURES merge relies on it).
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
   staying open, X-Perp history SWAP hardcode, market-order amend placing a new
   order, duplicate algo cancels. Shared by both: reduce-only conditional sent
