@@ -297,3 +297,9 @@ focused harness tests, independent plan/implementation/current-CI raw reviews,
 fresh mandatory public/private verification, five identical current-head CI
 pairs and full green checks. Guard the shared Hyperliquid crate separately
 from merging, audit actual parents/files, report the merge, then move to Kraken.
+
+Five focused private pairs with a fingerprint-matching CI engine are identical
+within each implementation, including complete IDs, timestamps and receipts.
+The standalone private strict gate passes with zero diagnostics; keep the
+17-record fixture and declaration manifest unchanged. Current-head CI must
+independently reproduce the proof and verify both mandatory cases before merge.
