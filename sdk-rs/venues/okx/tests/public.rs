@@ -275,7 +275,7 @@ fn variants_use_entity_hosts_and_demo_header() {
             assert!(is_get(&request, "tickers?instType=FUTURES"));
             reply(&mut e, &request, &envelope(""), 2.5);
         }
-        assert_eq!(actions(&mut e).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}:8443/")))).count(), 2);
+        assert_eq!(actions(&mut e).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}/")))).count(), 2);
     }
 }
 
