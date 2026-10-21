@@ -127,3 +127,8 @@ Startup and explicit refresh share one Instrument decoder and one metadata
 publication traversal to avoid retaining duplicate generated code. Their row
 admission and error policies remain separate; refresh keeps its strict envelope
 and atomic catalogue validation. CI measures the optimized WASM and replay costs.
+
+A completed refresh moves its staged rows and product metadata into the commit
+assembly. Each category/status list is consumed once, preserving duplicate
+precedence and atomic publication while avoiding redundant deep clones. The
+catalogue copy retained alongside the published store still owns its rows.

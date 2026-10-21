@@ -361,7 +361,7 @@ impl BybitLinear {
         }
     }
     fn commit_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        let walk = self.market_refresh.active.take().expect("completed walk");
+        let mut walk = self.market_refresh.active.take().expect("completed walk");
         cx.clear_timer(walk.deadline);
         let mut catalogs = HashMap::new();
         let mut classifications = HashMap::new();
@@ -373,18 +373,18 @@ impl BybitLinear {
             for &prelaunch in statuses(category) {
                 let list = walk
                     .lists
-                    .get(&(category, prelaunch))
+                    .get_mut(&(category, prelaunch))
                     .expect("completed category");
-                for market in &list.markets {
+                for market in std::mem::take(&mut list.markets) {
                     if let Some(&index) = indices.get(&market.symbol) {
-                        rows[index] = market.clone();
+                        rows[index] = market;
                     } else {
                         indices.insert(market.symbol.clone(), rows.len());
-                        rows.push(market.clone());
+                        rows.push(market);
                     }
                 }
-                classifications.extend(list.classifications.clone());
-                derivatives.extend(list.derivatives.clone());
+                classifications.extend(std::mem::take(&mut list.classifications));
+                derivatives.extend(std::mem::take(&mut list.derivatives));
             }
             catalogs.insert(category, rows.clone());
             markets.extend(rows);
