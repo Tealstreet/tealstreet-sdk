@@ -32,7 +32,7 @@ pub use capabilities::{
 };
 pub use credentials::ReadCredentials;
 pub use engine::{
-    Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
+    Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, Method, Notice,
     PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget,
     SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
     unsupported_venue_action,

@@ -177,8 +177,8 @@ it('reports independent identical failures independently and preserves ordinary 
   expect(first).not.toBe(second);
   expect(r.errors).toHaveBeenCalledTimes(2);
   r.deliver([
-    { op: 'log', level: 'error', message: 'identical' },
-    { op: 'log', level: 'info', message: 'background info' },
+    { op: 'event', code: 'test.diagnostic', level: 'error', message: 'identical' },
+    { op: 'event', code: 'test.diagnostic', level: 'info', message: 'background info' },
   ]);
   expect(r.errors).toHaveBeenCalledTimes(3);
   expect(r.logs).toHaveBeenCalledWith('[bybit] background info', LogSeverity.Info);

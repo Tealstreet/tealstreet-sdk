@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice, Query, Response};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
 use safe_cex_venue_woo::{Options, Woo};
 use serde::Deserialize;
 use support::*;
@@ -412,7 +412,7 @@ fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO fills history: skipped 1")
     )));
     let json = actions

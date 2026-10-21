@@ -2308,10 +2308,7 @@ fn error_logs(actions: &[Action]) -> usize {
         .filter(|a| {
             matches!(
                 a,
-                Action::Notice(Notice::Log {
-                    level: safe_cex_engine::LogLevel::Error,
-                    ..
-                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Error,
                     ..
                 }))
@@ -2324,11 +2321,7 @@ fn warnings(actions: &[Action]) -> Vec<String> {
     actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log {
-                level: safe_cex_engine::LogLevel::Warning,
-                message,
-            })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 level: safe_cex_engine::Level::Warn,
                 message,
                 ..
