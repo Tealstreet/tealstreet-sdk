@@ -699,17 +699,18 @@ impl Grvt {
                 }
             }
             Kind::Orders => {
+                // Ownership is checked before decoding, so a foreign row always fails the read.
+                let extra: OrderExtras<'_> = serde_json::from_str(item)
+                    .map_err(|_| Rejected::Row("Invalid GRVT historical order".into()))?;
+                if !extra.account.is_empty() && Some(&*extra.account) != r.account.as_deref() {
+                    return Err("GRVT order belongs to another subaccount".into());
+                }
                 let o = decode_order(item, cx.store, cx.now).map_err(Rejected::Row)?;
                 r.page_raw.insert(
                     o.native_id
                         .clone()
                         .unwrap_or_else(|| format!("{}:{}", o.order.id, o.created_ns)),
                 );
-                let extra: OrderExtras<'_> = serde_json::from_str(item)
-                    .map_err(|_| Rejected::Row("Invalid GRVT historical order".into()))?;
-                if !extra.account.is_empty() && Some(&*extra.account) != r.account.as_deref() {
-                    return Err("GRVT order belongs to another subaccount".into());
-                }
                 if o.created_ns == 0 {
                     return Err(Rejected::Row("Missing GRVT order creation time".into()));
                 }
