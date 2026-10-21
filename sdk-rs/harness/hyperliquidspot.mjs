@@ -40,6 +40,7 @@ export function validateHyperliquidSpotRequest({ method, url, body, now = Date.n
 }
 export const hyperliquidspot = {
   rust: 'hyperliquidspot',
+  virtualPrivateClock: true,
   recordAfterReady: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.exchange.ts', className: 'HyperliquidSpotExchange', name: 'hyperliquidspot' },
   publicOptions: { key: '' },
