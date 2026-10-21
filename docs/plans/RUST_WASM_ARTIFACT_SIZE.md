@@ -95,3 +95,26 @@ Exactly 31 suites meet the per-workload sample-count proof; BloFin alone has
 aggregate count. WOO alone fails timing. The original combined baseline
 passes all 32 public suites. Final nine-pair collection must close BloFin
 and certify the selected configuration on integrated landing.
+
+## KuCoin Spot throughput restoration after repeated landing misses
+
+The #1661 isolated-family selection is narrowed for KuCoin Spot after three
+unrelated CI timing misses. Its venue crate was already level 3; its host,
+engine and inherited dependencies still used shared z. `build.sh` now restores
+that whole family to its exact pre-#1661 arguments in both `--venue kucoinspot`
+and `--families`. KuCoin derivatives keep z. WOO and every other family's
+selection, combined/native profiles, `wasm-opt -Oz` and budgets stay unchanged.
+
+The trigger includes landing #1673 (`21a9081c18c`, run `39677179409`: Rust only
+9.1% faster than TS against a 10% requirement) and #1677's unrelated Robinhood
+PR (0.185% short, retry passed), in addition to the earlier miss. A successful
+retry does not erase the tally. AsterDEX remains at one miss and is unchanged.
+This restores performance margin rather than repeatedly rerunning a thin gate.
+
+[Restoration plan and proof requirements](RUST_KUCOIN_SPOT_THROUGHPUT.md):
+current-source baseline #1679 CI `39679489058` has two workloads, three mode
+groups and 11 complete stable Rust outputs, including nine public timing pairs.
+Before merging, require the candidate's full matching raw set, unchanged hashes
+except metrics, public CPU/memory gates and the fixed artifact budgets. Compare
+actual stripped bytes; no local release build or threshold adjustment. This
+compiler-only change has no caller API or deployment migration.
