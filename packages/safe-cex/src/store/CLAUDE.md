@@ -140,6 +140,20 @@ bumps from `update()`, a wholesale refresh can be pruned as
 unchanged. If you add a new bulk-replacement helper, bump the
 relevant `updateIds.*`.
 
+Native `ACCOUNT_READ` frames are the explicit exception: FrameApplier uses
+`update(changes, false, 'account-read')` to apply and notify their current values
+without advancing order/position freshness. Reading the same native state is
+not another venue observation; the pending ordinary stream frame owns that
+freshness increment. The marker travels with transferred frames so worker and
+main apply the same rule. Ordinary bulk updates retain their existing counters.
+
+`FILLS` may append reported realized-PnL/fee columns; absent metadata stays
+absent, while zero remains a reported value. Keep each venue's live-event PnL
+convention separate from historical execution normalization. Forward the native
+order identity as both the existing fill `id` and `orderId`: chaser tracking
+requires `orderId` for attribution. Preserve generic `Order.triggerType` beside
+the existing stop-loss/take-profit aliases.
+
 An attempted mutation of a missing row is a no-op: `removeOrder` and
 `updatePosition` must not advance an updateId unless they find and mutate the
 target. Advancing the counter without notifying makes the next unrelated store

@@ -3,6 +3,7 @@ mod account;
 mod closed;
 mod history;
 mod hyro;
+mod identity;
 mod options;
 mod paths;
 mod sign;
@@ -126,6 +127,7 @@ impl Rest {
 /// What to do with a response. Startup lists and klines stream in element by
 /// element (see `Cx::request_streamed`); their continuations collect the rows.
 pub enum Then {
+    Identity(CommandId),
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
@@ -1622,6 +1624,7 @@ impl BybitLinear {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match then {
+            Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets {
                 prelaunch,
                 markets,
@@ -1960,6 +1963,12 @@ impl Venue for BybitLinear {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             options: self.category_enabled(Category::Option),
+            // HyroTrader exposes no identity endpoint; `fetch_identity` refuses it.
+            account: if self.variant.is_hyro() {
+                safe_cex_engine::AccountLookup::Unsupported
+            } else {
+                safe_cex_engine::AccountLookup::Query
+            },
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             ..safe_cex_engine::Capabilities::BASE
@@ -2176,6 +2185,10 @@ impl Venue for BybitLinear {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         let symbol = match &command {
             Command::SubscribeOrderBook { symbol }
             | Command::UnsubscribeOrderBook { symbol }

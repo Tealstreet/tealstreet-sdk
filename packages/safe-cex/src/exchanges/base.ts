@@ -339,9 +339,16 @@ export const WORKER_OPTIONAL_METHODS = [
   'changeAccountTier',
   'fetchAccountTier',
   'fetchEngineCapabilities',
+  // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
   'findOrderByClientOrderId',
   'fetchPublicTrades',
   'fetchOHLCV',
@@ -452,6 +459,7 @@ export interface Exchange {
   validateAccount: () => Promise<ValidateAccountResult>;
   fetchPositions: (symbols?: string[]) => Promise<Position[]>;
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
+  syncAccountState: () => void;
   start: () => Promise<void>;
   nuke: (tries?: number) => Promise<void>;
   nukePositions: (tries?: number) => Promise<void>;
@@ -939,6 +947,9 @@ export class BaseExchange implements Exchange {
     await Promise.reject(new Error('Not implemented'));
     return [];
   };
+
+  /** Synchronize an in-process native account mirror before a store-based decision. No network refresh. */
+  syncAccountState = (): void => {};
 
   fetchMarkets = async (): Promise<Market[]> => {
     await Promise.reject(new Error('Not implemented'));

@@ -11,7 +11,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -195,6 +195,10 @@ impl State {
     }
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
+    }
+    /// Fences a settings read against writes and newer reads.
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision
     }
     pub fn invalidate_settings(&mut self) {
         self.settings_revision += 1;
@@ -914,13 +918,19 @@ impl WeexFutures {
                             self.account.fills.remove(&old);
                         }
                         if let Some(side) = side(&row.order_side) {
-                            cx.fill(Fill {
-                                order_id: row.order_id.to_string(),
-                                symbol: row.symbol.to_string(),
-                                side,
-                                price: row.fill_value / row.fill_size,
-                                amount: row.fill_size,
-                            });
+                            cx.fill_with_financials(
+                                Fill {
+                                    order_id: row.order_id.to_string(),
+                                    symbol: row.symbol.to_string(),
+                                    side,
+                                    price: row.fill_value / row.fill_size,
+                                    amount: row.fill_size,
+                                },
+                                FillFinancials {
+                                    realized_pnl: row.realize_pnl,
+                                    fee: row.fill_fee.map(f64::abs),
+                                },
+                            );
                         }
                     }
                 }

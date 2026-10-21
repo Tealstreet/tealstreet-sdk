@@ -2,6 +2,7 @@
 mod account;
 mod candles;
 mod history;
+mod identity;
 mod paths;
 mod sign;
 mod trading;
@@ -102,6 +103,7 @@ impl Urls {
 /// Startup lists and klines stream in element by element (see
 /// `Cx::request_streamed`); their continuations collect the decoded rows.
 pub enum Pending {
+    Identity(CommandId),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -1320,6 +1322,7 @@ impl Venue for BinanceFutures {
         match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
                 client_order_lookup: true,
+                account: safe_cex_engine::AccountLookup::Query,
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
@@ -1452,8 +1455,13 @@ impl Venue for BinanceFutures {
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         self.observe_weight(cx, &response);
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let Response { status, body, .. } = response;
         match pending {
+            Pending::Identity(_) => unreachable!(),
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
             }
@@ -1561,6 +1569,10 @@ impl Venue for BinanceFutures {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Identity(command) = pending {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         match pending {
             Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
             Pending::DepthSnapshot { symbol, generation } => {
@@ -1580,6 +1592,7 @@ impl Venue for BinanceFutures {
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
             Pending::Trade(request) => self.on_trade_response(cx, request, Err(error)),
             Pending::History(request) => self.on_history_response(cx, request, Err(error)),
+            Pending::Identity(_) => unreachable!(),
         }
     }
 
@@ -1637,6 +1650,10 @@ impl Venue for BinanceFutures {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),

@@ -684,3 +684,8 @@ partial success. See the crate's tests and `harness/gate.mjs` known fixes.
 Hedged `setLeverage` requires Long/Short and writes only native `LONG`/`SHORT`;
 one-way uses `BOTH`. Acknowledgements, REST snapshots and config events retain
 separate buy/sell leverage. A rejected write changes neither leg.
+
+`FetchLeverage` is a fresh signed `GET /openApi/swap/v2/trade/leverage` (as the
+TS adapter's `fetchLeverageForSymbol`), so BingX reports `leverageQuery: onRead`.
+It answers the long/short rails and publishes them unless a config event or
+acknowledgement changed positions while the read was in flight.

@@ -141,4 +141,34 @@ describe('main-thread Rust trading routing', () => {
     ]);
     expect(main.hasStarted).toBe(false);
   });
+
+  it('forwards main-thread native account reads to the worker without starting an engine', async () => {
+    const construct = vi.fn();
+    setWasmEngineLoader(async () => {
+      construct();
+      return new Promise(() => {});
+    });
+    main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    const calls: string[] = [];
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      const result = event.method === 'fetchPositionMode' ? true : event.method === 'fetchBalance' ? {} : [];
+      queueMicrotask(() => main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result }));
+    });
+    await main.fetchOrders();
+    await main.fetchPositions();
+    await main.fetchBalance();
+    await main.fetchPositionMode();
+    expect(calls).toEqual(['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode']);
+    expect(main.hasStarted).toBe(false);
+    expect(construct).not.toHaveBeenCalled();
+  });
+
+  it('leaves a mirror store to worker frames instead of syncing a local engine', () => {
+    setWasmEngineLoader(() => new Promise(() => {}));
+    main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    main.on('callMethod', () => {});
+    expect(() => main!.syncAccountState()).not.toThrow();
+    expect(main.hasStarted).toBe(false);
+  });
 });
