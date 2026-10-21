@@ -90,6 +90,19 @@ for (const method of methods) {
   });
 }
 
+test('a native stack overflow (V8 RangeError) is contained like a trap', async () => {
+  // wasm stack overflow surfaces as RangeError, not RuntimeError; the engine is
+  // left mid-mutation with its wasm-bindgen borrow held, so it cannot be reused.
+  const overflow = new RangeError('Maximum call stack size exceeded');
+  const r = rig({ command() { throw overflow; } });
+  await assert.rejects(r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'c-1' }] }), (error) =>
+    error instanceof EngineDeadError && error.kind === 'internal' && error.outcome === 'unknown');
+  assert.equal(r.host.dead, true);
+  assert.equal(r.host.deadError.cause, overflow);
+  assert.equal(r.deaths.length, 1);
+  await assert.rejects(r.host.command({ op: 'getAccount' }), EngineDeadError);
+});
+
 test('real WASM unreachable is contained without poisoning a sibling host', async () => {
   // (module (func (export "trap") unreachable)); no compiler or production panic API.
   const bytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0,
