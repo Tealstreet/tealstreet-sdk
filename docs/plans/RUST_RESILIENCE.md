@@ -89,3 +89,21 @@ settings-revision fencing. Four fail on the old implementation; all pass with
 the fix. Orderly plus Binance crate tests and scoped strict Clippy/fmt verify
 the change; independent review requested the additional malformed-envelope
 cases and found no production blockers. No downstream callers change.
+
+### Bybit discovery envelope rate limits
+
+Plan: recognize HTTP-200 `retCode:10006` on Markets, Tickers and OptionSeed
+responses, including missing-list error envelopes. Preserve the Response through
+the stream-error path only for this typed discovery rejection. A private helper
+combines a finite future `X-Bapi-Limit-Reset-Timestamp` (epoch milliseconds) with
+existing Retry-After parsing, a ten-second fallback and the shared one-hour cap;
+keep the HTTP403 ten-minute floor and maximum existing deadline. Extend already
+waiting category backoffs using their existing helper without increasing attempts
+or creating retries for idle categories. No transport-wide gate or write change.
+Regress actual retries, both envelope shapes, malformed/stale/huge hints, mixed
+hint precedence, success-header suppression, options seeds and cross-category
+timer extension. Verify failing baseline first, Bybit plus Binance tests, scoped
+Clippy/fmt, independent review, CI and a separate current-landing trial/guard.
+
+After this phase, reconcile skipped-row auth evidence per RUST_AUTH_RESULTS as
+a separate bridge follow-up PR; explicit network resync stays parked.
