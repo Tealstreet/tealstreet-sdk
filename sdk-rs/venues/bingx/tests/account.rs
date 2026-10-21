@@ -1336,6 +1336,35 @@ fn a_rejected_position_row_logs_once_until_it_maps_or_a_snapshot_is_clean() {
     assert_eq!(count(&h.logs, "ETHUSDT"), 2, "{:?}", h.logs);
     assert_eq!(count(&h.errors, "ETHUSDT"), 2, "{:?}", h.errors);
     assert_eq!(count(&h.errors, "BTCUSDT"), 0, "{:?}", h.errors);
+
+    // BTC drops out while ETH stays rejected; its malformed return has no copy left.
+    poll(&mut h, &[bad_btc, bad_eth]);
+    poll(&mut h, &[bad_eth]);
+    assert!(h.engine.store().positions().is_empty());
+    poll(&mut h, &[bad_btc, bad_eth]);
+    assert_eq!(count(&h.errors, "BTCUSDT"), 1, "{:?}", h.errors);
+}
+
+#[test]
+fn a_skip_warned_on_a_stale_snapshot_still_errors_once_its_copy_is_gone() {
+    let mut h = Harness::ready();
+    let bad_btc = r#"{"code":0,"data":[{"symbol":"BTC-USDT"}]}"#;
+    h.fire_at(3000.0);
+    let positions = h.take(POSITIONS);
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","pa":"0","ep":"60000","up":"0","ps":"BOTH","mt":"cross"}]}}"#);
+    h.reply(positions.id, 200, bad_btc);
+    let skipped = |logs: &[String]| {
+        logs.iter()
+            .filter(|l| l.contains("skipped malformed position row BTCUSDT"))
+            .count()
+    };
+    assert_eq!(skipped(&h.logs), 1, "{:?}", h.logs);
+    assert_eq!(skipped(&h.errors), 0, "{:?}", h.errors);
+    // The repair read commits with no BTC copy left.
+    h.fire_recovery();
+    h.respond(POSITIONS, 200, bad_btc);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(skipped(&h.errors), 1, "{:?}", h.errors);
 }
 
 #[test]

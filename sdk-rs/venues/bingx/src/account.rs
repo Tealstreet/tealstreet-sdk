@@ -102,7 +102,7 @@ pub struct Account {
     skipped_markets: HashSet<String>,
     reported_markets: HashSet<String>,
     // Rejected private rows already logged, keyed `kind:id`; bounded by SKIP_LOG_LIMIT.
-    skip_logged: HashSet<String>,
+    skip_logged: HashMap<String, bool>,
 }
 
 /// Bounds the once-per-identity skip log; clearing it only re-arms logs.
@@ -153,11 +153,12 @@ fn position_identity(item: &str, mode: PositionMode) -> String {
         _ => symbol,
     }
 }
-/// Logs a rejected row once per identity until it maps again; polls would otherwise
-/// repeat it. Error only when no stored copy is kept for it.
+/// Logs a rejected row once per identity until a committed snapshot no longer rejects
+/// it; polls would otherwise repeat it. Error only when no stored copy is kept, and a
+/// Warning still escalates once to Error when the copy is lost.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     kind: &str,
     id: &str,
     kept: bool,
@@ -165,9 +166,11 @@ fn log_skip(
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
-    if !logged.insert(format!("{kind}:{id}")) {
+    let key = format!("{kind}:{id}");
+    if logged.get(&key).is_some_and(|&errored| errored || kept) {
         return;
     }
+    logged.insert(key, !kept);
     let level = if kept {
         LogLevel::Warning
     } else {
@@ -182,26 +185,20 @@ fn log_skip(
         cx.log(level, format!("BingX skipped malformed {kind} row {id}"));
     }
 }
-/// Logs a committed snapshot's rejected rows; a clean snapshot re-arms every log of
-/// its kind, otherwise only those of rows that mapped again.
-fn log_snapshot_skips<'a>(
+/// Logs a committed snapshot's rejected rows and re-arms every row of its kind the
+/// snapshot no longer rejects, whether it mapped, went flat or disappeared.
+fn log_snapshot_skips(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     kind: &str,
     skipped: &[String],
-    mapped: impl IntoIterator<Item = &'a str>,
     kept: impl Fn(&str) -> bool,
 ) {
     let prefix = format!("{kind}:");
-    if skipped.is_empty() {
-        logged.retain(|key| !key.starts_with(&prefix));
-        return;
-    }
-    for id in mapped {
-        if !skipped.iter().any(|s| s == id) {
-            logged.remove(&format!("{prefix}{id}"));
-        }
-    }
+    logged.retain(|key, _| {
+        key.strip_prefix(&prefix)
+            .is_none_or(|id| skipped.iter().any(|s| s == id))
+    });
     for id in skipped {
         log_skip(cx, logged, kind, id, kept(id));
     }
@@ -902,17 +899,10 @@ impl Account {
                         })
                         .cloned()
                         .collect();
-                    log_snapshot_skips(
-                        cx,
-                        &mut self.skip_logged,
-                        "position",
-                        &skipped,
-                        rows.iter().flat_map(|p| [p.id.as_str(), p.symbol.as_str()]),
-                        |id| {
-                            kept.iter()
-                                .any(|p| id.is_empty() || p.id == id || p.symbol == id)
-                        },
-                    );
+                    log_snapshot_skips(cx, &mut self.skip_logged, "position", &skipped, |id| {
+                        kept.iter()
+                            .any(|p| id.is_empty() || p.id == id || p.symbol == id)
+                    });
                     rows.extend(kept);
                     cx.store.set_positions(rows);
                     for (symbol, value) in settings {
@@ -970,14 +960,9 @@ impl Account {
                     })
                     .cloned()
                     .collect();
-                log_snapshot_skips(
-                    cx,
-                    &mut self.skip_logged,
-                    "open order",
-                    &skipped,
-                    rows.iter().map(|o| o.id.as_str()),
-                    |id| kept.iter().any(|o| id.is_empty() || o.id == id),
-                );
+                log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
+                    kept.iter().any(|o| id.is_empty() || o.id == id)
+                });
                 rows.extend(kept);
                 cx.store.set_orders(rows);
             }
