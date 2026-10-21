@@ -1395,3 +1395,12 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+### Backpack nullable trigger quantities
+
+Rust readbacks accept missing/null base quantity only when native trigger fields
+prove a positive amount and consistent execution. Orders remain visible and
+repairable under their real IDs; malformed ordinary quantities preserve prior
+state and fail rather than creating zero-size rows. This applies to account and
+order history reads and repair acknowledgements without changing method shapes,
+placement units, WS fields or cancellation identity.

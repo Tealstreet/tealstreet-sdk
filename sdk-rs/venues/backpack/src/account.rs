@@ -156,15 +156,16 @@ fn unpriced(store: &safe_cex_engine::Store, symbol: &str) -> bool {
         .is_none_or(|t| t.last <= 0.0 && t.mark <= 0.0)
 }
 
-pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
+pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Result<Order, &'static str> {
+    let quantity = row.base_quantity()?;
     let side = side(&row.side);
     let trigger = row.trigger_price.map(|n| n.0);
     let amount = if trigger.is_some() {
-        row.trigger_quantity.map_or(row.quantity, |n| n.0)
+        row.trigger_quantity.map_or(quantity, |n| n.0)
     } else {
-        row.quantity
+        quantity
     };
-    Order {
+    Ok(Order {
         id: row.id.into_owned(),
         parent_id: None,
         status: status(&row.status),
@@ -193,7 +194,7 @@ pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
                 ..Default::default()
             },
         ),
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -462,7 +463,7 @@ impl Backpack {
                 invalid,
                 ..
             } => {
-                let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
+                let result = serde_json::from_str::<OrderRow<'_>>(item).and_then(|r| {
                     if cx.store.market(&r.symbol).is_none() {
                         // Only a working order on a malformed market holds the snapshot.
                         if self.report_skipped_market(cx, &r.symbol) {
@@ -477,10 +478,12 @@ impl Backpack {
                         {
                             repairs.push(repair);
                         }
-                        let mapped = order(r, cx.store);
+                        let mapped = order(r, cx.store)
+                            .map_err(<serde_json::Error as serde::de::Error>::custom)?;
                         self.note_unpriced_trigger(cx.store, &mapped);
                         rows.push(mapped);
                     }
+                    Ok(())
                 });
                 if result.is_err() {
                     *invalid = true;
