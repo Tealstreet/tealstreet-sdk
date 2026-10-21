@@ -164,7 +164,8 @@ threshold relaxation. Strike findings with the fix PR and its evidence.
 - ~~Never encoded: `conditional_order_price`, bracket trigger types,
   `remaining_notional`, `Ticker.mid_price`.~~
 - Low: ~~two `fetchedLeverage` writers~~; ~~`FORMAT` never bumped and reserved u16 unused~~;
-  fills precede orders by up to 250 ms; ~~`TickerState` views detach on transfer~~.
+  ~~fills precede orders by up to 250 ms~~ (a book-cadence flush carrying fills
+  writes the pending store sections with them); ~~`TickerState` views detach on transfer~~.
 
 Repair evidence: actual Rust-writer → JS decoder → FrameApplier regression,
 actual FILLS frame → GRVT chaser partial/completion regression, native layout
