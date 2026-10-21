@@ -220,7 +220,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1611 / `a07b6b35c` | For eligible signed BingX/MEXC/WEEX list reads, a typed success response (BingX/MEXC envelope; WEEX root array) with its required list proves Accepted even when rows are skipped, uncatalogued or held. Malformed/missing required envelope data supplies no outcome before grouped auth state changes; typed credential rejection retains precedence. Row diagnostics/financial retention, classifier scope and caller shapes stay unchanged. |
 | #1590 / `15434894b` | A startup fee-read 10003 on eligible built-in live linear/demo Bybit can add an opposite-environment key hint after one bounded signed diagnostic GET using the rejected credential. Failure/timeout retains the original rejection; native code, credential role and deactivation policy stay intact. No automatic environment switch or trading retry. |
 | #1596 / `687fe0c1e` | Bybit `refreshMarkets()` stages enabled public categories atomically, shares concurrent discovery and returns added/removed membership after publication. `marketRefresh` capability uses wire bit15; unsupported engines keep cached behavior. Failed discovery retains the old catalogue; shared-feed consumers must refresh the source and restart provider/accounts. See [Bybit explicit catalogue refresh](#bybit-explicit-catalogue-refresh). |
-| #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
+| #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; After a prior degraded report, Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -1917,7 +1917,8 @@ as documented.
 #1615 (`c63acfc19c2`) reports OKX/BloFin/Bitget public startup
 `startup.degraded` at Warn once after six failures of one required read, while
 capped retries continue. Fields include `kind`, `read`, `attempts`, and parsed
-`venueCode`/`venueMessage` when available. Info `startup.recovered` follows
+`venueCode`/`venueMessage` when available, plus `retryAfterMs` for a positive
+finite cooldown. After a prior degraded report, Info `startup.recovered` follows
 usable markets and tickers, including usable partial catalogues; repair timers
 continue. These use the existing Event wire and do not emit terminal
 `StartupFailed`. Warn preserves SDK `validateAccount` behavior by avoiding its
