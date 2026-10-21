@@ -74,11 +74,11 @@ register('blofin', 'BLOFIN', {
 for (const name of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
   const eea = name.startsWith('okxeu');
   const demo = endpoints(eea ? 'https://eea.okx.com' : 'https://openapi.okx.com',
-    eea ? 'wss://wseeapap.okx.com:8443' : 'wss://wspap.okx.com:8443');
+    eea ? 'wss://wseeapap.okx.com' : 'wss://wspap.okx.com');
   register(name, 'OKX', {
     demo,
     ...(!name.endsWith('demo') ? { mainnet: endpoints(eea ? 'https://eea.okx.com' : 'https://www.okx.com',
-      eea ? 'wss://wseea.okx.com:8443' : 'wss://ws.okx.com:8443') } : {}),
+      eea ? 'wss://wseea.okx.com' : 'wss://ws.okx.com') } : {}),
   }, { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' });
 }
 register('kraken', 'KRAKEN', {
