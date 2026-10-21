@@ -272,9 +272,14 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
                 this.broadcast(this.startupFailure);
               },
               onLog: (level, text) => this.notify(level !== 'info', { op: 'event', level: level === 'warning' ? 'warn' : level, code: 'host.diagnostic', message: text, fields: {} }),
-              onEvent: ({ level, code, message, fields }) => this.notify(level === 'warn' || level === 'error', {
-                op: 'event', level, message, code, fields,
-              }),
+              onEvent: ({ level, code, message, fields }) => {
+                // Command diagnostics are delivered through their owning request below.
+                // Unknown, malformed and retired command IDs must never become broadcasts.
+                if ((fields && Object.prototype.hasOwnProperty.call(fields, 'command')) || code === 'history.incomplete') return;
+                this.notify(level === 'warn' || level === 'error', {
+                  op: 'event', level, message, code, fields,
+                });
+              },
               onAccountAuth: (result) => {
                 for (const optedIn of this.accountAuthClients) this.reply(optedIn, { op: 'accountAuth', ...result });
               },
@@ -302,7 +307,15 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         }
         const host = this.host;
         try {
-          const result = await host.command(message.command);
+          const result = await host.command(message.command, {
+            onEvent: ({ level, code, message: text, fields }) => {
+              if (this.host !== host) return;
+              this.reply(client, {
+                op: 'event', level, message: text, code,
+                fields: { ...fields, command: message.id },
+              });
+            },
+          });
           if (this.host === host) this.reply(client, { op: 'done', id: message.id, result });
         } catch (error) {
           if (this.host === host) this.reply(client, { op: 'done', id: message.id, error: String(error?.message ?? error) });

@@ -59,7 +59,7 @@ const CAPABILITY_FLAGS = [
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
   ['cancelAll', ['eachOpenSymbol', 'eachPlacedSymbol', 'native']],
-  ['leverageQuery', ['settings', 'onRead', 'onMetadata']],
+  ['leverageQuery', ['settings', 'onRead', 'onMetadata', 'onReadAndMetadata']],
   ['maxLeverage', ['market', 'query', 'rails', 'unsupported']],
   ['quantityUnits', QUANTITY_UNITS],
 ];

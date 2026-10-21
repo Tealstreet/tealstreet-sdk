@@ -47,7 +47,7 @@ export interface EngineCapabilities {
   incomeHistory: boolean;
   fillsByOrderId: boolean;
   cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
-  leverageQuery: 'settings' | 'onRead' | 'onMetadata';
+  leverageQuery: 'settings' | 'onRead' | 'onMetadata' | 'onReadAndMetadata';
   maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
   accountLeverage: boolean;
   accountMarginType: boolean;
