@@ -13,6 +13,7 @@ import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'nod
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
+import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
 import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
@@ -289,7 +290,10 @@ async function runRust() {
       };
     }
   }
+  // Private tapes run with credentials; every log line is checked for them.
+  const notices = [];
   const host = new EngineHost(engine, transport, {
+    ...(isPrivate ? { onLog: (_level, message) => notices.push(message) } : {}),
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -396,6 +400,7 @@ async function runRust() {
       books: bookRows,
       account,
       commands: tape.results,
+      notices,
       transportReceipt: tape.transportReceipt(),
     };
   };
@@ -874,6 +879,14 @@ function comparisonSnapshot(result) {
 }
 
 const result = values.impl === 'ts' ? await runTs() : await runRust();
+if (result.notices) {
+  const leaks = findNoticeLeaks([...result.notices, ...result.commands], credentialValues(options));
+  if (leaks.length) {
+    for (const leak of leaks) console.error(leak);
+    realClearTimeout(replayDeadline);
+    process.exit(1);
+  }
+}
 const { writeFileSync } = await import('node:fs');
 writeFileSync(
   values.out,
