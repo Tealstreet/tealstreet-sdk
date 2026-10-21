@@ -253,10 +253,7 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
     e.handle(1700000000010.,Event::HttpResponse{request:r.id,response:Response{status:200,headers:"",body:r#"{"r":[{"ot":"1700000000000000000","o":"100","h":"102","l":"99","vb":"4"}]}"#}});
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 8,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 8, .. })
     )));
 }
 #[test]
@@ -427,10 +424,7 @@ fn unsupported_unicode_candle_interval_fails_without_trapping() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 33,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 33, .. })
     )));
 }
 

@@ -183,10 +183,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, .. })
     )));
 }
 #[test]
@@ -348,7 +345,7 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone {
                 command: 8,
-                result: Ok(s),
+                result: s,
             }) => Some(s),
             _ => None,
         })

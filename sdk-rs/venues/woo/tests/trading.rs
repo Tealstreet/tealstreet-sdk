@@ -121,7 +121,7 @@ fn result(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(Ok(result.clone())),
             // Failures as the plain text the host renders.
             Action::Notice(Notice::CommandFailed { command: 1, error }) => {
                 Some(Err(error.legacy_text()))

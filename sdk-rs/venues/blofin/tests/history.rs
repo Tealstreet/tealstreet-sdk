@@ -12,7 +12,10 @@ fn result(h: &Harness) -> Result<serde_json::Value, String> {
         .rev()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: 7, result }) => {
-                Some(result.clone().map(|r| serde_json::from_str(&r).unwrap()))
+                Some(Ok(serde_json::from_str(result).unwrap()))
+            }
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => {
+                Some(Err(error.legacy_text()))
             }
             _ => None,
         })

@@ -36,7 +36,10 @@ impl Harness {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, .. } => self.timers.push(timer),
-                Action::Notice(Notice::CommandDone { result, .. }) => self.results.push(result),
+                Action::Notice(Notice::CommandDone { result, .. }) => self.results.push(Ok(result)),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    self.results.push(Err(error.legacy_text()))
+                }
                 _ => {}
             }
         }
