@@ -78,7 +78,9 @@ not a deployed-runtime or npm-publication claim.
   ~~Paradex REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
   depth query, native side order and per-level quote totals; live SBE books,
   sequence state and existing private JWT remain independent.
-  **Still SDK-owned:** REST `fetchOrderBook` for WEEX.
+  ~~WEEX REST `fetchOrderBook` parity~~ now uses an independent unsigned query,
+  native cumulative base amounts and exact version strings; shared rate pause
+  admission survives while live book generations and account metadata stay separate.
   ~~Hyperliquid `scheduleCancel`~~ now has native signed arm/clear, safe UTC-ms
   admission/dispatch checks, synchronized clock, vault/network signing vectors,
   append-only capability and worker/host uncertain-write ownership.
@@ -89,7 +91,7 @@ not a deployed-runtime or npm-publication claim.
   ~~WEEX metadata refresh~~ now uses the shared `onReadAndMetadata` policy;
   [regressions](RUST_WEEX_METADATA_REFRESH.md) cover cached flat symbols,
   repeated reads, malformed-response retention and public-only isolation.
-  Streaming books do not implement the remaining WEEX REST query.
+  REST snapshot queries and the signed dead-man control remain independent of streaming books.
 - ~~`instanceof BlofinExchange` as an active downstream cutover blocker.~~
   Pinned NX read-only audit finds the class check in an unused helper, with no
   production import/render; active generic helpers have no guard. It remains

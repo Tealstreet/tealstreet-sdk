@@ -118,6 +118,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_GRVT_REST_ORDERBOOK.md](RUST_GRVT_REST_ORDERBOOK.md) |
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_MEXC_BOOK_JSON_INGRESS.md](RUST_MEXC_BOOK_JSON_INGRESS.md) |
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_PARADEX_REST_ORDERBOOK.md](RUST_PARADEX_REST_ORDERBOOK.md) |
+| REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_WEEX_REST_ORDERBOOK.md](RUST_WEEX_REST_ORDERBOOK.md) |
 | Replay determinism | Sweep plan / merge receipts | Private clock, fixture causality and complete raw repeatability proofs. | [HARNESS_TAPE_TIME.md](HARNESS_TAPE_TIME.md) |
 | Replay evidence | Retained plan/evidence | Checking strict reports, fixture provenance, declarations or repeatability proofs. | [HARNESS_ASTER_CLOCK.md](HARNESS_ASTER_CLOCK.md) |
 | Replay evidence | Retained plan/evidence | Checking strict reports, fixture provenance, declarations or repeatability proofs. | [RUST_BITGET_PARITY.md](RUST_BITGET_PARITY.md) |

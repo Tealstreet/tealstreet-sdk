@@ -1060,6 +1060,7 @@ mod tests {
                         "cryptocom",
                         "grvt",
                         "paradex",
+                        "weex",
                     ],
                     venue,
                 ),

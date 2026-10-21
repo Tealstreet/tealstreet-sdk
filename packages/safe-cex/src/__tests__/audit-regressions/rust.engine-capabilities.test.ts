@@ -25,7 +25,9 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
     fetchAccount: { userId: 'account-1' },
     fetchLeverage: { buyLeverage: 20, sellLeverage: 50 },
     findOrderByClientOrderId: { found: false, definitive: true },
-    fetchOrderBook: name === 'paradex'
+    fetchOrderBook: name === 'weex'
+      ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '90071992547409931234567890' }
+      : name === 'paradex'
       ? { bids: [{ price: 60000, amount: 0.001, total: 60 }], asks: [] }
       : name === 'grvt'
       ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [] }
@@ -216,6 +218,18 @@ describe('Rust bridge routes from the engine capability record', () => {
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'SOL_USDC_PERP', limit: 1 }),
+    ]);
+    expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
+  });
+
+  it('routes WEEX REST books from native capability with an exact version', async () => {
+    const { exchange, commands } = fixture({}, 'weex');
+    await exchange.start();
+    await expect(exchange.fetchOrderBook('BTCUSDT', 1)).resolves.toEqual({
+      bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '90071992547409931234567890',
+    });
+    expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT', limit: 1 }),
     ]);
     expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
   });
