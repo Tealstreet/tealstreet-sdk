@@ -511,6 +511,7 @@ const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
 
 const okx = (name) => ({
   rust: name,
+  virtualPrivateClock: true,
   requestKey: typedRequest,
   ts: {
     module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
