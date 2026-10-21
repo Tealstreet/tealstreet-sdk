@@ -448,19 +448,21 @@ fixture assumptions, not a live-feed bandwidth forecast.
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
 
-The stricter gate-honesty matrix has 107 mandatory cases. Its single
+The stricter gate-honesty matrix currently requires 32 suites / 110 exact cases
+([coverage contract](../../sdk-rs/harness/ci-gate-suites.mjs)). Its single
 [`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
 list records exact venue/tape/diagnostic failures; accepted known failures stay
 FAIL and do not certify parity. Port states below describe implementation and
 historical checks, not a claim that every stricter replay case passes.
 
-### 8. Remaining venues — in progress
+### 8. Port inventory and historical receipts
 
-One Codex lane per venue, each in its own aimux worktree on
-`feat/rust-<venue>`, working from `docs/plans/VENUE_PORT_BRIEF.md`: plan and
-execute in phases with sub-agent reviews, then a PR into `feat/rust-rewrite`
-reviewed adversarially until it passes, then merged. The overseer delegates,
-compacts lanes at checkpoints, watches gates and keeps this list current.
+The original venue lanes used independent worktrees, phased plans/reviews and
+PRs into `feat/rust-rewrite`. Their port receipts below are historical evidence,
+not an active lane queue or a claim of complete strict private parity. At
+`b6cb612bc7c`, the replay catalog contains 50 aliases and browser delivery has
+28 families. Current cutover/deletion obligations remain in the caller audit;
+the [plan index](README.md) retains the implementation evidence.
 
 | Venue | State |
 | --- | --- |
@@ -479,17 +481,17 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
 | Bitrue futures | done (#1314); cache/open-order client-ID lookup parity implemented and gated ([evidence](RUST_PARITY_GAPS.md)); TS has no complete order/PnL/funding histories or hedge/margin mode changes |
-| Bitunix | wave 1, PR in review |
+| Bitunix | port merged [#1309](https://github.com/Tealstreet/tealstreet-sdk/pull/1309), `3acf9e46392`; later repair evidence is indexed separately |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
 | WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
-| KuCoin, Phemex, Orderly family | wave 2 lanes running |
+| KuCoin, Phemex, Orderly family | ports merged [#1312](https://github.com/Tealstreet/tealstreet-sdk/pull/1312) (`373cc098643`), [#1310](https://github.com/Tealstreet/tealstreet-sdk/pull/1310) (`45d7a3fb988`) and [#1318](https://github.com/Tealstreet/tealstreet-sdk/pull/1318) (`f66bdc26f9a`); port completion is separate from cutover/parity |
 | KuCoin spot | Implemented and gated: HF spot public/private/trading, caller IDs and supported queries/settings; [scope and evidence](RUST_PARITY_GAPS.md) |
-| Engine performance: batched message delivery, per-venue wasm builds | lane running; [GRVT fixture profiling](GRVT_RUST_PERF.md) hands off measured replay audit overhead |
+| Engine artifact isolation and performance experiments | family delivery merged [#1393](https://github.com/Tealstreet/tealstreet-sdk/pull/1393), `cb371229da1`; the earlier combined proposal [#1344](https://github.com/Tealstreet/tealstreet-sdk/pull/1344) closed without merging. Current artifact/profile evidence is in [the size audit](RUST_WASM_ARTIFACT_SIZE.md); [GRVT profiling](GRVT_RUST_PERF.md) remains historical evidence |
 | GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing; [non-perpetual product decision](GRVT_PRODUCTS_DECISION.md) retires unexposed mapper-only Future/Call/Put paths |
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; remote/payload signing implemented and gated ([scope and evidence](RUST_PARITY_GAPS.md)) |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
-| Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Lighter perps | port merged [#1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), `31ec401f601`; later production and replay repairs remain separately recorded |
 | Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
