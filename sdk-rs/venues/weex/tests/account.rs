@@ -1515,3 +1515,61 @@ fn startup_order_row_without_identity_is_an_error_with_no_stored_orders() {
         ["WEEX skipped malformed order row without an ID"]
     );
 }
+
+#[test]
+fn a_skipped_order_with_an_id_is_an_error_only_when_no_stored_copy_is_kept() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert!(e.store().order("702345678901234600").is_some());
+    let actions = next_cycle(&mut e);
+    let malformed = |id: &str| {
+        format!(
+            r#"{{"orderId":{id},"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","status":"NEW","origQty":null}}"#
+        )
+    };
+    // 600 keeps its stored copy; 699 has none and drops out.
+    let normal = format!(
+        "[{},{}]",
+        malformed("702345678901234600"),
+        malformed("702345678901234699")
+    );
+    complete(&mut e, &actions, &normal, ALGO);
+    assert!(e.store().order("702345678901234600").is_some());
+    assert!(e.store().order("702345678901234699").is_none());
+    let (drained, actions) = drain_then_next_cycle(&mut e);
+    assert_eq!(
+        logs(&drained, Level::Error),
+        ["WEEX skipped malformed order row 702345678901234699"]
+    );
+    assert!(
+        logs(&drained, Level::Warn)
+            .contains(&"WEEX skipped malformed order row 702345678901234600".to_owned())
+    );
+    assert!(
+        drained
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event))
+                    if event
+                        .message
+                        .starts_with("WEEX skipped malformed order row") =>
+                    Some(event.code),
+                _ => None,
+            })
+            .all(|code| code == safe_cex_engine::log::code::ROW_SKIPPED)
+    );
+    complete(&mut e, &actions, &normal, ALGO);
+    let (drained, actions) = drain_then_next_cycle(&mut e);
+    assert!(logs(&drained, Level::Error).is_empty());
+    e.store_mut()
+        .update_order("702345678901234600", |o| o.status = OrderStatus::Canceled);
+    complete(&mut e, &actions, &normal, ALGO);
+    let (drained, actions) = drain_then_next_cycle(&mut e);
+    assert_eq!(
+        logs(&drained, Level::Error),
+        ["WEEX skipped malformed order row 702345678901234600"]
+    );
+    complete(&mut e, &actions, &normal, ALGO);
+    let (drained, _) = drain_then_next_cycle(&mut e);
+    assert!(logs(&drained, Level::Error).is_empty());
+}

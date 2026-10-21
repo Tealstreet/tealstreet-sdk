@@ -240,11 +240,11 @@ impl NativeOrder<'_> {
 #[derive(Default, Deserialize)]
 pub struct AccountUpdate<'a> {
     #[serde(default, borrow, rename = "P")]
-    pub positions: Vec<PositionUpdate<'a>>,
+    pub positions: Vec<&'a serde_json::value::RawValue>,
     #[serde(default, borrow, rename = "p")]
-    pub legacy_positions: Vec<PositionUpdate<'a>>,
+    pub legacy_positions: Vec<&'a serde_json::value::RawValue>,
     #[serde(default, borrow, rename = "B")]
-    pub balances: Vec<PositionUpdate<'a>>,
+    pub balances: Vec<&'a serde_json::value::RawValue>,
 }
 
 // The fallback B array can contain balance records; only symbol-bearing rows
@@ -317,4 +317,29 @@ pub enum Placed<'a> {
 pub struct PlacedEnvelope<'a> {
     #[serde(borrow)]
     pub data: Placed<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct Data<T> {
+    pub data: T,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Leverage {
+    #[serde(deserialize_with = "number")]
+    pub long_leverage: f64,
+    #[serde(deserialize_with = "number")]
+    pub short_leverage: f64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarginMode<'a> {
+    #[serde(borrow)]
+    pub margin_type: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct PositionIntent<'a> {
+    #[serde(default, borrow)]
+    pub s: Str<'a>,
 }
