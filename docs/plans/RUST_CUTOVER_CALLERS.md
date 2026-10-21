@@ -1620,8 +1620,8 @@ mode for flat symbols and publishes them together when the read remains current.
 Revision/query-generation races and reads issued during a pending settings write
 prevent stale store publication; they still return current cached buy/sell rails,
 with an independent validated-read fallback for each missing rail. Overlap alone
-never fails the read or produces `null`; transport/native-response failures
-remain failures. A superseded read finishes without another margin-mode request;
+never fails the read or produces `null`; transport failures and invalid native
+leverage responses can still fail the read. A superseded read finishes without another margin-mode request;
 a read issued during a pending write stays ineligible to publish even after that
 write settles. Current reads retain atomic leverage/margin publication.
 `fetchLeverageForSymbol` and selected metadata refreshes keep their existing APIs.
