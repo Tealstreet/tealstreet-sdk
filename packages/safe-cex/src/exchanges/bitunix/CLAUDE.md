@@ -734,6 +734,18 @@ rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
 
+Rust public discovery skips malformed typed catalogue/ticker rows with a coded
+warning while committing valid peers only after the complete envelope succeeds.
+Empty, filtered-only and wholly malformed seeds retry without claiming readiness;
+intentional eligibility filters do not count as malformed rows. Private startup
+begins from the usable catalogue and can finish before tickers; ticker recovery
+starts only public ticker sockets and never resets account settings or polling.
+Discovery uses shared capped exponential backoff with jitter and visible
+degradation/recovery. HTTP 418/429 honor `Retry-After` (60-second default); native
+`10005`/`10006` wait 60 seconds even with missing/null data, while `10001` remains a network
+failure. Malformed public previews are not copied into diagnostics. Private,
+financial history and trading policies remain separate.
+
 Rust socket supervision retains one retry state per private/futures/public-shard
 feed. Refusals use shared capped exponential jitter; open alone never resets the
 failure streak. Connection attempts expire after 10 seconds; opened public feeds

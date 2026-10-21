@@ -473,3 +473,365 @@ fn candle_interest_without_credentials_reads_no_symbol_settings() {
         Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("credentials")
     )));
 }
+
+fn pending_http(actions: &[Action], path: &str) -> safe_cex_engine::HttpRequest {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains(path) => Some(r.clone()),
+            _ => None,
+        })
+        .expect(path)
+}
+fn public_engine(credentials: bool) -> Engine<BitunixFutures> {
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+        key: credentials.then(|| "key".into()),
+        secret: credentials.then(|| "secret".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    e
+}
+#[test]
+fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
+    let mut e = public_engine(false);
+    let market = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let pair: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
+    response(
+        &mut e,
+        market.id,
+        &format!(
+            r#"{{"code":0,"data":[{},{{"symbol":"BADUSDT","basePrecision":null}}]}}"#,
+            pair["data"][0]
+        ),
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
+    let ticker = pending_http(&actions, "/tickers");
+    let tick: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
+    response(
+        &mut e,
+        ticker.id,
+        &format!(
+            r#"{{"code":0,"data":[{{"symbol":"BADUSDT","last":null}},{}]}}"#,
+            tick["data"][0]
+        ),
+    );
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 96000.0);
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
+}
+#[test]
+fn a_bad_ticker_row_cannot_discard_the_rest_of_a_usable_seed() {
+    let mut e = public_engine(false);
+    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    response(&mut e, r.id, PAIRS);
+    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    let ticks: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
+    response(
+        &mut e,
+        r.id,
+        &format!(r#"{{"code":0,"data":[{},null]}}"#, ticks["data"][0]),
+    );
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 1);
+}
+#[test]
+fn all_malformed_required_seeds_retry_without_loaded_empty_state() {
+    for ticker in [false, true] {
+        let mut e = public_engine(false);
+        let mut r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        if ticker {
+            response(&mut e, r.id, PAIRS);
+            r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+        }
+        response(&mut e, r.id, r#"{"code":0,"data":[null,{}]}"#);
+        assert!(
+            !(if ticker {
+                e.store().loaded().tickers
+            } else {
+                e.store().loaded().markets
+            })
+        );
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. }))
+        );
+    }
+}
+#[test]
+fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts_it() {
+    let mut e = public_engine(true);
+    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    response(&mut e, r.id, PAIRS);
+    let out: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a,Action::WsConnect {url,..} if url.contains("/private/")))
+            .count(),
+        1,
+        "private socket must not wait for ticker seed"
+    );
+    let balance = pending_http(&out, "/account");
+    let positions = pending_http(&out, "get_pending_positions");
+    let orders = pending_http(&out, "get_pending_orders");
+    let ticker = pending_http(&out, "/tickers");
+    assert!(!e.store().loaded().tickers);
+    // The account can establish settings independently from the pending seed.
+    response(
+        &mut e,
+        balance.id,
+        r#"{"code":0,"data":[{"marginCoin":"USDT","available":"900","margin":"100","positionMode":"ONE_WAY"}]}"#,
+    );
+    response(
+        &mut e,
+        positions.id,
+        r#"{"code":0,"data":{"positionList":[{"symbol":"BTCUSDT","positionId":"p","qty":"1","side":"BUY","avgOpenPrice":"100","leverage":20,"marginMode":"ISOLATION","positionMode":"ONE_WAY"}]}}"#,
+    );
+    response(&mut e, orders.id, r#"{"code":0,"data":{"orderList":[]}}"#);
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        if let Action::Http(r) = a {
+            assert!(r.url.contains("/tpsl/"));
+            response(&mut e, r.id, r#"{"code":0,"data":[]}"#);
+        }
+    }
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert!(
+        e.store().loaded().balance && e.store().loaded().positions && e.store().loaded().orders,
+        "private startup must complete while ticker seed remains pending"
+    );
+    e.drain_actions().for_each(drop);
+    response(
+        &mut e,
+        ticker.id,
+        r#"{"code":10001,"msg":"temporary failure","data":[]}"#,
+    );
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    response(&mut e, r.id, TICKERS);
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    assert!(!out.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::WsConnect {
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            }
+    )));
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(
+                a,
+                Action::WsConnect {
+                    channel: Some(safe_cex_engine::SocketChannel::Public),
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+}
+#[test]
+fn public_failures_use_capped_shared_backoff_and_report_recovery() {
+    let mut e = public_engine(false);
+    let mut request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let mut now = 0.0;
+    let mut degraded = 0;
+    for nominal in [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0, 30000.0] {
+        e.handle(
+            now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "public unavailable",
+            },
+        );
+        let out: Vec<_> = e.drain_actions().collect();
+        degraded+=out.iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_DEGRADED)).count();
+        let (timer, at) = out
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            (nominal * 0.75..=nominal).contains(&(at - now)),
+            "retry delay {} vs nominal {nominal}",
+            at - now
+        );
+        now = at;
+        e.handle(now, Event::TimerFired { timer });
+        request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        e.handle(now, Event::TimerFired { timer });
+        assert!(
+            !e.drain_actions().any(|a| matches!(a, Action::Http(_))),
+            "retired timer must not duplicate read"
+        );
+    }
+    assert_eq!(degraded, 1);
+    response(&mut e, request.id, PAIRS);
+    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    response(&mut e, request.id, TICKERS);
+    assert_eq!(e.drain_actions().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_RECOVERED)).count(),1);
+}
+
+#[test]
+fn discovery_rate_limits_honor_headers_and_native_codes_without_misclassifying_network_errors() {
+    for (status, code, headers, minimum) in [
+        (429, 0, "Retry-After: 15\r\n", 15000.0),
+        (200, 10005, "", 60000.0),
+        (200, 10006, "", 60000.0),
+        (200, 10001, "", 0.0),
+    ] {
+        let mut e = public_engine(false);
+        let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        let body = format!(r#"{{"code":{code},"msg":"temporary failure","data":[]}}"#);
+        e.handle(
+            0.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers,
+                    body: &body,
+                },
+            },
+        );
+        let at = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .unwrap();
+        if minimum > 0.0 {
+            assert_eq!(at, minimum);
+        } else {
+            assert!(
+                (750.0..=1000.0).contains(&at),
+                "native10001 is not a rate limit"
+            );
+        }
+    }
+}
+#[test]
+fn a_truncated_ticker_stream_never_commits_its_valid_prefix() {
+    let mut e = public_engine(false);
+    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    response(&mut e, request.id, PAIRS);
+    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    response(&mut e, request.id, &TICKERS[..TICKERS.len() - 2]);
+    assert!(!e.store().loaded().tickers);
+    assert!(e.store().tickers().is_empty());
+}
+#[test]
+fn intentionally_empty_or_filtered_catalogues_are_distinct_from_malformed_rows() {
+    for filtered in [false, true] {
+        let mut e = public_engine(false);
+        let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        let pairs: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
+        let body = if filtered {
+            format!(r#"{{"code":0,"data":[{}]}}"#, pairs["data"][1])
+        } else {
+            r#"{"code":0,"data":[]}"#.to_owned()
+        };
+        response(&mut e, request.id, &body);
+        assert!(!e.store().loaded().markets);
+        assert!(e.store().markets().is_empty());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
+        assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::WsConnect { .. })),
+            "no usable catalogue means no private/public sockets yet"
+        );
+    }
+}
+
+#[test]
+fn discovery_stream_business_rate_limits_without_arrays_keep_the_native_pause() {
+    for ticker in [false, true] {
+        for code in [10005, 10006] {
+            for data in ["", r#", "data":null"#, r#", "data":{}"#] {
+                let mut e = public_engine(false);
+                let mut request =
+                    pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+                if ticker {
+                    response(&mut e, request.id, PAIRS);
+                    request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+                }
+                response(
+                    &mut e,
+                    request.id,
+                    &format!(r#"{{"code":{code},"msg":"request too frequently"{data}}}"#),
+                );
+                let out: Vec<_> = e.drain_actions().collect();
+                assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+                assert!(
+                    out.iter()
+                        .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==60000.0)),
+                    "code={code}, ticker={ticker}, data={data}"
+                );
+            }
+        }
+    }
+}
+#[test]
+fn discovery_stream_errors_never_echo_raw_envelopes_into_failure_or_degradation() {
+    for ticker in [false, true] {
+        for body in [
+            r#"{"code":0,"RAW_BODY_SENTINEL":"private row","data":{}}"#,
+            r#"{"code":0,"RAW_BODY_SENTINEL":"private row"}"#,
+            r#"{"code":0,"data":[],"RAW_BODY_SENTINEL":"private row","broken":"#,
+        ] {
+            let mut e = public_engine(false);
+            let path = if ticker { "/tickers" } else { "trading_pairs" };
+            let mut request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+            if ticker {
+                response(&mut e, request.id, PAIRS);
+                request = pending_http(&e.drain_actions().collect::<Vec<_>>(), path);
+            }
+            let mut degraded = 0;
+            for _ in 0..6 {
+                response(&mut e, request.id, body);
+                let out: Vec<_> = e.drain_actions().collect();
+                assert!(!format!("{out:?}").contains("RAW_BODY_SENTINEL"));
+                degraded+=out.iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_DEGRADED)).count();
+                let (timer, at) = out
+                    .iter()
+                    .find_map(|a| match a {
+                        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                        _ => None,
+                    })
+                    .unwrap();
+                e.handle(at, Event::TimerFired { timer });
+                request = pending_http(&e.drain_actions().collect::<Vec<_>>(), path);
+            }
+            assert_eq!(degraded, 1);
+            assert!(
+                !(if ticker {
+                    e.store().loaded().tickers
+                } else {
+                    e.store().loaded().markets
+                })
+            );
+        }
+    }
+}
