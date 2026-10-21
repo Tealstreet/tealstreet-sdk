@@ -230,3 +230,52 @@ cause; prune only unobserved keys. Require focused harness tests, fresh public
 and private mandatory verification, independent current-head artifact review,
 full green CI, a separate Crypto.com dependency guard and an audited merge
 receipt before reporting and moving to GRVT.
+
+## GRVT phase
+
+Enable GRVT's virtual private clock using its existing fixed epoch without
+changing wire records, session routing or EIP-712 verification. Preserve caller
+identity across the scripted 401/session rotation and resend, native execution
+IDs, duplicate-fill handling, leverage refresh and symbol-scoped cancellation.
+Keep signature verification before existing request canonicalization.
+
+Validate the prefetched CI engine fingerprint before focused five-pair private
+iteration; refuse mismatches without fallback. Compare complete nonmetric
+outputs, including IDs, times, command receipts and staged account state. Prune
+only exact unobserved tape-bound declaration keys, and review any new diagnostic
+before adding its exact key, tape SHA and specific cause. Preserve strict FAIL.
+Require focused harness tests, fresh public/private mandatory verification,
+independent reviews and five identical current-head CI pairs. Merge only after
+full green CI, a fresh separate GRVT dependency guard and an audited merge
+receipt, then report and move to Phemex with its startup rewind preserved.
+
+Five focused pairs with a matching CI engine reproduced identical complete
+nonmetric outputs. At checkpoint 7 both implementations expose the same two
+order rows; remove only the five old declarations for that checkpoint's row
+count, row identity, symbol and client ID. Keep the other 33 exact private
+keys, strict FAIL, unchanged fixture and existing signature/session validation.
+
+## Phemex phase
+
+Enable only Phemex's virtual private clock. Keep its startup clock rewinding:
+leave `monotonicReplayClock` unset, because continuous startup breaks signed
+request validation. Preserve expiry freshness, bootstrap auth/subscription/
+snapshot ordering, the 1600 ms REST snapshot, terminal reconciliation, duplicate
+fill handling and both USDT/USDC account views. Do not change wire records,
+protocol validators or production behavior. The fixture currently has no epoch
+metadata; add an anchor only if complete raw evidence requires one.
+
+Use a hard fingerprint-matching CI engine for five focused private pairs.
+Compare complete nonmetric outputs including IDs, timestamps, settings and
+command receipts. Prune only exact unobserved private declaration keys; any
+new difference requires reviewed exact keys, tape SHA and a specific cause.
+Preserve existing public declarations and strict FAIL. Require focused tests,
+independent reviews, fresh mandatory public/private verification, five identical
+current-head CI pairs and full green checks. Run the Phemex dependency guard
+separately from the merge, audit actual parents/files, report the merge, and
+move to standalone Hyperliquid Spot.
+
+Five focused pairs with startup rewind preserved produced identical complete
+nonmetric outputs within each implementation. All 33 private keys remain exact,
+with zero unexpected or unobserved keys. Keep the fixture, absent epoch metadata
+and both private/public declaration entries unchanged.
