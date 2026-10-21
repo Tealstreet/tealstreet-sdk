@@ -33,3 +33,22 @@ its exact reviewed head and require actual prerequisite landing before merge.
 
 No new products, NX edits, TS deletion, budgets/replay allowances, local release
 WASM/full replay/timing matrices or release automation. Four local Cargo jobs.
+
+
+Implementation evidence:
+- Eight original-source groups failed through standalone JSON and actual venue
+  calls, then pass. They pin encoded live/testnet GET, default/explicit depth,
+  native order/zero quantities/per-level quote totals, empty sides, typed native/
+  HTTP/read failures, bounded rate hints, malformed/overflow atomic rejection
+  and concurrent exactly-once ownership. Extra tuple fields are ignored as TS.
+- An actual SBE snapshot survives REST success and public401 unchanged alongside
+  ticker/account state, and the next native delta still applies. A private-mode
+  regression proves a public auth-looking refusal does not refresh/invalidate
+  the JWT used by a subsequent successful private account-identity query.
+- Existing unsupported-command regression now excludes this supported command
+  while retaining all other refusal assertions. No private trading production
+  or live stream decoder code changed.
+- Final local checks pass:432 Paradex+Binance native tests, default combined-host
+  capability test,22 SDK bridge tests, typecheck, explicit no-ignore ESLint and
+  strict venue Clippy/format/bans. Two independent reviews CLEAR; full exact-head
+  CI and current-landing integration/separate guard remain required before merge.

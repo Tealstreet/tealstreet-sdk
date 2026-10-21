@@ -899,3 +899,24 @@ Rust bounded history reads that exhaust their page budget emit
 `history.incomplete` with the actual query command before partial completion.
 This lets the host flag and notify only the owning caller. Unbounded cap and
 other cursor-stall paths retain their existing failure behavior.
+
+
+## Native REST order-book query
+
+Rust supports the public SDK fetchOrderBook with an independent unsigned
+GET /orderbook/{encoded native symbol}?depth=N on production/testnet, default20
+and explicit caller depth forwarded without clamping. No market seed, private
+credentials or subscription is required. As TS does, native side order,
+duplicate prices and zero quantities survive, the first two string tuple fields
+are price/base size and extra metadata is ignored; each total is price*amount.
+There are no level IDs, cumulative totals, decimal scaling or update IDs.
+
+Both side arrays are required; present empty/one-sided books succeed. Malformed
+objects/tuples/finances and quote-total overflow fail the complete query. REST
+metadata never changes live SBE/JSON books, sequence/readiness or account/JWT
+state. HTTP/native/transport failures stay command-owned typed NotSent and
+explicitly non-auth, even for public credential-looking refusals. Only structured
+venue reasons are retained, with bounded usable HTTP429 Retry-After hints and no
+automatic retry or discovery/account startup. The standalone family enables its
+precise JSON book-command decoder. Existing market-order quote admission and
+private write/JWT/signing policies remain separate.

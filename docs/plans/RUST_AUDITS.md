@@ -69,7 +69,10 @@ not a deployed-runtime or npm-publication claim.
   ~~Backpack REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
   snapshot query, native price IDs/order/zero totals and a standalone JSON decoder;
   malformed snapshots/refusals reject without mutating subscription books.
-  **Still SDK-owned:** REST `fetchOrderBook` for Crypto.com/GRVT/Paradex/WEEX;
+  ~~Paradex REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
+  depth query, native side order and per-level quote totals; live SBE books,
+  sequence state and existing private JWT remain independent.
+  **Still SDK-owned:** REST `fetchOrderBook` for Crypto.com/GRVT/WEEX;
   Hyperliquid `scheduleCancel`.
   ~~Typed GRVT builder rejection~~ now preserves definitive code/reason/caps
   through the engine, host and worker/hosted command replies; failed checks stay
