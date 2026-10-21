@@ -22,3 +22,16 @@ are unified in. Combined/default tests mask the public API refusal.
 
 No new book semantics, budget changes, unrelated venue actions or local release
 WASM/replay matrices. Four local Cargo jobs; report the actual merge pin.
+
+Verification:
+- The standalone regression fails on original actual landing at JSON decoding
+  (unknown fetchOrderBook), before any HTTP; it passes after the precise opt-in.
+- Genuine dependency merge contains exact reviewed Backpack head cb28b85d74d.
+  All MEXC runtime source files remain identical to that dependency; only its
+  Cargo decoder admission changes. Existing AsterDEX/Polymarket features retain
+  admission; no other previously advertised family shares this omission.
+- All 391 MEXC+Binance native tests, strict MEXC all-target Clippy, format and bans
+  pass. Two independent correctness/preservation reviews are clear.
+- Exact-head full CI and actual predecessor landing remain required. The final
+  post-predecessor guard must list exactly the five owned files and no Backpack
+  or previously landed caller documentation changes.
