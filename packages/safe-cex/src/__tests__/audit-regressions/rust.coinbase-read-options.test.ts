@@ -132,7 +132,6 @@ it.each(aliases)(
       passphrase: 'primary-passphrase',
       publicDataOnly: false,
       publicFeed: { mode: 'disabled' },
-      spotOnly: name === 'coinbasespot',
     });
     expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('readCredentials');
     expect(r.request.mock.calls[0][0]).toMatchObject({

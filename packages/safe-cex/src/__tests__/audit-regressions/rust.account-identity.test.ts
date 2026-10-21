@@ -53,6 +53,7 @@ const unsupportedAliases: ExchangeName[] = [
   'binancespot',
   'binanceinverse',
   'bitrue',
+  'bitunix',
   'blofin',
   'breakoutprop',
   'hyrotrader',
@@ -187,7 +188,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
 
 it('audits every registered alias as supported identity or an explicit unsupported product', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
-  expect(new Set(inventory).size).toBe(48);
+  expect(new Set(inventory).size).toBe(49);
   expect(inventory.slice().sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
 });
