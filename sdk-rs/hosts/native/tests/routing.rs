@@ -1703,7 +1703,7 @@ async fn routed_signed_network_notices(
     tokio::time::timeout(Duration::from_secs(3), async {
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
-            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Public discovery read failed; retry scheduled");
+            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Startup read failed; retry scheduled");
             command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) } | Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }

@@ -1,4 +1,5 @@
-//! Public discovery retry policy. Venues rebuild requests to refresh signatures.
+//! Startup read retry policy, public discovery and private gates alike. Venues
+//! rebuild requests to refresh signatures.
 use crate::{Cx, LogLevel, TimerId};
 
 struct Read<K> {
@@ -74,10 +75,7 @@ impl<K: PartialEq> Backoff<K> {
             .max(minimum);
         read.timer = Some(cx.set_timer(delay));
         read.due = cx.now + delay;
-        cx.log(
-            LogLevel::Warning,
-            "Public discovery read failed; retry scheduled",
-        );
+        cx.log(LogLevel::Warning, "Startup read failed; retry scheduled");
     }
 
     pub fn succeeded<P>(&mut self, cx: &mut Cx<'_, P>, key: &K) {

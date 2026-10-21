@@ -1130,6 +1130,10 @@ impl Venue for Okx {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.account.config_pause_ms =
+                safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+        }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())
         } else {

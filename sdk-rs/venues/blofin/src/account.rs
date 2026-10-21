@@ -4,8 +4,13 @@ use safe_cex_engine::Fill;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::startup::rate_limit_pause_ms;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// BloFin counts REST limits per one-minute window, so a 418/429 without
+/// `Retry-After` waits out a whole window before the settings read retries.
+const RATE_LIMIT_PAUSE_MS: f64 = 60_000.0;
 
 #[derive(Clone, Default)]
 pub struct Source {
@@ -339,14 +344,15 @@ impl Blofin {
     /// Any outcome but 152409 ends that read's run of signature rejections.
     fn setting_unsettled(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
         self.account.signature_rejections[read as usize] = 0;
-        self.setting_retry(cx, read);
+        self.setting_retry(cx, read, 0.0);
     }
-    /// An unloaded setting retries with backoff; the startup gate never fails closed.
-    fn setting_retry(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+    /// An unloaded setting retries with backoff, never before `pause_ms`; the
+    /// startup gate never fails closed.
+    fn setting_retry(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead, pause_ms: f64) {
         if self.setting_loaded(read) {
             self.account.startup.succeeded(cx, &read);
         } else if !self.account.startup_rejected {
-            self.account.startup.failed(cx, read);
+            self.account.startup.failed_after(cx, read, pause_ms);
         }
     }
     /// A refused key can never pass the settings reads, so startup fails instead
@@ -957,7 +963,8 @@ impl Blofin {
                     if response.body.contains("152401") || response.body.contains("152406") {
                         self.account.auth_failures += 1;
                     }
-                    self.setting_retry(cx, read);
+                    let pause = rate_limit_pause_ms(&response, RATE_LIMIT_PAUSE_MS);
+                    self.setting_retry(cx, read, pause);
                     cx.log(LogLevel::Error, e);
                 }
                 return;
