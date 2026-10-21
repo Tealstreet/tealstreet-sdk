@@ -26,8 +26,8 @@ const weexTape = () => {
 };
 const ids = (response) => JSON.parse(response.body).map((row) => row.orderId ?? row.algoId);
 
-test('WEEX and ApeX Omni private replays run on the virtual tape clock', () => {
-  for (const name of ['weex', 'apexomni']) assert.equal(deterministicReplay(VENUES[name], true), true, name);
+test('WEEX, ApeX Omni, Paradex and KuCoin private replays run on the virtual tape clock', () => {
+  for (const name of ['weex', 'apexomni', 'paradex', 'kucoin']) assert.equal(deterministicReplay(VENUES[name], true), true, name);
 });
 
 test('a WEEX order snapshot is served only after its command write is acknowledged', () => {

@@ -3,6 +3,9 @@ use safe_cex_engine::{Command, Event, Method, Notice};
 use safe_cex_venue_breakoutprop::{Options, parse_session_timeout_ms};
 use support::*;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 #[test]
 fn documented_market_steps_and_margin_rates_are_not_decimal_counts() {
     let mut rig = Rig::defaults();
@@ -807,8 +810,12 @@ fn responses_already_in_flight_cannot_restart_failed_authentication() {
 }
 
 fn tick_interval(rig: &mut Rig, interval_ms: f64) {
-    rig.engine
-        .handle(rig.now, Event::TickIntervalChanged { interval_ms });
+    rig.engine.handle(
+        rig.now,
+        Event::PollScaleChanged {
+            scale: interval_ms / POLL_MS,
+        },
+    );
     rig.collect();
 }
 

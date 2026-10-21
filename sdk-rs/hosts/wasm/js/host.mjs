@@ -12,6 +12,10 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
+const socketStats = () => ({
+  open: 0, initialized: 0, lastReceived: 0, lastCloseCode: undefined, lastCloseAt: 0, closes: 0, closeStreak: 0,
+});
+
 const CHUNK_BYTES = 16 * 1024;
 const MAX_DECOMPRESSED_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
@@ -146,6 +150,8 @@ export class EngineDeadError extends Error {
     super('Exchange engine stopped unexpectedly', { cause });
     this.name = 'EngineDeadError';
     this.code = 'ENGINE_DEAD';
+    // A trap (a Rust panic) is the engine's own fault, never a venue answer.
+    this.kind = 'internal';
     if (command) {
       this.command = command.op;
       if (WRITE_COMMANDS.has(command.op)) {
@@ -166,6 +172,8 @@ export class EngineHost {
     this.transport = transport;
     this.handlers = handlers;
     this.sockets = new Map();
+    this.socketRecords = new Map();
+    this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
@@ -201,7 +209,11 @@ export class EngineHost {
         default: return fn.call(this.engine, a, b, c, d);
       }
     } catch (error) {
-      if (typeof WebAssembly === 'undefined' || !(error instanceof WebAssembly.RuntimeError)) throw error;
+      // A trap is a RuntimeError. A RangeError here unwound wasm mid-mutation (stack
+      // overflow, allocation failure in an import, result decode) with its borrow held.
+      const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
+        || error instanceof RangeError;
+      if (!fatal) throw error;
       this.deadError = new EngineDeadError(error);
       this.disposed = true;
       try { this.cleanup(); }
@@ -215,7 +227,7 @@ export class EngineHost {
     let timeoutMs;
     try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
     catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -312,6 +324,15 @@ export class EngineHost {
     return frame.buffer;
   }
 
+  /** Current private state and unflushed catalog; caller applies/forwards it. */
+  accountSnapshot() {
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.accountSnapshotFrame !== 'function') throw new Error('Engine does not support private account snapshots');
+    const frame = this.invoke(this.engine.accountSnapshotFrame, this.transport.now());
+    if (this.deadError) throw this.deadError;
+    return frame.buffer;
+  }
+
   /** The venue's capability record; fixed for the engine's lifetime, so read once. */
   capabilities() {
     if (this.capabilityRecord) return this.capabilityRecord;
@@ -319,6 +340,61 @@ export class EngineHost {
     const json = this.invoke(this.engine.capabilities);
     if (this.deadError) throw this.deadError;
     return (this.capabilityRecord = JSON.parse(json));
+  }
+
+  /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
+  health() {
+    if (this.disposed) throw new Error('engine disposed');
+    const json = this.engine.health?.();
+    return json ? JSON.parse(json) : undefined;
+  }
+
+  /** Per-channel socket state since construction (`EngineSocketStats`). */
+  socketHealth() {
+    const copy = (stats) => ({ ...stats });
+    return { public: copy(this.socketStats.public), business: copy(this.socketStats.business), private: copy(this.socketStats.private) };
+  }
+
+  /**
+   * Close the open sockets of `channel` (or all) as an abnormal close, so the
+   * venue runs its own reconnect. Returns how many sockets were closed.
+   */
+  reconnectSockets(channel) {
+    if (this.disposed) return 0;
+    let closed = 0;
+    for (const [id, record] of [...this.socketRecords]) {
+      // A connect in flight is left alone, as in TS: a second connect would leak it.
+      if ((channel !== undefined && record.channel !== channel) || !record.open || !this.sockets.has(id)) continue;
+      const socket = this.sockets.get(id);
+      this.sockets.delete(id);
+      this.socketClosed(id, 1006);
+      try { socket.close(); } catch { /* The engine still learns of the close below. */ }
+      this.run(this.invoke(this.engine.wsClose, id, 1006, this.transport.now()));
+      closed++;
+      if (this.disposed) break;
+    }
+    return closed;
+  }
+
+  socketClosed(id, code) {
+    const record = this.socketRecords.get(id);
+    if (!record) return;
+    this.socketRecords.delete(id);
+    const { stats } = record;
+    if (record.open) stats.open--;
+    if (record.initialized) stats.initialized--;
+    // Frames still in flight from a closed socket must not count as recovery.
+    record.open = false;
+    record.initialized = false;
+    stats.lastCloseCode = code;
+    stats.lastCloseAt = Date.now();
+    stats.closes++;
+    stats.closeStreak++;
+    this.socketChanged();
+  }
+
+  socketChanged() {
+    try { this.handlers.onSocketChange?.(); } catch { /* Health observers must not break socket handling. */ }
   }
 
   dispose() {
@@ -344,6 +420,7 @@ export class EngineHost {
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
+    this.socketRecords.clear();
     this.wsScratch = undefined;
     this.timers.clear();
     attempt(() => this.transport.dispose?.());
@@ -452,6 +529,7 @@ export class EngineHost {
   socketFailed(id, message) {
     const socket = this.sockets.get(id);
     this.sockets.delete(id);
+    this.socketClosed(id, 1006);
     try { socket?.close(); } catch { /* The failed transport is already detached. */ }
     if (this.disposed) return;
     this.handlers.onLog?.('error', message);
@@ -530,6 +608,18 @@ export class EngineHost {
           }, 0);
           break;
         }
+        const stats = this.socketStats[action.channel] ?? this.socketStats.public;
+        const record = { channel: action.channel ?? 'public', stats, open: false, initialized: false };
+        // Health tracking costs one write per frame; state changes notify once.
+        const received = () => {
+          stats.lastReceived = Date.now();
+          if (record.initialized || !record.open) return;
+          record.initialized = true;
+          stats.initialized++;
+          stats.closeStreak = 0;
+          this.socketChanged();
+        };
+        this.socketRecords.set(id, record);
         let socket;
         let connecting = true;
         try {
@@ -538,9 +628,18 @@ export class EngineHost {
             channel: action.channel,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
-            onOpen: () => { if (!this.disposed && (connecting || (socket && this.sockets.get(id) === socket))) this.run(this.invoke(engine.wsOpen, id, transport.now())); },
+            onOpen: () => {
+              if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
+              if (this.socketRecords.get(id) === record && !record.open) {
+                record.open = true;
+                stats.open++;
+                this.socketChanged();
+              }
+              this.run(this.invoke(engine.wsOpen, id, transport.now()));
+            },
             onMessage: (text) => {
               if (this.disposed || (!connecting && (!socket || this.sockets.get(id) !== socket))) return;
+              received();
               if (!wsMessageBytes) {
                 this.run(this.invoke(wsMessage, id, text, transport.now()));
                 return;
@@ -568,10 +667,12 @@ export class EngineHost {
             },
             onBinary: (data) => {
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
+              received();
               if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
               else {
                 const active = this.sockets.get(id);
                 this.sockets.delete(id);
+                this.socketClosed(id, 1003);
                 active.close();
                 this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
               }
@@ -579,6 +680,7 @@ export class EngineHost {
             onClose: (code) => {
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               this.sockets.delete(id);
+              this.socketClosed(id, code ?? 1006);
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
           });
@@ -604,6 +706,7 @@ export class EngineHost {
         this.clearSocketFailure(action.socket);
         this.sockets.get(action.socket)?.close();
         this.sockets.delete(action.socket);
+        this.socketClosed(action.socket, 1000);
         break;
       case 'http': {
         void this.request(action);
@@ -633,6 +736,12 @@ export class EngineHost {
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;
+      case 'event': {
+        const { level, code, message, fields = {} } = action;
+        if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
+        else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
+        break;
+      }
       case 'commandError': {
         // Only an explicitly attributed native error participates in command
         // reporting. Background warnings/errors retain their ordinary path.

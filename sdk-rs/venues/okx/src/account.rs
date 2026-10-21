@@ -128,6 +128,8 @@ pub struct AccountState {
     retry: Option<TimerId>,
     /// Backs off the config read that gates startup; transient failures never end it.
     startup: safe_cex_engine::startup::Backoff<()>,
+    /// Pause the latest 418/429 config answer asked for; a transport loss has none.
+    pub(crate) config_pause_ms: f64,
     /// Consecutive 50113 answers to the config read; two in a row reject the key.
     signature_rejections: u8,
     pub startup_rejected: bool,
@@ -830,7 +832,8 @@ impl Okx {
                     cx.log(LogLevel::Warning, error);
                 } else {
                     cx.log(LogLevel::Error, error);
-                    self.account.startup.failed(cx, ());
+                    let pause = std::mem::take(&mut self.account.config_pause_ms);
+                    self.account.startup.failed_after(cx, (), pause);
                 }
                 return;
             }
@@ -1795,9 +1798,10 @@ impl Okx {
                 None,
             )),
         }
-        let algo = !matches!(
+        // Same allow-list as valid_order: mmp/elp and other regular types carry an ordId.
+        let algo = matches!(
             o.ord_type,
-            "market" | "limit" | "post_only" | "fok" | "ioc" | "optimal_limit_ioc"
+            "trigger" | "conditional" | "oco" | "move_order_stop"
         );
         legs.into_iter()
             .map(|(kind, suffix, price, trigger_type)| {

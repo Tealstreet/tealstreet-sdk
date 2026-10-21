@@ -891,3 +891,24 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert_eq!(h.fired, 0, "no supervision timers fire");
 }
+
+#[test]
+fn a_market_without_a_positive_tick_is_skipped_as_malformed() {
+    for tick in [r#""0""#, r#""-0.01""#, r#""""#] {
+        let mut h = H::new();
+        let body = format!(
+            r#"[{{"conditionId":"0x9","slug":"zero-tick","clobTokenIds":"[\"9\"]","outcomes":"[\"Yes\"]","orderPriceMinTickSize":{tick}}},{}]"#,
+            &MARKETS[1..MARKETS.len() - 1]
+        );
+        h.response("/markets", 200, &body);
+        assert!(h.e.store().market("election-Yes").is_some());
+        assert!(h.e.store().market("zero-tick-Yes").is_none(), "{tick}");
+        assert!(
+            h.logs
+                .iter()
+                .any(|l| l.contains("malformed Polymarket market row") && l.contains("zero-tick")),
+            "{:?}",
+            h.logs
+        );
+    }
+}

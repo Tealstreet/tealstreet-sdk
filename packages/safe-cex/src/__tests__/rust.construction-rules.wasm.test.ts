@@ -59,7 +59,8 @@ it('Orderly private accounts need an application id', () =>
 it('locally signing venues refuse private accounts without a local signing key', () =>
   startRejects(
     'binance',
-    // A keyless remoteSigner account is routed to the TS venue first; a payload signer is not.
+    // TS refuses keyless remoteSigner and non-Paradex payloadSigner accounts before the engine;
+    // the engine's own local-signing rule is pinned in registry/tests/construction.rs.
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust engine private accounts require a local API key and secret; remote signing is unsupported',
+    /does not support payloadSigner/,
   ));
