@@ -87,6 +87,8 @@ pub struct MexcFutures {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
+    /// Regular, plan and stop order reads share the orders scope.
+    orders_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::Trading,
     public: Connection,
     public_supervisor: Supervisor,
@@ -119,6 +121,7 @@ impl MexcFutures {
             options,
             credentials,
             account: account::Account::new(),
+            orders_auth: Default::default(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             public_supervisor: Supervisor::new(Config {
@@ -565,6 +568,15 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
