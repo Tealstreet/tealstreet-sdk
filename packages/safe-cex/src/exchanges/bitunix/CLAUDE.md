@@ -745,3 +745,13 @@ degradation/recovery. HTTP 418/429 honor `Retry-After` (60-second default); nati
 `10005`/`10006` wait 60 seconds even with missing/null data, while `10001` remains a network
 failure. Malformed public previews are not copied into diagnostics. Private,
 financial history and trading policies remain separate.
+
+Rust socket supervision retains one retry state per private/futures/public-shard
+feed. Refusals use shared capped exponential jitter; open alone never resets the
+failure streak. Connection attempts expire after 10 seconds; opened public feeds
+expire after 45 seconds without traffic. Private feeds retain legacy silent-session
+compatibility until their first real pong, then use the same 45-second traffic
+deadline. Pings run every 15 seconds without synthetic traffic. Retired socket
+epochs and queue/login timers cannot mutate a replacement. Futures retirement
+immediately invalidates depth and publishes consumer clearing, retaining interests
+for one replay of the current subscriptions at the replacement open.
