@@ -52,3 +52,11 @@ and official Python/Rust SDK L1 action/signing records. Native trigger count10 p
 UTC day and caller-owned renewal stay venue/caller policy; no automatic lifecycle.
 No live actions/captures, NX edits, budgets/allowance widening, release automation
 or local release/full replay/timing builds. Four local Cargo jobs.
+
+Plan audit refinement before implementation:
+- HTTP408 is Unknown even with a well-formed native refusal, as are5xx; a
+  structured err/string below500 otherwise proves Rejected. Pin this precedence.
+- Reuse nonce sharing only within its existing native-process/WASM-module
+  boundary; no new cross-worker/process coordinator is implied.
+- Handle schedule replies before generic trading reconciliation so order reads
+  cannot imply arming or mutate settings; malformed/unknown ACKs fail closed.
