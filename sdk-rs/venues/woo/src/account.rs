@@ -535,10 +535,18 @@ impl Woo {
         };
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.connection.socket = Some(cx.connect_channel(
-            format!("{host}{}",self.options.application_id.as_deref().unwrap_or("undefined")),
-            SocketChannel::Private,
-        ));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{host}{}",
+                    self.options
+                        .application_id
+                        .as_deref()
+                        .unwrap_or("undefined")
+                ))
+                .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::replace(&mut self.account.started, true) {

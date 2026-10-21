@@ -189,6 +189,68 @@ pub struct SocketContext {
     pub recover: bool,
 }
 
+/// Everything a host needs to open one socket; `Cx::connect` takes it or a bare URL.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SocketSpec {
+    pub url: String,
+    /// Logical feed role lets hosts route identical venue URLs independently.
+    pub channel: Option<SocketChannel>,
+    pub context: Option<SocketContext>,
+    pub headers: Vec<(&'static str, String)>,
+    /// Binary protocols still receive text control responses through on_message.
+    pub binary: bool,
+}
+
+impl SocketSpec {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn channel(mut self, channel: SocketChannel) -> Self {
+        self.channel = Some(channel);
+        self
+    }
+
+    pub fn feed(mut self, feed: impl Into<String>, recover: bool) -> Self {
+        self.context = Some(SocketContext {
+            feed: feed.into(),
+            recover,
+        });
+        self
+    }
+
+    pub fn headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn binary(mut self) -> Self {
+        self.binary = true;
+        self
+    }
+}
+
+impl From<&str> for SocketSpec {
+    fn from(url: &str) -> Self {
+        Self::new(url)
+    }
+}
+
+impl From<String> for SocketSpec {
+    fn from(url: String) -> Self {
+        Self::new(url)
+    }
+}
+
+impl From<&String> for SocketSpec {
+    fn from(url: &String) -> Self {
+        Self::new(url.as_str())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     WsConnect {
@@ -196,13 +258,7 @@ pub enum Action {
         binary: bool,
         socket: SocketId,
         url: String,
-        channel: Option<SocketChannel>,
-        context: Option<SocketContext>,
-    },
-    /// Upgrade authentication; hosts must fail closed if headers are unsupported.
-    WsConnectWithHeaders {
-        socket: SocketId,
-        url: String,
+        /// Upgrade authentication; hosts must fail closed if headers are unsupported.
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
         context: Option<SocketContext>,
@@ -623,57 +679,14 @@ impl<P> Cx<'_, P> {
         self.io.public_feed_policy
     }
 
-    pub fn connect(&mut self, url: impl Into<String>) -> SocketId {
-        self.connect_with_channel(url, None)
-    }
-
-    /// Logical feed role lets hosts route identical venue URLs independently.
-    pub fn connect_channel(&mut self, url: impl Into<String>, channel: SocketChannel) -> SocketId {
-        self.connect_with_channel(url, Some(channel))
-    }
-
-    fn connect_with_channel(
-        &mut self,
-        url: impl Into<String>,
-        channel: Option<SocketChannel>,
-    ) -> SocketId {
-        self.connect_context(url, channel, None, false)
-    }
-
-    pub fn connect_feed(
-        &mut self,
-        url: impl Into<String>,
-        channel: SocketChannel,
-        feed: impl Into<String>,
-        recover: bool,
-    ) -> SocketId {
-        self.connect_context(
+    pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let SocketSpec {
             url,
-            Some(channel),
-            Some(SocketContext {
-                feed: feed.into(),
-                recover,
-            }),
-            false,
-        )
-    }
-
-    /// Binary protocols still receive text control responses through on_message.
-    pub fn connect_binary_channel(
-        &mut self,
-        url: impl Into<String>,
-        channel: SocketChannel,
-    ) -> SocketId {
-        self.connect_context(url, Some(channel), None, true)
-    }
-
-    fn connect_context(
-        &mut self,
-        url: impl Into<String>,
-        channel: Option<SocketChannel>,
-        context: Option<SocketContext>,
-        binary: bool,
-    ) -> SocketId {
+            channel,
+            context,
+            headers,
+            binary,
+        } = spec.into();
         if channel == Some(SocketChannel::Public)
             && self.io.public_feed_policy != PublicFeedPolicy::Direct
         {
@@ -684,49 +697,10 @@ impl<P> Cx<'_, P> {
         self.io.actions.push(Action::WsConnect {
             binary,
             socket,
-            url: url.into(),
-            channel,
-            context,
-        });
-        socket
-    }
-
-    pub fn connect_with_headers(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-    ) -> SocketId {
-        self.connect_headers_channel(url, headers, None)
-    }
-
-    pub fn connect_with_headers_channel(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-        channel: SocketChannel,
-    ) -> SocketId {
-        self.connect_headers_channel(url, headers, Some(channel))
-    }
-
-    fn connect_headers_channel(
-        &mut self,
-        url: impl Into<String>,
-        headers: Vec<(&'static str, String)>,
-        channel: Option<SocketChannel>,
-    ) -> SocketId {
-        if channel == Some(SocketChannel::Public)
-            && self.io.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            // Socket zero is reserved for suppressed feeds; it never reaches a host.
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
-        self.io.actions.push(Action::WsConnectWithHeaders {
-            socket,
-            url: url.into(),
+            url,
             headers,
             channel,
-            context: None,
+            context,
         });
         socket
     }

@@ -636,12 +636,11 @@ impl BybitLinear {
             Channel::Public => self.paths.public_ws.as_str(),
             Channel::Private => self.paths.private_ws.as_str(),
         };
-        let socket = cx.connect_channel(
-            url,
-            match channel {
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new(url).channel(match channel {
                 Channel::Public => safe_cex_engine::SocketChannel::Public,
                 Channel::Private => safe_cex_engine::SocketChannel::Private,
-            },
+            }),
         );
         let supervise =
             channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;

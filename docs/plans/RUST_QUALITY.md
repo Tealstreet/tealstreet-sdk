@@ -160,7 +160,8 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`), one `SocketSpec`.
+(done: `engine::test_support`), ~~one `SocketSpec`~~ (done: `Cx::connect` takes
+a `SocketSpec`; one `Action::WsConnect` carries headers).
 ~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
 `windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,

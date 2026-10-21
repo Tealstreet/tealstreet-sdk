@@ -317,7 +317,9 @@ impl Grvt {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.public_url()).channel(SocketChannel::Public),
+        ));
         self.public.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -428,7 +430,13 @@ impl Grvt {
             Interval::W1 => "candles-1w",
             _ => return,
         };
-        c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(SocketChannel::Public)
+                    .feed(feed, false),
+            ),
+        );
         c.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
