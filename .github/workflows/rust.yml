@@ -145,6 +145,53 @@ jobs:
         run: yarn rust:build-wasm --families
       - name: Load every family and check venue isolation and size
         run: yarn rust:test-families
+      - name: Archive same-run browser family assets
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+        run: corepack yarn -s rust:measure-browser --archive families --out sdk-rs/harness/out/browser-families
+      - name: Retain browser family inputs
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-wasm-families
+          path: sdk-rs/harness/out/browser-families/
+          retention-days: 14
+          if-no-files-found: error
+
+  # Measurements never lengthen PR CI and carry no timing threshold. Every
+  # sample uses fresh Chrome/profile + DedicatedWorker, with same-run web bytes.
+  browser:
+    name: Rust / browser cold start
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+    needs: [families, gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: browser-wasm-*
+          path: sdk-rs/harness/out/browser-inputs
+          merge-multiple: true
+      - name: Measure actual Chrome worker module readiness
+        run: |
+          corepack yarn -s rust:measure-browser --inputs sdk-rs/harness/out/browser-inputs --out sdk-rs/harness/out/browser-cold-start
+          cat sdk-rs/harness/out/browser-cold-start/table.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain browser observations and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-cold-start
+          path: sdk-rs/harness/out/browser-cold-start/
+          retention-days: 14
+          if-no-files-found: error
 
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
@@ -300,6 +347,18 @@ jobs:
       - name: Check the shipped combined wasm size budget
         if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
         run: corepack yarn -s rust:wasm-budget --combined
+      # Capture web bytes BEFORE the standalone family build overwrites pkg/web.
+      - name: Archive same-run combined browser diagnostic
+        if: matrix.venue == 'binance' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
+        run: corepack yarn -s rust:measure-browser --archive combined --out sdk-rs/harness/out/browser-combined
+      - name: Retain combined browser inputs
+        if: matrix.venue == 'binance' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-wasm-combined
+          path: sdk-rs/harness/out/browser-combined/
+          retention-days: 14
+          if-no-files-found: error
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
