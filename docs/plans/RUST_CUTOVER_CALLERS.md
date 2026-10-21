@@ -86,7 +86,7 @@ the merged contract PRs #1375, #1377, #1383, #1386, #1394, #1400, #1411, #1424,
 #1479, #1475, and the B9 SDK PRs #1482, #1483, #1484), plus #1388 (engine log
 events, `getHealth`), #1450 (B5), #1510 and #1531 (payload-signer routing, narrowed to Bybit/Binance).
 The [2026-10-21 refresh](#contract-refresh-2026-10-21) checks SDK landing
-`5b0c16a952e`, tealstreet-next local `origin/master` `fdd2389a825`
+`c0d37f95d93`, tealstreet-next local `origin/master` `fdd2389a825`
 (`git grep`/`git show` only), and mobile `master` `8377a4f3f1e` through the
 GitHub API. Existing line references retain the original NX audit revision;
 new history-forwarding references below use `fdd2389a825`. Open PR proposals
@@ -103,7 +103,7 @@ the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
 
 ### Contract refresh, 2026-10-21
 
-Checked landing `5b0c16a952e`, including the merges after the last refresh
+Checked landing `c0d37f95d93`, including the merges after the last refresh
 (#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
@@ -119,17 +119,18 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1551 / `c2a36b7ca1` | Binance native stop-limit orders refuse `updateOrder` as `unsupported`/`notSent`, before cancellation, instead of becoming stop-market orders with the wrong trigger. Regular stop-market amend remains supported. Surface the refusal; no new call shape. |
 | #1513 / `084a326abf` | Cancel/amend of a just-acknowledged placement may wait for its order-store row on opted-in venues, up to 10 s before dispatch. Chaser STOP already waits for placement IDs; no caller edit. A timeout still requires reconciliation before retry. |
 | #1527 / `8c1e779021` | A book-cadence frame carrying fills also carries pending store sections; worker/main consumers apply orders before emitting those fills. No reader or FILLS revision change. Venue-delivered execution-before-order ordering remains possible. |
-| #1538 / `c18c30e45e` | First venue batch uses coded log events; duplicate auth notices in one dispatch count once. Native-session/DO validators must accept the event notice contract (#1388). No new `exchange.on` code payload: B9's classified fields remain the host integration. |
+| #1538 / `c18c30e45e` | First venue batch uses coded log events; duplicate auth notices in one dispatch count once. Native sessions use `event` notices; DO logs carry `code`/`fields` (#1388). No new `exchange.on` code payload: B9's classified fields remain the host integration. |
 | #1547 / `e8ad6facc1` | Hyperliquid zero TP/SL prices omit that bracket leg; unified/portfolio spot holdings populate `balance.coins` for the margin panel. `currencies` remains unset to preserve sizing. No caller edit. |
 | #1555 / `92a1608191` | Bybit OHLCV with `limit` ignores `from` and returns the newest bars ending at `to`, as TS. Chart/history callers keep the same arguments. |
 | #1546 / `2bd1ef7ae8` and #1556 / `5b0c16a952` | Mobile options/costing and existing production issues are documented in [RUST_MOBILE_B3.md](RUST_MOBILE_B3.md). B3 and the app fixes remain owner items. |
+| #1501 / `550e534e08` | Spot-enabled `hyperliquid` accounts now run on Rust; the perp engine merges spot pairs, holdings and orders. B8's product fallback is superseded. The keyless hosted/payload-signer TS routing remains in place. |
+| #1506 / `c0d37f95d9` | Optional `UNDERLYING_TOKENS` frame section 20 carries merged Hyperliquid spot token names; both consumers reconstruct `Market.info.hlTokenName`/`hlTokenFullName`. The Margin panel's underlying-token risk disclosure works without an app edit. Ship matching engine/reader/applier. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548 replay-clock fixes do not change a
 downstream call shape. They add no cutover edit here. **Pending:** #1430
-adds native account reads and optional fill financials/FILLS revision 2; #1501
-and #1506 change Hyperliquid combined-product/metadata coverage; #1522 changes
-leverage reads. Re-audit those when merged rather than treating their proposed
+adds native account reads and optional fill financials/FILLS revision 2;
+#1522 changes leverage reads. Re-audit those when merged rather than treating their proposed
 contracts as available.
 
 ### Summary: cutover blockers (no new equivalent)
