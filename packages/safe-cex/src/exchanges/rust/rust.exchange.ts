@@ -628,6 +628,12 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
+    // Only Paradex consumes a payload signer natively; elsewhere it would be ignored and
+    // the account would start unsigned or silently public-only, even on venues exempt below.
+    if (this.options.payloadSigner && this.name !== 'paradex' && this.options.publicDataOnly !== true) {
+      const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (
       ![
         'hyperliquid',
