@@ -187,6 +187,9 @@ The Bitunix explicit-route follow-up checks #1650 at `b2059cce998`; existing NX
 flag forwarding was checked read-only at `65e086a3c90`.
 The Bitunix order-repair batch checks #1655 (`ba3d5bc69ee`) and #1658
 (`67e81cfc13b`), including the exact 44 terminal-retention replay keys.
+The packaging/account-recovery batch checks #1661 (`391dbe9af87`) and Bitunix
+#1662 (`501fb664edb`); artifact mapping is a source/build inventory, not a
+deployed-binary inspection.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -280,6 +283,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1650 / `b2059cce9` | With a routing-capable transport, explicit Bitunix `tealstreetWsRoute: true` selects each channel's declared fallback proxy from the first connection and on reconnect. False/unset keeps the existing two-attempt direct-first policy. A direct-only provider stays direct and warns; callers must choose a routing-capable provider to force proxy use. Existing options and native routing-plan schema stay unchanged. |
 | #1655 / `ba3d5bc69` | Bitunix regular/TP-SL reads keep independent serials and ten-second lost-read deadlines; ordinary notifications coalesce without postponing the first one-second repair. Earlier reconciliation can retire venue-terminal orders sooner than TS. The private replay declaration adds exactly 44 tape-pinned terminal-removal/index-shift paths; other checks and all prior declarations stay intact. |
 | #1658 / `67e81cfc1` | Ordinary Bitunix order snapshots admit healthy REST peers while preserving newer WS native families/terminal absence and bounded malformed-row scope. A separate write revision fences stale publication across placement/cancel/ACK/cleanup, including partial cancellation failure. Initial halves remain atomic, command-owned prerequisites stay strict, and no trading write is retried. |
+| #1661 / `391dbe9af` | WASM-only compiler profiles shrink the combined host and selected family builds without changing loader APIs or native profiles. Delivery still depends on the consumer: 28 browser families, combined Node for hosting/MCP, combined web embedded by the compiled CLI, or a deployment-injected Workers/React Native module. See the refreshed packaging inventory below. |
+| #1662 / `501fb664e` | Current Bitunix signed account/settings GETs now supply selected-credential scoped auth evidence. Strict native refusal is distinct from ambiguous failures; grouped order endpoints/settings symbols cannot heal each other. Background reads use bounded backoff and a shared rate pause; a blocked command prerequisite fails once `notSent`, with no write replay. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -718,7 +723,8 @@ transport-wide/write retry gate.
 `credential: 'primary' | 'secondary'`, scope `account | balance | orders |
 positions | settings`, and outcome `accepted | rejected`. It carries no command
 ID or credential material. Native classifiers currently provide this evidence
-for BingX, MEXC and WEEX; this does not establish equivalent coverage for every
+for BingX, MEXC, WEEX and, since #1662, Bitunix account/settings GETs; this
+does not establish equivalent coverage for every
 venue whose command errors are classified. Transport failures, public reads
 and text matching are not substitutes for this typed evidence.
 
@@ -1063,15 +1069,33 @@ those TS paths deletable.
 
 ## WASM packaging for web consumers
 
-Since #1393 the browser/Workers default loader imports only the account venue's
-family engine (`@tealstreet/safe-cex-wasm/engine` → `pkg/web/<family>`), with
-one literal import per family. **tealstreet-next web builds must run
+The browser default loader imports only the account venue's family engine
+(`@tealstreet/safe-cex-wasm/engine` → `pkg/web/<family>`), with one literal
+import per family. **tealstreet-next web builds must run
 `yarn rust:build-wasm --families` before bundling and ship every family engine
-the bundler emits**; a bundle that includes safe-cex fails to resolve without
-all 27 family packages. Node, the CLI, MCP and React Native still load the
-combined build from `yarn rust:build-wasm`, so builds serving both need both.
-`loadWebEngine(venue)` and `setWasmEngineLoader((venue) => …)` now receive the
-Rust venue. Measurements and decision: [RUST_WASM_FAMILIES.md](RUST_WASM_FAMILIES.md).
+the bundler emits**; all 28 family modules must resolve at build time.
+`loadWebEngine(venue)` and `setWasmEngineLoader((venue) => …)` receive the Rust
+venue. Family decisions: [RUST_WASM_FAMILIES.md](RUST_WASM_FAMILIES.md).
+
+The #1661 source/build inventory distinguishes these shipped artifacts:
+
+| Consumer | Artifact / delivery requirement |
+| --- | --- |
+| Browser SDK and browser worker | The venue's web family module via the browser `./engine` export. |
+| Node/Bun SDK hosting | Combined `pkg/node` bindings and WASM via the Node `./engine` export. |
+| MCP bundle | Combined Node module copied beside the bundle in `dist/wasm/rust` by `packages/exchange-mcp/tsup.config.ts`. |
+| Compiled Bun CLI | Combined web bindings and embedded WASM bytes, registered by `apps/cli/src/rust-engine.ts`; this is not the filesystem-based Node loader. |
+| Cloudflare Workers/Durable Objects | Deployment-supplied `loadEngine(venue)` passed to `createEngineObject`; it may select a family. The host does not own a separate Rust build. |
+| React Native | Host-injected module or compatible native bridge registered before account construction; no separately built Rust artifact is selected automatically. |
+
+The combined build comes from `yarn rust:build-wasm`; deployments serving both
+combined and family consumers need both outputs. Explicit `./web` and `./node`
+exports expose the combined binding layouts. #1661 changes WASM compiler
+profiles only: the combined build uses a host-only size override, and WOO keeps
+its original isolated-family arguments. Loader APIs, native release profiles
+and fixed budgets stay unchanged. Poseidon is a separate Go WASM artifact,
+outside these Rust compiler settings. This inventory does not certify which
+binaries NX has deployed. Details: [RUST_WASM_ARTIFACT_SIZE.md](RUST_WASM_ARTIFACT_SIZE.md).
 
 ## Runtime callers and their replacements
 
@@ -2307,9 +2331,51 @@ Formed secondary credentials require a nonempty key and secret before startup
 I/O, including public-only construction. Account balance/position/order/TP-SL
 reads and symbol settings tag the credential slot actually selected and their
 existing scope. History, public discovery and trading requests do not create
-account-auth evidence. Request tagging is not native success/rejection
-classification: #1640 does not add Bitunix `account_auth_outcome` handling or
-justify clearing a credential badge from unrelated successful traffic.
+account-auth evidence. #1640 added tagging only; #1662 now supplies the scoped
+native success/refusal classifier described below. Unrelated successful traffic
+still cannot clear a credential badge.
+
+### Bitunix scoped account evidence and recovery (#1662)
+
+Current signed balance, positions, regular/TP-SL orders and per-symbol settings
+GETs now emit the existing typed account-auth outcome for the credential slot
+actually used. HTTP 200 with strict native code `403`, `10003` or `10004`
+proves Rejected. Bare HTTP 401/403, signature/nonce/timestamp codes
+`10007`/`10010`/`10011`, proxy HTML, malformed responses and transport failures
+do not prove invalid credentials. Acceptance requires native success and the
+required valid balance/settings object or complete list, including an empty
+list. Skipped financial rows can coexist with Accepted; this does not establish
+snapshot completeness or initial readiness.
+
+Regular and TP-SL endpoints share the orders scope while retaining each
+endpoint's refusal; one sibling cannot heal the other. Settings likewise retain
+refusals per symbol, so one successful symbol cannot clear another's rejection.
+Superseded serial/write/generation callbacks cannot heal current auth evidence
+or reset/extend its failure backoff. The SDK already consumes this typed channel for isolated
+credential/scope streaks and polling policy; custom hosts must use it rather
+than infer credential state from diagnostic text.
+
+Sanitized `request.failed` events report the failure, with Error severity for
+strict credential refusal and Warn otherwise, and available `kind`,
+`venueCode` and `retryAfterMs` fields. These account-read diagnostics do not emit
+legacy `auth.rejected`, which would invent primary/account evidence for a
+secondary or narrower scope. The existing private-WS login diagnostic is a
+separate path; #1662 does not reclassify login, history or trading responses.
+
+Each account axis/settings symbol uses the existing jittered backoff with
+nominal one-second through thirty-second delays. HTTP 418/429 or native
+`10005`/`10006` imposes a shared account/settings-read pause of at least sixty
+seconds, honoring a longer numeric Retry-After up to one hour. New interests,
+polling, debounce, lost-read repair and preflight cannot bypass that pause;
+a sibling success cannot clear it. Matching validated success resets only its
+read source. Financial row admission and snapshot fences remain in force.
+
+A prerequisite blocked by recovery fails its command once with `notSent` while
+ordinary background repair remains scheduled. Repair cannot resurrect the
+retired command or replay a POST. Callers should retain normal typed failure
+handling and let SDK/native read recovery run; no new option, constructor field
+or caller-issued resync is required. This read policy does not add a trading
+retry.
 
 ### Bitunix private snapshot progress and retention (#1641/#1643/#1645)
 
