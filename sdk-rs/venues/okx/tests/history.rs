@@ -33,6 +33,30 @@ fn result(e: &mut Engine<Okx>) -> String {
         })
         .expect("completed query")
 }
+fn owned_incomplete(out: &[Action]) {
+    let (index, event) = out
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("owned semantic history warning");
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(991.0))]
+    );
+    let done = out
+        .iter()
+        .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 991, .. })))
+        .unwrap();
+    assert!(index < done);
+}
 fn url(request: &Action) -> &str {
     let Action::Http(request) = request else {
         panic!("expected HTTP")
@@ -378,6 +402,7 @@ fn unknown_market_does_not_issue_a_history_request() {
 #[test]
 fn repeating_cursor_stops_with_warning_without_refetching_forever() {
     let mut e = trading_engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
     let a = query(&mut e, orders(None));
     let page = (100..200)
         .map(|id| order(&id.to_string()))
@@ -393,6 +418,54 @@ fn repeating_cursor_stops_with_warning_without_refetching_forever() {
     );
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if serde_json::from_str::<Vec<HistoricalOrder>>(s).unwrap().len() == 100)));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains("cursor did not advance"))));
+    owned_incomplete(&out);
+}
+
+#[test]
+fn history_page_cap_keeps_rows_and_owns_its_warning_before_done() {
+    let mut e = trading_engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
+    let mut request = query(&mut e, orders(None));
+    for page in 0..50 {
+        let rows = (0..100)
+            .map(|i| order(&(10_000 - page * 100 - i).to_string()))
+            .collect::<Vec<_>>()
+            .join(",");
+        reply(
+            &mut e,
+            &request,
+            &envelope(&rows),
+            page as f64 * 100.0 + 10.0,
+        );
+        if page < 49 {
+            request = next_page(&mut e);
+        }
+    }
+    let out = actions(&mut e);
+    owned_incomplete(&out);
+    let result = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: 991,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .unwrap();
+    let rows: Vec<HistoricalOrder> = serde_json::from_str(result).unwrap();
+    assert_eq!(rows.len(), 5000);
+    assert!(
+        rows.iter()
+            .all(|row| row.amount == 0.03 && row.filled == 0.015)
+    );
+    assert!(out.iter().any(
+        |a| matches!(a, Action::Notice(Notice::Event(e)) if e.message.contains("50-page cap"))
+    ));
+    assert!(!out.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::SetTimer { .. } | Action::Notice(Notice::CommandFailed { .. })
+    )));
 }
 
 #[test]

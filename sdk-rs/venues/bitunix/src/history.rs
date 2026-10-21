@@ -33,7 +33,6 @@ pub struct Request {
     reached_start: bool,
     invalid: bool,
     seen: HashSet<String>,
-    checkpoint: [usize; 3],
     fills: Vec<Execution>,
     orders: Vec<HistoricalOrder>,
     income: Vec<Income>,
@@ -249,7 +248,6 @@ impl BitunixFutures {
             reached_start: false,
             invalid: false,
             seen: HashSet::new(),
-            checkpoint: [0; 3],
             fills: vec![],
             orders: vec![],
             income: vec![],
@@ -280,7 +278,6 @@ impl BitunixFutures {
         if read.kind == Kind::Income && read.page > 0 {
             params = params.num("skip", f64::from(read.page * 100));
         }
-        read.checkpoint = [read.fills.len(), read.orders.len(), read.income.len()];
         read.count = 0;
         read.added = 0;
         read.oldest = f64::INFINITY;
@@ -530,14 +527,14 @@ impl BitunixFutures {
             return;
         }
         let cap = if read.kind == Kind::Orders { 50 } else { 100 };
-        let next = read.kind != Kind::Fills
-            && read.count >= 100
-            && read.added > 0
-            && !read.reached_start
-            && read.page + 1 < cap
-            && (read.kind != Kind::Orders
-                || read.oldest.is_finite() && read.from.is_none_or(|from| read.oldest > from));
-        if next {
+        let more = read.kind != Kind::Fills && read.count >= 100 && !read.reached_start;
+        let stalled = more
+            && (read.added == 0
+                || read.kind == Kind::Orders
+                    && (!read.oldest.is_finite()
+                        || read.cursor.is_some_and(|cursor| read.oldest >= cursor)
+                        || read.from.is_some_and(|from| read.oldest <= from)));
+        if more && !stalled && read.page + 1 < cap {
             read.page += 1;
             if read.kind == Kind::Orders {
                 read.cursor = Some(read.oldest);
@@ -545,21 +542,26 @@ impl BitunixFutures {
             self.history_page(cx, read);
             return;
         }
-        if read.page + 1 >= cap {
-            cx.notice(
+        if more && (stalled || read.page + 1 >= cap) {
+            cx.event(
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
-                "Bitunix history reached the page cap; older rows were not fetched",
+                if stalled {
+                    "Bitunix history paging did not advance; older rows may not have been fetched"
+                } else {
+                    "Bitunix history reached the page cap; older rows were not fetched"
+                },
+                vec![(
+                    "command",
+                    safe_cex_engine::Value::Num(f64::from(read.command)),
+                )],
             );
         }
         self.history_done(cx, read);
     }
-    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, mut read: Request, error: &str) {
-        read.fills.truncate(read.checkpoint[0]);
-        read.income.truncate(read.checkpoint[2]);
-        read.orders.clear();
+    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, read: Request, error: &str) {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-        self.history_done(cx, read);
+        cx.fail(read.command, error);
     }
     fn history_done(&self, cx: &mut Cx<'_, Pending>, mut read: Request) {
         let result = match read.kind {

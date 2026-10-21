@@ -833,6 +833,10 @@ page or an exhausted pagination bound. Query JSON shapes match the engine's
 Binance history surface, including seconds for execution timestamps and
 milliseconds for order/income/public-trade timestamps.
 
+Rust closed-position history retains its rows at the 100-page cap and emits
+`history.incomplete` with the actual request command before completion, allowing
+the host to mark the owning result incomplete and notify only that caller.
+
 Terminal order rows remain until reconciliation, and cancel-all selects only open
 orders in both TS and Rust. Rust additionally keeps terminal socket states
 monotonic and rejects amending or merging terminal protection, preventing late

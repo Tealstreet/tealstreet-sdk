@@ -77,8 +77,10 @@ pub struct Amounts {
 }
 
 struct WsPosition {
-    at: f64,
+    at: Option<f64>,
     update: Option<f64>,
+    /// Observation only: never replaces or renews valid financial timestamps.
+    rejected_at: Option<f64>,
 }
 
 #[derive(Default)]
@@ -108,6 +110,8 @@ pub struct Account {
     inverse_assets: Vec<InverseAsset>,
     inverse_unpriced_warned: bool,
     full_positions_at: Option<f64>,
+    /// After partial traffic, a prior clean snapshot only fences older reads.
+    full_positions_fence_only: bool,
     full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
     terminal: HashMap<String, f64>,
@@ -670,7 +674,7 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
-                skipped,
+                mut skipped,
                 mut coins,
                 started,
             } => {
@@ -695,8 +699,16 @@ impl BitgetFutures {
                 }
                 self.account.positions_in_flight = false;
                 let mut rows = self.merge_positions(cx, rows, started);
+                self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
                 for p in &rows {
-                    self.position_setting(cx, p);
+                    if !self
+                        .account
+                        .ws_positions
+                        .get(&p.id)
+                        .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                    {
+                        self.position_setting(cx, p);
+                    }
                 }
                 for current in cx.store.positions() {
                     if !rows.iter().any(|p| p.id == current.id)
@@ -806,27 +818,24 @@ impl BitgetFutures {
                 } else {
                     self.account.orders_in_flight = false;
                     for (id, state) in snapshot.trailing {
-                        let newer = self.order_revision(&id) > snapshot.stream_revision
-                            || self
-                                .account
-                                .opened
-                                .get(&id)
-                                .is_some_and(|until| *until >= snapshot.started + 5_000.0);
-                        let terminal = self.account.terminal.contains_key(&id)
-                            || cx.store.order(&id).is_some_and(|o| {
-                                matches!(
-                                    o.status,
-                                    OrderStatus::Canceled
-                                        | OrderStatus::Closed
-                                        | OrderStatus::Canceling
-                                )
-                            });
-                        if !newer && !terminal {
+                        if self.order_metadata_current(
+                            cx,
+                            &id,
+                            snapshot.started,
+                            snapshot.stream_revision,
+                        ) {
                             self.account.trailing.insert(id, state);
                         }
                     }
                     for (id, plan) in snapshot.plans {
-                        self.account.plans.insert(id, plan);
+                        if self.order_metadata_current(
+                            cx,
+                            &id,
+                            snapshot.started,
+                            snapshot.stream_revision,
+                        ) {
+                            self.account.plans.insert(id, plan);
+                        }
                     }
                     self.commit_orders(
                         cx,
@@ -1099,16 +1108,58 @@ impl BitgetFutures {
         });
     }
 
+    fn coherent_position_modes(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        positions: &mut Vec<Position>,
+        skipped: &mut SnapshotCoverage<PositionKey>,
+        snapshot: bool,
+    ) -> HashSet<String> {
+        let mut conflicts = HashSet::new();
+        let Some(first) = positions.first().map(|p| p.position_mode) else {
+            return conflicts;
+        };
+        let mixed = positions.iter().any(|p| p.position_mode != first);
+        if snapshot && !mixed && skipped.rejected() == 0 {
+            return conflicts;
+        }
+        let held_conflict = cx.store.positions().iter().any(|old| {
+            old.position_mode != first
+                && !positions.iter().any(|p| p.id == old.id)
+                && (!snapshot
+                    || [Some(old.side), None]
+                        .into_iter()
+                        .any(|side| !skipped.allows_absence(&(old.symbol.clone(), side))))
+        });
+        if mixed || held_conflict {
+            conflicts.extend(
+                positions
+                    .iter()
+                    .filter(|p| {
+                        (p.position_mode == Some(PositionMode::Hedged)) != cx.store.hedged()
+                    })
+                    .map(|p| p.symbol.clone()),
+            );
+            for symbol in &conflicts {
+                skipped.reject(Some((symbol.clone(), None)));
+            }
+            positions.retain(|p| !conflicts.contains(&p.symbol));
+            if !conflicts.is_empty() {
+                cx.notice(Level::Warn, code::ROW_SKIPPED, "skipped Bitget position stream record: conflicting account position modes; cached exposure retained");
+            }
+        }
+        conflicts
+    }
+
     fn merge_positions(
         &self,
         cx: &Cx<'_, Pending>,
         rows: Vec<Position>,
         started: f64,
     ) -> Vec<Position> {
-        let full_fresh = self
-            .account
-            .full_positions_at
-            .is_some_and(|at| started - at <= 5_000.0);
+        let full_fresh = self.account.full_positions_at.is_some_and(|at| {
+            at >= started || (!self.account.full_positions_fence_only && started - at <= 5_000.0)
+        });
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1141,20 +1192,32 @@ impl BitgetFutures {
                         PositionMode::Oneway
                     });
                 }
+                if cx.store.positions().iter().any(|old| {
+                    old.symbol == p.symbol
+                        && old.position_mode != p.position_mode
+                        && self
+                            .account
+                            .ws_positions
+                            .get(&old.id)
+                            .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                }) {
+                    return None;
+                }
                 if full_fresh && !self.account.full_position_ids.contains(&p.id) {
                     return None;
                 }
-                if let Some(mark) = self.account.ws_positions.get(&p.id)
-                    && started - mark.at <= 5_000.0
-                {
-                    let current = cx.store.position(&p.id);
-                    if mark.at >= started
-                        || p.last_update.is_none()
-                        || mark
-                            .update
-                            .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
-                    {
-                        return current.cloned();
+                if let Some(mark) = self.account.ws_positions.get(&p.id) {
+                    let rejection = mark.rejected_at.is_some_and(|at| at >= started);
+                    let financial = mark.at.is_some_and(|at| {
+                        started - at <= 5_000.0
+                            && (at >= started
+                                || p.last_update.is_none()
+                                || mark
+                                    .update
+                                    .is_some_and(|t| p.last_update.is_some_and(|r| t > r)))
+                    });
+                    if rejection || financial {
+                        return cx.store.position(&p.id).cloned();
                     }
                 }
                 Some(p)
@@ -1162,16 +1225,38 @@ impl BitgetFutures {
             .collect();
         for current in cx.store.positions() {
             if !rows.iter().any(|p| p.id == current.id)
-                && self
-                    .account
-                    .ws_positions
-                    .get(&current.id)
-                    .is_some_and(|m| started - m.at <= 5_000.0)
+                && self.account.ws_positions.get(&current.id).is_some_and(|m| {
+                    m.rejected_at.is_some_and(|at| at >= started)
+                        || m.at.is_some_and(|at| started - at <= 5_000.0)
+                })
             {
                 rows.push(current.clone());
             }
         }
         rows
+    }
+
+    fn order_metadata_current(
+        &self,
+        cx: &Cx<'_, Pending>,
+        id: &str,
+        started: f64,
+        stream_revision: u64,
+    ) -> bool {
+        let newer = self.order_revision(id) > stream_revision
+            || self
+                .account
+                .opened
+                .get(id)
+                .is_some_and(|until| *until >= started + 5_000.0);
+        let terminal = self.account.terminal.contains_key(id)
+            || cx.store.order(id).is_some_and(|o| {
+                matches!(
+                    o.status,
+                    OrderStatus::Canceled | OrderStatus::Closed | OrderStatus::Canceling
+                )
+            });
+        !newer && !terminal
     }
 
     fn commit_orders(
@@ -1438,26 +1523,39 @@ impl BitgetFutures {
         };
         match channel {
             "positions" | "position" => {
-                let parsed = serde_json::from_str::<Message<'_, PositionRow>>(text);
-                let Ok(message) = parsed else {
+                let Ok(message) =
+                    serde_json::from_str::<Message<'_, &serde_json::value::RawValue>>(text)
+                else {
                     return;
                 };
                 let Some(rows) = message.data else {
                     return;
                 };
+                let empty = rows.is_empty();
                 let mut positions = Vec::with_capacity(rows.len());
-                let mut unmapped = false;
-                for row in rows {
-                    if self.account.uta
-                        && !row.margin_coin.is_empty()
-                        && row.margin_coin != self.coin()
-                    {
-                        continue;
-                    }
-                    match self.map_position(cx, &row) {
+                let mut skipped = SnapshotCoverage::default();
+                for item in rows {
+                    let mapped = match serde_json::from_str::<PositionRow>(item.get()) {
+                        Ok(row) => {
+                            if self.account.uta
+                                && !row.margin_coin.is_empty()
+                                && row.margin_coin != self.coin()
+                            {
+                                continue;
+                            }
+                            self.map_position(cx, &row)
+                        }
+                        Err(_) => {
+                            if self.foreign_stream_row(item.get(), true) {
+                                continue;
+                            }
+                            Err("malformed record".to_owned())
+                        }
+                    };
+                    match mapped {
                         Ok(position) => positions.push(position),
                         Err(error) => {
-                            unmapped = true;
+                            skipped.reject(self.position_key(item.get()));
                             cx.notice(
                                 Level::Warn,
                                 code::ROW_SKIPPED,
@@ -1466,41 +1564,113 @@ impl BitgetFutures {
                         }
                     }
                 }
-                if positions.is_empty() && unmapped {
+                if !empty && positions.is_empty() && skipped.rejected() == 0 {
                     return;
                 }
+                let mut rejected = skipped.clone();
+                // Preserve the prior all-unmappable scope hold. With valid peers,
+                // rejected identity coverage alone determines safe omission.
+                if positions.is_empty() && skipped.rejected() != 0 {
+                    skipped.reject(None);
+                }
+                let conflicts = self.coherent_position_modes(
+                    cx,
+                    &mut positions,
+                    &mut skipped,
+                    message.action == "snapshot",
+                );
+                for symbol in conflicts {
+                    rejected.reject(Some((symbol, None)));
+                }
+                let useful = !positions.is_empty() || empty;
+                for p in &positions {
+                    self.position_setting(cx, p);
+                }
+                let held: Vec<_> = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|current| {
+                        !positions.iter().any(|p| p.id == current.id)
+                            && [Some(current.side), None].into_iter().any(|side| {
+                                !skipped.allows_absence(&(current.symbol.clone(), side))
+                            })
+                    })
+                    .cloned()
+                    .collect();
+                // Rejections are observation barriers, never a new full financial
+                // snapshot. A fresh read can heal them; unrelated peers remain eligible.
+                for p in &held {
+                    if [Some(p.side), None]
+                        .into_iter()
+                        .any(|side| !rejected.allows_absence(&(p.symbol.clone(), side)))
+                    {
+                        self.account
+                            .ws_positions
+                            .entry(p.id.clone())
+                            .and_modify(|mark| mark.rejected_at = Some(cx.now))
+                            .or_insert(WsPosition {
+                                at: None,
+                                update: None,
+                                rejected_at: Some(cx.now),
+                            });
+                    }
+                }
                 if message.action == "snapshot" {
-                    self.account.full_positions_at = Some(cx.now);
-                    self.account.full_position_ids = positions
-                        .iter()
-                        .filter(|p| p.contracts > 0.0)
-                        .map(|p| p.id.clone())
-                        .collect();
+                    // Validly omitted identities still fence an older read's resurrection.
+                    for old in cx.store.positions() {
+                        if !positions.iter().any(|p| p.id == old.id)
+                            && !held.iter().any(|p| p.id == old.id)
+                        {
+                            self.account.ws_positions.insert(
+                                old.id.clone(),
+                                WsPosition {
+                                    at: Some(cx.now),
+                                    update: None,
+                                    rejected_at: None,
+                                },
+                            );
+                        }
+                    }
+                    if skipped.rejected() == 0 {
+                        self.account.full_positions_at = Some(cx.now);
+                        self.account.full_positions_fence_only = false;
+                        self.account.full_position_ids = positions
+                            .iter()
+                            .filter(|p| p.contracts > 0.0)
+                            .map(|p| p.id.clone())
+                            .collect();
+                    } else {
+                        self.account.full_positions_fence_only = true;
+                    }
                 }
                 for p in &positions {
                     self.account.ws_positions.insert(
                         p.id.clone(),
                         WsPosition {
-                            at: cx.now,
+                            at: Some(cx.now),
                             update: p.last_update,
+                            rejected_at: None,
                         },
                     );
-                    self.position_setting(cx, p);
                 }
-                if message.action == "snapshot" {
+                positions.extend(held);
+                if message.action == "snapshot" && useful {
                     cx.store.set_positions(
                         positions
                             .into_iter()
                             .filter(|p| p.contracts > 0.0)
                             .collect(),
                     );
-                } else {
+                } else if useful {
                     for p in positions {
                         cx.store.upsert_position(p);
                     }
                 }
-                self.account.last_payload = cx.now;
-                self.account.degraded = false;
+                if useful {
+                    self.account.last_payload = cx.now;
+                    self.account.degraded = false;
+                }
                 if self.account.positions_timer.is_none() {
                     self.account.positions_timer = Some(cx.set_timer(500.0));
                 }
@@ -1509,27 +1679,34 @@ impl BitgetFutures {
                 }
             }
             "orders" | "order" | "orders-algo" | "ordersAlgo" | "strategy-order" => {
-                let Ok(message) = serde_json::from_str::<Message<'_, OrderRow>>(text) else {
+                let Ok(message) =
+                    serde_json::from_str::<Message<'_, &serde_json::value::RawValue>>(text)
+                else {
                     return;
                 };
                 let Some(rows) = message.data else {
                     return;
                 };
-                for raw in rows {
+                let mut useful = rows.is_empty();
+                for item in rows {
+                    let Ok(raw) = serde_json::from_str::<OrderRow>(item.get()) else {
+                        if self.foreign_stream_row(item.get(), false) {
+                            continue;
+                        }
+                        self.reject_stream_order(cx, item.get());
+                        continue;
+                    };
                     if self.account.uta && !raw.category.eq_ignore_ascii_case(self.product()) {
                         continue;
                     }
                     let Ok(orders) = self.map_order(cx, &raw) else {
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            "invalid Bitget order stream record",
-                        );
+                        self.reject_stream_order(cx, item.get());
                         continue;
                     };
                     let Some(order) = orders.first() else {
                         continue;
                     };
+                    useful = true;
                     let status = raw_status(&raw);
                     let explicit_fill = matches!(
                         status,
@@ -1594,8 +1771,10 @@ impl BitgetFutures {
                         }
                     }
                 }
-                self.account.last_payload = cx.now;
-                self.account.degraded = false;
+                if useful {
+                    self.account.last_payload = cx.now;
+                    self.account.degraded = false;
+                }
                 if self.account.orders_timer.is_none() {
                     self.account.orders_timer = Some(cx.set_timer(500.0));
                 }
@@ -1841,9 +2020,10 @@ impl BitgetFutures {
             self.account.poll = None;
             // Keep stream updates and closures until every collateral read completes.
             if !self.account.positions_in_flight {
-                self.account
-                    .ws_positions
-                    .retain(|_, m| cx.now - m.at < 10_000.0);
+                self.account.ws_positions.retain(|_, m| {
+                    m.at.is_some_and(|at| cx.now - at < 10_000.0)
+                        || m.rejected_at.is_some_and(|at| cx.now - at < 10_000.0)
+                });
             }
             if self.account.degraded {
                 self.refresh_balance(cx);
@@ -1899,6 +2079,59 @@ impl BitgetFutures {
             } else {
                 self.refresh_orders(cx, false);
             }
+        }
+    }
+
+    fn foreign_stream_row(&self, item: &str, position: bool) -> bool {
+        if !self.account.uta {
+            return false;
+        }
+        #[derive(Deserialize)]
+        struct Product<'a> {
+            #[serde(default, borrow)]
+            category: std::borrow::Cow<'a, str>,
+            #[serde(default, borrow, rename = "marginCoin")]
+            margin_coin: std::borrow::Cow<'a, str>,
+        }
+        let Ok(row) = serde_json::from_str::<Product>(item) else {
+            return false;
+        };
+        if position {
+            !row.margin_coin.is_empty() && row.margin_coin != self.coin()
+        } else {
+            !row.category.is_empty() && !row.category.eq_ignore_ascii_case(self.product())
+        }
+    }
+
+    fn reject_stream_order(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
+        let id = order_row_id(item);
+        let held: Vec<_> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| {
+                id.as_ref().is_none_or(|id| {
+                    o.id == *id
+                        || o.parent_id.as_ref() == Some(id)
+                        || o.id.strip_suffix("__stop_loss") == Some(id.as_str())
+                        || o.id.strip_suffix("__take_profit") == Some(id.as_str())
+                })
+            })
+            .map(|o| o.id.clone())
+            .collect();
+        for id in held {
+            self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
+            self.account
+                .ws_order_revisions
+                .insert(id, self.account.ws_order_clock);
+        }
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "invalid Bitget order stream record",
+        );
+        if self.account.orders_timer.is_none() {
+            self.account.orders_timer = Some(cx.set_timer(500.0));
         }
     }
 

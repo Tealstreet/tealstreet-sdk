@@ -894,3 +894,8 @@ numbers retain strict validation. Binary position decoding is unchanged.
 ## Rust socket supervision
 
 Both Rust sockets use `engine::socket::Supervisor`: a 10-second connection deadline and capped exponential reconnect delay with jitter that survives short open/close flaps. Validated idle limits remain 60 seconds public and 90 seconds private; private authentication and subscription replies have 15-second deadlines. Native SBE heartbeat template40 and host RFC6455 control frames prove liveness. Rust sends no application JSON ping. Public per-book resynchronization and subscription retry timers remain independent.
+
+Rust bounded history reads that exhaust their page budget emit
+`history.incomplete` with the actual query command before partial completion.
+This lets the host flag and notify only the owning caller. Unbounded cap and
+other cursor-stall paths retain their existing failure behavior.
