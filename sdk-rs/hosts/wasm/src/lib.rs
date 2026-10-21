@@ -8,6 +8,7 @@
     feature = "grvt",
     feature = "paradex",
     feature = "bitrue",
+    feature = "bitunix",
     feature = "coinbase",
     feature = "binance",
     feature = "apexomni",
@@ -34,7 +35,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -376,6 +377,7 @@ impl WasmEngine {
         feature = "bitget",
         feature = "grvt",
         feature = "bitrue",
+        feature = "bitunix",
         feature = "backpack",
         feature = "phemex",
         feature = "weex",
@@ -670,6 +672,7 @@ mod tests {
         feature = "bingx",
         feature = "bitget",
         feature = "bitrue",
+        feature = "bitunix",
         feature = "blofin",
         feature = "breakoutprop",
         feature = "bybit",
@@ -721,6 +724,7 @@ mod tests {
             "bitgetinverse",
             "blofin",
             "bitrue",
+            "bitunix",
             "grvt",
             "mexc",
             "woo",

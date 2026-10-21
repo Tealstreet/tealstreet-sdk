@@ -1,0 +1,460 @@
+//! Payload shapes: bitunix.com/api-docs/futures/market/{trading_pairs,tickers,kline}.html
+//! Legacy depthop semantics: exchanges/bitunix/CLAUDE.md, captured 2026-07-15.
+use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId};
+use safe_cex_venue_bitunix::{BitunixFutures, Options};
+const PAIRS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"},{"symbol":"NOUSDT","base":"NO","quote":"USDT","symbolStatus":"OPEN","basePrecision":0,"quotePrecision":2,"maxLimitOrderVolume":"100","isApiSupported":"false"}]}"#;
+const TICKERS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","last":"96000","open":"95000","markPrice":"96001","baseVol":"1000","quoteVol":"96000000"}]}"#;
+fn response(e: &mut Engine<BitunixFutures>, r: safe_cex_engine::RequestId, body: &str) {
+    e.handle(
+        0.0,
+        Event::HttpResponse {
+            request: r,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+fn ready() -> (Engine<BitunixFutures>, SocketId) {
+    let mut e = Engine::new(BitunixFutures::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let Action::Http(r) = e.drain_actions().next().unwrap() else {
+        panic!()
+    };
+    response(&mut e, r.id, PAIRS);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let mut futures = None;
+    for a in actions {
+        match a {
+            Action::Http(r) => response(&mut e, r.id, TICKERS),
+            Action::WsConnect { socket, url, .. } => {
+                if url.contains("ws-futures") {
+                    futures = Some(socket);
+                }
+                e.handle(0.0, Event::WsOpened { socket });
+            }
+            _ => {}
+        }
+    }
+    let actions: Vec<_> = e.drain_actions().collect();
+    for a in actions {
+        if let Action::WsConnect { socket, .. } = a {
+            e.handle(0.0, Event::WsOpened { socket });
+        }
+    }
+    (e, futures.unwrap())
+}
+#[test]
+fn streams_seed_filters_api_disabled_and_updates_only_ticker_fields() {
+    let (mut e, s) = ready();
+    assert_eq!(e.store().markets().len(), 1);
+    let m = &e.store().markets()[0];
+    assert_eq!(m.id, "BTC/USDT");
+    assert_eq!(m.precision.amount, 0.001);
+    assert_eq!(m.precision.price, 0.1);
+    e.handle(5.0,Event::WsMessage {socket:s,text:r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"97000","o":"95000","b":"1234","q":"999"}}"#});
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(t.last, 97000.0);
+    assert_eq!(t.mark, 96001.0);
+    assert_eq!(t.bid, 96000.0);
+    e.handle(6.0,Event::WsMessage {socket:s,text:r#"{"ch":"price","symbol":"BTCUSDT","data":{"mp":"97001","ip":"97002","fr":"0.0001","ft":"1800000000000"}}"#});
+    assert_eq!(
+        e.store().ticker("BTCUSDT").unwrap().funding_time,
+        1800000000000.0
+    );
+}
+#[test]
+fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
+    let (mut e, s) = ready();
+    e.handle(
+        0.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    for text in [
+        r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2"],["95999","1"]],"asks":[["96001","3"]]}}"#,
+        r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["95998","4"]],"asks":[]}}"#,
+    ] {
+        e.handle(1.0, Event::WsMessage { socket: s, text });
+    }
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(95998.0, 4.0)]);
+    assert!(e.book("BTCUSDT").unwrap().asks().is_empty());
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(3.0, Event::WsOpened { socket });
+    assert!(e.book("BTCUSDT").is_none());
+    assert!(e.drain_actions().any(
+        |a| matches!(a,Action::WsSend {text,..} if text.contains("market_btcusdt_depthop_0.1"))
+    ));
+}
+#[test]
+fn an_authoritative_empty_snapshot_clears_the_consumer_book() {
+    use safe_cex_engine::wire::{section, sections};
+    let (mut e, socket) = ready();
+    e.handle(
+        0.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(e.book("BTCUSDT").is_none());
+    e.take_frame(0.0);
+    e.handle(1.0, Event::WsMessage { socket, text: r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2"]],"asks":[["96001","3"]]}}"# });
+    let frame = e.take_frame(1.0).unwrap();
+    assert!(sections(frame).any(|(kind, _)| kind == section::BOOK));
+    e.handle(
+        2.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[],"asks":[]}}"#,
+        },
+    );
+    let frame = e.take_frame(2.0).expect("empty snapshot must be delivered");
+    let book = sections(frame)
+        .find(|(kind, _)| *kind == section::BOOK)
+        .unwrap()
+        .1;
+    assert_eq!(book.len(), 16);
+    assert_eq!(&book[4..12], &[0; 8]);
+    assert!(e.book("BTCUSDT").unwrap().is_empty());
+    assert!(
+        sections(e.snapshot_frame(3.0))
+            .any(|(kind, data)| kind == section::BOOK && data[4..12] == [0; 8])
+    );
+}
+#[test]
+fn incomplete_stream_never_commits_a_partial_market_list() {
+    let mut e = Engine::new(BitunixFutures::new(Options::default()));
+    e.start(0.0);
+    let Action::Http(r) = e.drain_actions().next().unwrap() else {
+        panic!()
+    };
+    response(&mut e, r.id, &PAIRS[..PAIRS.len() - 2]);
+    assert!(e.store().markets().is_empty());
+    assert!(!e.store().loaded().markets);
+}
+#[test]
+fn candle_reads_use_quote_volume_and_seconds() {
+    let (mut e, _) = ready();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1000.0,
+        Event::Command(Command::FetchCandles {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(1),
+            from_ms: Some(0.0),
+            to_ms: Some(1000.0),
+        }),
+    );
+    let r = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    response(
+        &mut e,
+        r.id,
+        r#"{"code":0,"data":[{"time":1000,"open":"1","high":"3","low":"1","close":"2","quoteVol":"99"}]}"#,
+    );
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:9,result:Ok(s)}) if s.contains("\"timestamp\":1.0") && s.contains("\"volume\":99.0"))));
+}
+
+#[test]
+fn rejects_http_200_failure_envelopes_even_with_an_empty_data_array() {
+    for body in [
+        r#"{"code":10001,"msg":"failure","data":[]}"#,
+        r#"{"data":[],"code":10001,"msg":"failure"}"#,
+        r#"{"code":0,"data":[]"#,
+    ] {
+        let mut e = Engine::new(BitunixFutures::new(Options::default()));
+        e.start(0.0);
+        let Action::Http(r) = e.drain_actions().next().unwrap() else {
+            panic!()
+        };
+        response(&mut e, r.id, body);
+        assert!(!e.store().loaded().markets);
+    }
+}
+
+#[test]
+fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
+    let mut e = Engine::new(BitunixFutures::new(Options::default()));
+    e.start(0.0);
+    let Action::Http(r) = e.drain_actions().next().unwrap() else {
+        panic!()
+    };
+    response(&mut e, r.id, PAIRS);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        1
+    );
+    let request = actions
+        .into_iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    response(
+        &mut e,
+        request.id,
+        r#"{"code":10001,"data":[],"msg":"rate limit"}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(5000.0, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let r = actions
+        .into_iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(r.url.ends_with("/tickers"));
+    response(&mut e, r.id, TICKERS);
+    assert_eq!(
+        e.drain_actions()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn watchdog_closes_a_silent_connection_and_reconnects() {
+    let (mut e, s) = ready();
+    let actions: Vec<_> = e.drain_actions().collect();
+    // ready consumed connect timers, so isolate a fresh reconnection.
+    drop(actions);
+    e.handle(
+        1.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(*timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let socket = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(50_000.0, Event::TimerFired { timer });
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::WsClose {socket:s} if s==socket))
+    );
+}
+
+#[test]
+fn accepts_extended_legacy_levels_and_documented_iso_next_funding_time() {
+    let (mut e, s) = ready();
+    e.handle(
+        0.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    e.handle(1.0,Event::WsMessage {socket:s,text:r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2","",""]],"asks":[["96001","3","",""]]}}"#});
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(96000.0, 2.0)]);
+    // Official websocket/public/MarketPrice Channel example, also seen in the live tape.
+    e.handle(1.0,Event::WsMessage {socket:s,text:r#"{"ch":"price","symbol":"BTCUSDT","data":{"mp":"10000","ip":"0.0010","fr":"0.013461","ft":"2024-12-04T11:00:00Z","nft":"2024-12-04T12:00:00Z"}}"#});
+    assert_eq!(
+        e.store().ticker("BTCUSDT").unwrap().funding_time,
+        1733313600000.0
+    );
+}
+
+#[test]
+fn public_envelopes_accept_arbitrary_field_order_and_reject_malformed_payloads() {
+    let (mut e, s) = ready();
+    for text in [
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"97000","o":"95000","b":"1234","q":"999"}}"#,
+        r#"{"data":{"la":"97000","o":"95000","b":"1234","q":"999"},"symbol":"BTCUSDT","ch":"ticker"}"#,
+        r#"{"ch":"ticker","data":{"la":"97000","o":"95000","b":"1234","q":"999"},"symbol":"BTCUSDT"}"#,
+    ] {
+        e.handle(1.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.last, 97000.0);
+        assert_eq!(ticker.volume, 1234.0);
+        assert_eq!(ticker.quote_volume, 999.0);
+    }
+    for text in [
+        r#"{"ch":"price","data":{"mp":"97001","ip":"97002","fr":"0.0001","ft":"1800000000000"},"symbol":"BTCUSDT"}"#,
+        r#"{"data":{"mp":"97001","ip":"97002","fr":"0.0001","ft":"1800000000000"},"ch":"price","symbol":"BTCUSDT"}"#,
+    ] {
+        e.handle(2.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.mark, 97001.0);
+        assert_eq!(ticker.funding_time, 1800000000000.0);
+    }
+    for text in [
+        r#"{"ch":"depth_book1","symbol":"BTCUSDT","data":{"b":[["96999","1"]],"a":[["97001","2"]]}}"#,
+        r#"{"data":{"b":[["96999","1"]],"a":[["97001","2"]]},"symbol":"BTCUSDT","ch":"depth_book1"}"#,
+    ] {
+        e.handle(3.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.bid, 96999.0);
+        assert_eq!(ticker.ask, 97001.0);
+    }
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    for text in [
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"1"}}"#,
+        r#"{"data":{"la":"1"},"symbol":"BTCUSDT","ch":"ticker"}"#,
+        r#"{"ch":"price","symbol":"BTCUSDT","data":[]}"#,
+        r#"{"ch":"depth_book1","symbol":"BTCUSDT","data":{"b":[],"a":[[]]}}"#,
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":null}"#,
+    ] {
+        e.handle(4.0, Event::WsMessage { socket: s, text });
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap(), &before);
+    }
+}
+
+#[test]
+fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() {
+    let (mut e, _) = ready();
+    e.drain_actions().for_each(drop);
+    // Malformed text is rejected by the engine's typed Interval; Bitunix still
+    // refuses valid intervals its kline API does not offer.
+    use safe_cex_engine::model::Interval;
+    for interval in [Interval::S1, Interval::H3, Interval::Mo1] {
+        e.handle(
+            100_000_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 90,
+                symbol: "BTCUSDT".into(),
+                interval,
+                limit: Some(2),
+                from_ms: None,
+                to_ms: Some(100_000_000.0),
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandDone {
+                    command: 90,
+                    result: Err(_)
+                })
+            )),
+            "{interval:?}"
+        );
+    }
+    for (interval, duration) in [("1m", 60_000), ("2h", 7_200_000), ("1w", 604_800_000)] {
+        e.handle(
+            100_000_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 91,
+                symbol: "BTCUSDT".into(),
+                interval: Interval::parse(interval).unwrap(),
+                limit: Some(2),
+                from_ms: None,
+                to_ms: Some(100_000_000.0),
+            }),
+        );
+        let request = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            request
+                .url
+                .contains(&format!("startTime={}", 100_000_000 - duration * 2))
+        );
+    }
+}
+#[test]
+fn candle_interest_without_credentials_reads_no_symbol_settings() {
+    let (mut e, _) = ready();
+    e.handle(
+        1.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    // Public-only accounts neither send the signed read nor log a credentials failure.
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_leverage_margin_mode")))
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("credentials")
+    )));
+}

@@ -13,6 +13,7 @@ const families = Object.freeze({
   bitgetinverse: 'bitget',
   bitgetusdc: 'bitget',
   bitrue: 'bitrue',
+  bitunix: 'bitunix',
   blofin: 'blofin',
   breakoutprop: 'breakoutprop',
   bybit: 'bybit',
