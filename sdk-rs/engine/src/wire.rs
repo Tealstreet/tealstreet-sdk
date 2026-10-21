@@ -42,6 +42,8 @@ pub mod section {
     pub const POSITION_GREEKS: u16 = 18;
     /// The venue's capability record; snapshot frames only.
     pub const CAPABILITIES: u16 = 19;
+    /// Underlying venue tokens, indexed by the current market table.
+    pub const UNDERLYING_TOKENS: u16 = 20;
 }
 
 pub mod status_flag {

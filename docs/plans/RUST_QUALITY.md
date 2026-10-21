@@ -144,10 +144,15 @@ Medium:
 5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
    row keeps the store's copy. Structurally ends the one-bad-row-discards-the-
    snapshot class (~50 hand-rolled `invalid` flags).
-6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts
-   (crate and host wiring done; TS credential checks moving in batches);
+6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
-   route `tickInterval` to every venue.
+   route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every
+   venue for the wasm and native hosts and owns the credential rules (#1467,
+   #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
+   venue list is the `hostClock` capability (#1520); polling is the runtime
+   policy (#1392). Follow-ups: public-mode derivation with Paradex's rule,
+   AsterDEX API-version resolution, and the HyroTrader endpoint and
+   payload-signer name branches in `createHost`.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:
    `model::Interval` decoded at the command boundary; AsterDEX, Kraken and

@@ -373,6 +373,8 @@ pub struct SpotToken {
     pub name: String,
     pub index: u32,
     pub sz_decimals: i32,
+    #[serde(default)]
+    pub full_name: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct SpotCtx {

@@ -785,7 +785,7 @@ impl Orderly {
                     status: status(raw_status)?,
                     kind,
                     side: side_,
-                    price: row.trigger_price.map_or(row.price, |n| n.0),
+                    price: row.display_price(side_),
                     amount,
                     filled,
                     remaining: (amount - filled).max(0.0),
