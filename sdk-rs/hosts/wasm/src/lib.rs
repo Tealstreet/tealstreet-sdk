@@ -1205,11 +1205,6 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "hyperliquid")]
             "hyperliquid" | "hyperliquidspot" => {
-                if venue == "hyperliquid" && options.enable_spot_markets {
-                    return Err(JsError::new(
-                        "Rust Hyperliquid currently supports perpetual markets only",
-                    ));
-                }
                 let config = HyperliquidOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
@@ -1221,6 +1216,7 @@ impl WasmEngine {
                         b: b.address,
                         f: b.fee_tenths_bps,
                     }),
+                    enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
                 };
                 Box::new(Engine::new(if venue == "hyperliquidspot" {
                     Hyperliquid::new_spot(config)

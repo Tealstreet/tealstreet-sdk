@@ -71,6 +71,8 @@ const suiteCases = (suite) => {
     cases.push(privateCase(suite, 'lighter-testnet'));
   } else if (suite === 'bitget') {
     cases.push(privateCase('bitgetinverse'));
+  } else if (suite === 'hyperliquid') {
+    cases.push(privateCase('hyperliquid', 'hyperliquid-spot'));
   }
   return Object.freeze(cases.map((item) => Object.freeze(item)));
 };
