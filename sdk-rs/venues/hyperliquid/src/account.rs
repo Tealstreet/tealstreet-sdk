@@ -846,7 +846,9 @@ impl Hyperliquid {
                     }
                     if let Some(order) = self.map_order(cx, &row) {
                         orders.push(order);
-                    } else if (spot_coin(&row.coin) && !self.spot && !self.spot_markets)
+                    } else if (spot_coin(&row.coin)
+                        && !self.spot
+                        && (!self.spot_markets || !self.spot_committed))
                         || (!spot_coin(&row.coin) && self.spot)
                         || self.excluded_coin(&row.coin)
                     {
@@ -1586,6 +1588,12 @@ impl Hyperliquid {
                     .map(|b| (b.coin.trim().to_owned(), b.total, b.hold))
                     .collect(),
             );
+            if self.account.mode == Mode::Standard {
+                // Standard spot is holdings only, never collateral (TS).
+                self.account.spot_revision += 1;
+                self.live_balance(cx);
+                return;
+            }
         }
         self.account.spot_revision += 1;
         let values = self

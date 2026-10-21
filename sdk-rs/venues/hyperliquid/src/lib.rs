@@ -151,6 +151,8 @@ pub struct Hyperliquid {
     /// published; TS lists spot after both.
     spot_catalog: Option<SpotCatalog>,
     perps_published: bool,
+    /// The merged spot catalogue is in the store; until then spot rows are skipped.
+    pub(crate) spot_committed: bool,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
@@ -179,6 +181,7 @@ impl Hyperliquid {
             spot_markets,
             spot_catalog: None,
             perps_published: false,
+            spot_committed: false,
             spot_tokens: HashMap::new(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -306,13 +309,16 @@ impl Hyperliquid {
         self.register_spot(cx, &meta, &markets);
         let count = markets.len();
         self.commit_discovery(cx, markets, tickers, excluded);
+        self.spot_committed = true;
         cx.log(
             LogLevel::Info,
             format!("Loaded {count} Hyperliquid spot markets"),
         );
         self.account_prices(cx);
+        // A late catalogue: spot rows read before it were skipped. A scheduled
+        // refresh cannot be swallowed by an orders read already in flight.
         if self.account.started && !self.options.public_data_only && self.user().is_some() {
-            self.refresh_orders(cx);
+            self.schedule_orders(cx);
             self.refresh_spot_holdings(cx);
         }
     }

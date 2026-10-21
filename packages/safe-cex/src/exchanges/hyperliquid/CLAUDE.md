@@ -884,6 +884,14 @@ the standalone `spot` mode is unchanged. Every per-order decision reads
 - **Trading**: 8 - szDecimals price decimals; never reduce-only; base price
   last, mid, mark, index.
 
+- **Known gap**: engine markets carry no `info`, so the TS
+  `info.hlTokenName`/`hlTokenFullName` disclosure (the web Margin "Underlying
+  Token" row, e.g. `UBTC (Unit Bitcoin)` behind `BTC/USDC`) is absent on Rust.
+  `symbol` still names the venue token.
+- Until the spot catalogue is committed, spot open-order rows are skipped
+  rather than invalidating the snapshot, so a failing spot read never hides
+  perp orders; standard accounts never value spot as collateral.
+
 Gated by `sdk-rs/venues/hyperliquid/tests/spot_markets.rs` and the
 `hyperliquid-spot` private replay (`rust:private-tape-hyperliquid --spot`).
 

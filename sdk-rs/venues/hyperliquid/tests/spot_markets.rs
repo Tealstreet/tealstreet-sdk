@@ -317,3 +317,19 @@ fn exchange_write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
         })
         .expect("an /exchange write")
 }
+
+#[test]
+fn spot_orders_read_before_the_spot_catalogue_never_hide_perp_orders() {
+    // Spot discovery fails; the open-order snapshot still lists a spot row.
+    let r = run(true, None, false);
+    let orders = r.e.store().orders().to_vec();
+    assert!(orders.iter().any(|o| o.id == "6" && o.symbol == "BTC-PERP"));
+    assert!(!orders.iter().any(|o| o.id == "5"));
+    // Holdings still publish, and the perp-only balance is not held back.
+    assert_eq!(r.e.store().balance().total, 1000.0);
+    assert!(
+        !r.logs
+            .iter()
+            .any(|m| m.contains("collateral valuation unavailable"))
+    );
+}
