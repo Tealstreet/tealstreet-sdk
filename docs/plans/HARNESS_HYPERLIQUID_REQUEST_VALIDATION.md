@@ -61,3 +61,37 @@ default change is required.
 - Signature/request validation establishes only the observed request contract.
   Existing strict account differences, fixture representativeness, missing
   native metadata and live-environment evidence retain their separate limits.
+
+## Implementation and validation
+
+The factory validates original wire requests before canonicalization. A lazy
+harness-only oracle recovers the configured signer from ordered msgpack/EIP712
+bytes, binds mainnet/testnet, vault and private account/agent read subjects, and
+checks the documented open nonce interval. Published independent main/test/vault
+vectors and an order connection ID guard against shared signer mistakes. Safe
+integers beyond msgpack's 32-bit forms and lossless JSON uint64 order IDs retain
+their integer wire encoding; field ordering remains signature-sensitive.
+
+Creation cloids are required and unique. Caller IDs stay exact; generated IDs
+bind by the original queued action's order position and economic key. Later
+modify.order.c references must use the acknowledged alias (including
+optional-ID presence). The original queued body, rather than its normalized key,
+is the oracle. Signed missing/wrong references reject without consuming ACKs.
+Documented cancelByCloid {asset, cloid} and modify.oid matching stay exact; this phase adds no alias normalization
+for generated cloid amend targets. Unsupported remapped targets fail closed.
+
+Tape accepts a state-commit callback from a validator and runs it only inside
+Responses' matched-record hook after command/time eligibility. Premature staged
+or timed requests bind neither creation IDs nor aliases. Identical-intent retries
+within a command remain allowed; later commands cannot reuse a creation ID.
+Standalone Spot, production signers, the comparator, declarations and fixture
+bytes remain unchanged. Request validation certifies the exercised authentication
+and intent contract, not full action-schema coverage, private parity or live
+behavior. Existing six/eight private account differences remain strict FAILs.
+
+Focused protocol/clock tests: 26 pass. Removing only the catalog factory makes
+the actual Tape invalid-signature regression fail with "Missing expected
+exception": the old path consumed the ACK. Time-stage poisoning, missing/changed
+references, caller ownership and uint64 tamper controls pass with the factory.
+Initial full serial harness: 1037 pass; protocol-shape follow-up checked separately. Current-head CI/five-pair proof remain required before
+merge; final run IDs/hashes belong in the PR body.

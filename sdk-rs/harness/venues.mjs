@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
+import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
@@ -1628,6 +1629,8 @@ export const VENUES = {
   krakenspot,
   hyperliquid: {
     virtualPrivateClock: true,
+    createRequestValidator: createHyperliquidRequestValidator,
+    compareWriteOrder: true,
     rust: 'hyperliquid',
     ts: {
       module: `${root}/hyperliquid/hyperliquid.exchange.ts`,
