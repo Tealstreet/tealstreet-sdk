@@ -98,6 +98,7 @@ already declare `extra.asterdexApiVersion?: 'v1' | 'v3'` and
 `extra.hyrotraderMode?: 'demo' | 'production'`; no new caller edit.
 The native account/fill follow-up checks #1430 at `3002a226469` against the same
 NX revision; mobile `master` remains `8377a4f3f1e` (GitHub API).
+The leverage follow-up checks #1522 at `faad41cfba5` with those inventory revisions.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -117,6 +118,7 @@ The construction follow-ups check through #1575 at `570d15f3001`, including
 #1563, the #1550 logging merge and #1518's internal failure-path refactor.
 The subsequent #1558 logging-level merge is checked at `e757d8d7990`.
 Native account reads, identities, fill financials and nuke check #1430 at `3002a226469`.
+Fresh leverage reads and combined capability records check #1522 at `faad41cfba5`.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -146,12 +148,11 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1575 / `570d15f300` | Rust selects HyroTrader endpoints from optional raw mode/network maps, retaining legacy explicit endpoints when that config is absent. Private non-Paradex `payloadSigner` refusal moves into the registry; WASM registry failures carry JSON `Error.venueError`, which the SDK converts to `ExchangeError`, preserving `unsupported`/`notSent` for that refusal. Factory routing and application options stay unchanged; see [Host construction rules](#host-construction-rules-1575). |
 | #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 | #1430 / `3002a22646` | Account reads synchronize authoritative native state without a network refresh or new streaming freshness observation; worker mirrors forward the reads. Native identity lookup expands by capability. Live fills add optional `realizedPnl`/`fee` tails under the existing revision-1 header, and native nuke batches closes without automatic retry. See [Native account reads, identities and fills](#native-account-reads-identities-and-fills-1430) for caller and host requirements. |
+| #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. Metadata-refreshed venues read an uncached symbol rather than returning `null`; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
-downstream call shape. They add no cutover edit here. **Pending:** #1522 changes
-leverage reads. Re-audit it when merged rather than treating its proposed
-contract as available. Execution-ID attribution and a literal FILLS revision 2
+downstream call shape. They add no cutover edit here. Execution-ID attribution and a literal FILLS revision 2
 are separate follow-up work; #1430 did not introduce either.
 
 ### Summary: cutover blockers (no new equivalent)
@@ -292,6 +293,7 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 | `fetchMarketsAndTickers` (not on base), `fetchTickers`, `fetchPositions` via `as any` | web `exchangeAccountController.ts:668-669,687,750,863`, `components/customModules/frame/feedSources.ts:82-83`, `eagerExchangeWarmStart.ts:52,58` | REST reads | `fetchMarketsAndTickers` undefined on Rust; `fetchMarkets`/`fetchTickers` start the engine and wait ≤30 s for native data, else throw `Timed out waiting for native markets|tickers` (#1375). #1430 makes `fetchPositions` wait for its native sections and synchronize engine state; see below | RT |
 | Native account reads (#1430): `fetchOrders`, `fetchPositions`, `fetchBalance`, `fetchPositionMode` | MCP `tools.ts:62,82-83,144,152,160,322`; web warm-start `eagerExchangeWarmStart.ts:75,86` | cached JS store or venue REST | await native section readiness and synchronize current engine state; main-thread mirrors forward to their worker. No forced network refresh. Missing public-only private sections reject visibly | RT; same arguments/results |
 | Native identity `getAccount` (#1430) | no application exchange-identity calls found in web/CLI/MCP/server at `fdd2389a825` (CLI adapter `getAccount` is a different API) | limited native lookup support | query/after-load behavior follows `capabilities.account`; unsupported venues retain an explicit refusal. See identity boundary below | additive; no app edit found |
+| `fetchLeverageForSymbol` (#1522) | mirrored worker `UiStateHandler.ts:27-64`; web `hooks/margin/useMarginType.ts:27`, `usePositionMode.ts:27` consume `store.fetchedLeverage` | BingX/WEEX settings-only reads and uncached metadata rails could return `null`; WEEX native command had no handler | BingX/WEEX read fresh symbol rails; MEXC/WOO/Kraken `onMetadata` reads query only when no usable cached rails exist. UI still fetches only for a missing active-symbol entry. Failure keeps the SDK warning/`null` result contract | additive data; no app edit |
 | Native `nuke`/`nukePositions` (#1430) | web `hooks/trading/useNuke.ts:7`; mirrored CLI `commands/trading/NukeCommand.ts:32,42,51,60` | inherited store-based closes/retries | one native-state batch of reduce-only market closes; no automatic replay even if callers pass `3`. Observe/catch the promise and reconcile partial/unknown outcomes; CLI's max-retries text must not imply a guarantee | RT; caller error/retry handling |
 | `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced; the main-thread mirror forwards them (#1462) | none (B4) |
 | `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command; main-thread mirror forwards it (#1462) | RT (B4) |
@@ -310,6 +312,14 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 | Decisions and freshness | `syncAccountState(): void` is additive on `Exchange` (Base is a no-op); in-process Rust requires a started engine and ready native market catalog. CLI conditions/substitution/loops and chaser creation synchronize before store-based decisions. Generic cancel-all selects native open-order symbols; set-all leverage uses native positions and hedge-leg sides. The zero-length `ACCOUNT_READ` section 21 marks private snapshots so both consumers update rows without advancing orders/positions freshness IDs. Reads preserve pending streaming changes, fills and public baselines; they do not establish a fresh venue observation. Ship matching engine, reader and applier. |
 | Account identity | `getAccount()` uses native `fetchAccount` for `capabilities.account: 'query'`; `'afterLoad'` still waits for startup, and `'unsupported'` refuses. #1430 expands query support across supported aliases of Backpack, Binance USD-M/PM, BingX, Bitget, Bybit (excluding HyroTrader), Crypto.com, GRVT, KuCoin, Lighter/Robinhood, MEXC, Paradex, Phemex, WEEX and WOO. Lighter lookup can be unsigned; MEXC/WEEX validate selected read credentials and namespace identity from the primary key. These identities do not refresh financial state or establish new signing support. |
 | Bulk close and cancel | `nukePositions` reads native positions, sizes closes in venue order units (inverse notional where required), preserves hedge legs and submits valid reduce-only market closes in one `placeOrders` batch. Unusable rows are skipped; if the valid-close batch resolves, skipped rows cause rejection, while a batch failure propagates its own error. `nuke` also attempts cancel-all after close failure, then rethrows the original close failure. Concurrent nukes reject; legacy `tries` arguments do not trigger retries. Web `useNuke` must handle the returned rejection; CLI prints progress and catches warnings asynchronously, so its immediate success is not completion evidence. Partial/unknown outcomes require reconciliation before any retry. |
+
+#1522's leverage reads use native signed symbol queries: BingX maps long/short
+rails to `buyLeverage`/`sellLeverage`; WEEX returns rails plus `marginType` from
+the symbol configuration. Revision fencing preserves newer settings when a
+configuration event or write races the read; failures leave native settings
+intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
+queries the venue; `settings` stays cache-only. Ship matching engine and
+capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
 The work formerly called **FILLS revision 2** in this inventory landed as an
 extension of **revision 1**: the existing order/market/side/price/amount prefix
