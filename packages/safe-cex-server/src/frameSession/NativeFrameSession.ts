@@ -49,6 +49,8 @@ type Limits = Required<Pick<NativeFrameSessionOptions, 'connectTimeoutMs' | 'max
 type Delivery = { bytes: number } & ({ buffer: ArrayBuffer; snapshot: boolean } | { text: string; auth?: AccountAuthResult });
 
 const PROTOCOL = 'safe-cex-frame.v1';
+// Opts in to accountAuth notices; servers that predate it ignore the offer.
+const ACCOUNT_AUTH_PROTOCOL = 'safe-cex-frame.account-auth';
 const encoder = new TextEncoder();
 const error = () => new Error('Native frame session closed');
 const invalid = () => new Error('Invalid native frame session configuration');
@@ -206,7 +208,7 @@ export class NativeFrameSession {
     if (this.signal?.aborted) { this.close(); return; }
     this.timer = setTimeout(() => this.close(), this.limits.connectTimeoutMs);
     try {
-      const socket = factory(url, [PROTOCOL, `bearer.${token}`]);
+      const socket = factory(url, [PROTOCOL, ACCOUNT_AUTH_PROTOCOL, `bearer.${token}`]);
       // An injected factory can synchronously abort the owning downstream session.
       // Teardown may therefore have happened before a socket was available to close.
       if (this.isClosed) {

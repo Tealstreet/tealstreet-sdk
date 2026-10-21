@@ -163,7 +163,10 @@ pending IDs and resource-limit failures produce `type: "error"` (with `command`
 where known). Malformed JSON and binary commands produce an error without venue
 side effects. Logs (`type: "log"`, `level`, `message`), `type: "deactivate"`
 and `type: "startupFailed"` (with `detail`) notices go to all clients of the
-account. Results go only to their requester.
+account. `type: "accountAuth"` credential evidence goes only to clients that also
+offered the `safe-cex-frame.account-auth` subprotocol, because earlier v1 clients
+close on an unknown notice; the response still echoes only `safe-cex-frame.v1`.
+Results go only to their requester.
 
 Repeated book/candle subscriptions are idempotent per client, and the venue sees
 only first-subscribe/last-unsubscribe transitions. Another subscription to a live

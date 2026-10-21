@@ -222,6 +222,7 @@ enum Control {
         client: u64,
         outgoing: mpsc::Sender<Outgoing>,
         cancel: watch::Sender<bool>,
+        account_auth: bool,
         ready: oneshot::Sender<Result<(), &'static str>>,
     },
     Command {
@@ -236,12 +237,18 @@ enum Control {
     Leave(u64),
 }
 
+/// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
+/// `accountAuth` notices; the negotiated protocol stays v1.
+pub const ACCOUNT_AUTH_PROTOCOL: &str = "safe-cex-frame.account-auth";
+
 struct Peer {
     outgoing: mpsc::Sender<Outgoing>,
     cancel: watch::Sender<bool>,
     books: HashSet<String>,
     candles: HashSet<(String, Interval)>,
     tickers: Option<HashSet<String>>,
+    /// Offered ACCOUNT_AUTH_PROTOCOL: older v1 clients reject unknown notices.
+    account_auth: bool,
 }
 struct Pending {
     client: Option<u64>,
@@ -287,8 +294,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             tokio::select! {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
-                    Some(Control::Join { client, outgoing, cancel, ready }) => {
-                        let _ = ready.send(self.join(client, outgoing, cancel));
+                    Some(Control::Join { client, outgoing, cancel, account_auth, ready }) => {
+                        let _ = ready.send(self.join(client, outgoing, cancel, account_auth));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
@@ -321,6 +328,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         client: u64,
         outgoing: mpsc::Sender<Outgoing>,
         cancel: watch::Sender<bool>,
+        account_auth: bool,
     ) -> Result<(), &'static str> {
         if self.peers.len() >= self.config.max_clients_per_account {
             return Err("account client limit reached");
@@ -345,6 +353,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth,
             },
         );
         Ok(())
@@ -396,11 +405,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     credential,
                     scope,
                     outcome,
-                } => self.broadcast(Outgoing::Text(encode_notice(ServerNotice::AccountAuth {
-                    credential,
-                    scope,
-                    outcome,
-                }))),
+                } => self.broadcast_to(
+                    Outgoing::Text(encode_notice(ServerNotice::AccountAuth {
+                        credential,
+                        scope,
+                        outcome,
+                    })),
+                    |peer| peer.account_auth,
+                ),
                 Notice::StartupFailed { error } => {
                     let text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     self.startup_failure = Some(text.clone());
@@ -463,8 +475,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn broadcast(&mut self, message: Outgoing) {
+        self.broadcast_to(message, |_| true)
+    }
+
+    fn broadcast_to(&mut self, message: Outgoing, recipient: impl Fn(&Peer) -> bool) {
         if message.len() > self.config.max_frame_bytes {
-            let clients: Vec<_> = self.peers.keys().copied().collect();
+            let clients: Vec<_> = self
+                .peers
+                .iter()
+                .filter(|(_, peer)| recipient(peer))
+                .map(|(client, _)| *client)
+                .collect();
             for client in clients {
                 self.leave(client);
             }
@@ -473,6 +494,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         let gone: Vec<_> = self
             .peers
             .iter()
+            .filter(|(_, peer)| recipient(peer))
             .filter_map(|(client, peer)| {
                 peer.outgoing
                     .try_send(message.clone())
@@ -797,6 +819,7 @@ async fn connection(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut selected = None;
+    let mut account_auth = false;
     // Tungstenite requires an unboxed HTTP error response in this callback.
     #[allow(clippy::result_large_err)]
     let callback = |request: &Request, mut response: Response| {
@@ -808,6 +831,9 @@ async fn connection(
         let version = protocols
             .split(',')
             .any(|protocol| protocol.trim() == "safe-cex-frame.v1");
+        account_auth = protocols
+            .split(',')
+            .any(|protocol| protocol.trim() == ACCOUNT_AUTH_PROTOCOL);
         let mut bearer = protocols
             .split(',')
             .filter_map(|protocol| protocol.trim().strip_prefix("bearer."));
@@ -870,6 +896,7 @@ async fn connection(
         client,
         outgoing,
         cancel,
+        account_auth,
         ready,
     };
     let joined = async {
@@ -1060,6 +1087,8 @@ mod tests {
                         books: HashSet::new(),
                         candles: HashSet::new(),
                         tickers: None,
+                        // Client 2 is a v1 client that never offered the notice.
+                        account_auth: client == 1,
                     },
                 );
                 peers.push(receiver);
@@ -1086,15 +1115,18 @@ mod tests {
             },
         );
         actors[0].execute();
+        let Ok(Outgoing::Text(message)) = receivers[0][0].try_recv() else {
+            panic!("account auth notice")
+        };
+        assert_eq!(
+            message.as_ref(),
+            r#"{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"}"#
+        );
         for peer in &mut receivers[0] {
-            let Ok(Outgoing::Text(message)) = peer.try_recv() else {
-                panic!("account auth notice")
-            };
-            assert_eq!(
-                message.as_ref(),
-                r#"{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"}"#
+            assert!(
+                peer.try_recv().is_err(),
+                "only opted-in peers receive it, once"
             );
-            assert!(peer.try_recv().is_err());
         }
         for peer in &mut receivers[1] {
             assert!(peer.try_recv().is_err());
@@ -1123,6 +1155,7 @@ mod tests {
                     books: HashSet::new(),
                     candles: HashSet::new(),
                     tickers: None,
+                    account_auth: false,
                 },
             );
             receivers.push(receiver);
@@ -1195,6 +1228,7 @@ mod tests {
                     books: HashSet::new(),
                     candles: HashSet::new(),
                     tickers: None,
+                    account_auth: false,
                 },
             );
             receivers.push(receiver);
@@ -1298,6 +1332,7 @@ mod tests {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth: false,
             },
         );
         actor.command(
@@ -1358,7 +1393,9 @@ mod tests {
         actor.host.engine.start((actor.host.clock)());
         actor.execute();
         let (outgoing, mut messages) = mpsc::channel(4);
-        actor.join(7, outgoing, watch::channel(false).0).unwrap();
+        actor
+            .join(7, outgoing, watch::channel(false).0, false)
+            .unwrap();
         assert!(matches!(messages.recv().await, Some(Outgoing::Frame(_))));
         let Some(Outgoing::Text(text)) = messages.recv().await else {
             panic!("startup failure was not replayed");

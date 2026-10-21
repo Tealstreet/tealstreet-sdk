@@ -69,7 +69,8 @@ Other runtimes can inject `nativeOptions.socketFactory`. It must deliver future
 events after factory return and honor `binaryType = 'arraybuffer'`; Blob
 messages are rejected. Authentication uses the native server's
 `safe-cex-frame.v1` and `bearer.<token>` subprotocols; the server echoes only the
-version. Error messages exposed by the adapter omit target URLs and tokens.
+version. The session also offers `safe-cex-frame.account-auth`, which opts it in
+to `accountAuth` notices; servers that predate it ignore the offer. Error messages exposed by the adapter omit target URLs and tokens.
 
 Clients use the shared `Frame` decoder and `FrameApplier` on every binary
 message. The first binary message is a full snapshot; notices can arrive before

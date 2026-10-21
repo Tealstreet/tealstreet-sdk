@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NativeFrameSession, type NativeFrameSessionOptions, type NativeFrameSocket } from './NativeFrameSession';
 
 const PROTOCOL = 'safe-cex-frame.v1';
+const ACCOUNT_AUTH_PROTOCOL = 'safe-cex-frame.account-auth';
 const URL = 'wss://native.invalid/accounts/account-1';
 const TOKEN = 'opaque-account-token';
 
@@ -142,7 +143,7 @@ describe('NativeFrameSession', () => {
   });
   it('authenticates with subprotocols, accepts preceding notices, and preserves raw frames and command IDs', async () => {
     const { socket, sink, socketFactory, promise } = setup();
-    expect(socketFactory).toHaveBeenCalledWith(URL, [PROTOCOL, `bearer.${TOKEN}`]);
+    expect(socketFactory).toHaveBeenCalledWith(URL, [PROTOCOL, ACCOUNT_AUTH_PROTOCOL, `bearer.${TOKEN}`]);
     expect(socket.binaryType).toBe('arraybuffer');
     socket.open();
     const log = '{"type":"log","level":"info","message":"ready"}';
@@ -185,7 +186,7 @@ describe('NativeFrameSession', () => {
       socket.open();
       socket.message(frame());
       const session = await pending;
-      expect(constructor).toHaveBeenCalledWith(URL, [PROTOCOL, `bearer.${TOKEN}`]);
+      expect(constructor).toHaveBeenCalledWith(URL, [PROTOCOL, ACCOUNT_AUTH_PROTOCOL, `bearer.${TOKEN}`]);
       session.close();
     } finally { vi.unstubAllGlobals(); }
   });
