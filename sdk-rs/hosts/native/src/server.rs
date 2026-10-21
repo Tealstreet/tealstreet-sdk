@@ -424,11 +424,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
-                        text = encode_notice(ServerNotice::StartupFailed {
-                            detail: &VenueError::new(
-                                "Startup failed; its diagnostic exceeded the native message limit",
-                            ),
-                        });
+                        // Classification survives so clients can still branch on it.
+                        let mut bounded = VenueError::new(
+                            "Startup failed; its diagnostic exceeded the native message limit",
+                        );
+                        bounded.kind = error.kind;
+                        bounded.outcome = error.outcome;
+                        text = encode_notice(ServerNotice::StartupFailed { detail: &bounded });
                     }
                     self.startup_failure = Some(text.clone());
                     self.broadcast(Outgoing::Text(text))
@@ -470,23 +472,23 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
-    /// A completion too large to deliver still settles its command, as an error.
+    /// A completion too large to deliver still settles its command, as an error
+    /// whose outcome is unknown: the engine may have succeeded.
     fn bounded_done(&self, command: u32, text: Arc<str>) -> Arc<str> {
         if text.len() <= self.config.max_frame_bytes {
             return text;
         }
+        let error = VenueError::new(format!(
+            "Engine response of {} bytes exceeds the {}-byte native message limit",
+            text.len(),
+            self.config.max_frame_bytes
+        ))
+        .outcome(safe_cex_engine::Outcome::Unknown);
         encode_notice(ServerNotice::Done {
             command,
             result: None,
-            error: Some(
-                format!(
-                    "Engine response of {} bytes exceeds the {}-byte native message limit",
-                    text.len(),
-                    self.config.max_frame_bytes
-                )
-                .into(),
-            ),
-            detail: None,
+            error: Some(error.legacy_text().into()),
+            detail: Some(&error),
         })
     }
 
@@ -873,44 +875,69 @@ enum ServerNotice<'a> {
         detail: &'a VenueError,
     },
 }
-/// Splits a delta frame into consecutive frames under `max` bytes. Each carries
-/// the frame header and full string table, and sections keep their order, so
-/// applying the segments in sequence equals applying the frame. `None` when the
-/// frame is malformed or one section cannot fit with the table.
+/// The parent a section is only read beside, in the same frame, by frame consumers.
+fn section_parent(kind: u16) -> Option<u16> {
+    use safe_cex_engine::wire::section;
+    match kind {
+        section::PREDICTION_MARKETS
+        | section::INSTRUMENT_CLASSIFICATIONS
+        | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
+        section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        _ => None,
+    }
+}
+
+/// Splits a delta frame into consecutive frames under `max` bytes. The engine
+/// writes sections in the order consumers apply them, so applying the segments
+/// in sequence equals applying the frame, given that each carries the header and
+/// full string table, dependent sections stay with their parent, and STATUS
+/// (loaded flags) arrives last. `None` when the frame is malformed or a unit
+/// cannot fit with the table.
 fn segment_frame(frame: &[u8], max: usize) -> Option<Vec<Arc<[u8]>>> {
+    use safe_cex_engine::wire::section;
     const HEADER: usize = 16;
     let count = u16::from_le_bytes(frame.get(6..8)?.try_into().ok()?) as usize;
-    let mut sections = Vec::with_capacity(count);
+    // A unit is a parent section and its dependents: (head kind, bytes, sections).
+    let mut units: Vec<(u16, usize, Vec<&[u8]>)> = Vec::with_capacity(count);
+    let mut status = None;
     let mut strings: &[u8] = &[];
     let mut at = HEADER;
     for _ in 0..count {
         let header = frame.get(at..at + 8)?;
         let kind = u16::from_le_bytes([header[0], header[1]]);
         let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
-        let section = frame.get(at..at.checked_add(8 + length)?)?;
-        at += section.len();
-        if kind == safe_cex_engine::wire::section::STRINGS {
-            strings = section;
-        } else {
-            sections.push(section);
+        let bytes = frame.get(at..at.checked_add(8 + length)?)?;
+        at += bytes.len();
+        match (kind, section_parent(kind)) {
+            (section::STRINGS, _) => strings = bytes,
+            (section::STATUS, _) => status = Some(bytes),
+            (_, Some(parent)) => {
+                let unit = units.last_mut().filter(|unit| unit.0 == parent)?;
+                unit.1 += bytes.len();
+                unit.2.push(bytes);
+            }
+            _ => units.push((kind, bytes.len(), vec![bytes])),
         }
     }
     if at != frame.len() {
         return None;
     }
+    if let Some(bytes) = status {
+        units.push((section::STATUS, bytes.len(), vec![bytes]));
+    }
     let fixed = HEADER + strings.len();
     let mut groups: Vec<Vec<&[u8]>> = vec![Vec::new()];
     let mut size = fixed;
-    for section in sections {
-        if fixed + section.len() > max {
+    for (_, bytes, sections) in units {
+        if fixed + bytes > max {
             return None;
         }
-        if size + section.len() > max {
+        if size + bytes > max {
             groups.push(Vec::new());
             size = fixed;
         }
-        size += section.len();
-        groups.last_mut()?.push(section);
+        size += bytes;
+        groups.last_mut()?.extend(sections);
     }
     Some(
         groups
@@ -1437,6 +1464,68 @@ mod tests {
             segment_frame(&frame[..frame.len() - 1], max).is_none(),
             "malformed"
         );
+    }
+
+    fn kinded_frame(sections: &[(u16, usize)]) -> Vec<u8> {
+        let mut w = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 3.0);
+        for (kind, bytes) in sections {
+            w.begin(*kind);
+            let name = w.string("BTC");
+            w.u32(name);
+            w.f64s(std::iter::repeat_n(1.0, bytes / 8));
+            w.end();
+        }
+        w.finish()
+    }
+
+    #[test]
+    fn segments_keep_dependent_sections_with_their_parent_and_status_last() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[
+            (STATUS, 64),
+            (MARKETS, 400),
+            (PREDICTION_MARKETS, 300),
+            (INSTRUMENT_CLASSIFICATIONS, 300),
+            (TICKERS, 400),
+            (POSITIONS, 400),
+            (POSITION_GREEKS, 300),
+            (PREDICTION_HOLDINGS, 300),
+            (BOOK, 400),
+        ]);
+        let segments = segment_frame(&frame, 1_300).expect("units fit");
+        assert!(segments.len() >= 3);
+        let kinds: Vec<Vec<u16>> = segments
+            .iter()
+            .map(|segment| {
+                safe_cex_engine::wire::sections(segment)
+                    .map(|(kind, _)| kind)
+                    .filter(|kind| *kind != STRINGS)
+                    .collect()
+            })
+            .collect();
+        let segment_of = |wanted: u16| kinds.iter().position(|k| k.contains(&wanted)).unwrap();
+        for (parent, child) in [
+            (MARKETS, PREDICTION_MARKETS),
+            (MARKETS, INSTRUMENT_CLASSIFICATIONS),
+            (POSITIONS, POSITION_GREEKS),
+            (POSITIONS, PREDICTION_HOLDINGS),
+        ] {
+            assert_eq!(
+                segment_of(parent),
+                segment_of(child),
+                "{child} stays with {parent}"
+            );
+        }
+        assert_eq!(
+            segment_of(STATUS),
+            kinds.len() - 1,
+            "loaded flags follow their data"
+        );
+        assert_eq!(kinds.last().unwrap().last(), Some(&STATUS));
+        // A unit larger than the limit, or a dependent without its parent, cannot be split.
+        assert!(segment_frame(&frame, 1_000).is_none());
+        let orphan = kinded_frame(&[(TICKERS, 400), (POSITION_GREEKS, 400), (BOOK, 400)]);
+        assert!(segment_frame(&orphan, 900).is_none());
     }
 
     fn peer(
