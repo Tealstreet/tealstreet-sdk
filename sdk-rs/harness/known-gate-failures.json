@@ -36566,13 +36566,6 @@
             "checkpoint 0 tickers[1].quoteVolume",
             "checkpoint 0 tickers[1].volume"
           ]
-        },
-        {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
-          "keys": [
-            "checkpoint 0 account.balance.total",
-            "checkpoint 0 account.balance.upnl"
-          ]
         }
       ]
     },
@@ -36837,13 +36830,6 @@
             "checkpoint 0 tickers[1].fundingRate",
             "checkpoint 0 tickers[1].quoteVolume",
             "checkpoint 0 tickers[1].volume"
-          ]
-        },
-        {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
-          "keys": [
-            "checkpoint 0 account.balance.total",
-            "checkpoint 0 account.balance.upnl"
           ]
         }
       ]

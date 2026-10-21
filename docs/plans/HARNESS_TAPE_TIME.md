@@ -348,3 +348,19 @@ cases, zero unexpected or unused private declarations and all checks green.
 Run the dependency guard separately from merge, audit the actual merge and
 report its pin before starting Lighter-Robinhood. Keep fixtures, validators,
 production code, entropy and the ordinary one-pair CI default unchanged.
+
+Tape-time TS entry/TP/SL generation exposed the production generator's
+100-suffix-per-millisecond collision space. A controlled constant-random
+replay reproduces an acknowledged ID reuse and the independent verifier
+correctly rejects it. The overseer approved a harness-only, domain-separated
+SHA-256 stream seeded from the exact tape SHA for private Lighter TS replay,
+installed after crypto initialization. Keep real signing crypto, production
+ID arithmetic and the duplicate-ID verifier unchanged. The regression runs
+the real TS replay under colliding ambient randomness and checks the actual
+installed stream and all bracket acknowledgements; the clock-only version
+fails it. Native Rust seeds a stateful counter once through Cx entropy and
+increments for later IDs; the separate production TS risk was reported.
+
+Remove only four unobserved keys: checkpoint-0 total/upnl on each private
+tape (13 to 11 each). Preserve public and Robinhood declarations, fixture
+bytes, independent signatures and strict FAIL for remaining differences.
