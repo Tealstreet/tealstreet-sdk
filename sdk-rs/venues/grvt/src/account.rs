@@ -1812,9 +1812,8 @@ impl Grvt {
                 return;
             }
         }
-        cx.notice(
-            Level::Error,
-            code::REQUEST_FAILED,
+        cx.retried_failure(
+            "grvt.account:1815",
             "GRVT private request failed; retaining previous account state",
         );
     }

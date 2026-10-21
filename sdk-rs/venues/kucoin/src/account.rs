@@ -772,9 +772,8 @@ impl Kucoin {
                 self.account_issue(cx, request);
                 return;
             }
-            cx.notice(
-                Level::Error,
-                code::REQUEST_FAILED,
+            cx.retried_failure(
+                "kucoin.account:773",
                 format!("KuCoin private read failed: {}", request.path(cx.store)),
             );
             if let Read::Margin(symbol) | Read::Leverage(symbol) = &request.read {
