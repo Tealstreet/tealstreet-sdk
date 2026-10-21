@@ -5215,6 +5215,7 @@ mod placement_ack_tests {
                     side: OrderSide::Buy,
                     price: 1.,
                     amount: 1.,
+                    ..Default::default()
                 });
             } else if let Some((child, group)) = text.split_once('@') {
                 let mut row = order(child);

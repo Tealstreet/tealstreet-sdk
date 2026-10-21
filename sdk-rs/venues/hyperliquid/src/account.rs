@@ -1894,7 +1894,7 @@ impl Hyperliquid {
                     amount: fill.sz,
                     id: Some(fill.tid.to_string()),
                     // As TS: closing fills carry realized PnL net of their fee.
-                    realized_pnl: closing.then(|| fill.closed_pnl - fill.fee),
+                    realized_pnl: closing.then_some(fill.closed_pnl - fill.fee),
                     fee: closing.then_some(fill.fee),
                 });
                 if self.spot {

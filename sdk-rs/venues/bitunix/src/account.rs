@@ -1124,6 +1124,7 @@ impl BitunixFutures {
                                     side,
                                     price: clean_float((cost - previous.1) / delta),
                                     amount: clean_float(delta),
+                                    ..Default::default()
                                 });
                                 self.account
                                     .filled
