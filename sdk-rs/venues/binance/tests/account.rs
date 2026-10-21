@@ -1432,3 +1432,55 @@ fn listen_key_failures_back_off_from_5s_to_the_60s_cap() {
         assert!(h.has_request("/fapi/v1/listenKey"));
     }
 }
+
+#[test]
+fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
+    let mut h = ready();
+    let order = |id: u64, kind: &str| {
+        format!(
+            r#"{{"orderId":{id},"clientOrderId":"c{id}","executedQty":"0","origQty":"0.004","price":"89000","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &[String]| {
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
+        h.advance(10_000.0);
+        h.respond(
+            "/fapi/v1/openOrders",
+            200,
+            &format!("[{}]", orders.join(",")),
+        );
+        h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    };
+    refresh(&mut h, &[order(1, "LIMIT")]);
+    assert!(h.engine.store().order("1").is_some());
+    h.errors.clear();
+
+    // Order 1 keeps its stored copy; order 2 has none and drops out.
+    refresh(&mut h, &[order(1, "FUTURE_KIND"), order(2, "FUTURE_KIND")]);
+    assert!(h.engine.store().order("1").is_some());
+    assert!(h.engine.store().order("2").is_none());
+    assert_eq!(h.errors, ["Binance open order 2 has an unsupported type"]);
+    assert!(
+        h.logs
+            .contains(&"Binance open order 1 has an unsupported type".to_owned())
+    );
+    let bad = [order(1, "FUTURE_KIND"), order(2, "FUTURE_KIND")];
+    refresh(&mut h, &bad);
+    assert_eq!(h.errors.len(), 1, "repeated missing rows stay suppressed");
+    // Reused id on another symbol is not the rejected row's retained copy.
+    h.engine
+        .store_mut()
+        .update_order("1", |o| o.symbol = "ETHUSDT".into());
+    refresh(&mut h, &bad);
+    assert_eq!(h.errors.len(), 2, "a prior Warning must upgrade once");
+    assert_eq!(h.errors[1], "Binance open order 1 has an unsupported type");
+    refresh(&mut h, &bad);
+    assert_eq!(h.errors.len(), 2);
+    refresh(&mut h, &[order(1, "LIMIT"), order(2, "LIMIT")]);
+    h.engine.store_mut().update_order("2", |o| {
+        o.status = safe_cex_engine::model::OrderStatus::Canceled
+    });
+    refresh(&mut h, &bad);
+    assert_eq!(h.errors.len(), 3, "mapping re-arms the missing-copy error");
+}

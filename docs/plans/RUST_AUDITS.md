@@ -747,8 +747,9 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
   (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX and
-  WEEX now read native rails `onRead`; MEXC reads a symbol its metadata refresh
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX uses
+  fresh reads plus selected metadata refresh via `onReadAndMetadata`; WEEX keeps
+  fresh `onRead` rails; MEXC reads a symbol its metadata refresh
   has not covered yet); command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
   `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
@@ -897,10 +898,16 @@ Normal inputs send the same requests as TS; the risk is resilience.
   (`trading.rs:842`); no one-shot resend on signature error 100001;~~ multi-order
   cancel sends nothing if any id is unknown (`trading.rs:780`) — intended per
   [the unknown-cancel audit](RUST_UNKNOWN_CANCEL.md) (error before any write).
-- Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
-  per-symbol leverage/margin not read; trigger move requires trigger_type;
-  bracket `workingType`; history fails on one bad row; WS message with one bad
-  field dropped.
+- Low: ~~hedge leverage sets both sides~~ (requires a side and writes only that
+  native rail); ~~per-symbol leverage/margin not read~~ (explicit metadata reads
+  stage both atomically and fence newer settings); ~~bracket `workingType`~~
+  (per-leg trigger precedence already correct); ~~WS message with one bad field
+  dropped~~ for ACCOUNT_UPDATE positions (row isolation, coded warning and REST
+  repair). Orders/fills/config retain strict decoding when identity is uncertain.
+  **RISKY — retained:** `cancelRestrictions=ONLY_NEW` guards cancel-replace
+  against partial-fill races (quantity-only amend has no such restriction);
+  trigger moves require a known source rather than guessing; malformed financial
+  history rejects instead of silently returning a plausible incomplete ledger.
 
 ### WEEX
 - High: ~~one `null` numeric field in a public row stops the venue, private start
