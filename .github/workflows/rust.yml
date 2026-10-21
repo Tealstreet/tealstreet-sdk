@@ -6,6 +6,12 @@ name: Rust SDK
 
 on:
   workflow_dispatch:
+    inputs:
+      replay_artifact:
+        description: Engine layout for the complete strict replay matrix
+        type: choice
+        options: [family, combined]
+        default: family
   push:
     branches: [master, feat/rust-rewrite]
     paths:
@@ -289,10 +295,10 @@ jobs:
         if: matrix.venue == 'binance'
         run: yarn rust:test-server-adapter
       - name: Build the combined wasm engine
-        if: matrix.venue == 'binance'
+        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
         run: yarn rust:build-wasm
       - name: Check the shipped combined wasm size budget
-        if: matrix.venue == 'binance'
+        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
         run: corepack yarn -s rust:wasm-budget --combined
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
@@ -317,11 +323,16 @@ jobs:
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
+      # A dispatched combined run replays this exact module in every suite;
+      # never overwrite it with a family or archive it as a family-only build.
       - name: Build the venue wasm engine
+        if: inputs.replay_artifact != 'combined'
         run: yarn rust:build-wasm --venue ${{ matrix.venue }}
       - name: Archive the matching CI replay engine
+        if: inputs.replay_artifact != 'combined'
         run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
+        if: inputs.replay_artifact != 'combined'
         run: corepack yarn -s rust:wasm-budget
       - name: Replay request normalization
         run: yarn rust:test-harness
@@ -465,3 +476,14 @@ jobs:
           path: sdk-rs/hosts/wasm/pkg/ci-replay/
           retention-days: 3
           if-no-files-found: ignore
+      - name: Retain the shipped combined replay engine briefly
+        if: always() && inputs.replay_artifact == 'combined' && matrix.venue == 'binance'
+        uses: actions/upload-artifact@v7
+        with:
+          name: combined-wasm
+          path: |
+            sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js
+            sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm
+            sdk-rs/hosts/wasm/pkg/node/package.json
+          retention-days: 3
+          if-no-files-found: error
