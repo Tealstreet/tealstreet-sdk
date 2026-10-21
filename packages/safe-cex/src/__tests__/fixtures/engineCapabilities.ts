@@ -58,6 +58,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     accountTier: is('lighter', 'lighter-robinhood'),
     closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', ...OKX),
     balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
+    marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
     hostClock: is('backpack', 'coinbase', 'coinbasespot', ...ORDERLY),
     ...overrides,
   };

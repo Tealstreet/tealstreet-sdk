@@ -927,6 +927,16 @@ mod tests {
                 amend_with_symbol: venue == "kucoinspot",
                 order_book_query: any(&["asterdex", "polymarket"], venue),
                 options: false,
+                market_refresh: any(
+                    &[
+                        "bybit",
+                        "bybitdemo",
+                        "bybitinverse",
+                        "bybitspot",
+                        "hyrotrader",
+                    ],
+                    venue,
+                ),
                 quantity_units: match venue {
                     "mexc" | "blofin" | "kucoin" | "coinbase" | "coinbasespot" => {
                         QuantityUnits::NativePlacement

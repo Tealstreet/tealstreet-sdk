@@ -6,6 +6,7 @@ mod hyro;
 mod identity;
 mod options;
 mod paths;
+mod refresh;
 mod sign;
 mod trading;
 mod wire;
@@ -134,6 +135,7 @@ pub enum Then {
         rejected: bool,
     },
     Fees(HashMap<String, (f64, f64)>),
+    RefreshMarkets(refresh::Page),
     Tickers(Vec<Ticker>),
     OptionSeed {
         base_coin: String,
@@ -274,6 +276,7 @@ pub struct BybitLinear {
     history: history::HistoryState,
     /// The raw first account of the last good REST wallet read: TS `balance.info`.
     balance_info: Option<String>,
+    market_refresh: refresh::State,
 }
 
 /// Bybit kline interval codes.
@@ -455,6 +458,7 @@ impl BybitLinear {
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
             balance_info: None,
+            market_refresh: refresh::State::default(),
         }
     }
 
@@ -875,6 +879,9 @@ impl BybitLinear {
         rejected: bool,
         response: Result<Response<'_>, &str>,
     ) {
+        if self.market_refresh.retired_startup {
+            return;
+        }
         if prelaunch && (self.startup.markets_loaded || self.startup.prelaunch.is_some()) {
             return;
         }
@@ -1624,6 +1631,10 @@ impl BybitLinear {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match then {
+            Then::RefreshMarkets(page) => match response {
+                Ok(response) => self.refresh_response(cx, page, response),
+                Err(error) => self.refresh_failed(cx, page, error),
+            },
             Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets {
                 prelaunch,
@@ -1971,6 +1982,7 @@ impl Venue for BybitLinear {
             },
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
+            market_refresh: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2081,6 +2093,14 @@ impl Venue for BybitLinear {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if matches!(&pending.then, Then::RefreshMarkets(_)) {
+            self.select_category(pending.category);
+            let Then::RefreshMarkets(page) = pending.then else {
+                unreachable!()
+            };
+            self.refresh_response(cx, page, response);
+            return;
+        }
         self.select_category(pending.category);
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
@@ -2099,7 +2119,7 @@ impl Venue for BybitLinear {
         response: Response<'_>,
     ) {
         // A rejected fee read carries `result: {}`; its retCode decides startup.
-        if matches!(pending.then, Then::Fees(_)) {
+        if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_)) {
             return self.on_response(cx, pending, response);
         }
         self.on_request_failed(
@@ -2114,7 +2134,11 @@ impl Venue for BybitLinear {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
+        if self.market_refresh.retired_startup && matches!(&pending.then, Then::Markets { .. }) {
+            return;
+        }
         match &mut pending.then {
+            Then::RefreshMarkets(page) => self.refresh_item(page, item),
             Then::Account(request) => self.on_account_item(cx, request, item),
             Then::Options(request) => options::on_item(request, item),
             then => {
@@ -2143,6 +2167,13 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(&pending.then, Then::RefreshMarkets(_)) {
+            let Then::RefreshMarkets(page) = pending.then else {
+                unreachable!()
+            };
+            self.refresh_failed(cx, page, error);
+            return;
+        }
         self.select_category(pending.category);
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, error) {
@@ -2158,6 +2189,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.refresh_timer(cx, timer) {
+            return;
+        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
@@ -2171,6 +2205,7 @@ impl Venue for BybitLinear {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx, command),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

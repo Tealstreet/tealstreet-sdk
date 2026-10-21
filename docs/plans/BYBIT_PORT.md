@@ -91,10 +91,32 @@ not copy Rust subscriptions or hide missing native topics.
 
 ## Explicit market refresh and Hyro supervision (2026-10-21)
 
-Plan: add a capability-gated native public catalogue refresh that stages all
-enabled categories atomically, coalesces callers, bounds paging/timeouts and
-preserves account/trading/settings/fee state. Publish through the SDK after a
-host flush and forward read-only worker requests. Confirm the stale Hyro early
-ping finding with a deadline/retired-timer regression. Keep demo-key diagnostics
-in separate #1590. Run Bybit/Binance and touched engine/host/TS gates plus
-independent adversarial review before CI and merge.
+The native `refreshMarkets` command stages every enabled category before one
+catalogue commit. Public Trading/PreLaunch pages are bounded by cursor progress,
+a page budget and a 30 s deadline. Concurrent callers share the walk. Required
+Trading-option terms are strict; a failed category or malformed row retains the
+whole prior catalogue. Spot has no cursor/limit, options use documented `All`,
+and Hyro retains its own USDT perpetual filter.
+
+Account state, orders, settings, books, candles, tickers and known symbol fees
+survive discovery. Metadata/classification/product indices are rebuilt together;
+new symbols subscribe on their existing category socket. New symbol fees remain
+unknown until startup fee discovery after a restart. Refresh does no signing,
+account reconciliation or socket restart. A degraded optional startup category
+must recover through restart before refresh can proceed.
+
+SDK refresh coalesces callers, flushes native state before comparing one
+added/removed delta, and emits `markets:changed` when membership changes. Worker
+requests execute on the authoritative engine with read timeout semantics.
+`fetchMarkets`/`fetchTickers` remain cached reads. Unsupported engines keep their
+cached refresh behavior. Shared consumers must refresh the direct source and
+restart provider/accounts under the existing catalogue-identity contract.
+
+Hyro's early-ping finding was stale: 5 s watch wakes retain the absolute 10 s
+ping deadline. An existing-code regression verifies early, consumed and active
+cleared timer callbacks cannot ping early or rearm after close. Demo-key
+mismatch diagnostics remain separate in #1590.
+
+Primary instrument contract: https://bybit-exchange.github.io/docs/v5/market/instrument
+Independent adversarial review is clear after strict option-term validation and
+corrected inverse-category fixture/preconditions.

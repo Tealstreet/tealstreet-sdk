@@ -1718,6 +1718,38 @@ export class RustEngineExchange extends BaseExchange {
     return ready;
   };
 
+  private marketRefreshPending?: Promise<{ added: Market[]; removed: Market[] }>;
+
+  refreshMarkets = (): Promise<{ added: Market[]; removed: Market[] }> => {
+    if (this.marketRefreshPending) return this.marketRefreshPending;
+    const pending = this.refreshNativeMarkets().finally(() => {
+      if (this.marketRefreshPending === pending) this.marketRefreshPending = undefined;
+    });
+    this.marketRefreshPending = pending;
+    return pending;
+  };
+
+  private refreshNativeMarkets = async (): Promise<{ added: Market[]; removed: Market[] }> => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS, 'markets');
+    this.assertEngineAlive();
+    // Older/other engines retain their existing cached refresh behavior.
+    if (!this.capabilityRecord?.marketRefresh) return { added: [], removed: [] };
+    // A consumer may not diverge from its authoritative provider catalogue.
+    // Provider-side refresh keeps the existing identity-change/restart protocol.
+    if (this.publicFeedMode === 'shared')
+      throw new Error('Refresh the shared public feed source, then restart provider and accounts');
+    const previous = new Map(this.store.markets.map((market) => [market.id, market]));
+    await this.command({ op: 'refreshMarkets' });
+    this.host?.flush();
+    this.assertEngineAlive();
+    const current = this.store.markets;
+    const currentIds = new Set(current.map((market) => market.id));
+    const added = current.filter((market) => !previous.has(market.id));
+    const removed = [...previous.values()].filter((market) => !currentIds.has(market.id));
+    if (added.length || removed.length) this.emitter.emit('markets:changed', { added, removed });
+    return { added, removed };
+  };
+
   fetchMarkets = async () => {
     await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
     this.assertEngineAlive();
