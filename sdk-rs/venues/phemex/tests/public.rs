@@ -93,7 +93,7 @@ fn daily_candle_to_preserves_the_callers_day_instead_of_shifting_back() {
         .find_map(|action| match action {
             Action::Notice(Notice::CommandDone {
                 command: 91,
-                result: Ok(json),
+                result: json,
             }) => Some(serde_json::from_str::<Vec<Candle>>(&json).unwrap()),
             _ => None,
         })

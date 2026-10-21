@@ -314,3 +314,7 @@ Verification: index-trigger regression reproduced the prior unsupported error.
 All 400 focused Phemex/Binance native tests pass, as do touched fmt, strict
 all-target Clippy and banned-pattern checks. Independent correctness review is
 clear. Full TypeScript/WASM/replay validation remains CI's gate before merge.
+- Integrated pinned34adfdb71a6 (including success-only Cx.done) via clean porcelain
+  merge. Updated the added daily-candle success assertion to plain String;
+  independent integration rereview clean. Phemex/Binance400 tests, fmt, strict
+  all-target Clippy and bans pass again. Guard remains six intended files.
