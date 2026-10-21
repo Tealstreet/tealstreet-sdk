@@ -373,9 +373,14 @@ impl ApexOmni {
                     })
                     .and_then(|mut rows| rows.remove(&symbol));
                 let Some(rows) = rows else {
-                    cx.done(command, "[]".into());
+                    cx.fail(command, "Malformed ApeX candle response");
                     return;
                 };
+                if rows.iter().any(|row| row.t < 0.0 || row.t.fract() != 0.0) {
+                    cx.fail(command, "Invalid ApeX candle timestamp");
+                    return;
+                }
+                let received = rows.len();
                 let mut rows: Vec<_> = rows
                     .into_iter()
                     .map(|r| Candle {
@@ -387,8 +392,19 @@ impl ApexOmni {
                         volume: r.v,
                     })
                     .collect();
-                if !rows.iter().all(valid_candle) {
-                    cx.fail(command, "invalid ApeX candles");
+                rows.retain(|row| {
+                    if valid_candle(row) {
+                        return true;
+                    }
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        format!("ApeX skipped invalid {symbol} candle at {}", row.timestamp),
+                    );
+                    false
+                });
+                if received > 0 && rows.is_empty() {
+                    cx.fail(command, "No usable ApeX candles");
                     return;
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));

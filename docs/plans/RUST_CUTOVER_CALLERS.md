@@ -1679,6 +1679,14 @@ keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
 
+### ApeX Omni decimal remaining and candle row isolation
+
+Order displays/default amendments now preserve native decimal remainder (for
+example0.3-0.2 is0.1) without snapping to market amount precision. REST chart
+reads keep sorted valid candles when a typed zero-price row occurs and emit a
+coded warning; malformed or wholly unusable responses fail. Caller signatures,
+order IDs and explicit leverage-write semantics remain unchanged.
+
 ### BingX port-review metadata and stream recovery
 
 Rust BingX `updateSymbolMetadata(symbol)` now reads native leverage and margin
