@@ -114,6 +114,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Production findings | Current audit ledger | Choosing remaining work or deciding whether a historical finding is still open. | [RUST_AUDITS.md](RUST_AUDITS.md) |
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_BACKPACK_REST_ORDERBOOK.md](RUST_BACKPACK_REST_ORDERBOOK.md) |
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_CRYPTOCOM_REST_ORDERBOOK.md](RUST_CRYPTOCOM_REST_ORDERBOOK.md) |
+| REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_GRVT_REST_ORDERBOOK.md](RUST_GRVT_REST_ORDERBOOK.md) |
 | REST order-book queries | Retained plan/evidence | Changing request-owned book snapshots, JSON ingress or streaming isolation. | [RUST_MEXC_BOOK_JSON_INGRESS.md](RUST_MEXC_BOOK_JSON_INGRESS.md) |
 | Replay determinism | Sweep plan / merge receipts | Private clock, fixture causality and complete raw repeatability proofs. | [HARNESS_TAPE_TIME.md](HARNESS_TAPE_TIME.md) |
 | Replay evidence | Retained plan/evidence | Checking strict reports, fixture provenance, declarations or repeatability proofs. | [HARNESS_ASTER_CLOCK.md](HARNESS_ASTER_CLOCK.md) |

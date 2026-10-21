@@ -1,6 +1,8 @@
 # Architecture and replay-evidence re-audit
 
 Base: landing `b6cb612bc7c7c611a17dff5900e6977a7e8b5ab8` (#1688).
+Integrated landing `c568c1745a9` preserves the later GRVT book repair and
+caller documentation; those changes do not alter the audited gate policy.
 Scope: the Architecture and Gate honesty sections of `RUST_AUDITS.md`.
 Use current code and actual merged PRs; historical audit counts are not a
 current inventory. Production impact determines whether a remaining finding
@@ -53,8 +55,8 @@ All 50 use the effective deterministic private-clock policy: 49 explicit flags,
 plus polling BreakoutProp. This is a source-policy observation, not proof that
 every private result is correct. The pending sweep regression is separate.
 
-The current branch has 149 tracked paths under `docs/plans` before the new index;
-the index includes itself as path 150. Its status column describes document use,
+The integrated index covers 151 tracked paths under `docs/plans`, including
+itself and this ledger. Its status column describes document use,
 not blanket feature completion. Historical plans/JSON receipts remain intact.
 The stale in-progress Bitunix, KuCoin/Phemex/Orderly, Lighter and family-build
 roster rows are refreshed using actual first-parent merge receipts.
@@ -140,7 +142,7 @@ private policies; 13 tracked secondary-test modules; 68 Rust scripts and 61
 referenced source paths/patterns, all resolving. These counts are tied to the
 pinned source, not a blanket live readiness claim. Forty-nine existing focused
 enforcement controls pass, including hostile fixer access, protected diagnostic
-and workload failures, timing floors and exact budgets. All 150 index paths,
-217 local links and 36 actual merged ancestor pins validate. Independent plan
+and workload failures, timing floors and exact budgets. All 151 index paths,
+218 local links and the actual merged ancestor pins validate. Independent plan
 and documentation/evidence reviews are clean. Refresh the inventory on landing
 integration before final CI and the separate guard.
