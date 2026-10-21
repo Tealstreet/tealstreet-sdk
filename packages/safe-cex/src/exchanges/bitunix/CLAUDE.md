@@ -796,3 +796,24 @@ execution and optimistic/terminal guards remain. Partial initial halves cannot
 establish readiness, both staged serials/generations must be current, and partial
 command-owned refreshes cannot qualify as trading prerequisites. WS generation
 fences and financial/side defaults remain separate unchanged policies.
+
+Rust Bitunix declares synchronized host-clock input. The SDK adopts that capability
+before the first engine start and supplies its virtual clock for authenticated
+REST and private-login timestamps, including later socket epochs. Signing keeps
+its existing millisecond flooring and byte format. This does not add automatic
+signature-rejection retries or resend writes.
+
+Rust private-login controls are inspected even without `data`. An explicit false
+`data.result` keeps the existing rejection diagnostic; absent/null/malformed
+results warn as malformed stream data without claiming invalid credentials or
+copying the response. Failed controls share one two-second retry per socket
+without postponing its deadline. Success and socket retirement cancel that retry;
+a late timer cannot sign on a replacement. The existing first-pong compatibility,
+login timestamp units and write retry policy remain unchanged.
+
+Rust engine transport honors explicit `tealstreetWsRoute: true` on the first
+public-shard, private and futures/business socket attempt, selecting that channel's
+declared proxy. False/unset keeps two silent direct attempts before fallback;
+feed identities remain independent. The engine's native routing plan uses the
+same selection. The shared resolver and TS socket classes retain their existing
+fallback contract, and a direct transport still reports unsupported proxy routing.

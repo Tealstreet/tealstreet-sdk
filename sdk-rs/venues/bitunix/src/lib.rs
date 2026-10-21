@@ -237,7 +237,7 @@ impl BitunixFutures {
             cx.clear_timer(timer);
         }
         if matches!(s.feed, Feed::Private)
-            && let Some(timer) = self.account.login_retry.take()
+            && let Some((timer, _)) = self.account.login_retry.take()
         {
             cx.clear_timer(timer);
         }
@@ -398,6 +398,12 @@ fn candle(k: &Kline, rest: bool) -> Candle {
 }
 impl Venue for BitunixFutures {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            host_clock: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
@@ -492,7 +498,7 @@ impl Venue for BitunixFutures {
                     if m.op == "pong" {
                         s.pong_observed = true;
                     }
-                    self.private_message(cx, &m);
+                    self.private_message(cx, socket, &m);
                     return;
                 }
                 if let Err(e) = self.public_message(cx, &m) {

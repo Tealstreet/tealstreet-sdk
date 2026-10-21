@@ -529,11 +529,18 @@ Remaining resilience and completeness findings are independent of request parity
   at ~1 Hz (`account.rs:446`, `lib.rs:577`): no toast, account never loads.
 - Medium (unverified venue behaviour): leverage serialized as `30.0`
   (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
-  requires order detail to be final immediately (`trading.rs:1437`); a login
-  rejection without `data` is ignored (`account.rs:744`).
-- Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
+  requires order detail to be final immediately (`trading.rs:1437`); ~~a login
+  rejection without `data` is ignored~~. Missing/null/malformed login results now
+  emit a sanitized malformed-stream warning and coalesced retry on the originating
+  socket; explicit false retains its existing rejection diagnostic. Success and
+  retirement cancel pending retries, and old timers cannot sign on replacements.
+- Low: ~~no clock sync~~ (Bitunix requests synchronized SDK host time before
+  startup; authenticated REST and private login use that time); signature-rejection
+  (10007) resend remains separate (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
-  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
+  only on `op:"pong"` (`lib.rs:394`); ~~`tealstreetWsRoute` not honoured~~ (engine hosts now select each declared
+  Bitunix proxy on the first connection when explicitly requested; false/unset
+  retain two silent direct attempts and existing fallback recovery); ~~book kept
   while disconnected~~ (futures retirement immediately invalidates subscribed
   books and publishes consumer clearing before retry; current interests replay
   once on replacement); ~~secondary read keys dropped~~ (validated native options
