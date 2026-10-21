@@ -172,6 +172,11 @@ fields, construction metadata and pending-start behavior are recorded below.
 NX caller ordering was rechecked read-only at `65e086a3c90`.
 The Bitunix public-discovery follow-up checks #1636 at `62adf7651b0`; private
 initialization ordering and the shared startup visibility scope are updated below.
+The Bitunix socket/book follow-up checks #1639 at `77a5e5faaec`; NX empty-book
+propagation, smoothing and canvas rendering were checked read-only at
+`65e086a3c90`. The required caller repair below remains open.
+The Bitunix secondary-read follow-up checks #1640 at `93bb218ffda`; identity,
+egress and the limits of account-auth evidence are recorded below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -255,6 +260,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1627 / `9a4446203` | WEEX income lifetime-budget, truncated-chunk, advertised-cursor, failed-page and terminal-failure markers now carry their query command. Existing retained rows, chunk continuation, pacing and terminal rejection policy stay unchanged; a marker on a rejected query is not a successful partial array. |
 | #1637 / `673565c2e` | Runtime bridge policy now follows engine capability flags/enums; shared construction rules retain synchronous policy and expose optional `construction().bridge`. Capability-dependent public calls wait for an existing startup; no-start/failed-start calls reject with method-named `ExchangeError` `invalidInput`/`notSent`. Worker forwarding stays first. NX explicit readiness is recommended; typed rejection handling is required. See [Runtime capability readiness](#runtime-capability-readiness-1637). |
 | #1636 / `62adf7651` | A usable Bitunix catalogue starts private initialization before ticker seeding finishes. Valid public rows survive malformed typed peers; unusable required seeds retry without false loaded-empty readiness. Independent discovery retries honor rate floors and use existing startup.degraded/recovered codes. Ticker recovery does not restart private settings/polling; private/history failure policy and caller shapes stay unchanged. |
+| #1639 / `77a5e5faa` | Bitunix retains socket supervision/backoff per feed, rejects retired socket/timer events and replays current interests once on replacement. Futures-socket retirement immediately publishes empty books before retry; public ticker-shard retirement leaves the separate futures books intact. **Required, high priority:** NX must propagate empty-book invalidation through raw/smoothed listeners and clear displayed depth, rather than keep stale levels. See [Bitunix disconnected books](#bitunix-disconnected-books-1639). |
+| #1640 / `93bb218ff` | Bitunix signed GETs now use configured secondary read credentials and matching secondary egress; mutations, posted reads and private WS login stay primary, and public discovery stays unsigned. Account/settings requests tag the selected slot and scope, without adding native auth-outcome classification. Existing caller options remain; malformed secondary identities are rejected before I/O. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -310,6 +317,10 @@ Owner item, one-off at cutover: `historical_orders` (created by `supabase/histor
 Deployment order: exchange-server before web (B4 forwarding, `fetchEngineCapabilities`, then B11 completeness metadata). #1538 already emits venue events: deploy safe-cex-server with #1388's notice validator before connecting such engines to native sessions (an older validator closes the session on `type: "event"`).
 
 Not blockers but required edits are listed per area below.
+
+**High-priority trading-safety caller repair:** [Bitunix disconnected books](#bitunix-disconnected-books-1639)
+must clear previously displayed depth on invalidation. The current NX listener
+and renderer can keep stale book levels visible after disconnect.
 
 ### Venue names on Rust
 
@@ -2219,6 +2230,68 @@ sanitized messages instead of raw response bodies. Extend the required
 code-based degraded/recovered visibility below to Bitunix too; these retrying
 public reads are not terminal startup failures. Private/history strictness and
 caller arguments/results remain unchanged.
+
+### Bitunix disconnected books (#1639)
+
+Private, futures and public ticker-shard feeds retain independent socket
+supervisors across reconnects, with capped jittered backoff and a bounded connect
+attempt. Retired messages, opens, closes and queue/login timers cannot affect a
+replacement socket. Current subscription interests survive backoff and replay
+once at the replacement open; callers should not replay trading writes to recover
+public data. Outbound pings do not count as received traffic. The existing private
+silence compatibility remains until a real pong is observed.
+
+Retiring the **futures socket** immediately clears its subscribed books and emits
+empty BOOK updates, before retry or reopen. Reopen alone does not restore depth;
+only fresh current-socket data does, and that snapshot can have one empty side.
+The public ticker shards carry separate ticker channels; retiring one does not
+invalidate books on the still-live futures socket. URLs, channel/feed routing,
+book units and the wire format are unchanged.
+
+**Required cutover caller change, high priority: prevent stale displayed depth
+after disconnect.** At NX `65e086a3c90`, the raw web listener queues book updates
+(`apps/web/src/utils/market/listenOrderBook.ts:415-422`, batched storage at
+`:52-96`), but its consumer callback drops both-empty books (`:562-564`). The
+canvas also requires both sides to be nonempty before drawing
+(`apps/web/src/components/orderbook/Orderbook.tsx:1465-1471`); clearing the main
+canvas happens inside that skipped draw (`:1335`). Therefore the old displayed
+levels can survive an explicit invalidation. This is static source evidence,
+not a deployed-runtime reproduction.
+
+Smoothing must preserve the same invalidation: `listenOrderBook.ts:558-560`
+prefers the smoothed atom over raw data; `components/componentWorkers/OrderbookSmoothWorker.tsx:43-52`
+writes it only through the smoother, and `components/orderbook/useSmoothOrderbook.ts:80-81`
+returns without emitting when either current/previous side is empty. Propagate
+empty snapshots immediately, reset interpolation and cached rendered depth, and
+clear the canvas or show an explicit unavailable state. On fresh one-sided depth,
+render the available side or keep an explicit unavailable state without retaining
+old opposite-side levels. Do not interpolate across a disconnect.
+
+Required caller proof covers a seeded book followed by futures disconnect,
+immediate empty invalidation through worker/hosted delivery and both smoothing
+settings, no stale rendered levels during backoff/reopen, and fresh one-sided then
+two-sided recovery. Source `sdk-rs/venues/bitunix/tests/socket_lifecycle.rs`
+already verifies immediate empty BOOK publication, retired-epoch exclusion,
+replay once and one-sided recovery; it does not prove NX rendering. NX remains
+read-only in this docs lane; the caller repair and runtime proof are still open.
+
+### Bitunix secondary GET identity and egress (#1640)
+
+Existing SDK `secondary_key`/`secondary_secret` options now reach Bitunix through
+registry `readCredentials`. A signed GET uses that identity when configured;
+otherwise it uses the primary identity. The SDK recognizes the `api-key` header
+so GET signing identity and secondary proxy/HOW egress agree, including the
+existing native serialized routing policy. Mutations, reads issued as POST and
+private WS login continue using the primary identity/egress; public discovery
+remains unsigned. No caller argument or host runtime path is added.
+
+Formed secondary credentials require a nonempty key and secret before startup
+I/O, including public-only construction. Account balance/position/order/TP-SL
+reads and symbol settings tag the credential slot actually selected and their
+existing scope. History, public discovery and trading requests do not create
+account-auth evidence. Request tagging is not native success/rejection
+classification: #1640 does not add Bitunix `account_auth_outcome` handling or
+justify clearing a credential badge from unrelated successful traffic.
 
 ## Required startup degradation visibility
 
