@@ -60,6 +60,24 @@ pub struct Partial {
     pub failed_index: Option<usize>,
 }
 
+/// Definitive builder approval refusal; unknown/failed checks never carry this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BuilderAuthorizationReason {
+    Unauthorized,
+    CapTooLow,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuilderAuthorization {
+    pub code: &'static str,
+    pub reason: BuilderAuthorizationReason,
+    pub required_raw: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorized_raw: Option<u32>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
@@ -76,6 +94,8 @@ pub struct VenueError {
     pub retry_after_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial: Option<Box<Partial>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builder_authorization: Option<Box<BuilderAuthorization>>,
 }
 
 impl VenueError {
@@ -90,6 +110,11 @@ impl VenueError {
             message,
             ..Self::default()
         }
+    }
+
+    pub fn builder_authorization(mut self, detail: BuilderAuthorization) -> Self {
+        self.builder_authorization = Some(Box::new(detail));
+        self
     }
 
     pub fn kind(mut self, kind: ErrorKind) -> Self {
@@ -201,6 +226,24 @@ impl std::error::Error for VenueError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builder_approval_details_are_optional_and_keep_the_legacy_text() {
+        let error = VenueError::new("Builder cap too low")
+            .builder_authorization(BuilderAuthorization {
+                code: "GRVT_BUILDER_UNAUTHORIZED",
+                reason: BuilderAuthorizationReason::CapTooLow,
+                required_raw: 300,
+                authorized_raw: Some(100),
+            })
+            .kind(ErrorKind::InvalidInput)
+            .outcome(Outcome::NotSent);
+        assert_eq!(error.legacy_text(), "Builder cap too low");
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"message":"Builder cap too low","kind":"invalidInput","outcome":"notSent","builderAuthorization":{"code":"GRVT_BUILDER_UNAUTHORIZED","reason":"cap-too-low","requiredRaw":300,"authorizedRaw":100}}"#
+        );
+    }
 
     #[test]
     fn plain_errors_keep_their_text_and_serialize_only_the_message() {

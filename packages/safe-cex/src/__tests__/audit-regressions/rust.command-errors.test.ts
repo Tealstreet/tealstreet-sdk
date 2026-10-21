@@ -365,3 +365,32 @@ it('exposes native codes and fields while preserving legacy Error and Warn deliv
   expect(r.errors.mock.calls[0][1]).toMatchObject({ engineEvent: auth });
   expect(r.logs).toHaveBeenCalledExactlyOnceWith('[bybit] retrying', LogSeverity.Warning, retry);
 });
+
+it('reports a typed GRVT builder rejection once while preserving actionable approval fields', async () => {
+  const r = await fixture('grvt');
+  const reporting = vi.spyOn(r.exchange, 'emitAndLogError');
+  const builderAuthorization = {
+    code: 'GRVT_BUILDER_UNAUTHORIZED',
+    reason: 'cap-too-low',
+    requiredRaw: 300,
+    authorizedRaw: 100,
+  };
+  r.onCommand(({ command }) => [
+    {
+      op: 'done',
+      command,
+      error: 'Builder cap too low',
+      detail: {
+        message: 'Builder cap too low',
+        kind: 'invalidInput',
+        outcome: 'notSent',
+        builderAuthorization,
+      },
+    },
+  ]);
+  const error = await r.exchange.placeOrders([{ ...order, clientOrderId: '42' }]).catch((error: unknown) => error);
+  expect(error).toMatchObject({ ...builderAuthorization, kind: 'invalidInput', outcome: 'notSent' });
+  expect(reporting).toHaveBeenCalledTimes(1);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(serializeCommandError(error)).toMatchObject({ ...builderAuthorization, errorReported: true });
+});

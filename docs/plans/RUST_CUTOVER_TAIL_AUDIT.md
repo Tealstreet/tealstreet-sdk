@@ -63,12 +63,15 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    distinguish malformed failure/retention and public-only isolation. No new
    polling loop or venue-name fallback. The original table above records the
    audit baseline before this repair.
-2. **GRVT builder-specific rejection:** native checks/retries already block
-   unauthorized orders, but generic `invalidInput`/`notSent` cannot identify
-   the authorization UI contract. Preserve a stable typed builder code,
-   `unauthorized`/`cap-too-low` reason, required raw cap and available authorized
-   raw cap across engine, SDK and worker error serialization. Keep transport
-   or malformed-check failures distinct from a definitive missing approval.
+2. ~~**GRVT builder-specific rejection:**~~ repaired with a boxed typed native
+   record and validated flat `GRVT_BUILDER_UNAUTHORIZED` code,
+   `unauthorized`/`cap-too-low` reason, `requiredRaw` and optional `authorizedRaw`.
+   Planning/amend inspection and SDK worker/hosted replies retain these fields.
+   Unknown, transport and malformed checks remain ordinary errors. Native no-write,
+   real-host and sender/receiver clone/JSON regressions cover the boundaries;
+   [plan and evidence](RUST_GRVT_BUILDER_ERROR.md). NX's live class-only handler
+   still requires migration to exported `builderAuthorizationOf(error)`; SDK
+   source repair does not migrate or deploy that caller.
 3. **REST order-book queries:** Backpack now joins AsterDEX, MEXC and Polymarket
    with a native unsigned query and capability. Its request-owned snapshot keeps
    raw price IDs/order/zero totals and never mutates subscription state; malformed

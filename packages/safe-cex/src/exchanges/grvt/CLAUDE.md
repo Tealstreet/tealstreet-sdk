@@ -873,3 +873,15 @@ neighbours remain usable. Private account initialization starts once the usable
 catalogue is available, without waiting for REST ticker seeds. Account snapshots,
 mutation acknowledgements and signing validation retain their stricter rules.
 See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+## Rust builder error contract
+
+Native definitive missing/insufficient approval preserves
+`GRVT_BUILDER_UNAUTHORIZED`, `reason: unauthorized | cap-too-low`,
+`requiredRaw: 300` and the parsed `authorizedRaw` for a low cap. The shared host
+and SDK command allowlist carry this through local, worker and hosted rejection.
+Use SDK-root `builderAuthorizationOf(error)` for structural recognition; the old
+TS class prototype is not reconstructed. NX's existing class-only modal handler
+must migrate deliberately. Pending/unknown checks and exhausted network or
+malformed-list failures remain ordinary errors. Existing validation order,
+missing/unreadable-cap policy, retry budget, FIFO and write outcomes stay intact.
