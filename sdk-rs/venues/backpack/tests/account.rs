@@ -878,3 +878,28 @@ fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
     assert_eq!(store.orders().len(), 1);
     assert!(store.order("456").is_none());
 }
+#[test]
+fn undecodable_rows_on_a_malformed_market_still_hold_the_snapshot() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    let position = r#"[{"symbol":"BTC_USDC_PERP","netQuantity":null},{"symbol":"SOL_USDC_PERP","netQuantity":"5","entryPrice":"140","netExposureNotional":"705","pnlUnrealized":"5","estLiquidationPrice":"100"}]"#;
+    for (order, held) in [
+        (
+            r#"{"id":"456","symbol":"BTC_USDC_PERP","quantity":null}"#,
+            true,
+        ),
+        (r#"{"id":456,"symbol":"BTC_USDC_PERP","status":7}"#, true),
+        (
+            r#"{"id":"456","symbol":"BTC_USDC_PERP","status":"Filled","quantity":null}"#,
+            false,
+        ),
+    ] {
+        let (e, _, logs, _) = ready_catalogue(&markets, position, &format!("[{order},{ORDER}]"));
+        let loaded = e.store().loaded();
+        assert_eq!((loaded.positions, loaded.orders), (false, !held), "{order}");
+        assert!(
+            logs.iter()
+                .any(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is held")),
+            "{logs:?}"
+        );
+    }
+}

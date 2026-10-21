@@ -1435,6 +1435,16 @@ impl Blofin {
                                 }
                             }
                         }
+                        kept.retain(|order| !self.account.terminal.contains(&order.id));
+                        // A kept attached TP/SL leg already stands for its parent's leg.
+                        let kept_leg = |parent: &str, kind: OrderType| {
+                            kept.iter().any(|leg| {
+                                leg.kind == kind
+                                    && self.account.sources.get(&leg.id).is_some_and(|s| {
+                                        s.order_id == parent && !s.tpsl_id.is_empty()
+                                    })
+                            })
+                        };
                         let mut extra = Vec::new();
                         for order in &rows {
                             let Some(source) = sources.get(&order.id) else {
@@ -1457,6 +1467,7 @@ impl Blofin {
                                                 s.order_id == order.id && !s.tpsl_id.is_empty()
                                             })
                                     })
+                                    || kept_leg(&order.id, kind)
                                 {
                                     continue;
                                 }
@@ -1502,10 +1513,7 @@ impl Blofin {
                             }
                         }
                         rows.extend(extra);
-                        kept.retain(|order| {
-                            !self.account.terminal.contains(&order.id)
-                                && !rows.iter().any(|row| row.id == order.id)
-                        });
+                        kept.retain(|order| !rows.iter().any(|row| row.id == order.id));
                         for order in &kept {
                             if let Some(source) = self.account.sources.get(&order.id) {
                                 sources.insert(order.id.clone(), source.clone());

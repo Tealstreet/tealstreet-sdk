@@ -822,6 +822,15 @@ fn pushed_balance_publishes_per_coin_balances_with_the_aggregate() {
 
 /// Polls until an order read is issued, answering every read; returns the logs it produced.
 fn reconcile_with_orders(h: &mut Harness, positions: &str, orders: &str) -> Vec<String> {
+    reconcile_with_lists(h, positions, orders, "")
+}
+/// `reconcile_with_orders`, with `advanced` as the advanced order list.
+fn reconcile_with_lists(
+    h: &mut Harness,
+    positions: &str,
+    orders: &str,
+    advanced: &str,
+) -> Vec<String> {
     let start = h.actions.len();
     loop {
         next_tick(h);
@@ -838,7 +847,10 @@ fn reconcile_with_orders(h: &mut Harness, positions: &str, orders: &str) -> Vec<
                 "private/get-open-orders",
                 &format!(r#"{{"code":0,"result":{{"data":[{orders}]}}}}"#),
             );
-            h.reply("advanced/get-open-orders", EMPTY);
+            h.reply(
+                "advanced/get-open-orders",
+                &format!(r#"{{"code":0,"result":{{"data":[{advanced}]}}}}"#),
+            );
             break;
         }
     }
@@ -927,4 +939,41 @@ fn an_unidentified_snapshot_row_protects_stored_rows_while_valid_peers_commit() 
     assert_eq!(positions, ["BTCUSD-PERP:long"]);
     let orders: Vec<_> = store.orders().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(orders, ["77"]);
+}
+
+#[test]
+fn an_unidentified_row_protects_only_its_own_order_list() {
+    let mut h = Harness::new();
+    let advanced = r#"{"order_id":"55","instrument_name":"BTCUSD-PERP","order_type":"STOP_LOSS","side":"SELL","quantity":"1","trigger_price":"90","status":"ACTIVE","update_time":1}"#;
+    h.reply("get-positions", r#"{"code":0,"result":{"data":[]}}"#);
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+    );
+    h.reply(
+        "advanced/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{advanced}]}}}}"#),
+    );
+    let ids = |h: &Harness| {
+        let mut ids: Vec<_> = h
+            .engine
+            .store()
+            .orders()
+            .iter()
+            .map(|o| o.id.clone())
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(ids(&h), ["55", "9007199254740993"]);
+    let unnamed = r#"{"instrument_name":"BTCUSD-PERP","order_type":"LIMIT","quantity":null}"#;
+    // The advanced order left its list; the regular list's id-less row cannot vouch for it.
+    reconcile_with_lists(&mut h, "", unnamed, "");
+    assert_eq!(ids(&h), ["9007199254740993"]);
+    reconcile_with_lists(&mut h, "", ORDER, advanced);
+    assert_eq!(ids(&h), ["55", "9007199254740993"]);
+    // And the reverse: an id-less advanced row keeps 55 but not the departed regular order.
+    reconcile_with_lists(&mut h, "", "", unnamed);
+    assert_eq!(ids(&h), ["55"]);
 }

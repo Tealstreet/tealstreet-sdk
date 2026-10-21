@@ -1342,3 +1342,51 @@ fn position_row_without_a_symbol_no_longer_discards_the_position_snapshot() {
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, before * 2.0);
 }
+
+#[test]
+fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
+    use safe_cex_engine::LogLevel;
+    let mut h = Harness::new();
+    h.ready();
+    let poll = |h: &mut Harness, rows: &str| {
+        h.poll();
+        let read = h.http("/positions");
+        let start = h.actions.len();
+        h.respond(
+            &read,
+            200,
+            &format!(r#"{{"code":"200000","data":[{rows}]}}"#),
+        );
+        let levels: Vec<_> = h.actions[start..]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Log { level, message })
+                    if message.contains("KuCoin skipped") =>
+                {
+                    Some(*level)
+                }
+                _ => None,
+            })
+            .collect();
+        h.reply("/orders?", &Harness::page(ORDER, 1));
+        h.reply("/stopOrders?", EMPTY);
+        if h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/account-overview")))
+        {
+            h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+        }
+        levels
+    };
+    let unnamed = r#"{"currentQty":"lots"}"#;
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    assert_eq!(
+        poll(&mut h, &format!("{unnamed},{POSITION}")),
+        [LogLevel::Warning]
+    );
+    assert_eq!(poll(&mut h, ""), []);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(poll(&mut h, unnamed), [LogLevel::Error]);
+    assert_eq!(poll(&mut h, &bad), [LogLevel::Error]);
+    assert_eq!(poll(&mut h, &bad), []);
+}

@@ -172,12 +172,26 @@ impl Account {
     }
 }
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
-fn log_skip(cx: &mut Cx<'_, Pending>, logged: &mut HashSet<String>, key: String, message: String) {
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: String,
+) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.log(LogLevel::Warning, message);
+        cx.log(level, message);
+    }
+}
+/// A rejected row with no stored copy kept is an error: it commits as absent.
+fn skip_level(stored: bool) -> LogLevel {
+    if stored {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
     }
 }
 /// Re-arms the skip logs of `prefix`: all of them after a clean read, else those `ids` mapped.
@@ -338,7 +352,7 @@ impl Summary<'_> {
                             }
                         };
                         let key = format!("coin:{}", currency.as_deref().unwrap_or_default());
-                        log_skip(cx, logged, key, message);
+                        log_skip(cx, logged, key, LogLevel::Warning, message);
                         rejected.extend(currency.clone());
                         coins.reject(currency);
                     }
@@ -1135,18 +1149,26 @@ impl Grvt {
             } => match position(item, cx.store, cx.now) {
                 Ok(p) => rows.push(p),
                 Err(_) => {
-                    let symbol = serde_json::from_str::<RowInstrument<'_>>(item)
+                    let listed = serde_json::from_str::<RowInstrument<'_>>(item)
                         .ok()
-                        .map(|row| {
-                            market(cx.store, &row.instrument)
-                                .map_or_else(|| row.instrument.to_string(), |m| m.symbol.clone())
+                        .map(|row| match market(cx.store, &row.instrument) {
+                            Some(m) => (m.symbol.clone(), true),
+                            None => (row.instrument.to_string(), false),
                         });
+                    let symbol = listed.as_ref().map(|(symbol, _)| symbol.clone());
                     let message = match &symbol {
                         Some(symbol) => format!("Skipped malformed GRVT position row {symbol}"),
                         None => "Skipped malformed GRVT position row without an instrument".into(),
                     };
                     let key = format!("position:{}", symbol.as_deref().unwrap_or_default());
-                    log_skip(cx, &mut self.account.skip_logged, key, message);
+                    // An unlisted instrument hides no position the store could show.
+                    let stored = match &listed {
+                        Some((symbol, true)) => cx.store.position(symbol).is_some(),
+                        Some((_, false)) => true,
+                        None => !cx.store.positions().is_empty(),
+                    };
+                    let level = skip_level(stored);
+                    log_skip(cx, &mut self.account.skip_logged, key, level, message);
                     positions.reject(symbol);
                 }
             },
@@ -1169,6 +1191,7 @@ impl Grvt {
                         cx,
                         &mut self.account.skip_logged,
                         format!("order:{label}"),
+                        LogLevel::Warning,
                         message,
                     );
                 }

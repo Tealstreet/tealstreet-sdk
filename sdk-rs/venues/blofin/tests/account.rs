@@ -1860,6 +1860,11 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
 
 /// Fires the account poll at `at`, answers its reads, and returns their logs.
 fn poll(h: &mut Harness, at: f64, positions: &str, orders: &str) -> Vec<String> {
+    poll_lists(h, at, positions, orders, "")
+}
+
+/// `poll`, with `tpsl` as the first TP/SL list page.
+fn poll_lists(h: &mut Harness, at: f64, positions: &str, orders: &str, tpsl: &str) -> Vec<String> {
     h.actions.clear();
     h.e.handle(at, Event::TimerFired { timer: h.tick });
     h.collect();
@@ -1886,11 +1891,16 @@ fn poll(h: &mut Harness, at: f64, positions: &str, orders: &str) -> Vec<String> 
         "orders-pending",
         &format!(r#"{{"code":"0","data":[{orders}]}}"#),
     );
-    for path in [
-        "orders-pending",
-        "orders-tpsl-pending",
-        "orders-algo-pending",
-    ] {
+    if h.pending.iter().any(|r| r.url.contains("orders-pending")) {
+        h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    }
+    if !tpsl.is_empty() {
+        h.reply(
+            "orders-tpsl-pending",
+            &format!(r#"{{"code":"0","data":[{tpsl}]}}"#),
+        );
+    }
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
         if h.pending.iter().any(|r| r.url.contains(path)) {
             h.reply(path, r#"{"code":"0","data":[]}"#);
         }
@@ -1968,4 +1978,35 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
     assert_eq!(store.positions().len(), 1);
     assert!(store.order("b").is_none());
     assert_eq!(store.orders().len(), 1);
+}
+
+#[test]
+fn kept_attached_tpsl_leg_is_not_duplicated_by_its_parent() {
+    let mut h = Harness::new();
+    h.seed();
+    let parent = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"X","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live","attachAlgoOrders":[{"tpTriggerPrice":"65000","tpOrderPrice":"-1"}]}"#;
+    let tpsl = r#"{"instId":"BTC-USDT","tpslId":"T1","orderId":"X","side":"buy","size":"1","tpTriggerPrice":"65000","tpOrderPrice":"-1","state":"live"}"#;
+    let legs = |h: &Harness| {
+        let mut ids: Vec<_> =
+            h.e.store()
+                .orders()
+                .iter()
+                .filter(|o| o.kind == safe_cex_engine::model::OrderType::TakeProfit)
+                .map(|o| o.id.clone())
+                .collect();
+        ids.sort();
+        ids
+    };
+    poll_lists(&mut h, 10_000.0, POSITION, parent, tpsl);
+    assert_eq!(legs(&h), ["T1__take_profit"]);
+    let bad = tpsl.replace("\"size\":\"1\"", "\"size\":null");
+    let logs = poll_lists(&mut h, 20_000.0, POSITION, parent, &bad);
+    assert!(
+        logs.iter()
+            .any(|l| l == "BloFin skipped malformed order row T1"),
+        "{logs:?}"
+    );
+    assert_eq!(legs(&h), ["T1__take_profit"]);
+    poll_lists(&mut h, 30_000.0, POSITION, parent, "");
+    assert_eq!(legs(&h), ["X__take_profit"]);
 }

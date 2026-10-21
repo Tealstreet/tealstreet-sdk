@@ -1107,15 +1107,24 @@ fn missing_null_empty_or_negative_trade_account_numbers_preserve_good_balance() 
     }
 }
 #[test]
-fn malformed_trade_account_row_keeps_its_stored_balance_while_peers_update() {
+fn malformed_trade_account_row_keeps_its_stored_coin_and_the_previous_wallet_total() {
     let mut h = H::new(true);
     h.timer(5000.0);
+    // The 3 BTC (worth 300) were sold for USDT; the BTC row now fails to read.
     h.reply(
         "/accounts?type=trade",
-        r#"{"code":"200000","data":[{"currency":"USDT","available":"-1","holds":"100","balance":"1000"},{"currency":"BTC","available":"3","holds":"1","balance":"4"}]}"#,
+        r#"{"code":"200000","data":[{"currency":"USDT","available":"1200","holds":"100","balance":"1300"},{"currency":"BTC","available":null,"holds":"0","balance":"0"}]}"#,
     );
     let b = h.e.store().balance();
-    assert_eq!((b.free, b.used, b.total), (1200.0, 200.0, 1400.0));
+    assert_eq!((b.free, b.used, b.total), (1100.0, 200.0, 1300.0));
+    let coins: Vec<_> =
+        h.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .map(|c| (c.currency.as_str(), c.balance.total))
+            .collect();
+    assert_eq!(coins, [("USDT", 1300.0), ("BTC", 3.0)]);
 }
 #[test]
 fn newer_private_rows_cannot_shrink_below_the_existing_execution_floor() {

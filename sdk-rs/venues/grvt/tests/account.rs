@@ -1586,6 +1586,49 @@ fn unidentified_position_row_keeps_stored_positions_and_commits_its_peers() {
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 3.);
 }
+#[test]
+fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let btc = r#"{"i":"BTC_USDT_Perp","s":"-2","ep":"100","n":"200","l":"20","el":"140","up":"-2","mt":"CROSS","et":"1700000000000000900"}"#;
+    let timer = |h: &Harness| {
+        h.actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 500. => Some(*timer),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let poll = |h: &mut Harness, rows: &str| {
+        h.ws(r#"{"s":"v1.position","f":{}}"#);
+        h.timer(timer(h), h.now + 500.);
+        let start = h.actions.len();
+        h.reply("positions", &format!("{{\"r\":[{rows}]}}"), "");
+        h.actions[start..]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Log { level, message })
+                    if message.contains("malformed GRVT position row") =>
+                {
+                    Some(*level)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    use safe_cex_engine::LogLevel;
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [LogLevel::Error]);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(poll(&mut h, btc), []);
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [LogLevel::Warning]);
+    assert_eq!(poll(&mut h, btc), []);
+    let bad = btc.replace("\"s\":\"-2\"", "\"s\":null");
+    assert_eq!(poll(&mut h, &bad), [LogLevel::Warning]);
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.);
+}
 const FOREIGN_MALFORMED: &str = r#"{"r":[{"oi":"0x999","m":{"co":"66"}}]}"#;
 #[test]
 fn readable_unmatched_order_row_is_foreign_once_every_native_id_is_known() {

@@ -50,10 +50,39 @@ fn reserve_leverage(value: &str) -> f64 {
 /// What a list row that failed to decode still says about its identity.
 #[derive(serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
-struct RowIdentity<'a> {
-    inst_id: &'a str,
-    ord_id: &'a str,
-    algo_id: &'a str,
+struct RowIdentity {
+    #[serde(deserialize_with = "lenient")]
+    inst_id: String,
+    #[serde(deserialize_with = "lenient")]
+    inst_type: String,
+    #[serde(deserialize_with = "lenient")]
+    ord_id: String,
+    #[serde(deserialize_with = "lenient")]
+    algo_id: String,
+    #[serde(deserialize_with = "lenient")]
+    state: String,
+}
+
+/// A string field, or empty when it holds anything else; one bad field keeps the rest.
+fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Field<'a> {
+        Text(#[serde(borrow)] std::borrow::Cow<'a, str>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Field::deserialize(d)? {
+        Field::Text(text) => text.into_owned(),
+        Field::Other(_) => String::new(),
+    })
+}
+
+fn terminal_state(state: &str) -> bool {
+    matches!(
+        state,
+        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
+    )
 }
 
 pub enum Request {
@@ -136,6 +165,8 @@ pub struct AccountState {
     order_leverage: HashMap<String, (f64, String)>,
     equity: Vec<(String, f64)>,
     total_equity: Option<f64>,
+    /// A currency row was rejected: retained stale equity cannot be summed with fresh rows.
+    aggregate_held: bool,
     equity_loaded: bool,
     valuation_pending: bool,
     fills: HashMap<String, f64>,
@@ -497,8 +528,12 @@ impl Okx {
                     }
                 }
                 Err(_) => {
-                    let inst_id =
-                        serde_json::from_str::<RowIdentity<'_>>(item).map_or("", |row| row.inst_id);
+                    let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
+                    if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
+                        *invalid = true;
+                        return;
+                    }
+                    let inst_id = row.inst_id.as_str();
                     if !inst_id.is_empty() && cx.store.market_by_id(inst_id).is_none() {
                         if self.unlisted_exposure(cx, inst_id) {
                             *invalid = true;
@@ -536,21 +571,8 @@ impl Okx {
                         self.reject_order(cx, rows, o.ord_id, o.algo_id);
                         return;
                     }
-                    if cx.store.market_by_id(o.inst_id).is_none()
-                        && !matches!(
-                            o.state,
-                            "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
-                        )
-                    {
-                        if self.unlisted_exposure(cx, o.inst_id) {
-                            *invalid = true;
-                            cx.log(
-                                LogLevel::Warning,
-                                "OKX working order market unavailable; preserving order snapshot",
-                            );
-                        } else {
-                            self.unlisted_skipped(cx, o.inst_id);
-                        }
+                    if cx.store.market_by_id(o.inst_id).is_none() && !terminal_state(o.state) {
+                        self.unlisted_order(cx, o.inst_id, invalid);
                         return;
                     }
                     for order in self.orders(cx, &o) {
@@ -564,16 +586,27 @@ impl Okx {
                 // Still a page row: paging counts it and resumes after its id when readable.
                 Err(_) => {
                     *page_count += 1;
-                    let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+                    let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
                     let id = if row.algo_id.is_empty() {
-                        row.ord_id
+                        &row.ord_id
                     } else {
-                        row.algo_id
+                        &row.algo_id
                     };
                     if !id.is_empty() {
-                        *cursor = id.into();
+                        cursor.clone_from(id);
                     }
-                    self.reject_order(cx, rows, row.ord_id, row.algo_id);
+                    if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
+                        *invalid = true;
+                        return;
+                    }
+                    if !row.inst_id.is_empty() && cx.store.market_by_id(&row.inst_id).is_none() {
+                        // An unreadable state may be working, so it is held like one.
+                        if !terminal_state(&row.state) {
+                            self.unlisted_order(cx, &row.inst_id, invalid);
+                        }
+                        return;
+                    }
+                    self.reject_order(cx, rows, &row.ord_id, &row.algo_id);
                 }
             },
         }
@@ -905,7 +938,10 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
-                cx.orders_reconciled(None);
+                // A rejected row may be an uncertain placement; it proves nothing.
+                if clean {
+                    cx.orders_reconciled(None);
+                }
                 self.trading
                     .acknowledged
                     .retain(|_, order| order.version > version);
@@ -996,6 +1032,7 @@ impl Okx {
                 equity.rejected() == 0,
                 mapped.iter().map(String::as_str),
             );
+            self.account.aggregate_held = equity.rejected() > 0;
             let current = std::mem::take(&mut self.account.equity);
             self.account.equity = equity.commit(current, |(ccy, _)| ccy.clone());
             self.account.total_equity = None;
@@ -1242,6 +1279,19 @@ impl Okx {
         true
     }
 
+    /// A working order on a catalogue-malformed market holds the snapshot; others are skipped.
+    fn unlisted_order(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str, invalid: &mut bool) {
+        if self.unlisted_exposure(cx, inst_id) {
+            *invalid = true;
+            cx.log(
+                LogLevel::Warning,
+                "OKX working order market unavailable; preserving order snapshot",
+            );
+        } else {
+            self.unlisted_skipped(cx, inst_id);
+        }
+    }
+
     fn unlisted_skipped(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
         if self.account.unlisted_logged.insert(inst_id.into()) {
             cx.log(
@@ -1422,6 +1472,10 @@ impl Okx {
             return;
         }
         self.publish_currencies(cx);
+        // The USD balance keeps its previous value until every currency row reads again.
+        if self.account.aggregate_held {
+            return;
+        }
         let collateral = self
             .account
             .total_equity
@@ -1734,6 +1788,7 @@ impl Okx {
                 self.account.revision += 1;
                 self.account.balance_version = self.account.revision;
                 self.account.total_equity = Some(equity);
+                self.account.aggregate_held = false;
                 self.account.equity_loaded = true;
                 self.recalculate(cx);
             }

@@ -100,6 +100,8 @@ pub struct Account {
     position_skips: HashSet<String>,
     /// Order ids (empty when unidentified) whose skipped row was already logged.
     order_skips: HashSet<String>,
+    /// Stored order ids last seen in the advanced list or channel; the rest are regular.
+    advanced_orders: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -733,10 +735,19 @@ impl Cryptocom {
                         if regular.rejected() == 0 && rows.rejected() == 0 {
                             self.account.order_skips.clear();
                         }
-                        // Each list keeps the stored copies its own rejections protect.
-                        let current = cx.store.orders().to_vec();
+                        // Each list keeps only the stored copies of its own family that its
+                        // rejections protect.
+                        let (advanced_current, current): (Vec<_>, Vec<_>) = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .cloned()
+                            .partition(|o| self.account.advanced_orders.contains(&o.id));
                         let (mut regular, kept) = commit_split(regular, &current);
-                        let (advanced, advanced_kept) = commit_split(rows, &current);
+                        let (advanced, advanced_kept) = commit_split(rows, &advanced_current);
+                        self.account
+                            .advanced_orders
+                            .extend(advanced.iter().chain(&advanced_kept).map(|o| o.id.clone()));
                         regular.extend(advanced);
                         for order in kept.into_iter().chain(advanced_kept) {
                             if !regular.iter().any(|row| row.id == order.id) {
@@ -771,6 +782,10 @@ impl Cryptocom {
                             }
                         }
                         cx.store.set_orders(regular);
+                        let store = &*cx.store;
+                        self.account
+                            .advanced_orders
+                            .retain(|id| store.order(id).is_some());
                     }
                     self.account.count += 1;
                     self.schedule_reconcile(cx);
@@ -823,9 +838,13 @@ impl Cryptocom {
                 if channel.starts_with("user.order")
                     || channel.starts_with("user.advance.order") =>
             {
+                let advanced = channel.starts_with("user.advance.order");
                 each_row(cx, "order", message.data, |cx, row: OrderRow| {
                     if cx.store.market(row.instrument_name).is_none() {
                         return;
+                    }
+                    if advanced {
+                        self.account.advanced_orders.insert(id(row.order_id));
                     }
                     let order = row.order(cx.now, cx.store.order(&id(row.order_id)));
                     if cx

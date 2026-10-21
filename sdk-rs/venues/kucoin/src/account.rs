@@ -6,6 +6,7 @@ use safe_cex_engine::{Cx, Fill, LogLevel, Method, Store, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone)]
 pub(crate) enum Read {
@@ -91,8 +92,8 @@ pub(crate) struct Account {
     closures: HashMap<String, f64>,
     executions: HashSet<String>,
     execution_queue: VecDeque<String>,
-    /// A symbol-less position row was logged; re-armed by a read without one.
-    unidentified_logged: bool,
+    /// Unified symbols (empty when unreadable) of rejected position rows already logged.
+    position_skips: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -678,24 +679,19 @@ impl Kucoin {
                         );
                     }
                 }
-                Err(error) => match row_identity(item, "symbol") {
+                Err(_) => match row_identity(item, "symbol") {
                     Some(symbol) => {
-                        cx.log(
-                            LogLevel::Warning,
-                            format!("KuCoin skipped unmappable position {symbol}: {error}"),
-                        );
                         // Stored positions carry the unified symbol, not the contract id.
-                        request
-                            .skipped_symbols
-                            .insert(self::symbol(cx.store, &symbol));
+                        let unified = self::symbol(cx.store, &symbol);
+                        let stored = cx.store.positions().iter().any(|p| p.symbol == unified);
+                        let message = format!("KuCoin skipped unmappable position {symbol}");
+                        self.log_position_skip(cx, unified.clone(), stored, message);
+                        request.skipped_symbols.insert(unified);
                     }
                     None => {
-                        if !std::mem::replace(&mut self.account.unidentified_logged, true) {
-                            cx.log(
-                                LogLevel::Warning,
-                                "KuCoin skipped position row without a symbol",
-                            );
-                        }
+                        let stored = !cx.store.positions().is_empty();
+                        let message = "KuCoin skipped position row without a symbol";
+                        self.log_position_skip(cx, String::new(), stored, message);
                         request.unidentified = true;
                     }
                 },
@@ -746,6 +742,28 @@ impl Kucoin {
                 },
             },
             _ => request.invalid = true,
+        }
+    }
+    /// Logs a rejected position row once per symbol until it maps again; at Error when no
+    /// stored copy is kept, as the row then commits as flat.
+    fn log_position_skip(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: String,
+        stored: bool,
+        message: impl Into<String>,
+    ) {
+        let skips = &mut self.account.position_skips;
+        if skips.len() >= SKIP_LOG_LIMIT {
+            skips.clear();
+        }
+        if skips.insert(symbol) {
+            let level = if stored {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            };
+            cx.log(level, message);
         }
     }
     pub(crate) fn account_response(
@@ -870,9 +888,14 @@ impl Kucoin {
                             .insert(old.id.clone(), old.last_update.unwrap_or(cx.now));
                     }
                 }
-                if !request.unidentified {
-                    self.account.unidentified_logged = false;
-                }
+                // A skip log re-arms once its row stops failing.
+                self.account.position_skips.retain(|symbol| {
+                    if symbol.is_empty() {
+                        request.unidentified
+                    } else {
+                        request.skipped_symbols.contains(symbol)
+                    }
+                });
                 cx.store.set_positions(positions);
             }
             Read::Orders(stop) => {

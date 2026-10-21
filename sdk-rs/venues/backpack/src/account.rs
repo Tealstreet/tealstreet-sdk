@@ -99,6 +99,31 @@ impl Default for Account {
 }
 
 /// A skipped row is an error only when the store has no copy for it to keep.
+/// What a row that failed to decode still says about its identity.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct RowIdentity {
+    #[serde(deserialize_with = "lenient")]
+    id: String,
+    #[serde(deserialize_with = "lenient")]
+    symbol: String,
+    #[serde(deserialize_with = "lenient")]
+    status: String,
+}
+/// A string field, or empty when it holds anything else; one bad field keeps the rest.
+fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Field<'a> {
+        Text(#[serde(borrow)] Str<'a>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Field::deserialize(d)? {
+        Field::Text(text) => text.into_owned(),
+        Field::Other(_) => String::new(),
+    })
+}
 fn skip_level(stored: bool) -> LogLevel {
     if stored {
         LogLevel::Warning
@@ -462,7 +487,7 @@ impl Backpack {
         match pending {
             Request::Positions { rows, hold, .. } => {
                 let Ok(r) = serde_json::from_str::<PositionRow<'_>>(item) else {
-                    self.reject_position(cx, rows, item);
+                    self.reject_position(cx, rows, hold, item);
                     return;
                 };
                 self.account.position_skips.remove(r.symbol.as_ref());
@@ -493,7 +518,7 @@ impl Backpack {
                 ..
             } => {
                 let Ok(r) = serde_json::from_str::<OrderRow<'_>>(item) else {
-                    self.reject_order(cx, rows, item);
+                    self.reject_order(cx, rows, hold, item);
                     return;
                 };
                 self.account.order_skips.remove(r.id.as_ref());
@@ -520,20 +545,25 @@ impl Backpack {
         }
     }
     /// A malformed position row keeps its symbol's stored legs, or every leg when unnamed.
+    /// Its quantity is unknown, so a catalogue-malformed market holds the snapshot.
     fn reject_position(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rows: &mut SnapshotBuilder<String, Position>,
+        hold: &mut bool,
         item: &str,
     ) {
-        #[derive(serde::Deserialize)]
-        struct Identity<'a> {
-            #[serde(borrow, default)]
-            symbol: Str<'a>,
+        let symbol = serde_json::from_str::<RowIdentity>(item)
+            .unwrap_or_default()
+            .symbol;
+        if !symbol.is_empty() && cx.store.market(&symbol).is_none() {
+            if self.report_skipped_market(cx, &symbol) {
+                *hold = true;
+            } else {
+                self.report_unlisted_market(cx, &symbol);
+            }
+            return;
         }
-        let symbol = serde_json::from_str::<Identity<'_>>(item)
-            .map(|r| r.symbol.into_owned())
-            .unwrap_or_default();
         if symbol.is_empty() {
             let level = skip_level(!cx.store.positions().is_empty());
             let message = "Backpack skipped malformed position row without a symbol";
@@ -556,20 +586,24 @@ impl Backpack {
         }
     }
     /// A malformed order row keeps its stored copy, or every stored order when it has no id.
+    /// One on a catalogue-malformed market holds the snapshot unless its status reads terminal.
     fn reject_order(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rows: &mut SnapshotBuilder<String, Order>,
+        hold: &mut bool,
         item: &str,
     ) {
-        #[derive(serde::Deserialize)]
-        struct Identity<'a> {
-            #[serde(borrow, default)]
-            id: Str<'a>,
+        let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
+        if !row.symbol.is_empty() && cx.store.market(&row.symbol).is_none() {
+            if self.report_skipped_market(cx, &row.symbol) {
+                *hold |= row.status.is_empty() || status(&row.status) == OrderStatus::Open;
+            } else {
+                self.report_unlisted_market(cx, &row.symbol);
+            }
+            return;
         }
-        let id = serde_json::from_str::<Identity<'_>>(item)
-            .map(|r| r.id.into_owned())
-            .unwrap_or_default();
+        let id = row.id;
         if id.is_empty() {
             let level = skip_level(!cx.store.orders().is_empty());
             let message = "Backpack skipped malformed order row without an id";

@@ -898,42 +898,31 @@ impl Kraken {
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
-                    let mut orders = vec![];
-                    let mut valid = true;
-                    let mut unlisted = vec![];
-                    let result = json::each::<OrderWire<'_>>(raw.get(), |r| {
-                        if r.symbol.is_empty() {
-                            valid = false;
-                        } else if cx.store.market(&r.symbol).is_some() {
-                            if let Some(o) = self.map_order(cx, r) {
-                                orders.push(o);
-                            } else {
-                                valid = false;
-                            }
-                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
-                            valid = false;
-                        } else {
-                            unlisted.push(r.symbol.into_owned());
-                        }
+                    let mut request = Request::new(Scope::Orders, 0, 0);
+                    let result = json::each::<&RawValue>(raw.get(), |item| {
+                        self.account_order_item(cx, &mut request, item.get())
                     });
-                    self.account_unlisted(cx, unlisted);
-                    if result.is_ok() && valid {
+                    if result.is_ok() && request.valid {
                         self.account.payloads.insert("open_orders".into(), cx.now);
+                        let builder = request.orders;
                         if msg.feed == "open_orders_snapshot"
                             && self.account.orders_revision != self.account.snapshot_orders_revision
                         {
-                            for order in orders {
+                            for order in builder.rows().to_vec() {
                                 self.account_apply_order(cx, order, true);
                             }
                         } else {
                             self.account.orders_revision += 1;
-                            self.account_commit_orders(cx, orders, true);
+                            let mapped = recovered(&builder, |o| (&o.id, &o.id));
+                            self.account
+                                .rearm_skips("order:", builder.rejected() == 0, mapped);
+                            let live = builder.rows().len();
+                            let orders =
+                                builder.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                            self.account_commit_orders(cx, orders, live);
                         }
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
-                            "Kraken order snapshot contains an unmappable or invalid row",
-                        );
+                        cx.log(LogLevel::Warning, "Kraken order snapshot held");
                         self.account_schedule_heal(cx);
                     }
                 } else if let Some(raw) = msg.order
@@ -959,31 +948,21 @@ impl Kraken {
             }
             "open_positions" | "open_positions_snapshot" => {
                 if let Some(raw) = msg.positions {
-                    let mut positions = vec![];
-                    let mut valid = true;
-                    let mut unlisted = vec![];
-                    let result = json::each::<PositionWire<'_>>(raw.get(), |r| {
-                        if r.symbol.is_empty() {
-                            valid = false;
-                        } else if cx.store.market(&r.symbol).is_some() {
-                            if let Some(p) = self.map_position(cx, r, true) {
-                                positions.push(p);
-                            } else {
-                                valid = false;
-                            }
-                        } else if r.balance.or(r.size) == Some(0.0) {
-                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
-                            valid = false;
-                        } else {
-                            unlisted.push(r.symbol.into_owned());
-                        }
+                    let mut request = Request::new(Scope::Positions, 0, 0);
+                    let result = json::each::<&RawValue>(raw.get(), |item| {
+                        self.account_position_item(cx, &mut request, item.get(), true)
                     });
-                    self.account_unlisted(cx, unlisted);
-                    if result.is_ok() && valid {
+                    if result.is_ok() && request.valid {
                         self.account.positions_revision += 1;
                         self.account
                             .payloads
                             .insert("open_positions".into(), cx.now);
+                        let builder = request.positions;
+                        let mapped = recovered(&builder, |p| (&p.id, &p.symbol));
+                        self.account
+                            .rearm_skips("position:", builder.rejected() == 0, mapped);
+                        let mut positions =
+                            builder.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                         if !self.account.snapshot_positions_seen
                             && self.account.snapshot_settings_revision
                                 != self.account.settings_write_revision
@@ -998,10 +977,7 @@ impl Kraken {
                         self.account.snapshot_positions_seen = true;
                         self.account_commit_positions(cx, positions);
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
-                            "Kraken position snapshot contains an unmappable or invalid row",
-                        );
+                        cx.log(LogLevel::Warning, "Kraken position snapshot held");
                         self.account_schedule_heal(cx);
                     }
                 }
@@ -1197,15 +1173,16 @@ impl Kraken {
             last_update: Some(cx.now),
         })
     }
-    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>, live: bool) {
+    /// The first `live` rows are native observations; the rest are kept stored copies.
+    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>, live: usize) {
         let mut mapped = vec![];
-        for order in orders {
+        for (n, order) in orders.into_iter().enumerate() {
             if self.account.terminal.contains(&order.id) {
                 continue;
             }
             self.account_native_order_clock(&order.id, order.last_update);
             let order = self.account_merge_order(order);
-            if live {
+            if n < live {
                 self.trade_order_observed(&order.id, order.filled, order.status);
             }
             mapped.push(order);
@@ -1274,6 +1251,75 @@ impl Kraken {
             }
         }
     }
+    /// Maps one order row into `request`; a malformed-catalogue market holds it.
+    fn account_order_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        match serde_json::from_str::<OrderWire<'_>>(item) {
+            Ok(row) => {
+                if row.symbol.is_empty() {
+                    self.account_reject_order(cx, request, &row.order_id);
+                } else if cx.store.market(&row.symbol).is_some() {
+                    let id = row.order_id.to_string();
+                    if let Some(order) = self.map_order(cx, row) {
+                        request.orders.push(order);
+                    } else {
+                        self.account_reject_order(cx, request, &id);
+                    }
+                } else if self.skipped_markets.contains(row.symbol.as_ref()) {
+                    request.valid = false;
+                } else {
+                    self.account_unlisted(cx, vec![row.symbol.into_owned()]);
+                }
+            }
+            Err(_) => {
+                let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+                if self.skipped_markets.contains(row.symbol.as_ref())
+                    && cx.store.market(&row.symbol).is_none()
+                {
+                    request.valid = false;
+                } else {
+                    self.account_reject_order(cx, request, &row.order_id);
+                }
+            }
+        }
+    }
+    /// Maps one position row into `request`; `live` marks a stream row.
+    fn account_position_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+        live: bool,
+    ) {
+        match serde_json::from_str::<PositionWire<'_>>(item) {
+            Ok(row) => {
+                if row.symbol.is_empty() {
+                    self.account_reject_position(cx, request, "");
+                } else if cx.store.market(&row.symbol).is_some() {
+                    let symbol = row.symbol.to_string();
+                    if let Some(p) = self.map_position(cx, row, live) {
+                        request.positions.push(p);
+                    } else {
+                        self.account_reject_position(cx, request, &symbol);
+                    }
+                } else if row.balance.or(row.size) == Some(0.0) {
+                } else if self.skipped_markets.contains(row.symbol.as_ref()) {
+                    request.valid = false;
+                } else {
+                    self.account_unlisted(cx, vec![row.symbol.into_owned()]);
+                }
+            }
+            Err(_) => {
+                let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
+                if row.symbol.is_empty() || cx.store.market(&row.symbol).is_some() {
+                    self.account_reject_position(cx, request, &row.symbol);
+                } else if self.skipped_markets.contains(row.symbol.as_ref()) {
+                    request.valid = false;
+                } else {
+                    self.account_unlisted(cx, vec![row.symbol.into_owned()]);
+                }
+            }
+        }
+    }
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1281,63 +1327,8 @@ impl Kraken {
         item: &str,
     ) {
         match request.scope {
-            Scope::Orders => match serde_json::from_str::<OrderWire<'_>>(item) {
-                Ok(row) => {
-                    if row.symbol.is_empty() {
-                        self.account_reject_order(cx, request, &row.order_id);
-                    } else if cx.store.market(&row.symbol).is_some() {
-                        let id = row.order_id.to_string();
-                        if let Some(order) = self.map_order(cx, row) {
-                            request.orders.push(order);
-                        } else {
-                            self.account_reject_order(cx, request, &id);
-                        }
-                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
-                        request.valid = false;
-                    } else {
-                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
-                    }
-                }
-                Err(_) => {
-                    let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
-                    if self.skipped_markets.contains(row.symbol.as_ref())
-                        && cx.store.market(&row.symbol).is_none()
-                    {
-                        request.valid = false;
-                    } else {
-                        self.account_reject_order(cx, request, &row.order_id);
-                    }
-                }
-            },
-            Scope::Positions => match serde_json::from_str::<PositionWire<'_>>(item) {
-                Ok(row) => {
-                    if row.symbol.is_empty() {
-                        self.account_reject_position(cx, request, "");
-                    } else if cx.store.market(&row.symbol).is_some() {
-                        let symbol = row.symbol.to_string();
-                        if let Some(p) = self.map_position(cx, row, false) {
-                            request.positions.push(p);
-                        } else {
-                            self.account_reject_position(cx, request, &symbol);
-                        }
-                    } else if row.balance.or(row.size) == Some(0.0) {
-                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
-                        request.valid = false;
-                    } else {
-                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
-                    }
-                }
-                Err(_) => {
-                    let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
-                    if row.symbol.is_empty() || cx.store.market(&row.symbol).is_some() {
-                        self.account_reject_position(cx, request, &row.symbol);
-                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
-                        request.valid = false;
-                    } else {
-                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
-                    }
-                }
-            },
+            Scope::Orders => self.account_order_item(cx, request, item),
+            Scope::Positions => self.account_position_item(cx, request, item, false),
             Scope::Settings => match serde_json::from_str::<Preference<'_>>(item) {
                 Ok(p) => {
                     if p.max_leverage.is_none_or(|leverage| leverage > 0.0) {
@@ -1391,7 +1382,7 @@ impl Kraken {
                         .rearm_skips("order:", orders.rejected() == 0, mapped);
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                    self.account_commit_orders(cx, orders, false);
+                    self.account_commit_orders(cx, orders, 0);
                 }
             }
             Scope::Positions => {

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 mod support;
-use safe_cex_engine::{Action, Engine, Event};
+use safe_cex_engine::{Action, Engine, Event, LogLevel, Notice};
 use safe_cex_venue_okx::{Okx, Options};
 use support::*;
 
@@ -336,6 +336,17 @@ fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     }
     assert!(e.store().loaded().positions && e.store().loaded().balance);
     assert!(e.store().positions().is_empty());
+    let errors: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log {
+                level: LogLevel::Error,
+                message,
+            }) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors, ["OKX skipped unmappable BTCUSDT position row"]);
 }
 
 /// Starts a second account sweep after `complete` and answers it with these bodies.
@@ -868,4 +879,148 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         !out.iter()
             .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 3002.0))
     );
+}
+
+#[test]
+fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
+    let (mut e, private, _, pending) = startup();
+    let mut pending = pending;
+    while let Some(a) = pending.pop() {
+        let Action::Http(r) = &a else { continue };
+        let body = if r.url.contains("account-position-risk") {
+            envelope(r#"{"balData":[{"ccy":"BTC","eq":"1"},{"ccy":"USDT","eq":"0"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 5.0);
+        pending.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    let before = e.store().balance().clone();
+    assert_eq!(before.total, 40_000.0);
+    // The BTC was sold for USDT; the BTC row now fails to read.
+    resweep(
+        &mut e,
+        private,
+        r#"{"balData":[{"ccy":"BTC","eq":"bad"},{"ccy":"USDT","eq":"40000"}]}"#,
+        "",
+        "",
+    );
+    assert_eq!(*e.store().balance(), before);
+    let mut coins: Vec<_> = e
+        .store()
+        .currency_balances()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| (c.currency.clone(), c.balance.total))
+        .collect();
+    coins.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        coins,
+        [("BTC".to_string(), 1.0), ("USDT".to_string(), 40_000.0)]
+    );
+    resweep(
+        &mut e,
+        private,
+        r#"{"balData":[{"ccy":"BTC","eq":"0"},{"ccy":"USDT","eq":"40000"}]}"#,
+        "",
+        "",
+    );
+    assert_eq!(e.store().balance().total, 40_000.0);
+}
+
+#[test]
+fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
+    let bad_market = r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":null,"ctVal":"1"}"#;
+    for row in [
+        r#"{"instId":"ETH-USDT-SWAP","ordId":"9","sz":4}"#,
+        r#"{"instId":"ETH-USDT-SWAP","ordId":9,"state":null}"#,
+    ] {
+        let mut e = Engine::new(Okx::new(Options {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..Options::default()
+        }));
+        e.start(0.0);
+        let a = actions(&mut e).remove(0);
+        reply(
+            &mut e,
+            &a,
+            &envelope(&format!("{MARKET},{bad_market}")),
+            1.0,
+        );
+        let out = actions(&mut e);
+        let tickers = out
+            .iter()
+            .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+            .unwrap();
+        reply(&mut e, tickers, &envelope(TICKER), 2.0);
+        let config = out
+            .iter()
+            .find(|a| is_get(a, "/api/v5/account/config"))
+            .unwrap();
+        reply(
+            &mut e,
+            config,
+            &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+            3.0,
+        );
+        let mut pending = actions(&mut e);
+        let mut logs = vec![];
+        while let Some(a) = pending.pop() {
+            match &a {
+                Action::Http(r) => {
+                    let body = if r.url.contains("account-position-risk") {
+                        envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+                    } else if r.url.contains("orders-pending") {
+                        envelope(row)
+                    } else {
+                        envelope("")
+                    };
+                    reply(&mut e, &a, &body, 4.0);
+                    pending.extend(actions(&mut e));
+                }
+                Action::Notice(Notice::Log { message, .. }) => logs.push(message.clone()),
+                _ => {}
+            }
+        }
+        assert!(e.store().loaded().positions, "{row}");
+        assert!(!e.store().loaded().orders, "{row}");
+        assert!(
+            logs.iter()
+                .any(|l| l.contains("ETH-USDT-SWAP has open exposure")),
+            "{row}: {logs:?}"
+        );
+    }
+}
+
+#[test]
+fn undecodable_out_of_scope_order_row_fails_the_order_read() {
+    let (mut e, _, _, pending) = startup();
+    complete(
+        &mut e,
+        pending,
+        r#"{"instId":"BTC-USDT-SWAP","instType":"FUTURES","ordId":"9","sz":4}"#,
+    );
+    assert!(e.store().loaded().positions);
+    assert!(!e.store().loaded().orders);
+}
+
+#[test]
+fn undecodable_out_of_scope_position_row_fails_the_position_read() {
+    let (mut e, _, _, pending) = startup();
+    for a in pending {
+        if is_get(&a, "/api/v5/account/positions?instType=SWAP") {
+            let row = r#"{"instId":"BTC-USDT-SWAP","instType":"FUTURES","pos":5}"#;
+            reply(&mut e, &a, &envelope(row), 5.0);
+        } else if is_get(&a, "/api/v5/account/account-position-risk?instType=SWAP") {
+            let risk = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
+            reply(&mut e, &a, &envelope(risk), 5.0);
+        }
+    }
+    assert!(!e.store().loaded().positions);
 }

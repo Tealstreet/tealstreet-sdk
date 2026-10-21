@@ -128,7 +128,7 @@ fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
     message(
         &mut e,
         s,
-        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"bad","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"invalid"}]}"#,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"invalid"}]}"#,
     );
     assert!(e.store().order("O-100").is_some());
     message(
@@ -188,6 +188,51 @@ fn bad_open_order_row_keeps_its_stored_copy_while_peers_commit() {
     );
     assert_eq!(e.store().order("O-100").unwrap().amount, 2.);
     assert!(e.store().order("O-200").is_some());
+}
+#[test]
+fn bad_snapshot_execution_row_keeps_its_stored_copy_while_peers_commit() {
+    let peer = r#"{"order_id":"O-200","symbol":"ETH/USD","order_type":"limit","side":"sell","order_qty":1,"cum_qty":0,"limit_price":60}"#;
+    for (bad, kept) in [
+        (
+            r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"x"}"#,
+            &["O-100", "O-200"][..],
+        ),
+        (
+            r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":3,"cum_qty":5}"#,
+            &["O-100", "O-200"],
+        ),
+        (
+            r#"{"order_id":"GONE","symbol":"BTC/USD","order_type":"limit","side":"up","order_qty":1}"#,
+            &["O-200"],
+        ),
+        (r#"{"order_qty":"x"}"#, &["O-100", "O-200"]),
+    ] {
+        let (mut e, _, private) = ready(false);
+        let frame =
+            format!(r#"{{"channel":"executions","type":"snapshot","data":[{bad},{peer}]}}"#);
+        message(&mut e, private.unwrap(), &frame);
+        let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, kept, "{bad}");
+        if let Some(o) = e.store().order("O-100") {
+            assert_eq!(o.amount, 2., "{bad}");
+        }
+    }
+}
+#[test]
+fn bad_update_execution_row_is_skipped_alone_and_emits_no_fill() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    let bad = r#"{"order_id":"O-100","symbol":"BTC/USD","exec_type":"trade","order_qty":"x","cum_qty":2,"last_qty":1.5,"last_price":100,"exec_id":"T-bad","timestamp":"2023-11-14T22:13:21Z"}"#;
+    let peer = r#"{"order_id":"O-200","symbol":"ETH/USD","side":"sell","order_type":"limit","exec_type":"trade","order_qty":1,"cum_qty":0.5,"last_qty":0.5,"last_price":60,"exec_id":"T-good","timestamp":"2023-11-14T22:13:21Z"}"#;
+    message(
+        &mut e,
+        private.unwrap(),
+        &format!(r#"{{"channel":"executions","type":"update","data":[{bad},{peer}]}}"#),
+    );
+    assert_eq!(e.store().order("O-100").unwrap().filled, 0.5);
+    assert_eq!(e.store().order("O-200").unwrap().filled, 0.5);
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 1);
 }
 #[test]
 fn snapshot_history_never_emits_and_live_execution_reconnect_duplicates_dedupe() {

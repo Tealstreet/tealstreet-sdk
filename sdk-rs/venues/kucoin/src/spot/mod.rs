@@ -479,8 +479,10 @@ impl KucoinSpot {
             .map(|c| c.currency.clone())
             .collect();
         self.rearm_skips("coin:", builder.rejected() == 0, mapped);
+        // A retained stale row cannot be summed with fresh ones (a conversion would count
+        // twice), so the USD wallet keeps its previous total until every row reads.
+        let partial = builder.rejected() > 0;
         let stored = cx.store.currency_balances().unwrap_or_default().to_vec();
-        // The USD wallet sums the committed rows, retained copies included.
         let currencies = builder.commit(stored, |c| c.currency.clone());
         let mut sum = Balance::default();
         let mut coins = vec![];
@@ -542,7 +544,9 @@ impl KucoinSpot {
         }
         self.wallet_unquoted_warned = unquoted;
         cx.store.set_coin_balances(coins);
-        cx.store.set_balance(sum);
+        if !partial {
+            cx.store.set_balance(sum);
+        }
         Ok(())
     }
     /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
