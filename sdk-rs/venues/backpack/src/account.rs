@@ -430,10 +430,11 @@ impl Backpack {
             Request::Positions { rows, invalid, .. } => {
                 let result = serde_json::from_str::<PositionRow<'_>>(item).map(|r| {
                     if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
-                        // A malformed catalogue row hides its exposure; an absent market rejects the snapshot.
-                        if !self.report_skipped_market(cx, &r.symbol) {
+                        // A malformed catalogue row holds the snapshot; a filtered market is skipped.
+                        if self.report_skipped_market(cx, &r.symbol) {
                             *invalid = true;
-                            cx.log(LogLevel::Warning, "Backpack owned position market unavailable; preserving previous snapshot");
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else if r.net_quantity != 0.0 {
                         rows.push(position(
@@ -461,15 +462,11 @@ impl Backpack {
             } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
                     if cx.store.market(&r.symbol).is_none() {
-                        if !self.report_skipped_market(cx, &r.symbol)
-                            && r.symbol.ends_with("_PERP")
-                            && status(&r.status) == OrderStatus::Open
-                        {
-                            *invalid = true;
-                            cx.log(
-                                LogLevel::Warning,
-                                "Backpack working order market unavailable; preserving previous orders",
-                            );
+                        // Only a working order on a malformed market holds the snapshot.
+                        if self.report_skipped_market(cx, &r.symbol) {
+                            *invalid |= status(&r.status) == OrderStatus::Open;
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else {
                         if r.trigger_price.is_some()

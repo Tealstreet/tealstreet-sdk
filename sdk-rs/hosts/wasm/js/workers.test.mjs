@@ -502,3 +502,40 @@ test('Workers rejects provider controls from authenticated sockets while preserv
     assert.deepEqual(delivered, [{ op: 'fetchAccount' }]);
   } finally { client.close(); }
 });
+
+test('Workers forgets a startup failure once the engine stops or restarts', async () => {
+  let starts = 0;
+  const WasmEngine = class {
+    start() {
+      starts++;
+      return starts === 1 ? JSON.stringify([{ op: 'startupFailed', detail: { message: 'key rejected' } }]) : '';
+    }
+    snapshotFrame() { return Uint8Array.of(1); }
+    free() {}
+  };
+  const EngineObject = createEngineObject({
+    accountToken: () => 'account-a-token',
+    loadEngine: async () => ({ WasmEngine }),
+    flush: { store: 1e9, books: 1e9 },
+  });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const join = async () => {
+    const response = await object.fetch({ headers: new Map([['Upgrade', 'websocket'], ['Authorization', 'Bearer account-a-token']]) });
+    // The server side records what it sent, including replays sent while joining.
+    const server = [...object.clients].at(-1);
+    return { socket: response.webSocket, received: server.sent };
+  };
+  const failed = (received) => received.some((m) => typeof m === 'string' && m.includes('"startupFailed"'));
+  const first = await join();
+  first.socket.send(JSON.stringify({ op: 'start', venue: 'binance' }));
+  await until(() => failed(first.received));
+  first.socket.close();
+  const second = await join();
+  assert.ok(!failed(second.received), 'a stopped engine no longer reports its failed start');
+  second.socket.send(JSON.stringify({ op: 'start', venue: 'binance' }));
+  await until(() => object.host !== undefined);
+  const third = await join();
+  assert.ok(!failed(second.received) && !failed(third.received), 'a successful restart reports no failure');
+  third.socket.close();
+  second.socket.close();
+});

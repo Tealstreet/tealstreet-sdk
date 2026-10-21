@@ -1,7 +1,7 @@
 use crate::{Coinbase, Pending, account::Editable};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -40,6 +40,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     collect: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -515,6 +517,7 @@ impl Coinbase {
             steps: VecDeque::new(),
             ids: vec![],
             collect: false,
+            effective: false,
         };
         match command {
             Command::PlaceOrders { orders, .. } => {
@@ -1103,7 +1106,7 @@ impl Coinbase {
             Command::SetLeverage { .. }
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. } => {
-                cx.done(id, Err("Coinbase does not support account leverage, margin or position-mode mutations".into()));
+                cx.fail(id, not_sent("Coinbase does not support account leverage, margin or position-mode mutations").kind(ErrorKind::Unsupported));
                 return None;
             }
             Command::FetchLeverage { symbol, .. } => {
@@ -1122,7 +1125,10 @@ impl Coinbase {
                         })),
                     );
                 } else {
-                    cx.done(id, Err("Coinbase market settings are unavailable".into()));
+                    cx.fail(
+                        id,
+                        VenueError::new("Coinbase market settings are unavailable"),
+                    );
                 }
                 return None;
             }
@@ -1134,12 +1140,12 @@ impl Coinbase {
             || !cx.store.loaded().markets
             || !cx.store.loaded().orders
         {
-            cx.done(id, Err("Coinbase account is not ready for trading".into()));
+            cx.fail(id, not_sent("Coinbase account is not ready for trading"));
             return None;
         }
         self.reconcile_reductions(cx);
         if self.trading.queue.len() + usize::from(self.trading.active.is_some()) >= MAX_JOBS {
-            cx.done(id, Err("Coinbase trading queue is full".into()));
+            cx.fail(id, not_sent("Coinbase trading queue is full"));
             return None;
         }
         match self.prepare_job(cx, command) {
@@ -1147,7 +1153,7 @@ impl Coinbase {
                 self.trading.queue.push_back(job);
                 self.trading_next(cx);
             }
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.fail(id, not_sent(error)),
         }
         None
     }
@@ -1282,7 +1288,7 @@ impl Coinbase {
                 self.trading_finish_error(
                     cx,
                     command,
-                    "Coinbase cannot enumerate an unresolved placement for cancel-all",
+                    not_sent("Coinbase cannot enumerate an unresolved placement for cancel-all"),
                 );
                 return;
             }
@@ -1314,7 +1320,7 @@ impl Coinbase {
                     self.trading.active.as_mut().unwrap().steps = steps;
                     self.trading_next(cx);
                 }
-                Err(e) => self.trading_finish_error(cx, command, e),
+                Err(e) => self.trading_finish_error(cx, command, not_sent(e)),
             }
             return;
         }
@@ -1355,7 +1361,7 @@ impl Coinbase {
             );
         }
         if let Err(error) = self.request(cx, method, path, body, None, Pending::Trading(request)) {
-            self.trading_finish_error(cx, id, error);
+            self.trading_finish_error(cx, id, not_sent(error));
         } else if method == Method::Post {
             self.private_after_write(cx);
         }
@@ -1373,15 +1379,15 @@ impl Coinbase {
             .as_ref()
             .is_some_and(|job| job.command == command)
         {
-            self.trading.active = None;
+            let job = self.trading.active.take().expect("active job");
             self.trading.waiting = false;
-            let error = error.into();
-            // Unclassified failures keep the plain path until Coinbase migrates to `fail`.
-            if error.outcome.is_some() {
-                cx.fail(command, error);
-            } else {
-                cx.done(command, Err(error.message));
+            let mut error = error.into();
+            if (job.effective || !job.ids.is_empty())
+                && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
+                error.outcome = None;
             }
+            cx.fail(command, error);
             self.trading_next(cx);
         }
     }
@@ -1394,13 +1400,24 @@ impl Coinbase {
     ) {
         self.private_after_write(cx);
         self.placement_unresolved(cx, &request.step);
-        self.trading_finish_error(
-            cx,
-            request.command,
-            unknown(format!(
-                "Coinbase write outcome requires reconciliation: {error}"
-            )),
-        );
+        let error = unknown(format!(
+            "Coinbase write outcome requires reconciliation: {error}"
+        ));
+        self.trading_finish_error(cx, request.command, error.kind(ErrorKind::Network));
+    }
+
+    /// Refused at dispatch (signing or a dispatch-time check): Coinbase received nothing.
+    /// Reservation bookkeeping is kept as for a lost write; the key may belong to another request.
+    pub(crate) fn trading_unsent(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        self.private_after_write(cx);
+        self.placement_unresolved(cx, &request.step);
+        let error = format!("Coinbase write outcome requires reconciliation: {error}");
+        self.trading_finish_error(cx, request.command, not_sent(error));
     }
 
     pub(crate) fn trading_response(
@@ -1436,6 +1453,25 @@ impl Coinbase {
                 self.trading.reductions.remove(&payload.client_order_id);
                 self.private_placement_finished(&payload.client_order_id);
             }
+            let error = VenueError::new(error);
+            let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+            let error = match response.status {
+                401 => rejected(error, ErrorKind::AuthInvalid),
+                403 => rejected(error, ErrorKind::AuthPermission),
+                429 => rejected(error, ErrorKind::RateLimited),
+                // Any other 4xx (3xx answers prove nothing).
+                400..=499 => rejected(error, ErrorKind::Rejected),
+                _ => error.outcome(Outcome::Unknown),
+            };
+            // The cancellation proof is a read before the replacement write.
+            let error = if matches!(request.step, Step::Confirm { .. }) {
+                VenueError {
+                    outcome: Some(Outcome::NotSent),
+                    ..error
+                }
+            } else {
+                error
+            };
             self.trading_finish_error(cx, request.command, error);
             return;
         }
@@ -1443,8 +1479,12 @@ impl Coinbase {
         self.trading.waiting = false;
         match result {
             Ok(id) => {
+                let job = self.trading.active.as_mut().unwrap();
+                if !matches!(request.step, Step::Confirm { .. }) {
+                    job.effective = true;
+                }
                 if let Some(id) = id {
-                    self.trading.active.as_mut().unwrap().ids.push(id);
+                    job.ids.push(id);
                 }
                 self.trading_next(cx);
             }
@@ -1479,9 +1519,17 @@ impl Coinbase {
                 if !result.success {
                     self.trading.reductions.remove(&payload.client_order_id);
                     self.private_placement_finished(&payload.client_order_id);
-                    return Err(
-                        placement_rejection(result.error_response, result.failure_reason).into(),
-                    );
+                    // `success: false` is Coinbase's documented refusal: no order was created,
+                    // except a duplicate client ID, which may name a live order.
+                    let duplicate = result.error_response.as_ref().is_some_and(|e| {
+                        e.new_order_failure_reason.as_deref() == Some("DUPLICATE_CLIENT_ORDER_ID")
+                    });
+                    let message = placement_rejection(result.error_response, result.failure_reason);
+                    return Err(if duplicate {
+                        VenueError::new(message)
+                    } else {
+                        rejected(message)
+                    });
                 }
                 let id = if let Some(created) = result.success_response {
                     if created
@@ -1583,13 +1631,14 @@ impl Coinbase {
                     }
                 }
                 if !errors.is_empty() {
-                    return Err(errors.join(", ").into());
+                    // Per-order results; other orders in the batch may have been cancelled.
+                    return Err(VenueError::new(errors.join(", ")));
                 }
                 Ok(None)
             }
             Step::Confirm { id, product } => {
                 let detail: Detail = serde_json::from_str(body)
-                    .map_err(|_| "Malformed Coinbase cancellation confirmation")?;
+                    .map_err(|_| not_sent("Malformed Coinbase cancellation confirmation"))?;
                 if detail.order.order_id != *id
                     || detail.order.product_id != *product
                     || detail.order.status != "CANCELLED"
@@ -1599,9 +1648,9 @@ impl Coinbase {
                         .order(id)
                         .is_some_and(|o| o.filled == 0.0 && o.status != OrderStatus::Closed)
                 {
-                    return Err(
-                        "Coinbase replacement requires authoritative zero-fill cancellation".into(),
-                    );
+                    return Err(not_sent(
+                        "Coinbase replacement requires authoritative zero-fill cancellation",
+                    ));
                 }
                 self.private_order_canceled(cx, id);
                 Ok(None)
@@ -1612,16 +1661,23 @@ impl Coinbase {
                     unknown("Coinbase edit response omitted documented success/errors")
                 })?;
                 if !result.success || !result.errors.is_empty() {
+                    // Only `success: false` documents that the edit was not placed.
+                    let refused = !result.success;
                     let reasons: Vec<_> = result
                         .errors
                         .into_iter()
                         .flat_map(|e| [e.edit_failure_reason, e.preview_failure_reason])
                         .flatten()
                         .collect();
-                    return Err(if reasons.is_empty() {
-                        "Coinbase edit rejected".into()
+                    let message = if reasons.is_empty() {
+                        "Coinbase edit rejected".to_owned()
                     } else {
-                        reasons.join(", ").into()
+                        reasons.join(", ")
+                    };
+                    return Err(if refused {
+                        rejected(message)
+                    } else {
+                        VenueError::new(message)
                     });
                 }
                 self.private_after_write(cx);
@@ -1632,6 +1688,16 @@ impl Coinbase {
 }
 
 /// The write reached Coinbase but its result is unproven; reconcile before resending.
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+/// A documented refusal: nothing was created or changed.
+fn rejected(message: impl Into<String>) -> VenueError {
+    VenueError::new(message)
+        .kind(ErrorKind::Rejected)
+        .outcome(Outcome::Rejected)
+}
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
