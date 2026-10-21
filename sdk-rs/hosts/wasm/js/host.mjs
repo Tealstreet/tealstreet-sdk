@@ -146,6 +146,8 @@ export class EngineDeadError extends Error {
     super('Exchange engine stopped unexpectedly', { cause });
     this.name = 'EngineDeadError';
     this.code = 'ENGINE_DEAD';
+    // A trap (a Rust panic) is the engine's own fault, never a venue answer.
+    this.kind = 'internal';
     if (command) {
       this.command = command.op;
       if (WRITE_COMMANDS.has(command.op)) {

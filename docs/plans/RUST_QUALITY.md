@@ -69,8 +69,8 @@ shared parser per venue family, replacing `malformed` flags; (3) TS toast on
 rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
 `StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
 `StartupFailed`, BreakoutProp and Bybit landed); (6)
-app and chaser read `kind`/`outcome`; (7) wasm panic disposes the engine and
-surfaces `Internal`.
+app and chaser read `kind`/`outcome`; ~~(7) wasm panic disposes the engine and
+surfaces `Internal`~~ (`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),

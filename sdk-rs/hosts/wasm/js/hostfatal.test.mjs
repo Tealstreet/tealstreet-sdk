@@ -73,6 +73,7 @@ for (const method of methods) {
     assert.equal(r.deaths.length, 1);
     assert.equal(r.deaths[0], r.host.deadError);
     assert.equal(r.host.deadError.cause, trap);
+    assert.equal(r.host.deadError.kind, 'internal');
     assert.equal(r.host.wsScratchBusy, false);
     const count = r.calls.length;
     callbacks.onOpen(); callbacks.onMessage('late'); callbacks.onBinary(new Uint8Array([2])); callbacks.onClose();
@@ -138,6 +139,8 @@ test('fatal cleanup settles all pending operations with unknown write outcomes d
   r.host.start();
   const results = await pending;
   assert.ok(results.every((result) => result.status === 'rejected' && result.reason instanceof EngineDeadError));
+  // A trap is the engine's own fault, never the venue's: callers branch on `kind`.
+  assert.ok(results.every((result) => result.reason.kind === 'internal'));
   assert.equal(results[0].reason.outcome, 'unknown');
   assert.equal(results[0].reason.clientOrderId, 'caller-1');
   assert.deepEqual(results[1].reason.clientOrderIds, ['caller-2', 'caller-3']);
