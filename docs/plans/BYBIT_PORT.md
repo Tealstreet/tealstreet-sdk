@@ -70,9 +70,11 @@ price (the TS fallback could create a duplicate).
 
 ## Scope
 
-This lane ports linear USDT/USDC contracts. Inverse, spot and demo remain separate
-lanes. TS stays available as the replay oracle and as the base class of those
-unported variants; it cannot yet be deleted without breaking them.
+This document began with linear USDT/USDC contracts. The native registry now
+also selects inverse, spot, demo and Hyro variants, with optional inverse/option
+categories on linear accounts. Explicit refresh follows each instance's enabled
+categories. TS remains the replay oracle and must follow the shared deletion
+blockers before removal; this refresh does not authorize deleting variants.
 
 The shared harness now compares normalized outbound reads and subscriptions.
 It requires the native execution/wallet feeds in addition to TS's order/position
