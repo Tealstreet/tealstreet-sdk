@@ -475,11 +475,20 @@ Remaining resilience and completeness findings are independent of request parity
   connects or a watchdog recover the socket sticks to an endpoint that ignores
   depth/kline subscriptions while still answering pings: books and live candles go
   dead with no log. Tag it `SocketChannel::Business`.~~ (tagged Business)
-- Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
-  network speed across futures, private and every ticker shard.
-- Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
-  forever (`lib.rs:453,477,570,587`; strict `Pair`/`Daily` in `wire.rs:118-143`); a
-  tickers failure also blocks the private start (`lib.rs:541`). TS skips such rows.
+- Medium: ~~reconnects have no backoff; refused connections loop at network
+  speed across futures, private and every ticker shard~~. Each stable feed now
+  retains a shared socket Supervisor across epochs, with capped jittered retries,
+  connection deadlines and real-traffic stability reset. Retired epochs and their
+  queue/login timers cannot affect replacements; routing roles/feed/recover are
+  preserved. Opened private sessions retain first-pong silence compatibility.
+- Medium: ~~one unparsable catalog/ticker row fails the whole list and retries
+  forever; a ticker failure also blocks private startup~~. Typed public row
+  failures are skipped with coded warnings while valid peers commit; empty or
+  wholly unusable seeds retry without establishing readiness. Private startup
+  completes from the usable catalogue while tickers remain pending, and ticker
+  recovery never resets private settings/state. Shared capped discovery backoff
+  preserves native/HTTP rate-limit floors and degradation/recovery; malformed
+  streams/envelopes remain failures with sanitized public diagnostics.
 - Medium: one unmappable positions/orders row keeps the previous snapshot forever
   (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
 - Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
@@ -512,8 +521,12 @@ Remaining resilience and completeness findings are independent of request parity
   rejection without `data` is ignored (`account.rs:744`).
 - Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
-  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; book kept
-  while disconnected; secondary read keys dropped; `data: null` envelopes treated as
+  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
+  while disconnected~~ (futures retirement immediately invalidates subscribed
+  books and publishes consumer clearing before retry; current interests replay
+  once on replacement); ~~secondary read keys dropped~~ (validated native options
+  now reach the GET signer, with api-key secondary egress in SDK/native plans;
+  mutations/private login remain primary and public discovery stays unsigned); `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
   as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL

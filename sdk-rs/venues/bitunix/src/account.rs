@@ -176,7 +176,16 @@ impl BitunixFutures {
         body: Option<String>,
         pending: Pending,
     ) {
-        let Some(c) = &self.credentials else {
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
+        let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             self.fail_private(cx, pending, "Bitunix credentials required");
             return;
         };
@@ -200,7 +209,16 @@ impl BitunixFutures {
             if query.is_empty() { "" } else { "?" },
             query
         );
-        if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
+        let scope = match &pending {
+            Pending::Private(read) => Some(match read.axis {
+                Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
+                Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
+                Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
+            }),
+            Pending::SymbolSettings { .. } => Some(safe_cex_engine::AccountReadScope::Settings),
+            _ => None,
+        };
+        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
             || matches!(&pending, Pending::History(_))
         {
             cx.request_streamed(
@@ -218,9 +236,20 @@ impl BitunixFutures {
                     "rows",
                 ]),
                 pending,
-            );
+            )
         } else {
-            cx.request(method, url, headers, body, pending);
+            cx.request(method, url, headers, body, pending)
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
+            );
         }
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
@@ -462,7 +491,7 @@ impl BitunixFutures {
             if let Some(s) = self
                 .sockets
                 .iter()
-                .find(|s| matches!(s.feed, Feed::Private) && s.opened)
+                .find(|s| s.active && matches!(s.feed, Feed::Private) && s.opened)
             {
                 self.login(cx, s.id);
             }

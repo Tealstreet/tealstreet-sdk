@@ -707,8 +707,6 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
     let r = requests(&mut e)
         .into_iter()
         .find(|r| r.url.contains("marginCoin"))
@@ -792,6 +790,14 @@ fn private_heartbeat_preserves_legacy_silent_sessions() {
             code: 1006,
         },
     );
+    let (retry, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer: retry });
     let actions: Vec<_> = e.drain_actions().collect();
     let socket = actions
         .iter()
@@ -803,18 +809,14 @@ fn private_heartbeat_preserves_legacy_silent_sessions() {
             }
         })
         .unwrap();
-    let timer = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(*timer)
-            } else {
-                None
-            }
+    e.handle(at, Event::WsOpened { socket });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
         })
         .unwrap();
-    e.handle(1.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
     e.handle(50_000.0, Event::TimerFired { timer });
     assert!(
         !e.drain_actions()
@@ -982,8 +984,6 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
     let mut timers = vec![];
     loop {
         let actions: Vec<_> = e.drain_actions().collect();
@@ -994,7 +994,9 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
             match a {
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 Action::Http(r) => {
-                    let body = if r.url.contains("get_pending_positions") {
+                    let body = if r.url.ends_with("/tickers") {
+                        TICKERS
+                    } else if r.url.contains("get_pending_positions") {
                         POSITIONS
                     } else if r.url.contains("/tpsl/") {
                         TPSL
