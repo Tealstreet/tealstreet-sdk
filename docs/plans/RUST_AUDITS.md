@@ -695,9 +695,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   are resent.
 
 ### BloFin
+
 - ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
   request command before retained rows complete. Its native cap regression
   checks exact ownership and ordering even at Error-only log level.
+
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
   after usable markets and retries ticker discovery; #1615 (`c63acfc19c2`)
