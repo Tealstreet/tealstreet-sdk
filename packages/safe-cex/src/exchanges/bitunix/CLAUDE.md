@@ -810,3 +810,10 @@ copying the response. Failed controls share one two-second retry per socket
 without postponing its deadline. Success and socket retirement cancel that retry;
 a late timer cannot sign on a replacement. The existing first-pong compatibility,
 login timestamp units and write retry policy remain unchanged.
+
+Rust engine transport honors explicit `tealstreetWsRoute: true` on the first
+public-shard, private and futures/business socket attempt, selecting that channel's
+declared proxy. False/unset keeps two silent direct attempts before fallback;
+feed identities remain independent. The engine's native routing plan uses the
+same selection. The shared resolver and TS socket classes retain their existing
+fallback contract, and a direct transport still reports unsupported proxy routing.
