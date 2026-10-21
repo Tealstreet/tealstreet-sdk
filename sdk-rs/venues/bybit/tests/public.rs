@@ -488,3 +488,28 @@ fn a_limited_candle_read_asks_for_the_newest_bars_up_to_to() {
         request.url
     );
 }
+
+#[test]
+fn a_zero_limit_candle_read_keeps_from_and_the_default_count() {
+    let mut h = Harness::started(safe_cex_venue_bybit::Options {
+        variant: safe_cex_venue_bybit::Variant::Inverse,
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.command(Command::FetchCandles {
+        command: 3,
+        symbol: "BTCUSD".into(),
+        interval: safe_cex_engine::model::Interval::H1,
+        limit: Some(0),
+        from_ms: Some(1670601600000.0),
+        to_ms: Some(1670608800000.0),
+    });
+    let request = h.take("/v5/market/kline");
+    assert!(
+        request
+            .url
+            .ends_with("&start=1670601600000&end=1670608800000&limit=500"),
+        "{}",
+        request.url
+    );
+}
