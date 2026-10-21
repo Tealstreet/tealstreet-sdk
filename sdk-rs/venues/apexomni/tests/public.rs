@@ -457,3 +457,75 @@ fn secondary_trade_uses_decimal_quote_conversion_and_rollover_without_backflow()
         .collect();
     assert_eq!(values, [120.0, 3.0, 4.0, 3.0, 4.0, 0.5]);
 }
+
+fn candle_query_actions(body: &str) -> Vec<Action> {
+    let (mut e, _) = started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        100.0,
+        Event::Command(Command::FetchCandles {
+            command: 88,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    response(&mut e, &request, 101.0, body);
+    e.drain_actions().collect()
+}
+
+#[test]
+fn rest_candles_isolate_zero_price_with_coded_warning_and_keep_sorted_peers() {
+    let actions = candle_query_actions(
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":3000,"o":"2","h":"4","l":"1","c":"3","v":"7"},{"t":2000,"o":"0","h":"0","l":"0","c":"0","v":"0"},{"t":1000,"o":"1","h":"3","l":"1","c":"2","v":"5"}]}}"#,
+    );
+    let result = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: 88,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .expect("valid peers survive");
+    let rows: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(rows[0]["timestamp"], 1.0);
+    assert_eq!(rows[1]["timestamp"], 3.0);
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+}
+
+#[test]
+fn rest_candles_keep_valid_empty_and_fail_unusable_envelopes_or_timestamps() {
+    let empty = candle_query_actions(r#"{"code":0,"data":{"BTCUSDT":[]}}"#);
+    assert!(empty.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { command:88,result }) if result == "[]")
+    ));
+    for body in [
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":1000,"o":"0","h":"0","l":"0","c":"0","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":"bad","o":"1","h":"1","l":"1","c":"1","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":"","o":"1","h":"1","l":"1","c":"1","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":-1,"o":"1","h":"1","l":"1","c":"1","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":1.5,"o":"1","h":"1","l":"1","c":"1","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":[{"t":1000,"o":"bad","h":"1","l":"1","c":"1","v":"0"}]}}"#,
+        r#"{"code":0,"data":{"BTCUSDT":{}}}"#,
+        r#"{"code":0,"data":{}}"#,
+    ] {
+        let actions = candle_query_actions(body);
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 88, .. }))),
+            "{body}"
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 88, .. })))
+        );
+    }
+}

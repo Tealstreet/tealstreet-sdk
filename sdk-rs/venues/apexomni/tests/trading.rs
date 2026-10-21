@@ -862,3 +862,18 @@ fn write_failures_are_classified_without_changing_their_text() {
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
 }
+
+#[test]
+fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
+    let (mut e, socket) = ready_with_socket();
+    let decimal_parent = |filled: &str| {
+        serde_json::json!({"topic":"ws_zk_accounts_v3","type":"delta","contents":{"orders":[{"id":"parent","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"0.3","price":"60000","cumSuccessFillSize":filled}]}}).to_string()
+    };
+    ws(&mut e, socket, NOW + 5.0, &decimal_parent("0.1"));
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    ws(&mut e, socket, NOW + 12.0, &decimal_parent("0.2"));
+    e.drain_actions().for_each(drop);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
+}

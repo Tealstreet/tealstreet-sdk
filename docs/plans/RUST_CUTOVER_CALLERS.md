@@ -1716,6 +1716,16 @@ The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
 and transport dependencies. Generic consumer fixtures do not authorize deleting
 those oracle dependencies or enabling measurement-gated order controls.
 
+### AsterDEX bounded fill reads and flat events
+
+Rust AsterDEX callers can request fill ranges longer than seven days; limit is a
+per-page native limit and no longer caps the final bounded range. Native rows
+are deduplicated across boundaries, then cumulative PnL is normalized over all
+orders before an optional order filter. V3's search precedence cannot override
+caller time bounds. Saturated timestamps and incomplete reads fail visibly.
+Closed hedge legs can omit entry price when their amount is explicitly zero;
+other exposure and balance provenance remain strict. Shapes are unchanged.
+
 ### Orderly port-review display/read corrections
 
 Orderly `fetchOHLCV` callers supplying `from`/`to` now receive native history
@@ -1723,6 +1733,14 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### ApeX Omni decimal remaining and candle row isolation
+
+Order displays/default amendments now preserve native decimal remainder (for
+example0.3-0.2 is0.1) without snapping to market amount precision. REST chart
+reads keep sorted valid candles when a typed zero-price row occurs and emit a
+coded warning; malformed or wholly unusable responses fail. Caller signatures,
+order IDs and explicit leverage-write semantics remain unchanged.
 
 ### BingX port-review metadata and stream recovery
 
@@ -1741,6 +1759,15 @@ No extra polling or write retry is added. Malformed position-stream rows retain 
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
 
+### Backpack nullable trigger quantities
+
+Rust readbacks accept missing/null base quantity only when native trigger fields
+prove a positive amount and consistent execution. Orders remain visible and
+repairable under their real IDs; malformed ordinary quantities preserve prior
+state and fail rather than creating zero-size rows. This applies to account and
+order history reads and repair acknowledgements without changing method shapes,
+placement units, WS fields or cancellation identity.
+
 ### Lighter port-review confirmation and failures
 
 A Rust Lighter reduce-only limit order without matching known exposure now waits
@@ -1752,6 +1779,14 @@ result shapes. HTTP405/429 include neutral guidance with native diagnostics;
 explicit invalid-margin21613 rejection refreshes state without changing cached
 mode by guess or automatically replaying a placement.
 
+
+### Bitrue private conditional display
+
+Newly observed Bitrue conditional orders use native conditionOrder/triggerType
+for SL/TP classification even when execution type is MARKET/LIMIT. Existing
+protective child identity, direction and trigger reference remain authoritative.
+Order overlays and protective controls receive corrected kinds/prices with no
+method, quantity, placement or cancellation contract change.
 
 ### Phemex explicit index triggers and daily cutoff
 

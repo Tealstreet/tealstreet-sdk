@@ -402,6 +402,10 @@ struct OrderEvent<'a> {
     open: Cow<'a, str>,
     #[serde(rename = "E", default)]
     time: Number,
+    #[serde(default, rename = "conditionOrder")]
+    condition_order: bool,
+    #[serde(default, rename = "triggerType")]
+    trigger_type: Number,
     #[serde(default, rename = "triggerPrice")]
     trigger_price: Number,
     #[serde(default, rename = "triggerPriceType")]
@@ -938,7 +942,16 @@ impl Bitrue {
         let Some(mut side) = side(&row.side) else {
             return;
         };
-        let Some(mut kind) = order_type(&row.o) else {
+        let protection = if row.condition_order {
+            match row.trigger_type.0 {
+                1.0 => Some(OrderType::StopLoss),
+                2.0 => Some(OrderType::TakeProfit),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let Some(mut kind) = protection.or_else(|| order_type(&row.o)) else {
             return;
         };
         if let Some(previous) = existing
