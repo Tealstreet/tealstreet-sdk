@@ -424,26 +424,55 @@ against current code before fixing. Lifecycle differences alone are not defects.
 
 ## Architecture
 
+Re-verified on `b6cb612bc7c`; item-by-item source/merge evidence and remaining
+dispositions are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AUDIT.md).
+
 - ~~Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.~~
-  Done: every venue decodes through `engine::de` (RUST_QUALITY helper 1).
+  Shared strict/lenient numeric helpers landed in #1358 (`722e878afb8`);
+  preserve each venue's chosen malformed/blank policy (RUST_QUALITY helper 1).
 - ~~Socket supervision copied per venue, no jitter, two without backoff →
-  `engine::socket::Supervisor`.~~ Fixed: every venue socket runs under the shared supervisor (#1385, #1406, #1423 and the final socket PR).
+  `engine::socket::Supervisor`.~~ Shared supervision landed through #1350,
+  #1385, #1406, #1423 and #1433; #1512 shares socket specs. Connection-specific
+  protocol/authentication behavior remains explicit.
 - ~~Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
   `safe-cex-venues` crate shared by both hosts.~~ Done: `sdk-rs/registry` is shared
-  by the hosts (RUST_QUALITY helper 6).
+  by the hosts (#1467/#1469/#1476), with uniform TS options in #1519 and
+  runtime host-clock policy in #1520 (RUST_QUALITY helper 6).
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
+  **Still present:** `BybitBbo`, BBO/tick-tolerance placement fields and four
+  venue-named command features. This is coupling/cleanup debt, not evidence of
+  incorrect routing. **Owner decision:** park pure cleanup until after cutover;
+  any later change must preserve existing JSON and trading rules.
 - ~~Client ids use OS randomness in the deterministic core (`crypto/src/uuid.rs`).~~
   Host-owned identity and separate signing entropy now enter through `Engine`/`Cx`;
   production hosts bind OS/WebCrypto and replay hosts inject tape-derived identity.
-  Missing providers fail construction; CI bans ambient core/venue draws.
-- ~~~30 URL encoders in three dialects → `engine::url`.~~ Done (RUST_QUALITY helper 2).
+  Missing providers fail construction; CI bans ambient core/venue draws (#1624,
+  `0cd8f2b1657`). Signing remains cryptographic unless explicitly injected.
+- ~~~30 URL encoders in three dialects → `engine::url`.~~ Shared encoders and
+  query dialects landed in #1368 (`e4cdde22cd3`); signing-specific spellings remain
+  explicit (RUST_QUALITY helper 2).
 - ~~`RangeWalk` used by 6 of 26 venues~~ (shared `CursorWalk`/`windows`/`OffsetWalk`
-  page 12 venues; the rest stay hand-rolled with reasons in
-  [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md)); three book-stitch designs.
-- Read-key routing re-implemented ~14 times plus 12 copied test files.
-- `docs/plans` 47 files; collapse to this file, `RUST_REWRITE.md`,
-  `VENUE_PORT_BRIEF.md`, the cutover docs, and per-venue READMEs. Roster stale.
-- Workspace manifest, `rust:*` scripts and `.cargo/config.toml` comment cleanup.
+  now serve the documented batches; retained paging exceptions have reasons in
+  [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md)). Book storage is shared;
+  venue-specific snapshot/sequence/checksum protocols still require distinct
+  stitching policies. Their count alone does not establish a production defect.
+- Read-key routing remains repeated in venue signing/request paths. The shared
+  `ReadCredentials` type does not select credentials. Preserve GET-only behavior,
+  private/write boundaries, passphrase inheritance and Bitget's degraded-balance
+  primary-key exception when sharing it. ~~Copied per-venue test probes~~ were
+  replaced by `engine::test_support::ProbeVenue` in #1427 (`1435005aea3`);
+  13 secondary-test files retain venue-specific assertions. **Owner decision:**
+  park selection deduplication until after cutover; this re-audit established no
+  wrong-key or missing-read-key production defect.
+- ~~`docs/plans` has 47 files; collapse the evidence documents; roster stale.~~
+  **Owner decision:** retain the documents and use the single
+  [topic/status/read-trigger/file index](README.md). The old in-progress port
+  labels are refreshed in [the roster](RUST_REWRITE.md#8-port-inventory-and-historical-receipts).
+- ~~Workspace manifest, `rust:*` scripts and `.cargo/config.toml` comment cleanup.~~
+  Re-check found 68 Rust scripts with all 61 referenced source paths/patterns resolving;
+  the 128 KiB stack comment matches `131072`. Workspace profiles/layout are
+  documented in [the artifact audit](RUST_WASM_ARTIFACT_SIZE.md). No remaining
+  broken-path/comment defect was demonstrated; feature-name debt remains above.
 
 ## Gate honesty
 
@@ -454,12 +483,13 @@ single [`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.jso
 list. An accepted known failure is not a parity pass. Baseline/workload and
 candidate/fixer integrity failures cannot be exempted.
 
-Implemented on the gate-honesty lane:
+Implemented findings (source and merged-PR receipts in
+[the re-audit](RUST_ARCHITECTURE_GATE_AUDIT.md); primarily #1346, `a22e6b6ac1e`):
 
-- Binance/Bybit margin expectations come from taped native position/configuration
+- ~~Circular Binance/Bybit margin expectations.~~ Expectations come from taped native position/configuration
   fields. Isolated TS fixers cannot receive candidate output; AST and mutation
   controls reject circular fixes.
-- Compare TP/SL and each leg's trigger source, conditional execution price,
+- ~~Comparison omissions, duplicate masking and final-only coverage.~~ Compare TP/SL and each leg's trigger source, conditional execution price,
   parent IDs, open/flat-position realized PnL and fill
   price/fee/time/execution identity. Client IDs and fill prices default on; any
   exclusion requires an explicit venue/field/reason. Duplicate public symbols
@@ -467,23 +497,39 @@ Implemented on the gate-honesty lane:
   at startup, tape quarters, commands and terminal checkpoints, before fixers.
   Validate each runner's boundaries against the tape plan independently, with
   required account/book sections; matching omissions cannot establish coverage.
-- Per-venue leaf permissions and structural rules constrain every fixer;
+- ~~Unbounded fixer mutations.~~ Per-venue leaf permissions and structural rules constrain every fixer;
   overwritten-field counts are reported. No fixer rewrites candidate requests.
-- At least seven fresh interleaved performance pairs, alternating first runner;
-  require 10% improvement in main/steady/process CPU and retained memory.
+- ~~Three-run/partial-load performance evidence.~~ At least seven fresh
+  interleaved performance pairs alternate the first runner. Main/steady CPU
+  objectives below 100 ms TS use nine pairs and allow at most max(1 ms, 5%)
+  above TS (#1461, `dfbc0a94bc2`); larger windows, process CPU and retained
+  memory require 10% improvement. CI requests nine public pairs. The small-window
+  exception cannot detect a regression that remains within its allowance.
   Implementation loading and WASM compilation count in total CPU. Audit
   callbacks, checkpoint reconstruction and baseline GC are outside performance
   intervals. Retention subtracts the idle-loaded module baseline and counts
   WASM growth once. Each performance run must reproduce its own audited final
-  output and transport receipt. No rerun-to-green performance selection.
-- Fixed combined shipping WASM budget: 13,631,488 bytes, checked on both browser
-  and Node artifacts before standalone overwrite. Standalone is 1,310,720 (#1421).
-- Bitget USDC has public/private CI cases with explicitly authored synthetic
+  output and transport receipt. The gate does not select favorable pairs;
+  separate CI retries remain separate observations, not erased failures.
+- ~~Missing combined budget / undecided artifact layout.~~ One budget source
+  now enforces 14,155,776 B combined and 1,343,488 B family ceilings
+  (#1528/#1535); combined web/Node are checked before standalone overwrite.
+  #1393 selects families for browser/Workers; explicit combined dispatches are
+  also supported. No budget change is made by this audit.
+- ~~Bitget USDC has no independent public/private CI case.~~ Public/private
+  cases have explicitly authored synthetic
   provenance. A private query timeout remains incomplete evidence, not a pass.
 
 Remaining evidence limitations:
 
-- No venue has live private evidence; private tapes are documented/synthetic.
+- Private CI tapes are documented/synthetic, not live-private certification.
+  Live-smoke tooling and scripted lifecycle regressions exist; no all-venue
+  approved live-capture corpus was found. The tape-time sweep now makes the
+  effective private clock policy deterministic for all 50 catalog aliases
+  (49 explicit flags plus polling BreakoutProp). Merged per-family proofs in
+  [HARNESS_TAPE_TIME.md](HARNESS_TAPE_TIME.md) compare complete nonmetric outputs,
+  including IDs/requests/receipts/checkpoints, over five pairs. Determinism does
+  not close private parity or live-evidence gaps; declared differences stay FAIL.
   Several TS handlers emit execution identity or timestamps, now preserved by
   the comparison. Rust now preserves Hyperliquid execution IDs; other venues'
   execution IDs and live-fill timestamps remain unreported where not supplied.
@@ -491,17 +537,36 @@ Remaining evidence limitations:
   remain missing, never reconstructed into candidate output from the tape.
 - Some tape-derived TS corrections still rebuild sections. Their declared leaf
   fields and overwrite counts are visible; raw checkpoints do not use them.
-- About 20 TS venues changed as paired fixes, so the oracle moved with the port.
-  Freeze outputs against master TS and declare deltas before removing references.
+- Paired TS fixes mean the oracle is not unchanged master TS. **Owner decision:**
+  retain executable TS references as the CPU/memory oracle through cutover;
+  delete neither venues nor references before then. Before later retirement,
+  preserve independently reviewed correctness/performance evidence and declare
+  deltas; Rust-versus-itself is not a replacement oracle. No frozen-output or
+  independent-oracle completion is claimed by the tape-time sweep.
 - Existing public recordings were driven by Rust; TS-only subscriptions can
   still be absent. Fixtures were refreshed alongside behavior changes.
   HyroTrader, BreakoutProp and Bitget USDC public fixtures are synthetic.
-- The harness measures implementation loading/runtime plus replay routing and
+- ~~No actual browser cold-start observations.~~ #1688 (`b6cb612bc7c`) adds
+  actual Chrome worker observations for 28 families plus a combined diagnostic,
+  with three fresh processes/profiles each. It remains measurement-only with
+  no threshold; a proposal requires at least three completed landing runs.
+  The replay harness separately measures implementation loading/runtime plus replay routing and
   minimal receipt recording. Common harness imports precede those intervals;
   this is not a browser cold-start or pure venue-handler benchmark.
-- CI performance replays use the selected standalone venue build. The combined
-  shipping build has a separate size budget; these standalone measurements do
-  not establish combined-artifact cold-load or browser performance.
+- Routine CI replays use the selected standalone family build. An explicit
+  combined dispatch can measure that build, but standalone results do not
+  establish combined runtime performance. Browser module readiness has its own
+  provenance and limits; it is not a replay CPU/memory or account-startup gate.
+
+Current source requires 32 suites / 110 exact venue/tape/books cases. The
+mandatory verifier rejects missing/duplicate/substituted cases and protected
+integrity failures. A green CI result may include exact declared FAILs; unused
+declarations and missing native fill metadata must remain visible limitations.
+The harness lane owns the remaining validator/fixture/declaration work; see the
+re-audit ledger for the Hyperliquid and Orderly caveats. Final sweep #1694
+(`e87107621f6`) pins all 50 effective clock policies and removes exactly 20 stale
+WEEX fee leaves; ten stable raw outputs and 112 exact remaining leaves establish
+repeatability/declaration scope, not private parity.
 
 Before cutover: live-smoke private captures on every venue (mainnet minimum size
 for coinbase, backpack, mexc with approval), a 3–7 day read-only production
