@@ -164,3 +164,9 @@ Require fresh mandatory public/private suite verification, independent
 review, five identical current-head CI pairs, full green head CI, a separate
 landing guard protecting the shared `kucoin` Rust crate, and an audited
 merge receipt before reporting and moving to BingX.
+
+Five focused pairs reproduced the handoff's 13 additional paths: eight
+filled/remaining fields where TS REST replacement restores startup values
+after the WS update while Rust preserves the cumulative fill, and five
+retained cancelled-row paths. Declare only those exact paths on the existing
+tape SHA and remove two unobserved checkpoint-5 row keys; retain strict FAIL.
