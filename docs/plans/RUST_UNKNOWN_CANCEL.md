@@ -80,8 +80,10 @@ naming an acknowledged, still-unstored id until the store has it, or for at most
 10 seconds on an engine-owned timer, and dispatches it unchanged. An id that
 never appears still fails explicitly at the venue; unrelated unknown ids are
 never held. A stored virtual leg (`{id}_sl`), a group child whose `parent_id` is
-the id, or a fill of the id ends the wait. A later write to a held order waits
-behind it, so writes to one order keep their arrival order. Opted in: Binance,
+the id ends the wait; a fill of the id shortens it to 1.5 seconds, since a
+venue may drop a filled order while a partial fill's row may still follow. A
+later write to a held order waits behind it, so writes to one order keep their
+arrival order. Opted in: Binance,
 Bybit, Crypto.com, Hyperliquid, Backpack, BingX, GRVT, Lighter, MEXC, Orderly,
 TxFlow, WOO. BloFin, Bitget, Bitrue, OKX and Phemex route acknowledged ids from
 their own acknowledgement caches; AsterDEX and KuCoin spot cancel with symbols;

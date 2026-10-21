@@ -14,14 +14,15 @@ use std::collections::HashSet;
 /// How long an acknowledged id may wait for the store before a command naming
 /// it is dispatched anyway.
 pub(crate) const ACK_WAIT_MS: f64 = 10_000.0;
+/// After a fill of an unstored id the order may be gone (venues drop filled
+/// orders) or partly live with its row still in flight on another topic.
+pub(crate) const FILL_GRACE_MS: f64 = 1_500.0;
 
 #[derive(Default)]
 pub(crate) struct PlacementAcks {
     placing: HashSet<CommandId>,
     /// Acknowledged ids not yet seen in the store, with their expiry.
     acked: Vec<(String, f64)>,
-    /// Acknowledged ids reported filled: a venue may never store them.
-    filled: HashSet<String>,
     /// Held commands, each with its dispatch deadline.
     held: Vec<(Command, f64)>,
 }
@@ -85,24 +86,48 @@ impl PlacementAcks {
         }
     }
 
-    /// A fill settles the wait: the venue may drop a filled order rather than
-    /// store it, and the cancel's answer no longer depends on the stream.
-    pub fn filled(&mut self, order_id: &str) {
-        if self.acked.iter().any(|(acked, _)| acked == order_id) {
-            self.filled.insert(order_id.to_owned());
+    /// A fill shortens the wait to `FILL_GRACE_MS`: a venue may drop a filled
+    /// order rather than store it, while a partial fill's row may still follow.
+    pub fn filled(&mut self, order_id: &str, now: f64) {
+        let grace = now + FILL_GRACE_MS;
+        let mut matched = false;
+        for (acked, expiry) in &mut self.acked {
+            if acked == order_id {
+                *expiry = expiry.min(grace);
+                matched = true;
+            }
+        }
+        if !matched {
+            return;
+        }
+        for (command, deadline) in &mut self.held {
+            if named_ids(command)
+                .iter()
+                .any(|id| native(id) == order_id || id == order_id)
+            {
+                *deadline = deadline.min(grace);
+            }
         }
     }
 
-    fn awaited(&self, store: &Store, command: &Command, now: f64) -> bool {
-        named_ids(command).iter().any(|id| {
-            !stored(store, id)
-                && !self.filled.contains(id)
-                && !self.filled.contains(native(id))
-                && self
-                    .acked
+    /// The latest expiry among the acknowledged, unstored ids `command` names.
+    fn awaited_until(&self, store: &Store, command: &Command, now: f64) -> Option<f64> {
+        named_ids(command)
+            .iter()
+            .filter(|id| !stored(store, id))
+            .flat_map(|id| {
+                self.acked
                     .iter()
-                    .any(|(acked, expiry)| *expiry > now && (acked == id || acked == native(id)))
-        })
+                    .filter(move |(acked, expiry)| {
+                        *expiry > now && (acked == id || acked == native(id))
+                    })
+                    .map(|(_, expiry)| *expiry)
+            })
+            .reduce(f64::max)
+    }
+
+    fn awaited(&self, store: &Store, command: &Command, now: f64) -> bool {
+        self.awaited_until(store, command, now).is_some()
     }
 
     /// Whether to hold `command` until its acknowledged ids are stored. A
@@ -116,23 +141,25 @@ impl PlacementAcks {
                     .any(|other| native(other) == native(id))
             })
         });
-        if !behind && !self.awaited(store, command, now) {
+        let until = self.awaited_until(store, command, now);
+        if !behind && until.is_none() {
             return false;
         }
-        self.held.push((command.clone(), now + ACK_WAIT_MS));
+        self.held
+            .push((command.clone(), until.unwrap_or(now + ACK_WAIT_MS)));
         true
     }
 
     /// Commands whose ids are now stored or whose wait expired, in arrival order.
     pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
-        self.acked
-            .retain(|(id, expiry)| *expiry > now && !stored(store, id));
-        let acked = &self.acked;
-        self.filled
-            .retain(|id| acked.iter().any(|(acked, _)| acked == id));
         if self.held.is_empty() {
+            // Runs on every engine event: without held commands only expiry
+            // matters, and `hold` checks the store when a command arrives.
+            self.acked.retain(|(_, expiry)| *expiry > now);
             return Vec::new();
         }
+        self.acked
+            .retain(|(id, expiry)| *expiry > now && !stored(store, id));
         let mut ready = Vec::new();
         let mut index = 0;
         while index < self.held.len() {

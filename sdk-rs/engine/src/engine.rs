@@ -1036,7 +1036,7 @@ impl<P> Cx<'_, P> {
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.placement_acks.filled(&fill.order_id);
+        self.io.placement_acks.filled(&fill.order_id, self.now);
         self.io.fills.push(fill);
     }
 }
@@ -1187,6 +1187,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    /// Set while dispatching released commands, which must not be held again.
+    releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
     account_startup: bool,
     shared_books: HashMap<String, Book>,
@@ -1220,6 +1222,7 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -1454,8 +1457,14 @@ impl<V: Venue> Engine<V> {
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
     /// whose wait expired, then re-arm the wake-up for the remaining ones.
     fn release_held(&mut self, now: f64) {
-        for command in self.io.placement_acks.release(&self.store, now) {
-            self.handle_event(now, Event::Command(command));
+        let released = self.io.placement_acks.release(&self.store, now);
+        if !released.is_empty() {
+            // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
+            let was_releasing = std::mem::replace(&mut self.releasing, true);
+            for command in released {
+                self.handle_event(now, Event::Command(command));
+            }
+            self.releasing = was_releasing;
         }
         let next = self.io.placement_acks.next_deadline();
         if self.ack_timer.map(|(_, at)| at) == next {
@@ -1473,6 +1482,7 @@ impl<V: Venue> Engine<V> {
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
         if self.venue.cancel_needs_stored_order()
+            && !self.releasing
             && let Event::Command(command) = &event
         {
             match command {
@@ -4199,7 +4209,7 @@ mod startup_watch_tests {
 mod placement_ack_tests {
     use super::*;
     use crate::model::{Order, OrderSide, OrderStatus, OrderType};
-    use crate::placement_acks::ACK_WAIT_MS;
+    use crate::placement_acks::{ACK_WAIT_MS, FILL_GRACE_MS};
 
     /// Routes cancellation only through stored orders, like Bybit or Binance.
     struct StoredOnly {
@@ -4265,7 +4275,7 @@ mod placement_ack_tests {
         }
         fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
             match command {
-                Command::PlaceOrders { command, .. } => cx.done(command, Ok(r#"["7"]"#.into())),
+                Command::PlaceOrders { command, .. } => cx.done(command, Ok(r#"["7","8"]"#.into())),
                 Command::CancelOrders { command, ids } => {
                     if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
                         cx.done(command, Err(format!("Order {id} not found")));
@@ -4346,7 +4356,7 @@ mod placement_ack_tests {
     fn cancel_of_an_acknowledged_placement_waits_for_the_stream_then_reaches_the_venue() {
         let mut engine = engine(true);
         place(&mut engine, 0.);
-        assert_eq!(results(&mut engine), [(1, Ok(r#"["7"]"#.into()))]);
+        assert_eq!(results(&mut engine), [(1, Ok(r#"["7","8"]"#.into()))]);
         // A chaser stopped mid-placement cancels the returned id at once.
         cancel(&mut engine, 1., 2, "7");
         assert!(
@@ -4397,7 +4407,8 @@ mod placement_ack_tests {
         engine.drain_actions().for_each(drop);
         cancel(&mut engine, 1., 2, "7");
         let (timer, at_ms) = own_timer(&mut engine).expect("an engine wake-up is armed");
-        assert_eq!(at_ms, 1. + ACK_WAIT_MS);
+        // The wait is bounded by the acknowledgement (placed at 0), not the cancel.
+        assert_eq!(at_ms, ACK_WAIT_MS);
         engine.handle(at_ms, Event::TimerFired { timer });
         assert_eq!(
             results(&mut engine),
@@ -4484,13 +4495,57 @@ mod placement_ack_tests {
     }
 
     #[test]
-    fn a_fill_of_an_unstored_order_releases_its_cancel_at_once() {
+    fn a_fill_of_an_unstored_order_shortens_its_wait_to_the_grace_period() {
         let mut engine = engine(true);
         place(&mut engine, 0.);
         engine.drain_actions().for_each(drop);
         cancel(&mut engine, 1., 2, "7");
+        engine.drain_actions().for_each(drop);
+        // A venue may drop a filled order rather than store it.
         stream(&mut engine, 2., "fill:7");
+        let (timer, at_ms) = own_timer(&mut engine).expect("re-armed for the grace period");
+        assert_eq!(at_ms, 2. + FILL_GRACE_MS);
+        engine.handle(at_ms, Event::TimerFired { timer });
         assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    #[test]
+    fn a_partial_fill_before_the_order_row_keeps_the_cancel_until_the_row_lands() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        // Bybit and Hyperliquid fills arrive on a topic separate from orders.
+        stream(&mut engine, 2., "fill:7");
+        assert!(
+            results(&mut engine).is_empty(),
+            "the remainder may still be live"
+        );
+        stream(&mut engine, 3., "7");
+        assert_eq!(results(&mut engine), [(2, Ok("null".into()))]);
+    }
+
+    #[test]
+    fn a_released_cancel_is_not_held_again_behind_a_later_one() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        engine.handle(
+            2.,
+            Event::Command(Command::CancelOrders {
+                command: 3,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 3., "7");
+        assert_eq!(
+            results(&mut engine),
+            [(2, Ok("null".into()))],
+            "the first cancel goes out once 7 is stored; the second still waits for 8"
+        );
+        stream(&mut engine, 4., "8");
+        assert_eq!(results(&mut engine), [(3, Ok("null".into()))]);
     }
 
     #[test]
