@@ -30,6 +30,103 @@ const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
 /// Reject reasons that are the user's own cancel, not an error.
 const QUIET_REJECT_REASONS: [&str; 2] = ["EC_PerCancelRequest", "EC_NoError"];
 
+/// Retain rejected identities without treating them as authoritative settings.
+#[derive(Default)]
+pub struct RejectedRows {
+    keys: HashSet<String>,
+    unidentified: bool,
+    overflowed: bool,
+}
+impl RejectedRows {
+    fn reject(&mut self, key: Option<String>) {
+        match key {
+            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
+                self.keys.insert(key);
+            }
+            Some(_) => {
+                self.unidentified = true;
+                self.overflowed = true;
+            }
+            None => self.unidentified = true,
+        }
+    }
+    fn extend(&mut self, other: Self) {
+        self.unidentified |= other.unidentified;
+        self.overflowed |= other.overflowed;
+        for key in other.keys {
+            self.reject(Some(key));
+        }
+    }
+    fn holds(&self, key: &str) -> bool {
+        self.unidentified || self.keys.contains(key)
+    }
+    fn conflicts(&self, key: &str) -> bool {
+        self.overflowed || self.keys.contains(key)
+    }
+    fn any(&self) -> bool {
+        self.unidentified || !self.keys.is_empty()
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RejectedIdentity {
+    #[serde(default)]
+    order_id: Option<String>,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+}
+fn rejected_identity(item: &str) -> Option<RejectedIdentity> {
+    serde_json::from_str(item).ok()
+}
+fn parent_order_id(id: &str) -> &str {
+    id.strip_suffix("__stop_loss")
+        .or_else(|| id.strip_suffix("__take_profit"))
+        .unwrap_or(id)
+}
+
+fn admitted_order_numbers(row: &OrderRow<'_>, hyro: bool) -> bool {
+    !(hyro && !valid_hyro_order(row))
+        && float_of(&row.qty).is_finite()
+        && float_of(&row.qty) >= 0.0
+        && order_status(&row.order_status).is_some()
+        && [
+            &row.price,
+            &row.cum_exec_qty,
+            &row.cum_exec_value,
+            &row.leaves_qty,
+            &row.avg_price,
+            &row.trigger_price,
+            &row.stop_loss,
+            &row.take_profit,
+        ]
+        .into_iter()
+        .all(optional_numeric)
+}
+fn admitted_position_numbers(row: &PositionRow<'_>, hyro: bool) -> bool {
+    let size = float_of(&row.size);
+    !((hyro && !valid_hyro_position(row))
+        || !size.is_finite()
+        || size < 0.0
+        || (size > 0.0 && order_side(row.side.as_deref()).is_none())
+        || !valid_position_greeks(row)
+        || [
+            &row.avg_price,
+            &row.entry_price,
+            &row.mark_price,
+            &row.leverage,
+            &row.unrealised_pnl,
+            &row.position_value,
+            &row.position_im,
+            &row.cur_realised_pnl,
+            &row.liq_price,
+        ]
+        .into_iter()
+        .any(|value| !optional_numeric(value)))
+}
+
 pub enum Request {
     AccountInfo,
     Orders {
@@ -39,6 +136,7 @@ pub enum Request {
         rows: Vec<Mapped>,
         unsupported: Vec<String>,
         invalid: bool,
+        rejected: RejectedRows,
     },
     Positions {
         generation: u32,
@@ -46,6 +144,7 @@ pub enum Request {
         cursor: String,
         rows: Vec<MappedPosition>,
         invalid: bool,
+        rejected: RejectedRows,
     },
     Wallet {
         session: u32,
@@ -99,6 +198,7 @@ struct PositionsJoin {
     pending: usize,
     rows: Vec<MappedPosition>,
     failed: bool,
+    rejected: RejectedRows,
     cursors: HashSet<String>,
 }
 
@@ -110,6 +210,7 @@ struct OrdersJoin {
     rows: Vec<Mapped>,
     unsupported: Vec<String>,
     failed: bool,
+    rejected: RejectedRows,
     cursors: HashSet<String>,
 }
 
@@ -1354,6 +1455,7 @@ impl BybitLinear {
             rows: Vec::new(),
             unsupported: Vec::new(),
             invalid: false,
+            rejected: RejectedRows::default(),
         };
         self.send(
             cx,
@@ -1381,6 +1483,7 @@ impl BybitLinear {
             cursor,
             rows: Vec::new(),
             invalid: false,
+            rejected: RejectedRows::default(),
         };
         self.send(
             cx,
@@ -1404,6 +1507,7 @@ impl BybitLinear {
             rows: Vec::new(),
             unsupported: Vec::new(),
             failed: false,
+            rejected: RejectedRows::default(),
             cursors: HashSet::new(),
         });
         for coin in coins {
@@ -1428,6 +1532,7 @@ impl BybitLinear {
             pending: coins.len(),
             rows: Vec::new(),
             failed: false,
+            rejected: RejectedRows::default(),
             cursors: HashSet::new(),
         });
         for coin in coins {
@@ -1667,6 +1772,63 @@ impl BybitLinear {
             }
         }
         match wire_topic.map(|topic| topic.split('.').next().unwrap_or(topic)) {
+            Some("order") if !self.variant.is_hyro() => {
+                let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                else {
+                    self.account.orders_stale = true;
+                    self.account.revision = self.account.revision.wrapping_add(1);
+                    self.account.orders_follow_up |= self.account.orders.is_some();
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        "Bybit malformed order frame; reconciliation scheduled",
+                    );
+                    return;
+                };
+                let mut rejected = RejectedRows::default();
+                let mut admitted = Vec::new();
+                for raw in &frame.data {
+                    let Ok(row) = serde_json::from_str::<OrderRow>(raw.get()) else {
+                        self.reject_order_item(cx, &mut rejected, raw.get());
+                        continue;
+                    };
+                    if row.symbol.is_empty() || row.order_id.is_empty() {
+                        self.reject_order_item(cx, &mut rejected, raw.get());
+                        continue;
+                    }
+                    if !self.trades_row(&row.category, &row.symbol) {
+                        continue;
+                    }
+                    // Existing replacement placeholders carry no financial update.
+                    if row.order_status.as_ref() == "PartiallyFilled"
+                        && or_zero(&row.price) <= 0.0
+                        && or_zero(&row.qty) <= 0.0
+                    {
+                        continue;
+                    }
+                    let mapped = map_order(&row, cx.store, cx.now);
+                    if !admitted_order_numbers(&row, false)
+                        || mapped
+                            .as_ref()
+                            .is_none_or(|m| m.orders.iter().any(|o| !valid_order(o)))
+                    {
+                        self.reject_order_item(cx, &mut rejected, raw.get());
+                        continue;
+                    }
+                    admitted.push((row, mapped.expect("validated mapping")));
+                }
+                if rejected.any() {
+                    self.account.revision = self.account.revision.wrapping_add(1);
+                    self.account.orders_follow_up |= self.account.orders.is_some();
+                }
+                for (row, mapped) in admitted {
+                    if !rejected.conflicts(row.order_id.as_ref()) {
+                        self.apply_order_row(cx, &row, mapped);
+                    }
+                }
+            }
+
             Some("order") => {
                 if let Ok(frame) = serde_json::from_str::<TopicFrame<OrderRow>>(text) {
                     if self.variant.is_hyro()
@@ -1707,6 +1869,45 @@ impl BybitLinear {
                     }
                 }
             }
+            Some("position") if !self.variant.is_hyro() => {
+                let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                else {
+                    self.account.position_version = self.account.position_version.wrapping_add(1);
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        "Bybit malformed position frame; awaiting reconciliation",
+                    );
+                    return;
+                };
+                let mut rejected = RejectedRows::default();
+                let mut admitted = Vec::new();
+                for raw in &frame.data {
+                    let Ok(row) = serde_json::from_str::<PositionRow>(raw.get()) else {
+                        self.reject_position_item(cx, &mut rejected, raw.get());
+                        continue;
+                    };
+                    if row.symbol.is_empty() {
+                        self.reject_position_item(cx, &mut rejected, raw.get());
+                        continue;
+                    }
+                    if !self.trades_row(&row.category, &row.symbol) {
+                        continue;
+                    }
+                    if !admitted_position_numbers(&row, false) {
+                        self.reject_position_item(cx, &mut rejected, raw.get());
+                        continue;
+                    }
+                    admitted.push(row);
+                }
+                if rejected.any() {
+                    self.account.position_version = self.account.position_version.wrapping_add(1);
+                }
+                admitted.retain(|row| !rejected.conflicts(row.symbol.as_ref()));
+                self.on_position_rows(cx, &admitted);
+            }
+
             Some("position") => {
                 if let Ok(frame) = serde_json::from_str::<TopicFrame<PositionRow>>(text) {
                     if self.variant.is_hyro()
@@ -1826,9 +2027,19 @@ impl BybitLinear {
         if status == "PartiallyFilled" && or_zero(&row.price) <= 0.0 && or_zero(&row.qty) <= 0.0 {
             return;
         }
-        let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
+        let Some(mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
+        self.apply_order_row(cx, row, mapped);
+    }
+
+    fn apply_order_row(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        row: &OrderRow<'_>,
+        mut mapped: Mapped,
+    ) {
+        let status = row.order_status.as_ref();
         self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
@@ -1979,6 +2190,49 @@ impl BybitLinear {
         }
     }
 
+    fn reject_order_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rejected: &mut RejectedRows,
+        item: &str,
+    ) {
+        let identity = rejected_identity(item);
+        if let Some(identity) = &identity
+            && let Some(symbol) = identity.symbol.as_deref().filter(|v| !v.is_empty())
+            && !self.trades_row(&identity.category.as_deref().map(Into::into), symbol)
+        {
+            return;
+        }
+        let key = identity.and_then(|r| {
+            r.symbol
+                .filter(|v| !v.is_empty())
+                .and(r.order_id.filter(|v| !v.is_empty()))
+        });
+        rejected.reject(key);
+        cx.notice(Level::Warn, code::ROW_SKIPPED, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
+        self.account.orders_stale = true;
+    }
+    fn reject_position_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rejected: &mut RejectedRows,
+        item: &str,
+    ) {
+        let identity = rejected_identity(item);
+        if let Some(identity) = &identity
+            && let Some(symbol) = identity.symbol.as_deref().filter(|v| !v.is_empty())
+            && !self.trades_row(&identity.category.as_deref().map(Into::into), symbol)
+        {
+            return;
+        }
+        rejected.reject(identity.and_then(|r| r.symbol.filter(|v| !v.is_empty())));
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "Bybit malformed position row; cached symbol exposure retained until reconciliation",
+        );
+    }
+
     pub(crate) fn on_account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1990,99 +2244,81 @@ impl BybitLinear {
                 rows,
                 unsupported,
                 invalid,
+                rejected,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<OrderRow>(item) else {
-                    *invalid = true;
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_order_item(cx, rejected, item);
+                    }
                     return;
                 };
                 if row.symbol.is_empty() || row.order_id.is_empty() {
-                    *invalid = true;
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_order_item(cx, rejected, item);
+                    }
                     return;
                 }
                 if !self.trades_row(&row.category, &row.symbol) {
                     return;
                 }
                 let mapped = map_order(&row, cx.store, cx.now);
-                let well_formed = !(self.variant.is_hyro() && !valid_hyro_order(&row))
-                    && float_of(&row.qty).is_finite()
-                    && float_of(&row.qty) >= 0.0
-                    && order_status(&row.order_status).is_some()
-                    && [
-                        &row.price,
-                        &row.cum_exec_qty,
-                        &row.cum_exec_value,
-                        &row.leaves_qty,
-                        &row.avg_price,
-                        &row.trigger_price,
-                        &row.stop_loss,
-                        &row.take_profit,
-                    ]
-                    .into_iter()
-                    .all(optional_numeric);
+                let well_formed = admitted_order_numbers(&row, self.variant.is_hyro());
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.
                 if well_formed && mapped.is_none() && !self.variant.is_hyro() {
+                    rejected.reject(Some(row.order_id.to_string()));
                     unsupported.push(row.order_id.to_string());
-                } else if (self.variant.is_hyro() && !valid_hyro_order(&row))
-                    || !float_of(&row.qty).is_finite()
-                    || float_of(&row.qty) < 0.0
-                    || order_status(&row.order_status).is_none()
-                    || [
-                        &row.price,
-                        &row.cum_exec_qty,
-                        &row.cum_exec_value,
-                        &row.leaves_qty,
-                        &row.avg_price,
-                        &row.trigger_price,
-                        &row.stop_loss,
-                        &row.take_profit,
-                    ]
-                    .into_iter()
-                    .any(|value| !optional_numeric(value))
+                } else if !well_formed
                     || mapped
                         .as_ref()
                         .is_none_or(|mapped| mapped.orders.iter().any(|order| !valid_order(order)))
                 {
-                    *invalid = true;
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_order_item(cx, rejected, item);
+                    }
                 } else if let Some(mapped) = mapped {
                     self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }
             }
-            Request::Positions { rows, invalid, .. } => {
+            Request::Positions {
+                rows,
+                invalid,
+                rejected,
+                ..
+            } => {
                 let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
-                    *invalid = true;
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_position_item(cx, rejected, item);
+                    }
                     return;
                 };
                 if row.symbol.is_empty() {
-                    *invalid = true;
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_position_item(cx, rejected, item);
+                    }
                     return;
                 }
                 if !self.trades_row(&row.category, &row.symbol) {
                     return;
                 }
-                let size = float_of(&row.size);
-                if (self.variant.is_hyro() && !valid_hyro_position(&row))
-                    || !size.is_finite()
-                    || size < 0.0
-                    || (size > 0.0 && order_side(row.side.as_deref()).is_none())
-                    || !valid_position_greeks(&row)
-                    || [
-                        &row.avg_price,
-                        &row.entry_price,
-                        &row.mark_price,
-                        &row.leverage,
-                        &row.unrealised_pnl,
-                        &row.position_value,
-                        &row.position_im,
-                        &row.cur_realised_pnl,
-                        &row.liq_price,
-                    ]
-                    .into_iter()
-                    .any(|value| !optional_numeric(value))
-                {
-                    *invalid = true;
+                if !admitted_position_numbers(&row, self.variant.is_hyro()) {
+                    if self.variant.is_hyro() {
+                        *invalid = true;
+                    } else {
+                        self.reject_position_item(cx, rejected, item);
+                    }
                 } else {
                     rows.push(self.map_account_position(&row, cx.store, cx.now));
                 }
@@ -2177,6 +2413,7 @@ impl BybitLinear {
                 rows,
                 unsupported,
                 invalid,
+                rejected,
             } => {
                 let malformed = invalid
                     || outcome
@@ -2202,6 +2439,7 @@ impl BybitLinear {
                 match outcome {
                     Ok(_) => {
                         join.rows.extend(rows);
+                        join.rejected.extend(rejected);
                         join.unsupported.extend(unsupported);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
@@ -2230,6 +2468,7 @@ impl BybitLinear {
                 cursor,
                 rows,
                 invalid,
+                rejected,
             } => {
                 let malformed = invalid
                     || outcome
@@ -2255,6 +2494,7 @@ impl BybitLinear {
                 match outcome {
                     Ok(_) => {
                         join.rows.extend(rows);
+                        join.rejected.extend(rejected);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
@@ -2371,7 +2611,7 @@ impl BybitLinear {
             }
             return;
         }
-        self.account.orders_stale = false;
+        self.account.orders_stale = join.rejected.any();
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.orders = Some(join.rows);
@@ -2384,9 +2624,25 @@ impl BybitLinear {
             return;
         }
         self.account.orders_snapshot_version += 1;
-        self.account.position_bound.clear();
+        let admitted_parents: HashSet<String> = join
+            .rows
+            .iter()
+            .map(|r| parent_order_id(&r.orders[0].id))
+            .filter(|id| !join.rejected.conflicts(id))
+            .map(str::to_owned)
+            .collect();
+        self.account.position_bound.retain(|id| {
+            join.rejected.holds(parent_order_id(id))
+                && !admitted_parents.contains(parent_order_id(id))
+        });
         let mut orders = Vec::new();
         for mut mapped in join.rows {
+            if join
+                .rejected
+                .conflicts(parent_order_id(&mapped.orders[0].id))
+            {
+                continue;
+            }
             if self.stale_terminal_snapshot(&mapped) {
                 continue;
             }
@@ -2423,6 +2679,15 @@ impl BybitLinear {
         for (id, order) in &fresh {
             if !merged.iter().any(|o| o.id == *id) {
                 merged.push((*order).clone());
+            }
+        }
+        for order in cx.store.orders().iter().filter(|o| {
+            self.owns_symbol(&o.symbol)
+                && join.rejected.holds(parent_order_id(&o.id))
+                && !admitted_parents.contains(parent_order_id(&o.id))
+        }) {
+            if !merged.iter().any(|o| o.id == order.id) {
+                merged.push(order.clone());
             }
         }
         for id in &join.unsupported {
@@ -2512,7 +2777,21 @@ impl BybitLinear {
             // A stream event landed after these reads went out; it is newer.
             return;
         }
-        let best = best_positions(join.rows);
+        let mut best = best_positions(
+            join.rows
+                .into_iter()
+                .filter(|r| !join.rejected.conflicts(&r.position.symbol))
+                .collect(),
+        );
+        // Unknown neighbors cannot prove a same-symbol mode transition. Keep
+        // that symbol coherent while unrelated authoritative symbols progress.
+        if join.rejected.unidentified {
+            best.retain(|r| {
+                !cx.store.positions().iter().any(|old| {
+                    old.symbol == r.position.symbol && old.position_mode != r.position.position_mode
+                })
+            });
+        }
         if !best.is_empty() {
             for row in &best {
                 if let Some(mode) = row.position.position_mode {
@@ -2537,9 +2816,11 @@ impl BybitLinear {
             .unwrap_or_default()
             .iter()
             .filter(|row| {
-                cx.store
-                    .position(&row.position_id)
-                    .is_some_and(|position| !self.owns_symbol(&position.symbol))
+                cx.store.position(&row.position_id).is_some_and(|position| {
+                    !self.owns_symbol(&position.symbol)
+                        || (join.rejected.holds(&position.symbol)
+                            && !best.iter().any(|r| r.position.id == position.id))
+                })
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2556,7 +2837,9 @@ impl BybitLinear {
         let category = self.category;
         let spot = self.variant.is_spot();
         cx.store.update_positions(|position| {
-            if spot || Category::for_symbol(&position.symbol) == category {
+            if (spot || Category::for_symbol(&position.symbol) == category)
+                && !join.rejected.holds(&position.symbol)
+            {
                 position.contracts = 0.0;
             }
         });

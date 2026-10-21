@@ -12,3 +12,17 @@ WS repair. Keep history marker ownership as a separate per-venue follow-up.
 Run focused Bybit plus Binance native tests, strict Bybit Clippy, fmt/bans,
 independent adversarial review and full CI. Integrate current landing when
 required; run the exact scope guard separately before green merge.
+
+
+Implementation receipt: bounded parent/symbol rejection coverage in the existing
+Bybit joins, preserving terminal/freshness/optimistic state and independent product
+scopes. Ordinary WS rows decode/map once and reuse typed admission checks; Hyro,
+execution and wallet paths retain typed whole-frame handling. Unknown neighbors
+cannot restore brackets omitted by an admitted parent, duplicate option Greeks,
+erase valid closed-position Greek removal, or mix a new one-way ID with held hedge
+legs. Bad WS rows fence older reads and coalesce repair without dispatching writes.
+
+Eight new/strengthened regressions fail against original c63 source (no compile
+failure), then pass with repair. Additional duplicate-key and mode-coherence
+regressions protect the new admission boundary. Independent review caught the
+Greek/follow-up interactions and hot-path duplicate decode; all corrected.
