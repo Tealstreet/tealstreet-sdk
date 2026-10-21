@@ -879,7 +879,9 @@ mod tests {
                 } else {
                     CancelAll::EachOpenSymbol
                 },
-                leverage_query: if any(
+                leverage_query: if venue == "bingx" {
+                    LeverageQuery::OnReadAndMetadata
+                } else if any(
                     &[
                         "asterdex",
                         "blofin",
@@ -890,7 +892,6 @@ mod tests {
                         "coinbase",
                         "coinbasespot",
                         "polymarket",
-                        "bingx",
                         "weex",
                     ],
                     venue,
@@ -1461,6 +1462,11 @@ mod tests {
                 continue;
             }
             let parsed = safe_cex_engine::command::decode_command(json);
+            // Account identity queries are shared across every venue since #1430.
+            if index == 2 {
+                assert!(matches!(parsed, Ok(Command::FetchAccount { command: 19 })));
+                continue;
+            }
             #[cfg(feature = "asterdex")]
             match (index, parsed.unwrap()) {
                 (

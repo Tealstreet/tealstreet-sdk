@@ -96,6 +96,7 @@ struct Observation {
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<CommandId, Job>,
+    settings_pending: HashSet<CommandId>,
     observed: HashMap<String, Observation>,
 }
 
@@ -281,6 +282,10 @@ fn validated_placement(response: Response<'_>) -> Result<String, VenueError> {
 }
 
 impl Trading {
+    pub fn settings_pending(&self) -> bool {
+        !self.settings_pending.is_empty()
+    }
+
     pub fn observe_order(
         &mut self,
         order: &Order,
@@ -407,6 +412,12 @@ impl Trading {
             job.steps.clear();
         }
         if let Some(step) = job.steps.pop_front() {
+            if matches!(
+                &step.call,
+                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
+            ) {
+                self.settings_pending.insert(command);
+            }
             cx.command_progress(command, step.receipts);
             crate::issue(
                 cx,
@@ -442,6 +453,7 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
+        self.settings_pending.remove(&request.command);
         let places = request.places_order();
         let error = unknown(error).kind(ErrorKind::Network);
         self.finish(cx, credentials, request.command, places, Err(error));
@@ -454,6 +466,7 @@ impl Trading {
         request: Request,
         response: Response<'_>,
     ) {
+        self.settings_pending.remove(&request.command);
         let places = request.places_order();
         let result = (|| {
             let absent_ok = matches!(

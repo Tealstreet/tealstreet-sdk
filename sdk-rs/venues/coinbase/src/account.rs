@@ -15,10 +15,10 @@ const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
 const SKIP_LOG_LIMIT: usize = 4_096;
-/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+/// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     key: String,
     level: Level,
     message: impl Into<String>,
@@ -26,19 +26,30 @@ fn log_skip(
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
-    if logged.insert(key) {
-        cx.notice(level, code::ROW_SKIPPED, message);
+    let error = level == Level::Error;
+    if logged.get(&key).is_some_and(|&errored| errored || !error) {
+        return;
     }
+    logged.insert(key, error);
+    cx.notice(level, code::ROW_SKIPPED, message);
+}
+fn skip_level(kept: bool) -> Level {
+    if kept { Level::Warn } else { Level::Error }
+}
+fn order_kept(store: &safe_cex_engine::Store, terminal: &HashSet<String>, id: &str) -> bool {
+    store
+        .order(id)
+        .is_some_and(|o| !terminal.contains(id) || o.status != OrderStatus::Open)
 }
 /// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped keys.
 fn rearm_skips<'a>(
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     prefix: &str,
     clean: bool,
     mapped: impl Iterator<Item = &'a str>,
 ) {
     if clean {
-        logged.retain(|key| !key.starts_with(prefix));
+        logged.retain(|key, _| !key.starts_with(prefix));
     } else {
         for key in mapped {
             logged.remove(&format!("{prefix}{key}"));
@@ -166,7 +177,7 @@ pub(crate) struct Account {
     // Open orders the engine cannot represent (e.g. brackets placed on Coinbase).
     foreign: HashMap<String, String>,
     /// `position:`, `order:` or `holding:` plus the identity (empty if none) of logged skips.
-    skip_logged: HashSet<String>,
+    skip_logged: HashMap<String, bool>,
 }
 impl Account {
     pub(crate) fn new() -> Self {
@@ -1328,13 +1339,19 @@ impl Coinbase {
                             let logged = &mut self.account.skip_logged;
                             let Some((id, symbol)) = skipped_row(cx.store, text) else {
                                 let message = "Coinbase skipped unmappable order without an id";
-                                log_skip(cx, logged, "order:".into(), Level::Warn, message);
+                                let level =
+                                    skip_level(cx.store.orders().iter().any(|o| {
+                                        order_kept(cx.store, &self.account.terminal, &o.id)
+                                    }));
+                                log_skip(cx, logged, "order:".into(), level, message);
                                 s.unidentified = true;
                                 return Ok(());
                             };
                             let message =
                                 format!("Coinbase skipped unmappable order {id}: {error}");
-                            log_skip(cx, logged, format!("order:{id}"), Level::Warn, message);
+                            let level =
+                                skip_level(order_kept(cx.store, &self.account.terminal, &id));
+                            log_skip(cx, logged, format!("order:{id}"), level, message);
                             s.skipped.insert(id, symbol);
                             return Ok(());
                         }
@@ -1637,12 +1654,20 @@ impl Coinbase {
                     let unit = match configuration_unit(&row.order_configuration) {
                         Ok(unit) => unit,
                         Err(error) => {
-                            cx.notice(
-                                Level::Warn,
-                                code::ROW_SKIPPED,
+                            let deferred = self.take_deferred(&id);
+                            let level = if deferred.iter().any(|p| p.snapshot) {
+                                skip_level(order_kept(cx.store, &self.account.terminal, &id))
+                            } else {
+                                Level::Warn
+                            };
+                            log_skip(
+                                cx,
+                                &mut self.account.skip_logged,
+                                format!("order:{id}"),
+                                level,
                                 format!("Coinbase skipped unmappable order {id}: {error}"),
                             );
-                            for pending in self.take_deferred(&id) {
+                            for pending in deferred {
                                 if pending.snapshot
                                     && let Some(s) = &mut self.account.snapshot
                                 {
@@ -1689,9 +1714,16 @@ impl Coinbase {
                                 }
                             }
                             Err(error) => {
-                                cx.notice(
-                                    Level::Warn,
-                                    code::ROW_SKIPPED,
+                                let level = if pending.snapshot {
+                                    skip_level(order_kept(cx.store, &self.account.terminal, &id))
+                                } else {
+                                    Level::Warn
+                                };
+                                log_skip(
+                                    cx,
+                                    &mut self.account.skip_logged,
+                                    format!("order:{id}"),
+                                    level,
                                     format!("Coinbase skipped unmappable order {id}: {error}"),
                                 );
                                 if let Some(s) = &mut self.account.snapshot {
@@ -1786,13 +1818,20 @@ impl Coinbase {
                     }
                     let mut coins = SnapshotBuilder::default();
                     let mut seen = HashSet::new();
+                    let held = |cx: &Cx<'_, Pending>, asset: Option<&str>| {
+                        cx.store
+                            .currency_balances()
+                            .unwrap_or_default()
+                            .iter()
+                            .any(|c| asset.is_none_or(|a| c.currency == a))
+                    };
                     for b in r.breakdown.spot_positions {
                         if b.asset.is_empty() {
                             log_skip(
                                 cx,
                                 &mut self.account.skip_logged,
                                 "holding:".into(),
-                                Level::Warn,
+                                skip_level(held(cx, None)),
                                 "Coinbase skipped spot holding without an asset",
                             );
                             coins.reject(None);
@@ -1809,7 +1848,7 @@ impl Coinbase {
                                 cx,
                                 &mut self.account.skip_logged,
                                 format!("holding:{}", b.asset),
-                                Level::Warn,
+                                skip_level(held(cx, Some(&b.asset))),
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
                             );
                             coins.reject(Some(b.asset));
@@ -2231,7 +2270,7 @@ impl Coinbase {
                                     cx,
                                     &mut self.account.skip_logged,
                                     format!("order:{id}"),
-                                    Level::Warn,
+                                    skip_level(order_kept(cx.store, &self.account.terminal, &id)),
                                     format!("Coinbase skipped unmappable order {id}: {error}"),
                                 );
                                 s.skipped.insert(id, symbol);
