@@ -965,6 +965,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
+  ~~Paradex's bounded history-cap ownership omission~~ now carries the actual
+  request command before retained rows complete. Its native regression covers
+  exact Warn ownership/order at Error-only logging; unbounded caps and other
+  stalls still fail.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.

@@ -728,10 +728,14 @@ impl History {
             }
             // A bounded read keeps what its pages found, as before: a lookup
             // reports a non-definitive miss. An unbounded read is incomplete.
-            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.notice(
+            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.event(
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 "Paradex history reached page cap",
+                vec![(
+                    "command",
+                    safe_cex_engine::Value::Num(f64::from(request.command)),
+                )],
             ),
             CursorStep::Stalled(Stall::PageBudget) => {
                 self.on_failed(cx, request, "INCOMPLETE: Paradex history page cap reached");

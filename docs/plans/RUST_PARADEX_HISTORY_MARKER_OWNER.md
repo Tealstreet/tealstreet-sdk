@@ -7,3 +7,7 @@ checks retained rows/exact ownership/order at Error-only level, and fails origin
 code. Run Paradex/Binance native tests, strict Clippy/fmt/bans and independent
 review/CI. Hold merge for entropy1624, then real integration/fresh CI/exact separate
 guard before green merge/report.
+
+Original regression fails on missing owner. Fixed Paradex/Binance suite passes
+422 tests; strict Paradex Clippy/fmt/bans pass. Independent review CLEAR: bounded
+partial behavior and unbounded/other-stall failures preserved.
