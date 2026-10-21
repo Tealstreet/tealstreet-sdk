@@ -755,3 +755,13 @@ deadline. Pings run every 15 seconds without synthetic traffic. Retired socket
 epochs and queue/login timers cannot mutate a replacement. Futures retirement
 immediately invalidates depth and publishes consumer clearing, retaining interests
 for one replay of the current subscriptions at the replacement open.
+
+Rust construction retains validated secondary read credentials. Signed GETs
+(account axes, symbol settings and history) use that identity and the SDK's api-key
+GET discriminator sends them through secondary egress. Unsigned public GETs also
+use the configured secondary GET transport without adding authentication. POSTs,
+other mutations and private WS login retain primary identity/egress. Partial/empty
+secondary credentials fail before startup I/O, including public-only engines;
+primary-only configurations keep existing signatures. Account/settings request
+tags name the selected credential slot; history is never account-auth evidence.
+This signing/routing fix does not classify native account-auth outcomes.
