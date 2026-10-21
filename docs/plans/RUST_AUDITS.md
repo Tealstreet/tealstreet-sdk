@@ -684,8 +684,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### BloFin
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
-  after usable markets and retries ticker discovery; the mixed-row/failed-seed
-  startup regression covers both paths; ~~`brokerId` never sent,
+  after usable markets and retries ticker discovery; #1615 (`c63acfc19c2`)
+  adds shared degradation/recovery reporting on that retry schedule.
+  ~~`brokerId` never sent,
   losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`)~~
   ([attribution audit](RUST_BROKER_ATTRIBUTION.md));
   ~~per-symbol margin mode stays stale after a position closes, so orders go out
@@ -696,7 +697,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   invalid required private REST quantities still preserve the snapshot);
   ~~WS login timestamp serialized as float (`account.rs:284`)~~;
   ~~one odd instrument row aborts startup~~ (#1356, `d65119bea35`: mixed valid
-  and malformed catalogue rows retain valid markets); ~~cancel of an id the store lacks resolves OK with no request
+  and malformed catalogue rows retain valid markets and retry repair);
+  ~~cancel of an id the store lacks resolves OK with no request
   (`trading.rs:671`)~~ (explicit error).
 - Low: ~~strict leverage fetch~~ (no user impact: the bridge turns a refused
   read into `null` plus a warning, as TS returns `null`); ~~trigger TP/SL not
@@ -711,8 +713,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### Cross-venue patterns from the port reviews
 - ~~OKX/BloFin startup has no retry and needs a shared policy~~. #1356
   (`d65119bea35`) supplies row-local public discovery and bounded per-read
-  backoff; #1516 (`1f93bf93358`) preserves retry-after bounds. This does not
-  authorize accepting malformed private financial envelopes.
+  backoff; #1516 (`1f93bf93358`) preserves retry-after bounds. #1615
+  (`c63acfc19c2`) adds shared degradation/recovery reporting for OKX, BloFin
+  and Bitget on that schedule; see [the policy](RUST_STARTUP_RETRY.md).
+  This does not authorize accepting malformed private financial envelopes.
 - ~~Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
   tag against TS.~~ All registered names audited; payload/partner/header fixes
   and preserved gates are tabled in [the attribution audit](RUST_BROKER_ATTRIBUTION.md).
@@ -731,6 +735,7 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   fills (`history.rs:984,867`).~~ Forced-close suffixes and absent profit now map.
   ~~One bad market row or transient error halts startup without retry~~
   (#1356, `d65119bea35`; catalogue retry and independent private-start tests).
+  #1615 (`c63acfc19c2`) exposes prolonged public startup degradation/recovery.
   ~~One unmappable REST row prevents valid-peer position/order refresh~~
   (#1459, `f903d7a9436`): identity-preserving coverage retains rejected cached
   rows and protective children while peers commit; unidentified rows protect

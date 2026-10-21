@@ -36545,8 +36545,6 @@
         {
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
-            "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[1]",
             "checkpoint 8 account.orders.length",
             "checkpoint 8 account.orders[0]"
           ]
@@ -36555,6 +36553,29 @@
           "divergence": "TS drops native/caller client IDs; asynchronous cancel reconciliation determines whether this fixed boundary exposes the missing ID on placed-order or an entire retained/removed row. Tape boundaries, commands and transport receipts are unchanged.",
           "keys": [
             "checkpoint 5 account.orders[1].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "TS applies the WS cumulative fill but REST replacement can restore startup filled/remaining 0.5/1.5 until its next read; Rust preserves WS 0.7/1.3 against stale snapshots.",
+          "keys": [
+            "checkpoint 1 account.orders[0].filled",
+            "checkpoint 1 account.orders[0].remaining",
+            "checkpoint 2 account.orders[0].filled",
+            "checkpoint 2 account.orders[0].remaining",
+            "checkpoint 3 account.orders[0].filled",
+            "checkpoint 3 account.orders[0].remaining",
+            "checkpoint 4 account.orders[0].filled",
+            "checkpoint 4 account.orders[0].remaining"
+          ]
+        },
+        {
+          "divergence": "TS retains the canceled placed-order row until REST replaces the order list; Rust removes terminal rows immediately at these fixed tape boundaries.",
+          "keys": [
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[1]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[1]",
+            "checkpoint 8 account.orders[1]"
           ]
         }
       ]

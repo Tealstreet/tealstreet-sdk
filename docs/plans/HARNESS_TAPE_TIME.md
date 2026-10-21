@@ -147,3 +147,26 @@ Require the existing matching-branch five-pair CI mode, fresh mandatory
 public/private suite verification, independent review, full green head CI,
 a separate landing guard and an audited merge receipt before reporting the
 merge and moving to KuCoin Spot.
+
+## KuCoin Spot phase
+
+Enable the virtual private clock in KuCoin Spot's separate harness config,
+using its existing fixed epoch without changing wire records or protocol
+checks. Preserve bullet-token roles, welcome ordering, signature checks,
+caller IDs, staged order snapshots and the final reconciliation wait.
+Use a fingerprint-matching CI engine for five focused private pairs and
+inspect complete nonmetric outputs, including cumulative fills, cancelled
+rows, timestamps, IDs and command receipts. Recheck the handoff's reported
+paths against these outputs; declare any observed difference only with
+exact keys, tape SHA and a specific cause. Prune only unobserved keys.
+
+Require fresh mandatory public/private suite verification, independent
+review, five identical current-head CI pairs, full green head CI, a separate
+landing guard protecting the shared `kucoin` Rust crate, and an audited
+merge receipt before reporting and moving to BingX.
+
+Five focused pairs reproduced the handoff's 13 additional paths: eight
+filled/remaining fields where TS REST replacement restores startup values
+after the WS update while Rust preserves the cumulative fill, and five
+retained cancelled-row paths. Declare only those exact paths on the existing
+tape SHA and remove two unobserved checkpoint-5 row keys; retain strict FAIL.
