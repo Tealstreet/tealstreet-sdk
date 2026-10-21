@@ -156,7 +156,9 @@ worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
 (trading, nuke, client-ID lookup, public trades, candles, history axes; plus
 `fetchHistoricalPositions` and the native account reads `fetchOrders`,
 `fetchPositions`, `fetchBalance` and `fetchPositionMode` by name, since those
-wait on native state and would otherwise start a local engine) whole through
+wait on native state and would otherwise start a local engine; the worker
+answers them as `WORKER_OPTIONAL_METHODS`, and a mirror's `syncAccountState` is
+a no-op because worker frames keep its store current) whole through
 `callMethodInWorker`, so preflight, placement scopes and nuke retries run
 against the worker's state and report there once. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
