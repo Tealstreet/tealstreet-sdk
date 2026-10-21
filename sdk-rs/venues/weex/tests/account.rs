@@ -543,7 +543,12 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 26_000.0 => Some(*timer),
+            // The first failure's 4 s backoff, jittered into [3 s, 4 s].
+            Action::SetTimer { timer, at_ms }
+                if (NOW + 25_000.0..=NOW + 26_000.0).contains(at_ms) =>
+            {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("read-only retry after deadline");
@@ -1030,6 +1035,8 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         );
     }
     engine.drain_actions().for_each(drop);
+    // The jittered failure floor is fixed once and must survive every policy change.
+    let mut floor = None;
     for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
             now + 1_500.0 + offset,
@@ -1047,7 +1054,14 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 5_500.0]);
+            let at = *times.first().expect("one rearmed poll");
+            assert_eq!(times, vec![at]);
+            let delay = at - (now + 1_500.0);
+            assert!(
+                (0.75 * 4_000.0..=4_000.0).contains(&delay),
+                "jittered failure backoff {delay}"
+            );
+            assert_eq!(*floor.get_or_insert(at), at);
         }
     }
 }

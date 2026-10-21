@@ -502,14 +502,14 @@ fn post_write_census(h: &mut Harness) -> HttpRequest {
     // Startup's census predates the write. It cannot certify its outcome.
     let stale = h.take(Method::Get, "/fapi/v2/openOrders");
     h.reply(stale, r#"{"code":"0","data":[]}"#);
-    let timer = h
+    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the 100 ms reply.
+    let (timer, due) = *h
         .timers
         .iter()
         .rev()
-        .find(|(_, at)| *at == 600.0)
-        .unwrap()
-        .0;
-    h.e.handle(600.0, Event::TimerFired { timer });
+        .find(|(_, at)| (475.0..=600.0).contains(at))
+        .unwrap();
+    h.e.handle(due, Event::TimerFired { timer });
     h.collect();
     h.take(Method::Get, "/fapi/v2/openOrders")
 }
@@ -759,14 +759,14 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
     });
     assert_eq!(h.writes(), 0);
     assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("uncertain"))));
-    let timer = h
+    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the 100 ms reply.
+    let (timer, due) = *h
         .timers
         .iter()
         .rev()
-        .find(|(_, at)| *at == 600.0)
-        .unwrap()
-        .0;
-    h.e.handle(600.0, Event::TimerFired { timer });
+        .find(|(_, at)| (475.0..=600.0).contains(at))
+        .unwrap();
+    h.e.handle(due, Event::TimerFired { timer });
     h.collect();
     let census = h.take(Method::Get, "/fapi/v2/openOrders");
     h.reply(census, r#"{"code":"0","data":[]}"#);

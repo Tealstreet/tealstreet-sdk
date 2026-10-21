@@ -21,6 +21,10 @@ struct H {
     connects: usize,
     fired: usize,
 }
+/// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 impl H {
     fn new() -> Self {
         Self::with_policy(PublicFeedPolicy::Direct)
@@ -70,6 +74,19 @@ impl H {
                 _ => {}
             }
         }
+    }
+    /// Finds the retry timer jittered from `nominal`, then advances the clock
+    /// to the nominal delay, which is never before the jittered deadline.
+    fn retry_after(&mut self, nominal: f64) -> TimerId {
+        let now = self.now;
+        let timer = self
+            .timers
+            .iter()
+            .find(|(_, at)| jittered(at - now, nominal))
+            .unwrap()
+            .0;
+        self.now += nominal;
+        timer
     }
     fn event(&mut self, e: Event<'_>) {
         self.e.handle(self.now, e);
@@ -233,11 +250,14 @@ fn market_retry_backoff_doubles_and_caps_at_thirty_seconds() {
         h.event(Event::TimerFired { timer });
     }
     // Shared engine discovery backoff: doubling from one second, capped at thirty.
-    assert_eq!(
-        &delays[..6],
-        &[1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0]
-    );
-    assert!(delays[5..].iter().all(|d| *d == 30000.0));
+    let nominal = [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0];
+    for (delay, nominal) in delays.iter().zip(nominal) {
+        assert!(
+            jittered(*delay, nominal),
+            "{delay} not jittered from {nominal}"
+        );
+    }
+    assert!(delays[5..].iter().all(|d| jittered(*d, 30000.0)));
     assert_eq!(h.http.len(), 1);
 }
 #[test]
@@ -609,13 +629,7 @@ fn rejected_midpoints_keep_prior_quotes_retry_and_allow_valid_peers() {
     );
     assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.0)
-        .unwrap()
-        .0;
-    h.now += 1000.0;
+    let timer = h.retry_after(1000.0);
     h.event(Event::TimerFired { timer });
     h.response(
         "/midpoints",
@@ -624,13 +638,7 @@ fn rejected_midpoints_keep_prior_quotes_retry_and_allow_valid_peers() {
     );
     assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 2000.0)
-        .unwrap()
-        .0;
-    h.now += 2000.0;
+    let timer = h.retry_after(2000.0);
     h.event(Event::TimerFired { timer });
     h.response(
         "/midpoints",
@@ -659,13 +667,7 @@ fn late_midpoint_seeds_preserve_only_supplied_live_quote_fields() {
     assert_eq!((yes.bid, yes.ask, yes.last), (0.4, 0.8, 0.5));
     assert!((yes.mark - 0.6).abs() < 1e-12);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.9);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.)
-        .unwrap()
-        .0;
-    h.now += 1000.;
+    let timer = h.retry_after(1000.);
     h.event(Event::TimerFired { timer });
     h.message(
         r#"{"event_type":"last_trade_price","asset_id":"2","price":"0.8","timestamp":"103"}"#,
@@ -721,13 +723,7 @@ fn failed_midpoint_batch_retries_without_blocking_or_repeating_later_batches() {
     assert_eq!(last.body.as_deref(), Some(r#"[{"token_id":"101"}]"#));
     h.response("/midpoints", 200, r#"{"101":"0.7"}"#);
     assert_eq!(h.e.store().ticker("batch-Outcome101").unwrap().last, 0.7);
-    let timer = h
-        .timers
-        .iter()
-        .find(|(_, at)| *at == h.now + 1000.)
-        .unwrap()
-        .0;
-    h.now += 1000.;
+    let timer = h.retry_after(1000.);
     h.event(Event::TimerFired { timer });
     let retry = h
         .http

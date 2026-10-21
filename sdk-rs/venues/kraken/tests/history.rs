@@ -283,7 +283,9 @@ fn saturated_descending_ledger_returns_the_newest_page_marked_truncated() {
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event))
             if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-                && event.message.contains("TRUNCATED"))));
+                && event.message.contains("TRUNCATED")
+                && event.fields.iter().any(|(key, value)| *key == "command"
+                    && matches!(value, safe_cex_engine::Value::Num(n) if *n == 91.0)))));
     let rows = actions
         .into_iter()
         .find_map(|action| match action {

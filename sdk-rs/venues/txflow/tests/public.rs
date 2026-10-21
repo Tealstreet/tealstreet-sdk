@@ -645,10 +645,7 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 2000.0,
-            } => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - 1000.0, 1000.0) => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -1136,10 +1133,7 @@ fn ambiguous_native_identity_preserves_store_and_retries_with_backoff() {
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 2000.0,
-            } => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - 1000.0, 1000.0) => Some(*timer),
             _ => None,
         })
         .unwrap();

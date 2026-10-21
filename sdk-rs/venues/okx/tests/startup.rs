@@ -35,16 +35,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         2.,
     );
     assert!(!engine.store().loaded().tickers);
-    let timer = actions(&mut engine)
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1002.,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
     engine.handle(1002., Event::TimerFired { timer });
     let retry = actions(&mut engine).remove(0);
     reply(
@@ -117,16 +108,7 @@ fn eea_later_source_cannot_hide_all_malformed_rows_behind_an_earlier_product() {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
     let out = actions(&mut e);
-    let timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1002.0,
-            } => Some(*timer),
-            _ => None,
-        })
-        .unwrap();
+    let timer = retry_timer(&out, 2.0, 1_000.0).unwrap();
     let request = out
         .into_iter()
         .find(|a| is_get(a, "tickers?instType=SWAP"))
@@ -170,16 +152,7 @@ fn eea_later_source_cannot_hide_all_malformed_rows_behind_an_earlier_product() {
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().mark, 77.0);
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
-    let timer = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 2006.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    let timer = retry_timer(&out, 1006.0, 1_000.0).unwrap();
     e.handle(2006.0, Event::TimerFired { timer });
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(TICKER), 2007.0);
@@ -243,16 +216,7 @@ fn recovering_an_earlier_product_keeps_existing_market_setting_indices() {
     e.store_mut()
         .update_setting(&symbol, |setting| setting.leverage = 7.0);
     assert_eq!(e.store().market_index_by_id("BTC-USD-UM"), Some(0));
-    let timer = actions(&mut e)
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1002.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    let timer = retry_timer(&actions(&mut e), 2.0, 1_000.0).unwrap();
     e.handle(1002.0, Event::TimerFired { timer });
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1003.0);
@@ -285,16 +249,7 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope("{}"), 2.0);
     let out = actions(&mut e);
-    let catalogue_timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1002.0,
-            } => Some(*timer),
-            _ => None,
-        })
-        .unwrap();
+    let catalogue_timer = retry_timer(&out, 2.0, 1_000.0).unwrap();
     let request = out
         .into_iter()
         .find(|a| is_get(a, "tickers?instType=SWAP"))
@@ -303,16 +258,7 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope("{}"), 4.0);
     let out = actions(&mut e);
-    let ticker_timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1004.0,
-            } => Some(*timer),
-            _ => None,
-        })
-        .unwrap();
+    let ticker_timer = retry_timer(&out, 4.0, 1_000.0).unwrap();
     let socket = out
         .iter()
         .find_map(|a| match a {
@@ -389,16 +335,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         r#"{"code":"50011","msg":"rate limit","data":[]}"#,
         2.,
     );
-    let timer = actions(&mut engine)
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1_002.,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
     engine.handle(1_002., Event::TimerFired { timer });
     let config = actions(&mut engine)
         .into_iter()

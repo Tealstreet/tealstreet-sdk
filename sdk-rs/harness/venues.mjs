@@ -9,6 +9,7 @@ import {
   createCoinbaseSocketAudit,
   installSynchronousEs256,
 } from './coinbase-protocol.mjs';
+import { installSynchronousDigest } from './sync-webcrypto.mjs';
 import {
   APEX_SEED,
   apexWireBody,
@@ -1573,6 +1574,9 @@ export const VENUES = {
   },
   backpack: {
     rust: 'backpack',
+    virtualPrivateClock: true,
+    // TS ed25519 signing hashes through WebCrypto, which settles on wall time.
+    loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousDigest(); },
     ignoreGeneratedBodyId: (key, value, callerIds, context) =>
       key === 'clientId' &&
       !callerIds.has(String(value)) &&

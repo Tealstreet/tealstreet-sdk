@@ -2,6 +2,11 @@
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, Venue};
 use safe_cex_venue_backpack::{Backpack, Options};
 
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 type Driver = Engine<Backpack>;
 fn http(e: &mut Driver, needle: &str) -> HttpRequest {
     e.drain_actions()
@@ -436,10 +441,7 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
     let timer = actions
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .unwrap();

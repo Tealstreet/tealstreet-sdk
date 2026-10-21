@@ -332,7 +332,10 @@ fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(at, 1000. + delay);
+        assert!(
+            (0.75 * delay..=delay).contains(&(at - 1000.)),
+            "{at} is not a jittered {delay} ms backoff"
+        );
         e.handle(at, Event::TimerFired { timer });
         assert!(!e.store().loaded().markets);
     }

@@ -1,11 +1,13 @@
 //! Fixtures follow KuCoin Classic Futures documented account and private-order examples.
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_kucoin::{Kucoin, Options};
+use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
 
@@ -1164,7 +1166,9 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let i = h
         .actions
         .iter()
-        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1610000001000.0))
+        .position(|a| {
+            matches!(a, Action::SetTimer { at_ms, .. } if jittered(*at_ms - 1610000000000.0, 1000.0))
+        })
         .expect("partial catalogue retry");
     let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
         unreachable!()

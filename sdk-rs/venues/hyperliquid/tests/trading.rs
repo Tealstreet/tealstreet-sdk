@@ -1380,3 +1380,29 @@ fn pace_timer(e: &mut Engine<Hyperliquid>) -> safe_cex_engine::TimerId {
         .next_back()
         .expect("pacing timer")
 }
+
+#[test]
+fn perp_zero_bracket_prices_disable_only_the_requested_child() {
+    for (stop, take, children) in [
+        ("0", "0", Vec::<&str>::new()),
+        ("0", "120", vec!["tp"]),
+        ("80", "0", vec!["sl"]),
+    ] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2,"stopLoss":{stop},"takeProfit":{take}}}"#))] }));
+        let payload = body(&write(&mut e));
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 1 + children.len(), "sl {stop} tp {take}");
+        assert_eq!(
+            payload["action"]["grouping"],
+            if children.is_empty() {
+                "na"
+            } else {
+                "normalTpsl"
+            }
+        );
+        for (wire, kind) in wires.iter().skip(1).zip(children) {
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+        }
+    }
+}

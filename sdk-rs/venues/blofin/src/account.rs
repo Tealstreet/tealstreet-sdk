@@ -1895,7 +1895,11 @@ impl Blofin {
                 self.refresh_orders(cx, 1);
             }
             let not_before_ms = if self.account.auth_failures > 0 {
-                cx.now + Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)
+                // Only auth-failure retries spread; healthy ticks keep their cadence.
+                cx.now
+                    + cx.jittered(
+                        Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures),
+                    )
             } else {
                 f64::NEG_INFINITY
             };

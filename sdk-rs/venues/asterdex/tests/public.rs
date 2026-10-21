@@ -6,6 +6,10 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_asterdex::{AsterDex, Options, sign::Version};
 
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 const MARKETS: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MAX_NUM_ALGO_ORDERS","limit":100}]},{"symbol":"OLDUSDT","status":"SETTLING","baseAsset":"OLD","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3}]}"#;
 const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"4.00000200","priceChangePercent":"-95.960","volume":"8913.30000000","quoteVolume":"15.30000000"}]"#;
 const DOCUMENTED_DEPTH: &str = r#"{"stream":"btcusdt@depth20@100ms","data":{"e":"depthUpdate","E":1571889248277,"T":1571889248276,"s":"BTCUSDT","U":390497796,"u":390497878,"pu":390497794,"b":[["7403.89","0.002"],["7403.90","3.906"],["7404.00","1.428"],["7404.85","5.239"],["7405.43","2.562"]],"a":[["7405.96","3.340"],["7406.63","4.525"],["7407.08","2.475"],["7407.15","4.800"],["7407.20","0.175"]]}}"#;
@@ -551,7 +555,7 @@ fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
         .timers
         .iter()
         .copied()
-        .find(|(_, at)| *at == h.now + 1000.)
+        .find(|(_, at)| jittered(*at - h.now, 1000.))
         .unwrap();
     h.now = at;
     h.event(Event::TimerFired { timer });

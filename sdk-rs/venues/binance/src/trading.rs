@@ -252,6 +252,17 @@ impl BinanceFutures {
                 return;
             }
         }
+        // A limit-execution stop would be re-placed as a market stop at its limit price.
+        if let Command::AmendOrder { command, id, .. } = &command
+            && self.account.limit_stops.contains(id)
+        {
+            cx.fail(
+                *command,
+                not_sent("Binance stop-limit orders cannot be amended; cancel and place a new one")
+                    .kind(ErrorKind::Unsupported),
+            );
+            return;
+        }
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
