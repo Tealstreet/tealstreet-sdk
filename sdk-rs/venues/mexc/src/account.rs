@@ -1642,7 +1642,14 @@ impl MexcFutures {
             Pending::Account(Request::Mode) => e
                 .data
                 .is_some_and(|d| matches!(serde_json::from_str::<u8>(d.get()), Ok(1 | 2))),
-            Pending::Account(Request::Snapshot(s)) => !s.bad && e.data.is_some(),
+            // A row the snapshot skipped is malformed data, which never clears a streak.
+            Pending::Account(Request::Snapshot(s)) => {
+                !s.bad
+                    && s.assets.rejected() == 0
+                    && s.positions.rejected() == 0
+                    && s.orders.rejected() == 0
+                    && e.data.is_some()
+            }
             _ => false,
         };
         valid.then_some(Accepted)
