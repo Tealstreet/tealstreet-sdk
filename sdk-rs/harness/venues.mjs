@@ -1382,6 +1382,7 @@ export const VENUES = {
   ...Object.fromEntries(['lighter', 'lighter-robinhood'].map((name) => [name, lighter(name)])),
   woo: {
     rust: 'woo',
+    virtualPrivateClock: true,
     wooProtocol: true,
     subscriptionGenerations: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
