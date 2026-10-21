@@ -1506,13 +1506,13 @@ fn multi_position_mode_refusal_explains_how_to_continue() {
         );
         let r = h.take("batch-orders");
         h.respond(r, reply);
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 7,
-                result: Err(error)
-            }) if error.contains("Turn off Multi-Position mode on BloFin")
-        )));
+        let error = h.failures.last().expect("placement refused");
+        assert!(
+            error
+                .message
+                .contains("Turn off Multi-Position mode on BloFin")
+        );
+        assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     }
 }
 
@@ -1545,14 +1545,55 @@ fn margin_type_change_warns_while_orders_are_open() {
             }),
         );
         h.collect();
-        let warned = h.actions.iter().any(|a| {
-            matches!(
-                a,
-                Action::Notice(Notice::Log { message, .. })
-                    if message.starts_with("Changing margin type with open positions / orders")
-            )
-        });
-        assert_eq!(warned, open);
+        assert_eq!(margin_warned(&h), open);
         assert!(h.pending.iter().any(|r| r.url.contains("set-margin-mode")));
     }
+}
+
+#[test]
+fn margin_type_change_warns_while_a_position_is_open() {
+    let mut h = Harness::new();
+    h.seed();
+    assert!(h.e.store().positions().iter().any(|p| p.contracts > 0.0));
+    h.e.handle(
+        1.0,
+        Event::Command(Command::SetMarginType {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        }),
+    );
+    h.collect();
+    assert!(margin_warned(&h));
+}
+
+fn margin_warned(h: &Harness) -> bool {
+    h.actions.iter().any(|a| {
+        matches!(
+            a,
+            Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message })
+                if message.starts_with("Changing margin type with open positions / orders")
+        )
+    })
+}
+
+#[test]
+fn multi_position_mode_refusal_of_a_protective_order_is_explained() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":55000}]"#,
+    );
+    let r = h.take("order-tpsl");
+    h.respond(
+        r,
+        r#"{"code":"102143","msg":"position selection required","data":null}"#,
+    );
+    let error = h.failures.last().expect("placement refused");
+    assert!(
+        error
+            .message
+            .contains("Turn off Multi-Position mode on BloFin")
+    );
 }

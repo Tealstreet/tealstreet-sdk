@@ -1450,13 +1450,12 @@ impl Blofin {
                 count,
                 inst_id,
             } => {
+                // Multi-Position mode refuses the whole placement, rows or not.
+                let multi_position = reply.code == MULTI_POSITION_CODE
+                    || rows.iter().any(|row| row.code == MULTI_POSITION_CODE);
                 if reply.code != "0" || rows.len() != *count {
-                    unproven |= rows.len() != *count;
-                    error = Some(if reply.code == MULTI_POSITION_CODE {
-                        MULTI_POSITION_MESSAGE.into()
-                    } else {
-                        format!("BloFin placement {}: {}", reply.code, reply.msg)
-                    });
+                    unproven |= rows.len() != *count && reply.code != MULTI_POSITION_CODE;
+                    error = Some(format!("BloFin placement {}: {}", reply.code, reply.msg));
                 }
                 let mut seen = HashSet::new();
                 for row in rows {
@@ -1471,11 +1470,7 @@ impl Blofin {
                     let odd = !matches!(message.as_str(), "" | "success" | "order placed");
                     if id.is_empty() || !seen.insert(id.to_string()) || refused || odd {
                         unproven |= !refused;
-                        error = Some(if row.code == MULTI_POSITION_CODE {
-                            MULTI_POSITION_MESSAGE.into()
-                        } else {
-                            format!("BloFin placement rejected: {}", row.msg)
-                        });
+                        error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
                         let id = id.into_owned();
                         if cx.store.order(&id).is_none() {
@@ -1493,6 +1488,9 @@ impl Blofin {
                         }
                         request.job.ids.push(id);
                     }
+                }
+                if multi_position {
+                    error = Some(MULTI_POSITION_MESSAGE.into());
                 }
             }
             Effect::Cancel(targets) => {
