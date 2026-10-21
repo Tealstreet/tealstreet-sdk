@@ -1,5 +1,6 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
+mod depth_query;
 mod history;
 mod sign;
 mod trading;
@@ -58,6 +59,11 @@ pub enum Pending {
     Depth {
         symbol: String,
         generation: u32,
+    },
+    BookQuery {
+        command: CommandId,
+        size: f64,
+        limit: usize,
     },
     Candles {
         command: CommandId,
@@ -540,6 +546,12 @@ impl MexcFutures {
                 }
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::BookQuery { command, .. } => cx.fail(
+                command,
+                VenueError::new(error)
+                    .kind(ErrorKind::Network)
+                    .outcome(Outcome::NotSent),
+            ),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
@@ -575,6 +587,7 @@ impl Venue for MexcFutures {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            order_book_query: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -751,6 +764,15 @@ impl Venue for MexcFutures {
             self.trade_response(cx, request, response);
             return;
         }
+        if let Pending::BookQuery {
+            command,
+            size,
+            limit,
+        } = pending
+        {
+            self.book_query_response(cx, command, size, limit, response);
+            return;
+        }
         if matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. })
             && let Err(error) = Envelope::checked(response.body)
         {
@@ -882,6 +904,7 @@ impl Venue for MexcFutures {
                     cx.book_changed(&symbol);
                 }
             }
+            Pending::BookQuery { .. } => unreachable!(),
             Pending::Candles { command, limit } => {
                 let result = Envelope::checked(response.body).and_then(|e| {
                     let k: Klines =
@@ -1030,6 +1053,11 @@ impl Venue for MexcFutures {
                     self.send(cx, "sub.kline", &id, Some(("interval", i)));
                 }
             }
+            Command::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            } => self.fetch_book(cx, command, &symbol, limit),
             Command::FetchCandles {
                 command,
                 symbol,

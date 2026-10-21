@@ -290,3 +290,22 @@ and cut a follow-up branch. Never touch master or force-push.
    MEXC/Binance and host-capability checks, touched TS tests/typecheck/lint,
    fmt/Clippy/bans with CARGO_BUILD_JOBS=4; independently review and push for CI.
    MERGE HOLD applies until lifted by the overseer.
+
+- Implemented independent public depth queries and plan reduce-only correction.
+  The query captures each request's contract scale/limit, validates the complete
+  snapshot before truncating, retains zero levels/empty sides and exact u64
+  versions, sorts levels and accumulates base quantity. It never changes live
+  subscription/recovery state. Rate limits share cooldown without automatic
+  retries; malformed data and transport/HTTP/native failures settle once.
+- Independent adversarial review found public HTTP401/403 incorrectly classified
+  as account auth failures. Corrected to VenueUnavailable so native auth counters
+  and bridge text matching cannot invalidate a healthy private account. Added
+  auth-looking refusal, private-state, cooldown expiry and invalid-version tests.
+- Added native capability and bridge/host expectation coverage. Signed fee is
+  explicitly retained as RISKY; no independently verified rebate-sign contract.
+- Focused validation passes: MEXC119 + Binance246 native tests, MEXC-enabled
+  WASM host14 tests, TS bridge/socket-health21 tests, safe-cex typecheck,
+  touched-file ESLint (including normally ignored tests), fmt, strict MEXC
+  all-target Clippy and banned-pattern guard. Public HTTP200/native refusals also
+  use a non-auth-specific classification; auth-looking venue details remain intact.
+  Full workspace/WASM/replay validation runs in CI; merge remains held.

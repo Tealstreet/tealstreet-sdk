@@ -1,10 +1,11 @@
 import type { EngineCapabilities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { Order } from '../../types';
+import type { ExchangeName, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { ExchangeHealthMonitor } from '../../health/ExchangeHealthMonitor';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
@@ -14,7 +15,7 @@ import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 const running: RustEngineExchange[] = [];
 
 /** A venue whose bridge behaviour comes only from the record its engine reports. */
-const fixture = (capabilities: Partial<EngineCapabilities>) => {
+const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo') => {
   const commands: Array<Record<string, unknown>> = [];
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
@@ -22,9 +23,10 @@ const fixture = (capabilities: Partial<EngineCapabilities>) => {
     fetchAccount: { userId: 'account-1' },
     fetchLeverage: { buyLeverage: 20, sellLeverage: 50 },
     findOrderByClientOrderId: { found: false, definitive: true },
+    fetchOrderBook: { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
   };
   const engine: WasmEngineLike = {
-    capabilities: () => engineCapabilities('woo', capabilities),
+    capabilities: () => engineCapabilities(name, capabilities),
     start: started,
     command(json) {
       const command = JSON.parse(json);
@@ -56,7 +58,7 @@ const fixture = (capabilities: Partial<EngineCapabilities>) => {
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   installNativeStartupFrames(engine, store);
-  const exchange = new RustEngineExchange('woo', { key: 'key', secret: 'secret' }, store);
+  const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, store);
   running.push(exchange);
   return { exchange, commands, started };
 };
@@ -79,6 +81,34 @@ describe('Rust bridge routes from the engine capability record', () => {
   afterEach(() => {
     for (const exchange of running.splice(0)) exchange.dispose();
     vi.restoreAllMocks();
+  });
+
+  it('routes MEXC snapshot queries without a book subscription', async () => {
+    const { exchange, commands } = fixture({}, 'mexc');
+    await exchange.start();
+    await expect(exchange.fetchOrderBook('BTCUSDT', 20)).resolves.toEqual({
+      bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993',
+    });
+    expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT', limit: 20 }),
+    ]);
+    expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
+  });
+
+  it('keeps public MEXC depth refusals out of terminal account auth health', () => {
+    const monitor = new ExchangeHealthMonitor('mexc');
+    try {
+      for (const status of [401, 403, 200]) {
+        expect(monitor.processMessage(
+          `MEXC depth query HTTP ${status}: invalid api key: permission denied`,
+          true,
+          { kind: 'venueUnavailable', outcome: 'notSent' },
+        )).toBe('exchange_down');
+        expect(monitor.hasAuthError()).toBe(false);
+      }
+    } finally {
+      monitor.dispose();
+    }
   });
 
   it('is unknown until the engine exists, then brands the missing history axes', async () => {
