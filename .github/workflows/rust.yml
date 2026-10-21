@@ -340,6 +340,11 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Hyperliquid spot-enabled account and trading (correctness)
+        if: matrix.venue == 'hyperliquid'
+        run: |
+          yarn rust:private-tape-hyperliquid --spot --out sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl
+          corepack yarn -s rust:gate:record --venue hyperliquid --tape sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl --runs 1 --books ''
       - name: Lighter testnet deployment signing and replay
         if: matrix.venue == 'lighter' || matrix.venue == 'lighter-robinhood'
         run: |

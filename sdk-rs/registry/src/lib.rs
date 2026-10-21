@@ -934,11 +934,6 @@ pub fn build<T: Visit>(
         ),
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
-            if venue == "hyperliquid" && options.enable_spot_markets {
-                return Err(invalid(
-                    "Rust Hyperliquid currently supports perpetual markets only",
-                ));
-            }
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -950,6 +945,7 @@ pub fn build<T: Visit>(
                     b: b.address,
                     f: b.fee_tenths_bps,
                 }),
+                enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
             };
             finish(
                 visitor,
