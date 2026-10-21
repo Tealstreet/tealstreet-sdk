@@ -2,6 +2,8 @@
 mod account;
 mod error;
 mod history;
+#[cfg(test)]
+mod secondary_tests;
 mod sign;
 mod trading;
 mod wire;
@@ -31,6 +33,7 @@ const KLINE: &str = "/api/v1/futures/market/kline";
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub key: Option<String>,
     pub secret: Option<String>,
 }
@@ -39,6 +42,9 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
     fn erase_secrets(&mut self) {
         safe_cex_crypto::secrets::erase(&mut self.key);
         safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
     }
 }
 
@@ -231,7 +237,7 @@ impl BitunixFutures {
             cx.clear_timer(timer);
         }
         if matches!(s.feed, Feed::Private)
-            && let Some(timer) = self.account.login_retry.take()
+            && let Some((timer, _)) = self.account.login_retry.take()
         {
             cx.clear_timer(timer);
         }
@@ -392,7 +398,19 @@ fn candle(k: &Kline, rest: bool) -> Candle {
 }
 impl Venue for BitunixFutures {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            host_clock: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            return;
+        }
         self.markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -480,7 +498,7 @@ impl Venue for BitunixFutures {
                     if m.op == "pong" {
                         s.pong_observed = true;
                     }
-                    self.private_message(cx, &m);
+                    self.private_message(cx, socket, &m);
                     return;
                 }
                 if let Err(e) = self.public_message(cx, &m) {
@@ -588,6 +606,8 @@ impl Venue for BitunixFutures {
                 let success = (200..300).contains(&response.status)
                     && data(response.body).is_ok()
                     && !read.invalid
+                    && !read.position_rejected.any()
+                    && !read.order_rejected.any()
                     && self.account.generations[read.axis.index()] == read.generation
                     && self.account.serials[match read.axis {
                         account::Axis::Balance => 0,
@@ -739,6 +759,7 @@ impl Venue for BitunixFutures {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
+                self.position_answered(cx, &read);
                 if read.axis == account::Axis::Balance {
                     self.account.balance_answered = self.account.balance_answered.max(read.serial);
                 }

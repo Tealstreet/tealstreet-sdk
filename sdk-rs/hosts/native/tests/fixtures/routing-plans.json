@@ -2193,6 +2193,1049 @@
     ]
   },
   {
+    "name": "bitunix-secondary-private-cors",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "readHeader": "api-key",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "direct",
+        "prefix": "https://secondary.invalid/bitunix",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "ws": {
+        "public": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+        },
+        "private": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+        },
+        "business": {
+          "fallback": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+        }
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "direct",
+          "authorize": true,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "Origin": "https://trade.tealstreet.io",
+            "Referer": "https://trade.tealstreet.io/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "empty"
+          },
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-read-key"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "direct",
+          "authorize": true,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "Origin": "https://trade.tealstreet.io",
+            "Referer": "https://trade.tealstreet.io/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "empty"
+          },
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bitunix-secondary-private-how",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "readHeader": "api-key",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "how",
+        "prefix": "https://secondary.invalid/bitunix",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+        },
+        "private": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+        },
+        "business": {
+          "fallback": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+        }
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-read-key"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bitunix-secondary-public-cors",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "readHeader": "api-key",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "direct",
+        "prefix": "https://secondary.invalid/bitunix",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "ws": {
+        "public": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+        },
+        "private": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+        },
+        "business": {
+          "fallback": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+        }
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "direct",
+          "authorize": true,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "Origin": "https://trade.tealstreet.io",
+            "Referer": "https://trade.tealstreet.io/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "empty"
+          },
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-read-key"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/bitunix/https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/bitunix",
+          "mode": "direct",
+          "authorize": true,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "Origin": "https://trade.tealstreet.io",
+            "Referer": "https://trade.tealstreet.io/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "empty"
+          },
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bitunix-secondary-direct-provider",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "readHeader": "api-key",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {},
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-read-key"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
     "name": "breakout-direct-provider",
     "exchange": "breakoutprop",
     "plan": {
@@ -3899,6 +4942,506 @@
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bitunix-force-ws",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {
+          "host": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+        },
+        "private": {
+          "host": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+        },
+        "business": {
+          "host": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+        }
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-venue-key"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bitunix-direct-first-ws",
+    "exchange": "bitunix",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+        },
+        "private": {
+          "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+        },
+        "business": {
+          "fallback": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+        }
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-venue-key"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           }
         ]
