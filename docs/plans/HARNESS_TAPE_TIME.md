@@ -230,3 +230,21 @@ cause; prune only unobserved keys. Require focused harness tests, fresh public
 and private mandatory verification, independent current-head artifact review,
 full green CI, a separate Crypto.com dependency guard and an audited merge
 receipt before reporting and moving to GRVT.
+
+## GRVT phase
+
+Enable GRVT's virtual private clock using its existing fixed epoch without
+changing wire records, session routing or EIP-712 verification. Preserve caller
+identity across the scripted 401/session rotation and resend, native execution
+IDs, duplicate-fill handling, leverage refresh and symbol-scoped cancellation.
+Keep signature verification before existing request canonicalization.
+
+Validate the prefetched CI engine fingerprint before focused five-pair private
+iteration; refuse mismatches without fallback. Compare complete nonmetric
+outputs, including IDs, times, command receipts and staged account state. Prune
+only exact unobserved tape-bound declaration keys, and review any new diagnostic
+before adding its exact key, tape SHA and specific cause. Preserve strict FAIL.
+Require focused harness tests, fresh public/private mandatory verification,
+independent reviews and five identical current-head CI pairs. Merge only after
+full green CI, a fresh separate GRVT dependency guard and an audited merge
+receipt, then report and move to Phemex with its startup rewind preserved.
