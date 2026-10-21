@@ -539,7 +539,7 @@ impl WeexFutures {
                     let count = request.skipped_rows;
                     cx.notice(
                         Level::Warn,
-                        code::STREAM_MALFORMED,
+                        code::ROW_SKIPPED,
                         format!("WEEX skipped {count} malformed {kind} row(s)"),
                     );
                 }

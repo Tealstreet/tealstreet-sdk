@@ -781,7 +781,7 @@ impl Venue for Backpack {
         {
             cx.notice(
                 safe_cex_engine::Level::Warn,
-                code::STREAM_MALFORMED,
+                code::ROW_SKIPPED,
                 format!(
                     "Skipped {} malformed Backpack {} rows: {}",
                     skipped.len(),

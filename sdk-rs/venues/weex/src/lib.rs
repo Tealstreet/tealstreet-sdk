@@ -814,7 +814,7 @@ impl Venue for WeexFutures {
             };
             cx.notice(
                 safe_cex_engine::Level::Warn,
-                code::STREAM_MALFORMED,
+                code::ROW_SKIPPED,
                 format!(
                     "WEEX skipped {} malformed {kind} row(s): {}",
                     p.skipped.len(),

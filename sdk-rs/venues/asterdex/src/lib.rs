@@ -1207,7 +1207,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
     if !skipped.is_empty() {
         cx.notice(
             Level::Warn,
-            code::STREAM_MALFORMED,
+            code::ROW_SKIPPED,
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),

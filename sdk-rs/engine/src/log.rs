@@ -133,7 +133,9 @@ pub mod code {
     pub const HTTP_FAILED: &str = "http.failed";
     /// The engine counts HTTP 429 itself; venues emit this only for socket limits.
     pub const RATE_LIMITED: &str = "rate_limited";
+    /// Counted once per report: a single discarded snapshot or row.
     pub const SNAPSHOT_DISCARDED: &str = "snapshot.discarded";
+    /// Counted once per report: one skipped row, or one summary of several.
     pub const ROW_SKIPPED: &str = "row.skipped";
 
     // Not counted. Hosts and apps match these codes, never message text.

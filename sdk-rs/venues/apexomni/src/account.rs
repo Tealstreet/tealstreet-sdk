@@ -1289,7 +1289,7 @@ impl ApexOmni {
             if let Some(skipped) = skipped.filter(|skipped| !skipped.is_empty()) {
                 cx.notice(
                     Level::Warn,
-                    code::STREAM_MALFORMED,
+                    code::ROW_SKIPPED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
                         skipped.join(", ")

@@ -337,7 +337,7 @@ impl ApexOmni {
                         .collect::<Vec<_>>();
                     cx.notice(
                         Level::Warn,
-                        code::STREAM_MALFORMED,
+                        code::ROW_SKIPPED,
                         format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
                     );
                 }

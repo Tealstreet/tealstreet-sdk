@@ -486,7 +486,7 @@ impl Backpack {
             if !r.skipped_fills.is_empty() {
                 cx.notice(
                     Level::Warn,
-                    code::STREAM_MALFORMED,
+                    code::ROW_SKIPPED,
                     format!(
                         "Skipped {} malformed Backpack fill rows: {}",
                         r.skipped_fills.len(),

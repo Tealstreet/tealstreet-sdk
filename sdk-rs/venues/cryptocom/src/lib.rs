@@ -148,7 +148,7 @@ impl Skipped {
         if let Some(first) = &self.first {
             cx.notice(
                 Level::Warn,
-                code::STREAM_MALFORMED,
+                code::ROW_SKIPPED,
                 format!(
                     "Crypto.com skipped {} unmappable {kind} rows (first: {first})",
                     self.count

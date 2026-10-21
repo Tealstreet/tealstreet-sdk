@@ -781,7 +781,7 @@ impl Venue for Polymarket {
                 if !skipped.is_empty() {
                     cx.notice(
                         Level::Warn,
-                        code::STREAM_MALFORMED,
+                        code::ROW_SKIPPED,
                         format!(
                             "Skipped {} malformed Polymarket market rows: {}",
                             skipped.len(),
@@ -926,7 +926,7 @@ impl Venue for Polymarket {
                 if rejected {
                     cx.notice(
                         Level::Warn,
-                        code::STREAM_MALFORMED,
+                        code::SNAPSHOT_DISCARDED,
                         "Incomplete Polymarket midpoint rows; preserving prior quotes",
                     );
                     self.midpoint_failed.insert(offset);

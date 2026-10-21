@@ -193,7 +193,7 @@ impl Skipped {
         if self.count > 0 {
             cx.notice(
                 Level::Warn,
-                code::STREAM_MALFORMED,
+                code::ROW_SKIPPED,
                 format!(
                     "Skipped {} malformed GRVT {kind} row(s), retaining known copies: {}",
                     self.count, self.first
@@ -325,7 +325,7 @@ impl Summary<'_> {
         if skipped > 0 {
             cx.notice(
                 Level::Warn,
-                code::STREAM_MALFORMED,
+                code::ROW_SKIPPED,
                 format!("Skipped {skipped} malformed GRVT spot balance row(s)"),
             );
         }
