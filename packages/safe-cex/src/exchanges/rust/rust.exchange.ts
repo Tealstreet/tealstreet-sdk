@@ -188,24 +188,21 @@ const needsTsPayloadSigner = (
 ) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
 
 /**
- * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
- * account stays on the TS venue, which merges spot markets into the perp account; the
- * engine's perp venue does not, and refuses the option when constructed directly. A
- * keyless remote-signed account stays on TS too, which signs through the browser, as
- * does a payload-signed account outside Paradex.
+ * Whether `engine: 'rust'` runs this account on the engine. A keyless remote-signed
+ * account stays on the TS venue, which signs through the browser, as does a
+ * payload-signed account outside Paradex.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
   options: Partial<
     Pick<
       ExchangeOptions,
-      'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
+      'engine' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
     >
   >,
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
-  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
   !isKeylessRemoteSigned(name, options) &&
   !needsTsPayloadSigner(name, options);
 
@@ -714,11 +711,6 @@ export class RustEngineExchange extends BaseExchange {
       if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
         throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
       }
-    }
-    if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error(
-        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
-      );
     }
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');

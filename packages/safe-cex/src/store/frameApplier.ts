@@ -187,6 +187,19 @@ export class FrameApplier {
             };
           }
         }
+        // TS Hyperliquid's merged spot disclosure: the wrapped token behind the pair.
+        const underlying = frame.underlyingTokens?.();
+        if (underlying) {
+          for (let i = 0; i < underlying.count; i++) {
+            const market = rows[underlying.market[i]];
+            if (!market) throw new Error('Underlying token has no market');
+            market.info = {
+              ...market.info,
+              hlTokenName: underlying.name(i),
+              hlTokenFullName: underlying.fullName(i),
+            };
+          }
+        }
         const products = frame.derivativeProducts?.();
         if (products) {
           for (let i = 0; i < products.count; i++) {

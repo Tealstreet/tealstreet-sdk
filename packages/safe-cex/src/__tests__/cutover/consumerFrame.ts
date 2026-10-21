@@ -91,6 +91,19 @@ export function consumerFrame(
         ],
         [],
       );
+    const underlying = rows
+      .map((market, index) => ({ market, index }))
+      .filter(({ market }) => market.info?.hlTokenName !== undefined);
+    if (underlying.length)
+      table(
+        20,
+        [
+          underlying.length,
+          ...underlying.map(({ index }) => index),
+          ...underlying.flatMap(({ market }) => [ref(market.info.hlTokenName), ref(market.info.hlTokenFullName)]),
+        ],
+        [],
+      );
     const products = rows
       .map((market, index) => ({ market, index }))
       .filter(({ market }) => market.option || ['FUTURE', 'CALL', 'PUT'].includes(market.info?.instrumentKind));
@@ -272,7 +285,7 @@ export function consumerFrame(
   view.setUint32(4 + strings.length * 4, end, true);
   sections.push({ kind: 1, bytes });
   // ACCOUNT_READ: a current-state read that must not advance freshness IDs.
-  if (accountRead) sections.push({ kind: 20, bytes: new Uint8Array(0) });
+  if (accountRead) sections.push({ kind: 21, bytes: new Uint8Array(0) });
   const buffer = new ArrayBuffer(16 + sections.reduce((n, s) => n + 8 + s.bytes.length, 0));
   const header = new DataView(buffer);
   header.setUint32(0, 0x46584353, true);

@@ -115,7 +115,8 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 | 19 | `CAPABILITIES` (snapshot frames only) | `u32` flags (bits 0-11: clientOrderLookup, fillHistory, orderHistory, incomeHistory, fillsByOrderId, accountLeverage, accountMarginType, cancelWithSymbols, amendWithSymbol, orderBookQuery, options, accountTier); `u32` four-bit fields: account, cancelAll, leverageQuery, maxLeverage, quantityUnits |
-| 20 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
+| 20 | `UNDERLYING_TOKENS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][2]` (venue token name, optional full name): the token behind a wrapped pair, e.g. Hyperliquid `UBTC`/`Unit Bitcoin` behind `BTC/USDC`; applied as `market.info.hlTokenName`/`hlTokenFullName` |
+| 21 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
 
 The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
 Section revision 0 preserves the layouts above. Revision 1 has explicit fixed

@@ -24,6 +24,8 @@ any-field-envelope = []
 # Public Command variants and unsupported-IV guards remain available everywhere.
 command-options = []
 product-semantics = []
+# Hyperliquid opts in: the token behind a wrapped spot pair (UBTC behind BTC/USDC).
+underlying-tokens = []
 # Venue crates' tests drive private request helpers through ProbeVenue.
 test-support = []
 
