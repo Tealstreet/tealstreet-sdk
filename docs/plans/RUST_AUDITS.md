@@ -955,9 +955,16 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Rejected WS identities protect pending REST joins without globally starving
   unrelated rows, with coalesced read repair. Regression coverage includes both
   structural/numeric failures, missing IDs, duplicate keys, option update/close,
-  mode coherence and repeated WS rejects during REST walks. Remaining: Bitget
-  structural WS order/position array rejection. Preserve actual revision/mode
-  fences, strict financial execution coverage and Hyro's atomic handshake.
+  mode coherence and repeated WS rejects during REST walks.
+  ~~Bitget structural WS order/position array rejection~~: valid Classic/UTA
+  peers advance with identity/scope retention and coalesced read repair. Native
+  rejection observation times remain separate from financial timestamps; earlier
+  clean snapshots still fence older reads, while fresh REST-only peers can heal.
+  Partial/mixed account modes cannot corrupt global routing or manufacture initial
+  readiness. Plans/trailing metadata retain native cancel routes through the
+  existing revision/terminal fence. Regressions cover each boundary.
+  Preserve actual revision/mode fences, strict financial execution coverage and
+  Hyro's atomic handshake.
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
