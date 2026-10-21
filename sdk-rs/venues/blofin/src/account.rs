@@ -854,8 +854,21 @@ impl Blofin {
                         && p.positions.0 != 0.0
                         && cx.store.market_by_id(&p.inst_id).is_none()
                     {
-                        *failed = true;
-                        cx.log(LogLevel::Warning, "BloFin owned position has unavailable market metadata; preserving account snapshot");
+                        if self.malformed_markets.contains(p.inst_id.as_ref()) {
+                            *failed = true;
+                            cx.log(LogLevel::Warning, "BloFin owned position has unavailable market metadata; preserving account snapshot");
+                            return;
+                        }
+                        // As the stream does, account totals still cover the native row.
+                        *used += p.maintenance_margin.0;
+                        *upnl += p.unrealized_pnl.0;
+                        cx.log(
+                            LogLevel::Warning,
+                            format!(
+                                "Skipping BloFin position on uncatalogued market {}",
+                                p.inst_id
+                            ),
+                        );
                         return;
                     }
                     if let Some(position) = self.map_position(cx, &p) {
@@ -895,9 +908,16 @@ impl Blofin {
                         )
                         && cx.store.market_by_id(&o.inst_id).is_none()
                     {
-                        *failed = true;
-                        cx.log(LogLevel::Warning, "BloFin working order has unavailable market metadata; preserving order snapshot");
-                        return;
+                        if self.malformed_markets.contains(o.inst_id.as_ref()) {
+                            *failed = true;
+                            cx.log(LogLevel::Warning, "BloFin working order has unavailable market metadata; preserving order snapshot");
+                            return;
+                        }
+                        // Still counted for paging; it maps to no stored order.
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Skipping BloFin order on uncatalogued market {}", o.inst_id),
+                        );
                     }
                     *page_rows += 1;
                     *last_cursor = match family {

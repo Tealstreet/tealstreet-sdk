@@ -156,7 +156,8 @@ fn early_native_wallet_waits_for_real_rates_and_live_quotes_complete_it_before_r
 }
 
 #[test]
-fn omitted_rest_conversion_peer_preserves_previous_usd_and_live_recovery_revalues_immediately() {
+fn omitted_rest_conversion_peer_counts_as_zero_after_the_seed_and_live_recovery_revalues_immediately()
+ {
     let mut wallet = Wallet::pending();
     let previous = Balance {
         total: 777.,
@@ -171,7 +172,14 @@ fn omitted_rest_conversion_peer_preserves_previous_usd_and_live_recovery_revalue
     body["result"].as_object_mut().unwrap().remove("XETHZUSD");
     wallet.tickers(&body.to_string());
     assert!(wallet.engine.store().loaded().tickers);
-    assert_eq!(*wallet.engine.store().balance(), previous);
+    // Once the seed has completed, the unquoted ETH counts as zero instead of freezing USD.
+    assert_eq!(wallet.engine.store().balance().total, 1205.);
+    assert!(
+        wallet
+            .warnings
+            .iter()
+            .any(|w| w.contains("without a quote at zero"))
+    );
     wallet.live(r#"[{"symbol":"ETH/USD","last":50}]"#);
     assert_eq!(wallet.engine.store().balance().total, 1355.);
     wallet.live(r#"[{"symbol":"BTC/USD","last":200}]"#);
@@ -251,7 +259,9 @@ fn shared_feed_quote_completes_pending_native_wallet_without_private_poll() {
                 .unwrap(),
         )
         .unwrap();
-    assert!(!engine.store().loaded().balance);
+    // The first shared frame completes the seed; BBO values BTC at its midpoint.
+    assert!(engine.store().loaded().balance);
+    assert_eq!(engine.store().balance().total, 200.);
     engine
         .apply_public_feed(
             NOW,
@@ -280,7 +290,7 @@ fn a_catalogued_usdc_quote_is_a_supported_conversion_not_an_unpriced_exclusion()
 }
 
 #[test]
-fn rejected_btc_metadata_cannot_classify_funded_btc_as_unsupported_and_zero_its_wallet() {
+fn rejected_pair_holds_its_funded_currency_until_the_reread_repairs_it() {
     let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
     partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
     for prior in [
@@ -296,12 +306,14 @@ fn rejected_btc_metadata_cannot_classify_funded_btc_as_unsupported_and_zero_its_
         if let Some(prior) = &prior {
             wallet.engine.store_mut().set_balance(prior.clone());
         }
+        wallet.tickers(TICKERS);
         wallet.native(r#"{"error":[],"result":{"XXBT":"2"}}"#);
+        // XXBTZUSD is pending re-read, so BTC is never published at zero.
+        assert_eq!(wallet.engine.store().loaded().balance, prior.is_some());
         assert_eq!(
             wallet.engine.store().balance().total,
             prior.as_ref().map_or(0., |p| p.total)
         );
-        assert_eq!(wallet.engine.store().loaded().balance, prior.is_some());
         assert!(
             !wallet
                 .warnings
@@ -330,35 +342,67 @@ fn rejected_btc_metadata_cannot_classify_funded_btc_as_unsupported_and_zero_its_
 }
 
 #[test]
-fn clean_metadata_recovery_can_prove_a_native_currency_has_no_supported_conversion_path() {
+fn funded_currency_without_any_usd_route_never_waits_on_a_partial_catalogue() {
     let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
     partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
     let mut wallet = Wallet::with_meta(&partial.to_string());
-    wallet.native(r#"{"error":[],"result":{"ATOM":"4"}}"#);
-    assert!(!wallet.engine.store().loaded().balance);
-    let recovered = wallet.recover_metadata(META);
+    wallet.native(r#"{"error":[],"result":{"ATOM":"4","ZCAD":"7","KFEE":"100","ZUSD":"10"}}"#);
     assert!(wallet.engine.store().loaded().balance);
-    assert_eq!(
-        wallet.engine.store().currency_balances().unwrap()[0].currency,
-        "ATOM"
+    assert_eq!(wallet.engine.store().balance().total, 10.);
+    assert!(
+        wallet
+            .warnings
+            .iter()
+            .any(|w| w.contains("without a supported USD market"))
     );
+    wallet.recover_metadata(META);
+    assert_eq!(wallet.engine.store().balance().total, 10.);
     assert_eq!(
-        wallet.engine.store().currency_balances().unwrap()[0]
+        wallet
+            .engine
+            .store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|b| b.currency == "ATOM")
+            .unwrap()
             .balance
             .total,
         4.
     );
-    assert!(recovered.iter().any(|action| match action {
-        Action::Notice(Notice::Log {
-            level: LogLevel::Warning,
-            message,
-        }) => message.contains("without a supported USD market"),
-        _ => false,
-    }));
 }
 
 #[test]
-fn malformed_native_pair_identity_cannot_prove_funded_asset_is_unsupported() {
+fn seeded_route_without_a_last_is_valued_at_its_bid_ask_midpoint() {
+    let mut wallet = Wallet::pending();
+    wallet.tickers(&TICKERS.replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#));
+    wallet.native(BALANCE);
+    assert!(wallet.engine.store().loaded().balance);
+    assert_eq!(wallet.engine.store().balance().total, 1355.);
+    wallet.live(r#"[{"symbol":"ETH/USD","last":60}]"#);
+    assert_eq!(wallet.engine.store().balance().total, 1385.);
+}
+
+#[test]
+fn persistent_rejected_pair_rereads_only_the_catalogue() {
+    let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
+    partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
+    let mut wallet = Wallet::with_meta(&partial.to_string());
+    wallet.tickers(TICKERS);
+    assert!(wallet.engine.store().loaded().tickers);
+    let reread = wallet.recover_metadata(&partial.to_string());
+    assert!(!reread.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(!reread.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+    assert!(
+        reread
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 3000.)),
+        "the catalogue retry stays on backoff"
+    );
+}
+
+#[test]
+fn malformed_native_pair_holds_its_funded_currency_until_recovered() {
     for wsname in ["/USD", " /USD", "BTC/", "BTC/ USD", "BTC/USD ", "BTC//USD"] {
         let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
         partial["result"]["XXBTZUSD"]["wsname"] = serde_json::json!(wsname);
@@ -373,12 +417,6 @@ fn malformed_native_pair_identity_cannot_prove_funded_asset_is_unsupported() {
             1,
             "valid ETH peer remains usable"
         );
-        assert!(
-            !wallet
-                .warnings
-                .iter()
-                .any(|w| w.contains("without a supported USD market"))
-        );
         assert!(wallet.metadata_retry.is_some());
         wallet.recover_metadata(META);
         wallet.live(r#"[{"symbol":"BTC/USD","last":110}]"#);
@@ -387,9 +425,13 @@ fn malformed_native_pair_identity_cannot_prove_funded_asset_is_unsupported() {
 }
 
 #[test]
-fn unpriceable_wallet_warns_once_across_balance_polls() {
+fn unquoted_wallet_publishes_after_the_seed_and_warns_once_across_balance_polls() {
     let mut wallet = Wallet::pending();
-    wallet.tickers(&TICKERS.replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#));
+    wallet.tickers(
+        &TICKERS
+            .replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#)
+            .replace(r#""a":["51","1","1"]"#, r#""a":["0","1","1"]"#),
+    );
     wallet.native(BALANCE);
     let (timer, at_ms) = wallet.poll;
     wallet.engine.handle(at_ms, Event::TimerFired { timer });
@@ -399,11 +441,18 @@ fn unpriceable_wallet_warns_once_across_balance_polls() {
         .unwrap();
     reply_at(&mut wallet.engine, at_ms, &balance, BALANCE);
     wallet.collect();
-    assert!(!wallet.engine.store().loaded().balance);
+    assert!(wallet.engine.store().loaded().balance);
+    assert_eq!(wallet.engine.store().balance().total, 1205.);
     let warnings = wallet
         .warnings
         .iter()
-        .filter(|w| w.contains("awaits a valid quote"))
+        .filter(|w| w.contains("without a quote at zero"))
         .count();
     assert_eq!(warnings, 1);
+    assert!(
+        !wallet
+            .warnings
+            .iter()
+            .any(|w| w.contains("awaits a valid quote"))
+    );
 }

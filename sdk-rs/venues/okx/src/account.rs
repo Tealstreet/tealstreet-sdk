@@ -106,6 +106,7 @@ pub struct AccountState {
     pub mode_version: u64,
     pub leverage_versions: HashMap<String, u64>,
     skipped_instruments_logged: HashSet<String>,
+    unlisted_logged: HashSet<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -439,31 +440,31 @@ impl Okx {
                 rows,
                 invalid,
                 ..
-            } => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(p) => {
-                        if !self.account_scope(*product, p.inst_id, p.inst_type) {
-                            *invalid = true;
-                            return;
-                        }
-                        if cx.store.market_by_id(p.inst_id).is_none()
-                            && p.pos.parse::<f64>().ok() != Some(0.0)
-                        {
-                            *invalid = true;
-                            self.unlisted_exposure(cx, p.inst_id);
-                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
-                            return;
-                        }
-                        if let Some(row) = self.position(cx, &p) {
-                            rows.push(row);
-                        } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some()
-                        {
-                            *invalid = true;
-                        }
+            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(p) => {
+                    if !self.account_scope(*product, p.inst_id, p.inst_type) {
+                        *invalid = true;
+                        return;
                     }
-                    Err(_) => *invalid = true,
+                    if cx.store.market_by_id(p.inst_id).is_none()
+                        && p.pos.parse::<f64>().ok() != Some(0.0)
+                    {
+                        if self.unlisted_exposure(cx, p.inst_id) {
+                            *invalid = true;
+                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
+                        } else {
+                            self.unlisted_skipped(cx, p.inst_id);
+                        }
+                        return;
+                    }
+                    if let Some(row) = self.position(cx, &p) {
+                        rows.push(row);
+                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                        *invalid = true;
+                    }
                 }
-            }
+                Err(_) => *invalid = true,
+            },
             Request::Orders {
                 product,
                 rows,
@@ -493,12 +494,15 @@ impl Okx {
                             "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
                         )
                     {
-                        *invalid = true;
-                        self.unlisted_exposure(cx, o.inst_id);
-                        cx.log(
-                            LogLevel::Warning,
-                            "OKX working order market unavailable; preserving order snapshot",
-                        );
+                        if self.unlisted_exposure(cx, o.inst_id) {
+                            *invalid = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "OKX working order market unavailable; preserving order snapshot",
+                            );
+                        } else {
+                            self.unlisted_skipped(cx, o.inst_id);
+                        }
                         return;
                     }
                     for order in self.orders(cx, &o) {
@@ -1014,17 +1018,32 @@ impl Okx {
         .map_err(|e| e.to_string())
     }
 
-    // Exposure on an instrument whose catalog row was malformed cannot be shown.
-    fn unlisted_exposure(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
-        if self.skipped_instruments.contains(inst_id)
-            && self
-                .account
-                .skipped_instruments_logged
-                .insert(inst_id.into())
+    /// Exposure on an instrument whose catalog row was malformed holds the snapshot;
+    /// any other unlisted instrument was filtered or delisted and is skipped.
+    fn unlisted_exposure(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) -> bool {
+        if !self.skipped_instruments.contains(inst_id) {
+            return false;
+        }
+        if self
+            .account
+            .skipped_instruments_logged
+            .insert(inst_id.into())
         {
             cx.log(
                 LogLevel::Error,
                 format!("OKX {inst_id} has open exposure but its instrument row was malformed; it is not shown"),
+            );
+        }
+        true
+    }
+
+    fn unlisted_skipped(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
+        if self.account.unlisted_logged.insert(inst_id.into()) {
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "OKX {inst_id} is not a listed market; its positions and orders are skipped"
+                ),
             );
         }
     }

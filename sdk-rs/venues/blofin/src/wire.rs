@@ -32,6 +32,17 @@ pub struct Instrument<'a> {
     pub max_market_size: Number,
     pub max_leverage: Number,
 }
+/// The identity of an instrument row that failed to decode.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstrumentKey<'a> {
+    #[serde(borrow)]
+    pub inst_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub inst_type: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub contract_type: Option<Str<'a>>,
+}
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Tick<'a> {
