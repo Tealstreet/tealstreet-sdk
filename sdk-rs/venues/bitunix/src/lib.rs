@@ -606,7 +606,7 @@ impl Venue for BitunixFutures {
                 cx.notice(Level::Warn, code::REQUEST_FAILED, error);
             }
             _ => {
-                cx.notice(Level::Error, code::REQUEST_FAILED, error);
+                cx.retried_failure("bitunix.lib:1", error);
                 self.retry = Some(cx.set_timer(5_000.0));
             }
         }
