@@ -1615,6 +1615,7 @@ impl BitgetFutures {
                                 side,
                                 price,
                                 amount,
+                                ..Default::default()
                             });
                         }
                     }
@@ -1738,6 +1739,7 @@ impl BitgetFutures {
             side: order.side,
             price,
             amount,
+            ..Default::default()
         });
     }
 

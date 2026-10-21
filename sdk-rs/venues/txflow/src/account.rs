@@ -985,6 +985,7 @@ impl TxFlow {
                             },
                             price: f.px.0,
                             amount: f.sz.0,
+                            ..Default::default()
                         });
                     }
                 }

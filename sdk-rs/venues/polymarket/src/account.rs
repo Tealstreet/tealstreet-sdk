@@ -1244,6 +1244,7 @@ impl Polymarket {
                 side,
                 price,
                 amount,
+                ..Default::default()
             });
             if let Some(live) = cx.store.order(order).cloned() {
                 // A trade can precede its cumulative order notification. Bump

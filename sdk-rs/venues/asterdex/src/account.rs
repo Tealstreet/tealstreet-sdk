@@ -1113,6 +1113,7 @@ impl AsterDex {
                     side: order_side(&o.side),
                     price,
                     amount: qty,
+                    ..Default::default()
                 });
             }
         }
@@ -1126,6 +1127,7 @@ impl AsterDex {
                     side: order_side(&o.side),
                     price,
                     amount: qty.min(filled - execution_previous),
+                    ..Default::default()
                 });
             }
         }

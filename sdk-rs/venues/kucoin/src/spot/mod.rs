@@ -581,6 +581,7 @@ impl KucoinSpot {
                     side: order.side,
                     price,
                     amount,
+                    ..Default::default()
                 });
             }
         }

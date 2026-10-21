@@ -209,13 +209,18 @@ pub enum Notice {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fill {
     pub order_id: String,
     pub symbol: String,
     pub side: OrderSide,
     pub price: f64,
     pub amount: f64,
+    /// The venue's own execution identity, when it reports one.
+    pub id: Option<String>,
+    /// Realized PnL net of this execution's fee, where the venue reports it.
+    pub realized_pnl: Option<f64>,
+    pub fee: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2320,7 +2325,7 @@ impl<V: Venue> Engine<V> {
         w.candles(&candles);
         let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 1);
+            w.begin_revision(section::FILLS, 2);
             w.u32(fills.len() as u32);
             let orders: Vec<u32> = fills.iter().map(|f| w.string(&f.order_id)).collect();
             w.u32s(orders);
@@ -2337,6 +2342,22 @@ impl<V: Venue> Engine<V> {
             for fill in &fills {
                 let symbol = w.string(&fill.symbol);
                 w.u32(symbol);
+            }
+            // Revision 2: the venue's execution id, then realized PnL and fee
+            // (NaN when the venue reports none).
+            for fill in &fills {
+                let id = fill
+                    .id
+                    .as_deref()
+                    .map_or(crate::wire::NONE, |id| w.string(id));
+                w.u32(id);
+            }
+            w.pad();
+            for fill in &fills {
+                w.f64s([
+                    fill.realized_pnl.unwrap_or(f64::NAN),
+                    fill.fee.unwrap_or(f64::NAN),
+                ]);
             }
             w.end();
         }
@@ -3439,6 +3460,7 @@ mod streaming_tests {
                 side: OrderSide::Buy,
                 price: 99.,
                 amount: 1.,
+                ..Default::default()
             });
         }
         let snapshot = engine.account_snapshot_frame(1.).to_vec();
@@ -3552,6 +3574,7 @@ mod streaming_tests {
             side: OrderSide::Buy,
             price: 7.,
             amount: 0.25,
+            ..Default::default()
         });
         let frame = engine.take_frame(2.).unwrap().to_vec();
         let sections: Vec<_> = crate::wire::sections(&frame).collect();
@@ -4983,6 +5006,7 @@ mod fill_frame_tests {
                     side: OrderSide::Buy,
                     price: 1.,
                     amount: 1.,
+                    ..Default::default()
                 });
             }
         }

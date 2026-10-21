@@ -2297,6 +2297,7 @@ impl Lighter {
                 side,
                 price: trade.price.0,
                 amount: trade.size.0,
+                ..Default::default()
             },
         })
     }

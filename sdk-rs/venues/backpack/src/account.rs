@@ -746,6 +746,7 @@ impl Backpack {
                         side,
                         price: d.execution_price.map_or(price, |n| n.0),
                         amount: executed.0,
+                        ..Default::default()
                     });
                     self.account.balance_revision += 1;
                     self.account.positions_revision += 1;

@@ -222,6 +222,10 @@ export interface FillRows {
   /** `[price, amount]` per execution. */
   rows: Float64Array;
   symbol?(i: number): string | undefined;
+  /** Revision 2: the venue's execution id, when reported. */
+  fillId?(i: number): string | undefined;
+  /** Revision 2: `[realizedPnl, fee]` per execution; NaN where the venue reports none. */
+  details?: Float64Array;
   orderId(i: number): string;
 }
 

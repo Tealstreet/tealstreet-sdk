@@ -1885,12 +1885,17 @@ impl Hyperliquid {
                 {
                     self.account.notify_fills.remove(&id);
                 }
+                let closing = ps.is_some() && fill.dir.contains("Close");
                 cx.fill(Fill {
                     order_id: fill.oid.to_string(),
                     symbol: symbol.clone(),
                     side: side(&fill.side),
                     price: fill.px,
                     amount: fill.sz,
+                    id: Some(fill.tid.to_string()),
+                    // As TS: closing fills carry realized PnL net of their fee.
+                    realized_pnl: closing.then(|| fill.closed_pnl - fill.fee),
+                    fee: closing.then_some(fill.fee),
                 });
                 if self.spot {
                     self.record_spot_fill(&fill, &symbol);

@@ -1643,6 +1643,7 @@ impl Blofin {
                 side: order.side,
                 price: row.average_price.0,
                 amount: clean(qty * contract),
+                ..Default::default()
             },
             qty,
             value,

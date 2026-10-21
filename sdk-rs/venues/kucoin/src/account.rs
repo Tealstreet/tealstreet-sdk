@@ -1169,6 +1169,7 @@ impl Kucoin {
                             row.match_size.get(),
                             contract_size(cx.store, &orders[0].symbol),
                         ),
+                        ..Default::default()
                     });
                 }
             }

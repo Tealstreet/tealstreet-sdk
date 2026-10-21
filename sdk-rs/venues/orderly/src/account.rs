@@ -1412,6 +1412,7 @@ impl Orderly {
             side: order.side,
             price,
             amount: quantity,
+            ..Default::default()
         });
     }
     fn execution_row(

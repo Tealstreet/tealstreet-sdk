@@ -1212,6 +1212,7 @@ impl Account {
                     side: order_side(&native.side),
                     price,
                     amount: delta,
+                    ..Default::default()
                 });
                 self.bump_positions();
                 self.schedule_repair(cx);

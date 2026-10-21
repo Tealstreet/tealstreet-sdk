@@ -2013,6 +2013,7 @@ impl Grvt {
                             },
                             price: fill.price.0,
                             amount: fill.size.0,
+                            ..Default::default()
                         });
                     }
                 }

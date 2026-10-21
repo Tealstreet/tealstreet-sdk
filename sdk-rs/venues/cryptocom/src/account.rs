@@ -894,6 +894,7 @@ impl Cryptocom {
                         side: side(row.side),
                         price: num::parse(row.traded_price),
                         amount: num::parse(row.traded_quantity),
+                        ..Default::default()
                     });
                 })?;
             }

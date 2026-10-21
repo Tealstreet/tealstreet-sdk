@@ -916,6 +916,7 @@ impl WeexFutures {
                                 side,
                                 price: row.fill_value / row.fill_size,
                                 amount: row.fill_size,
+                                ..Default::default()
                             });
                         }
                     }

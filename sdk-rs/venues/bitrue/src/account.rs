@@ -984,6 +984,7 @@ impl Bitrue {
                         side,
                         price: decimal(execution_price),
                         amount,
+                        ..Default::default()
                     });
                 }
             }

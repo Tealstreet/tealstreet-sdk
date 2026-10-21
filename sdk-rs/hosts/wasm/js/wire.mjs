@@ -561,14 +561,22 @@ export class Frame {
     const { buffer } = this;
     const count = rowCount(this, section);
     const data = align8(section.offset + 4 + count * 12);
-    requireEnd(section, data + count * (section.revision === 1 ? 20 : 16));
+    // Revision 1 appends symbol references; revision 2 then execution ids and,
+    // 8-aligned, [realizedPnl, fee] per row (NaN when the venue reports none).
+    const ids = data + count * 20;
+    const extras = align8(ids + count * 4);
+    requireEnd(section, section.revision >= 2 ? extras + count * 16 : data + count * (section.revision === 1 ? 20 : 16));
     const orderId = new Uint32Array(buffer, section.offset + 4, count);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const side = new Uint32Array(buffer, section.offset + 4 + count * 8, count);
     const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 12), count * 2);
-    const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 16, count) : undefined;
+    const symbols = section.revision >= 1 ? new Uint32Array(buffer, data + count * 16, count) : undefined;
+    const fillIds = section.revision >= 2 ? new Uint32Array(buffer, ids, count) : undefined;
+    const details = section.revision >= 2 ? new Float64Array(buffer, extras, count * 2) : undefined;
     return { count, market, side, rows,
       ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
+      ...(fillIds && { fillId: (i) => this.string(fillIds[i]) }),
+      ...(details && { details }),
       orderId: (i) => requiredString(this, orderId[i]) };
   }
 }

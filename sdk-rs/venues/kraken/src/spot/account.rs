@@ -960,6 +960,7 @@ impl KrakenSpot {
                             side,
                             price,
                             amount: qty,
+                            ..Default::default()
                         },
                     ));
                 }

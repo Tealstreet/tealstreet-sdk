@@ -1514,6 +1514,7 @@ impl ApexOmni {
                 side,
                 price,
                 amount: qty,
+                ..Default::default()
             });
         }
         self.account.prune_progress();

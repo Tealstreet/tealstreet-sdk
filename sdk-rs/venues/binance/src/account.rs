@@ -1787,6 +1787,7 @@ impl BinanceFutures {
                 side: order_side(&o.side),
                 price,
                 amount: last_quantity,
+                ..Default::default()
             });
         }
         let is_terminal = matches!(
@@ -2795,6 +2796,7 @@ impl BinanceFutures {
                 side: order_side(&event.side),
                 price: last_price.expect("validated execution price"),
                 amount: last_quantity.expect("validated execution quantity"),
+                ..Default::default()
             });
         }
         let (previous, was_terminal) = self

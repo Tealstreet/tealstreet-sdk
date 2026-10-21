@@ -2375,6 +2375,7 @@ impl Coinbase {
                         side: o.side,
                         price,
                         amount: delta,
+                        ..Default::default()
                     });
                 }
             }

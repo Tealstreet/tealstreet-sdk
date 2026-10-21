@@ -90,6 +90,7 @@ fn executions(cx: &mut Cx<'_, ()>) {
             side: OrderSide::Buy,
             price: 101.,
             amount: 0.25,
+            ..Default::default()
         });
     }
 }

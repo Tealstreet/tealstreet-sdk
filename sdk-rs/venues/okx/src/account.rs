@@ -1328,6 +1328,7 @@ impl Okx {
                 side: side(row.side),
                 price,
                 amount,
+                ..Default::default()
             });
         }
     }

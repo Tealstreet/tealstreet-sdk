@@ -949,6 +949,7 @@ impl BybitLinear {
                 side,
                 price,
                 amount,
+                ..Default::default()
             });
         }
         self.store_hyro_fill_cursor(
@@ -2616,6 +2617,7 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         side,
         price,
         amount,
+        ..Default::default()
     });
 }
 

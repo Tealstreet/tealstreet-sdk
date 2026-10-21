@@ -1782,6 +1782,7 @@ impl Woo {
                 side: order.side,
                 price,
                 amount,
+                ..Default::default()
             };
             // REST may already include an execution whose stream report arrived late.
             let position_amount = delta.map_or(amount, |advance| amount.min(advance));

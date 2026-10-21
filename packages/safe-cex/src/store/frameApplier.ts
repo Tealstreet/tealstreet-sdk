@@ -752,8 +752,11 @@ export class FrameApplier {
         ? fallback
         : (this.frameMarkets.get(frame)?.symbols[rows!.market[i]] ?? this.symbol(rows!.market[i], fallback));
       if (symbol === undefined) throw new FrameApplyError('Fill identity requires a market snapshot');
+      const realizedPnl = rows!.details?.[i * 2];
+      const fee = rows!.details?.[i * 2 + 1];
       fills.push({
-        id: rows!.orderId(i),
+        // As the TS venues: the execution id when the venue reports one.
+        id: rows!.fillId?.(i) ?? rows!.orderId(i),
         orderId: rows!.orderId(i),
         symbol,
         ...([OrderSide.Buy, OrderSide.Sell][rows!.side[i]] !== undefined && {
@@ -761,6 +764,8 @@ export class FrameApplier {
         }),
         price: rows!.rows[i * 2],
         amount: rows!.rows[i * 2 + 1],
+        ...(Number.isFinite(realizedPnl) && { realizedPnl }),
+        ...(Number.isFinite(fee) && { fee }),
       } as OrderFillEvent);
     }
     return fills;

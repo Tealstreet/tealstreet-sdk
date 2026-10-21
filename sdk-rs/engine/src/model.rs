@@ -18,9 +18,10 @@ pub struct OrderIdentityReceipt {
     pub identity: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OrderSide {
+    #[default]
     Buy,
     Sell,
 }

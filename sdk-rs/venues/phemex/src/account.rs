@@ -1501,6 +1501,7 @@ impl PhemexPerpetuals {
             side,
             price: row.exec_price_rp,
             amount: row.exec_qty,
+            ..Default::default()
         });
     }
     pub(crate) fn account_close(

@@ -441,6 +441,7 @@ impl MexcFutures {
                         side: side(raw.side),
                         price: raw.price,
                         amount: raw.vol * m.contract_size.unwrap_or(1.0),
+                        ..Default::default()
                     });
                 }
             }

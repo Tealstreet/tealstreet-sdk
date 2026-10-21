@@ -1748,6 +1748,7 @@ impl Account {
             side,
             price: row.price.0,
             amount: row.size.0,
+            ..Default::default()
         });
         true
     }

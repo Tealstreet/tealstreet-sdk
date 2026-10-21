@@ -833,6 +833,7 @@ impl Kraken {
                                 },
                                 price: e.price,
                                 amount: e.qty,
+                                ..Default::default()
                             });
                         }
                         self.account_schedule_heal(cx);
