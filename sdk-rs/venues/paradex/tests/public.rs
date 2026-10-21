@@ -1221,3 +1221,82 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert!(h.e.store().market("ETH-USD-PERP").is_none(), "{bad}");
     }
 }
+
+#[test]
+fn rest_query_success_and_failure_leave_sbe_book_sequence_and_account_unchanged() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    let snapshot = binary_vector("snapshot");
+    h.e.handle(
+        h.now,
+        Event::WsBinary {
+            socket: h.public,
+            data: &snapshot,
+        },
+    );
+    h.collect();
+    let before = (
+        h.e.book(BTC).unwrap().bids().to_vec(),
+        h.e.book(BTC).unwrap().asks().to_vec(),
+        h.e.store().tickers().to_vec(),
+        h.e.store().balance().clone(),
+        h.e.store().positions().to_vec(),
+        h.e.store().orders().to_vec(),
+    );
+    for (command, status, body) in [
+        (7, 200, r#"{"bids":[["1","2"]],"asks":[],"seq_no":999999}"#),
+        (
+            8,
+            401,
+            r#"{"error":"INVALID_API_KEY","message":"invalid api key"}"#,
+        ),
+    ] {
+        h.actions.clear();
+        h.command(Command::FetchOrderBook {
+            command,
+            symbol: BTC.into(),
+            limit: Some(5),
+        });
+        assert_eq!(h.pending.len(), 1);
+        let request = h.take("/orderbook/");
+        assert!(request.headers.is_empty());
+        h.respond(request, status, body);
+        if command == 7 {
+            let result: serde_json::Value = serde_json::from_str(h.result(7).unwrap()).unwrap();
+            assert_eq!(result["bids"][0]["total"], 2.0);
+        } else {
+            assert!(h.result(8).is_err());
+        }
+        assert!(h.pending.is_empty());
+        assert!(!h.actions.iter().any(|a| matches!(
+            a,
+            Action::WsConnect { .. }
+                | Action::WsClose { .. }
+                | Action::SetTimer { .. }
+                | Action::SignPayload { .. }
+                | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        )));
+        assert_eq!(
+            (
+                h.e.book(BTC).unwrap().bids().to_vec(),
+                h.e.book(BTC).unwrap().asks().to_vec(),
+                h.e.store().tickers().to_vec(),
+                h.e.store().balance().clone(),
+                h.e.store().positions().to_vec(),
+                h.e.store().orders().to_vec()
+            ),
+            before
+        );
+    }
+    let delta = binary_vector("delta");
+    h.e.handle(
+        h.now,
+        Event::WsBinary {
+            socket: h.public,
+            data: &delta,
+        },
+    );
+    h.collect();
+    assert_eq!(h.e.book(BTC).unwrap().bids()[0], (99.0, 3.0));
+    assert_eq!(h.e.book(BTC).unwrap().asks(), [(110.0, 2.0)]);
+}

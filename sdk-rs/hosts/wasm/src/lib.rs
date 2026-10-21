@@ -1052,7 +1052,16 @@ mod tests {
                 cancel_with_symbols: any(&["asterdex", "kucoinspot"], venue),
                 amend_with_symbol: venue == "kucoinspot",
                 order_book_query: any(
-                    &["asterdex", "polymarket", "mexc", "backpack", "weex"],
+                    &[
+                        "asterdex",
+                        "polymarket",
+                        "mexc",
+                        "backpack",
+                        "cryptocom",
+                        "grvt",
+                        "paradex",
+                        "weex",
+                    ],
                     venue,
                 ),
                 options: false,

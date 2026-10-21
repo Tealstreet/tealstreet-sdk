@@ -72,18 +72,24 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    [plan and evidence](RUST_GRVT_BUILDER_ERROR.md). NX's live class-only handler
    still requires migration to exported `builderAuthorizationOf(error)`; SDK
    source repair does not migrate or deploy that caller.
-3. **REST order-book queries:** Backpack now joins AsterDEX, MEXC and Polymarket
+3. ~~**REST order-book queries:**~~ Backpack now joins AsterDEX, MEXC and Polymarket
    with a native unsigned query and capability. Its request-owned snapshot keeps
    raw price IDs/order/zero totals and never mutates subscription state; malformed
    data/refusals fail. A precise shared decoder feature admits standalone JSON
-   requests without unrelated venue commands. WEEX now issues independent unsigned
-   queries, with cumulative native base totals, exact version strings and shared
-   rate-pause admission but no live depth/account mutation. Crypto.com, GRVT and
-   Paradex remain parity gaps; streaming subscriptions are separate. MEXC's existing
+   requests without unrelated venue commands. Crypto.com now uses unsigned live/UAT
+   GET with fixed depth50, typed first-book mapping and independent query ownership;
+   native price IDs/order/zero totals survive without stream mutation. GRVT now
+   issues independent unsigned MDG lite queries using the documented i/d fields
+   and full/lite response aliases; native side order, zero rows and cumulative
+   base totals are preserved without stream/session mutation. Paradex now uses
+   unsigned request-owned depth queries (default20/explicit depth), native row
+   order and per-level quote totals, independently of live SBE sequence state
+   and private JWT. WEEX now issues independent unsigned queries with cumulative
+   native base totals, exact version strings and shared rate-pause admission,
+   without mutating live depth/account state; streaming subscriptions are separate. MEXC's existing
    standalone JSON decoder omission is repaired by opting into the precise book
    feature, with a JSON-to-native-HTTP/result regression; native book semantics
-   stay unchanged. Add each remaining native query/capability without synthesizing
-   an absent stream book.
+   stay unchanged. REST queries never synthesize snapshots from absent streams.
 4. **Hyperliquid dead-man switch:** TS `scheduleCancel(time?: number | null)`
    sends a signed account-wide action; Rust inherits the base rejection and
    has no matching engine command. Preserve cancellation semantics, UTC-ms

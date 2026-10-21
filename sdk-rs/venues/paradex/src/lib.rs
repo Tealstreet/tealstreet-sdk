@@ -1,5 +1,6 @@
 //! Paradex perpetuals on the sans-I/O engine.
 mod account;
+mod depth_query;
 mod history;
 mod identity;
 mod public;
@@ -43,6 +44,7 @@ impl Options {
 }
 
 pub enum Pending {
+    BookQuery(safe_cex_engine::CommandId),
     Public(public::Request),
     Account(account::Request),
     Trade(trading::Request),
@@ -94,6 +96,7 @@ impl Venue for Paradex {
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account: safe_cex_engine::AccountLookup::Query,
+            order_book_query: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -137,11 +140,15 @@ impl Venue for Paradex {
             Pending::Public(request) => self.public_item(cx, request, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
-            Pending::Trade(_) | Pending::Identity(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery(_) => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
+            Pending::BookQuery(command) => {
+                self.book_query_response(cx, command, response);
+                return;
+            }
             Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
@@ -173,6 +180,13 @@ impl Venue for Paradex {
         self.on_request_failed(cx, pending, &error);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::BookQuery(command) = pending {
+            cx.fail(
+                command,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            );
+            return;
+        }
         self.dispatch_failed(cx, pending, error);
         self.failures(cx);
     }
@@ -195,6 +209,26 @@ impl Venue for Paradex {
         self.failures(cx);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchOrderBook {
+            command,
+            ref symbol,
+            limit,
+        } = command
+        {
+            cx.request(
+                safe_cex_engine::Method::Get,
+                format!(
+                    "{}/orderbook/{}?depth={}",
+                    self.rest(),
+                    safe_cex_engine::url::encode(symbol),
+                    limit.unwrap_or(20)
+                ),
+                vec![],
+                None,
+                Pending::BookQuery(command),
+            );
+            return;
+        }
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
             self.failures(cx);
@@ -228,6 +262,10 @@ impl Venue for Paradex {
 impl Paradex {
     fn dispatch_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::BookQuery(command) => cx.fail(
+                command,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Public(request) => self.public_failed(cx, request, error),
             Pending::Account(request) => self.account.on_failed(cx, request, error),
