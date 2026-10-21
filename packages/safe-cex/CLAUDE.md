@@ -199,6 +199,16 @@ allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
 
+## Rust incomplete history
+
+A Rust history read that cannot be walked completely still returns the rows it
+read, with a `history.incomplete` warning event that names its `command`. The
+host then marks the returned array with a non-enumerable `incomplete: true`.
+Kraken (income past one 500-row `account-log` page) and Binance (exhausted
+income chunks) set it. Existing callers see a plain array. A consumer recording
+coverage must not treat a flagged result as complete. Structured clone drops
+the property, so a worker or server hop has to forward it explicitly.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only
