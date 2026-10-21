@@ -23,7 +23,8 @@ pub(crate) struct PlacementAcks {
     placing: HashSet<CommandId>,
     /// Acknowledged ids not yet seen in the store, with their expiry.
     acked: Vec<(String, f64)>,
-    /// Held commands, each with its dispatch deadline.
+    /// Held commands, each with a hard cap; the live deadline is computed from
+    /// the acknowledgements it still awaits, so it never goes stale.
     held: Vec<(Command, f64)>,
 }
 
@@ -90,22 +91,9 @@ impl PlacementAcks {
     /// order rather than store it, while a partial fill's row may still follow.
     pub fn filled(&mut self, order_id: &str, now: f64) {
         let grace = now + FILL_GRACE_MS;
-        let mut matched = false;
         for (acked, expiry) in &mut self.acked {
             if acked == order_id {
                 *expiry = expiry.min(grace);
-                matched = true;
-            }
-        }
-        if !matched {
-            return;
-        }
-        for (command, deadline) in &mut self.held {
-            if named_ids(command)
-                .iter()
-                .any(|id| native(id) == order_id || id == order_id)
-            {
-                *deadline = deadline.min(grace);
             }
         }
     }
@@ -141,12 +129,10 @@ impl PlacementAcks {
                     .any(|other| native(other) == native(id))
             })
         });
-        let until = self.awaited_until(store, command, now);
-        if !behind && until.is_none() {
+        if !behind && !self.awaited(store, command, now) {
             return false;
         }
-        self.held
-            .push((command.clone(), until.unwrap_or(now + ACK_WAIT_MS)));
+        self.held.push((command.clone(), now + ACK_WAIT_MS));
         true
     }
 
@@ -163,16 +149,8 @@ impl PlacementAcks {
         let mut ready = Vec::new();
         let mut index = 0;
         while index < self.held.len() {
-            let (command, deadline) = &self.held[index];
-            // An earlier held write to the same order goes first.
-            let behind = self.held[..index].iter().any(|(earlier, _)| {
-                named_ids(earlier).iter().any(|other| {
-                    named_ids(command)
-                        .iter()
-                        .any(|id| native(id) == native(other))
-                })
-            });
-            if !behind && (now >= *deadline || !self.awaited(store, command, now)) {
+            let (command, cap) = &self.held[index];
+            if !self.behind(index) && (now >= *cap || !self.awaited(store, command, now)) {
                 let (command, _) = self.held.remove(index);
                 // An expired wait must not hold the same id again on dispatch.
                 for id in named_ids(&command) {
@@ -187,11 +165,29 @@ impl PlacementAcks {
         ready
     }
 
-    /// The earliest held deadline, for the engine's wake-up timer.
-    pub fn next_deadline(&self) -> Option<f64> {
-        self.held
-            .iter()
-            .map(|(_, deadline)| *deadline)
+    /// Whether an earlier held write names the same order; it goes first.
+    fn behind(&self, index: usize) -> bool {
+        let command = &self.held[index].0;
+        self.held[..index].iter().any(|(earlier, _)| {
+            named_ids(earlier).iter().any(|other| {
+                named_ids(command)
+                    .iter()
+                    .any(|id| native(id) == native(other))
+            })
+        })
+    }
+
+    /// When the earliest releasable held command is due, for the engine's
+    /// wake-up timer. Commands waiting behind another are released with it.
+    /// Always later than `now` after `release`, so the timer cannot spin.
+    pub fn next_deadline(&self, store: &Store, now: f64) -> Option<f64> {
+        (0..self.held.len())
+            .filter(|&index| !self.behind(index))
+            .map(|index| {
+                let (command, cap) = &self.held[index];
+                self.awaited_until(store, command, now)
+                    .map_or(*cap, |until| until.min(*cap))
+            })
             .reduce(f64::min)
     }
 }

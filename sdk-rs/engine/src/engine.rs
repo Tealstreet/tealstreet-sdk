@@ -1466,7 +1466,7 @@ impl<V: Venue> Engine<V> {
             }
             self.releasing = was_releasing;
         }
-        let next = self.io.placement_acks.next_deadline();
+        let next = self.io.placement_acks.next_deadline(&self.store, now);
         if self.ack_timer.map(|(_, at)| at) == next {
             return;
         }
@@ -4571,6 +4571,56 @@ mod placement_ack_tests {
             .map(|(command, _)| command)
             .collect();
         assert_eq!(order, [2, 3]);
+    }
+
+    #[test]
+    fn a_fill_of_one_id_keeps_the_wait_for_the_others_in_the_command() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 2., "fill:8");
+        let (timer, at_ms) = own_timer(&mut engine).unwrap();
+        assert_eq!(at_ms, ACK_WAIT_MS, "7 is still awaited for its full wait");
+        // 7's row lands after the fill's grace; the cancel must still wait for it.
+        engine.handle(2. + FILL_GRACE_MS + 1., Event::TimerFired { timer });
+        assert!(results(&mut engine).is_empty());
+        stream(&mut engine, 4000., "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 8 not found".into()))]);
+    }
+
+    #[test]
+    fn the_wake_up_never_targets_a_command_waiting_behind_another() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        engine.handle(
+            1.5,
+            Event::Command(Command::CancelOrders {
+                command: 3,
+                ids: vec!["7".into(), "8".into()],
+            }),
+        );
+        stream(&mut engine, 2., "fill:8");
+        let (timer, at_ms) = own_timer(&mut engine).unwrap();
+        assert_eq!(
+            at_ms, ACK_WAIT_MS,
+            "cancel 3 is behind cancel 2, which waits for 7"
+        );
+        engine.handle(at_ms, Event::TimerFired { timer });
+        let order: Vec<_> = results(&mut engine)
+            .into_iter()
+            .map(|(command, _)| command)
+            .collect();
+        assert_eq!(order, [2, 3]);
+        assert!(own_timer(&mut engine).is_none(), "nothing left to wake for");
     }
 
     fn engine_with_hold() -> Engine<StoredOnly> {
