@@ -101,6 +101,9 @@ NX revision; mobile `master` remains `8377a4f3f1e` (GitHub API).
 The leverage follow-up checks #1522 at `faad41cfba5` with those inventory revisions.
 The coded-health follow-up checks #1583 at `916585a30f2`, with NX `fdd2389a825`
 and mobile `8377a4f3f1e` unchanged; its caller inventory remains cutover work.
+The OKX port follow-up checks #1588 at `447134dbf24`; mirror `origin/master`
+`1f91dfe4dcb` still has the old 8443 URLs. Live-master/hot-patch status below is
+the overseer's 2026-10-21 report, not evidence of a deployed change.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -153,6 +156,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1430 / `3002a22646` | Account reads synchronize authoritative native state without a network refresh or new streaming freshness observation; worker mirrors forward the reads. Native identity lookup expands by capability. Live fills add optional `realizedPnl`/`fee` tails under the existing revision-1 header, and native nuke batches closes without automatic retry. See [Native account reads, identities and fills](#native-account-reads-identities-and-fills-1430) for caller and host requirements. |
 | #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. The metadata-refreshed bridge issues a native command for uncached symbols instead of returning a cache miss immediately; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
 | #1583 / `916585a30f` | SDK `engine-event` and the same worker op expose received coded diagnostics. Legacy Error and Info/Warn delivery retains event metadata for caller-controlled duplicate suppression; Error telemetry adds scalar `event_code`. `ExchangeHealthMonitor.processEvent` classifies codes/optional typed detail, and `processHealth` copies authoritative engine counters. Downstream handlers still need migration; preserve the [coded diagnostic caller inventory](#coded-diagnostic-caller-cutover-pr5). PR6 protocol cleanup remains pending. |
+| #1588 / `447134dbf2` | Rust/TS OKX public/private/business WebSocket URLs and relay upstream metadata use default TLS 443 across global/EEA live/demo, preserving host/path. SDK arguments stay unchanged. Proxy upstreams and live master need a separate owner-run port migration before the public-internet 8443 deadline; see [OKX operations prerequisite](#okx-websocket-port-operations-prerequisite-1588). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -384,6 +388,24 @@ the op protocol is its ABI. Beyond B2, B6, B7:
 | Writable generic emitter | cli-core `worker-host/WorkerPlatformAdapter.ts:76`, `router.ts:38-107` (emit `exec-log`/`exec-result`) | `ExchangeEmitter` accepts arbitrary events (it does) |
 | Global teardown | `repl.ts:2940-2948` (`virtualClock.stop()`, `disposeHOWWebSockets()`), MCP `index.ts:15` | `dispose()` must release engine timers/sockets so Bun/Node exit |
 | Chaser/TWAP/cross-trade managers driven against the exchange | cli-core `ChaseCommand.ts:340-350`, `TwapCommand.ts`, `apps/cli/src/cross-trade-daemon.ts:221-224` | `on('update'|'fill')`, `mintClientOrderId`, `findOrderByClientOrderId`, `store.*BySymbol` on Rust (present) |
+
+### OKX WebSocket port operations prerequisite (#1588)
+
+**Open ops work, before 2026-10-31.** [OKX's port-retirement notice](https://www.okx.com/docs-v5/log_en/#upcoming-changes-websocket-port-8443-discontinuation)
+states public-internet WebSocket connections to 8443 stop on that date; 443
+already works, with the same hosts and paths. #1588 removes `:8443` from SDK
+global/EEA live/demo URLs and relay metadata. This merge does not migrate the
+deployed proxy upstreams.
+
+| Ops dependency | Required action / owner boundary |
+| --- | --- |
+| Python `ws-proxy` EEA termination | Move its `wss://wseea.okx.com:8443` upstream to default 443 (`wss://wseea.okx.com`), preserving the EEA host and channel path. Changing only client URLs does not update this server-side destination. |
+| `okx-proxy-ja.tealstreet.io` HAProxy passthrough | Move its upstream destination from 8443 to 443 before the deadline. Its client-facing 443 listener is not proof that its OKX upstream already uses 443. |
+| Live master / hot patch | The overseer reports live master still uses 8443; checked mirror `origin/master` `1f91dfe4dcb` also retains those URLs. Sam decides the production hot patch and rollout timing; the Rust landing merge is not a deployed fix. |
+
+Keep this prerequisite separate from B1's engine delivery and the Rust cutover:
+the port deadline also affects the live TS path. No proxy edit, hot patch or
+deployment is performed by this documentation refresh.
 
 ### Error strings that must move to codes
 
