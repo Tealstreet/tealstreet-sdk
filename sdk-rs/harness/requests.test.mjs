@@ -19,6 +19,23 @@ import {
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
 
+test('historical OKX socket ports alias default TLS without changing other identities', () => {
+  for (const host of ['ws.okx.com', 'wspap.okx.com', 'wseea.okx.com', 'wseeapap.okx.com']) {
+    for (const channel of ['public', 'private', 'business']) {
+      assert.equal(canonicalUrl(`wss://${host}:8443/ws/v5/${channel}`),
+        canonicalUrl(`wss://${host}/ws/v5/${channel}`));
+    }
+  }
+  for (const [left, right] of [
+    ['wss://ws.okx.com:8444/ws/v5/public', 'wss://ws.okx.com/ws/v5/public'],
+    ['wss://ws.okx.com.evil:8443/ws/v5/public', 'wss://ws.okx.com.evil/ws/v5/public'],
+    ['wss://ws.okx.com:8443/other', 'wss://ws.okx.com/other'],
+    ['https://ws.okx.com:8443/ws/v5/public', 'https://ws.okx.com/ws/v5/public'],
+    ['wss://ws.okx.com/ws/v5/public', 'wss://wseea.okx.com/ws/v5/public'],
+    ['wss://ws.okx.com/ws/v5/public', 'wss://ws.okx.com/ws/v5/private'],
+  ]) assert.notEqual(canonicalUrl(left), canonicalUrl(right));
+});
+
 test('wire body decoding preserves semantic form and multipart identity before normalization', () => {
   const options = { wireBody: (body) => typeof body === 'string' && body.includes('=')
     ? Object.fromEntries(new URLSearchParams(body)) : body };
