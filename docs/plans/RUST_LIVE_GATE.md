@@ -35,21 +35,32 @@ behaviour. Either one blocks cutover until it is fixed or declared.
 Per venue and product (the Rust aliases in `RUST_VENUES`):
 
 - Record with `corepack yarn rust:record --venue <v> --seconds 300 --books
-  <3 active symbols>`. Capture once in quiet hours and once in a volatile hour,
-  so listing churn, funding rollover and book bursts are covered.
+  <3 active symbols> --out sdk-rs/harness/out/live/<v>-<utc-stamp>.jsonl`.
+  **Always pass `--out`.** Without it the recorder writes
+  `sdk-rs/harness/tapes/<v>.jsonl`, the committed fixture directory, and
+  overwrites a tracked fixture. Capture once in quiet hours and once in a
+  volatile hour, so listing churn, funding rollover and book bursts are covered.
 - Gate with `corepack yarn rust:gate --venue <v> --tape <tape> --books <same>`.
-  Correctness must PASS. CPU and memory results are informational for live
-  tapes, because committed public fixtures stay the performance baseline.
+  For public tapes the gate also enforces its CPU and memory objectives (a
+  required improvement), with no flag to disable them, so a live tape can fail
+  on timing alone. Only correctness failures count for this gate; committed
+  fixtures stay the performance baseline. A timing-only miss is recorded and
+  does not block. Implementation phase 1 adds a correctness-only mode so the
+  exit code reflects this.
 - Pass criteria:
-  - zero unexpected divergences;
-  - every known failure in `known-gate-failures.json` still matches exactly
-    (`rust:gate:verify`).
+  - zero divergences beyond the venue's declared ones;
+  - known failures in `known-gate-failures.json` are keyed by venue plus
+    `tapeSha256`, and `rust:gate:verify` reads only the CI ledger, so no fresh
+    live tape matches an entry. Compare the live divergence paths with the
+    diagnostic keys declared for that venue's fixture: a path outside that
+    family is new. Phase 1 automates this match.
   - A new divergence is triaged into a Rust fix or a declared, reviewed TS fix
     before the venue may proceed.
 - Live public tapes contain no secrets, but they are large. Keep them outside
   git (`sdk-rs/harness/out/` or local storage). Commit one only when it replaces
-  a fixture, trimmed with `rust:trim-tape`. Tape scrubbing in
-  `tape-fields.mjs` (cookies and auth headers) applies before any commit.
+  a fixture, trimmed with `rust:trim-tape`. The recorder applies
+  `tape-fields.mjs` at capture time: a static allowlist of field names, plus
+  removal of `set-cookie` response headers. Check that before any commit.
 
 ## 2. Private shadow (read-only, credentialed)
 
@@ -58,10 +69,11 @@ Gap: no read-only private capture exists yet. `record.mjs` forces
 
 Build `rust:shadow-private` by reusing the live-smoke profile and recorder:
 
-- **Credentials and endpoints:** environment-only credentials
-  (`liveSmokeProfile(env)`), the reviewed per-venue environment profiles with
-  their endpoint fences and redirect refusal, and the same recorder redaction
-  and 0600 tape files.
+- **Credentials and endpoints:** environment-only credentials through
+  `liveSmokeProfile(name, mode, env)`, the reviewed per-venue environment
+  profiles with their endpoint fences and redirect refusal, and the live-smoke
+  recorder's credential, auth and signature redaction (`live-smoke-tape.mjs`)
+  with 0600 tape files.
 - **What it does:** start private, wait for readiness, hold for a bounded window
   (default 120 s, so order, position and balance streams and one REST
   reconciliation are captured), then dispose.
@@ -104,17 +116,24 @@ inferred.
 
 ## 4. Canary criteria
 
-A canary routes real accounts to Rust through the existing per-account
+A canary routes real accounts to Rust through the per-account
 `ExchangeOptions.engine: 'rust'` override (`runsOnRustEngine`). It does not
-change registry defaults. Entry requirements per venue and product:
+change registry defaults. The SDK honours the override, but no tealstreet-next
+caller sets it today. A canary on web or exchange-server therefore first needs:
+- blocker B1 in `RUST_CUTOVER_CALLERS.md`: engine delivery, since no
+  tealstreet-next build runs the Rust/wasm step yet;
+- a caller change that sets the override for the cohort.
+
+CLI and MCP can pass the override directly. Entry requirements per venue and
+product:
 
 1. Replay gates are green in CI, and public shadow (1) passes on two fresh live
    tapes.
 2. Private shadow (2) passes on every applicable account shape, and the smoke
    checklist (3) passes, on the account types the canary will use.
-3. Cutover-readiness consumer checks pass for the alias. Its row in
-   `RUST_CUTOVER_CALLERS.md` has no open RT blocker for the canary's surface
-   (web, exchange-server, CLI or MCP).
+3. Cutover-readiness consumer checks pass for the alias. No open blocker
+   (B1–B8) or RT-tagged behaviour row in `RUST_CUTOVER_CALLERS.md` affects the
+   canary's surface (web, exchange-server, CLI or MCP).
 4. The canary cohort is internal accounts first (Sam or team), then opt-in
    users. Each stage runs at least 7 days and through at least one venue
    maintenance window or reconnect storm.
@@ -140,9 +159,14 @@ for the full canary, plus Sam's sign-off.
 ## 5. Rollback
 
 - **Per account:** remove the `engine: 'rust'` override. The next account
-  start constructs the TS venue. The TS venues stay in the tree until deletion
-  prerequisites are met, so rollback never needs a build. Store state is
-  rebuilt from the venue on start, and no engine-specific state is persisted.
+  start constructs the TS venue. That works only where the TS class still
+  exists. Store state is rebuilt from the venue on start, and no
+  engine-specific state is persisted.
+- **Names that are already Rust by default with their TS class removed**
+  (coinbase, coinbasespot, the six Orderly brokers and txflow) have no TS
+  fallback. Rollback there means a fix-forward, or a revert to an earlier
+  release, through the normal lane. Hosted keyless signing keeps its retained
+  TS Coinbase/Orderly path (#1505).
 - **Per venue default:** revert the default-change PR. Defaults are registry
   data, so a revert is one commit through the normal release lane.
 - **Triggers:**
@@ -158,9 +182,15 @@ for the full canary, plus Sam's sign-off.
 
 ## Implementation phases
 
-1. **`rust:shadow-private`:** the read-only runner. Scripted-transport tests
-   cover the write refusal, endpoint fences, redaction, the bounded window and
-   replay through `gate.mjs` private mode. Independent review, then merge.
+1. **Live tooling.**
+   - `rust:shadow-private`, the read-only runner. Scripted-transport tests cover
+     the write refusal, endpoint fences, redaction, the bounded window and
+     replay through `gate.mjs` private mode.
+   - A correctness-only `gate.mjs` mode for live public tapes.
+   - Matching live divergences against the venue's declared diagnostic-key
+     families.
+
+   Independent review, then merge.
 2. **Live-evidence table:** a per-venue row in `RUST_CUTOVER_READINESS.md`:
    - public shadow date and result;
    - private shapes covered;
