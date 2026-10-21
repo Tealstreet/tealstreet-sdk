@@ -215,3 +215,26 @@ is measured rather than inferred from isolated venue builds.
 3. Keep this family documentation-only if revalidation finds no safe remaining
    behavior fix. Independently review the audit disposition, check the diff and
    use CI before merging; documentation-only PRs are exempt from the code hold.
+
+- Revalidation is documentation-only. `trading.rs::SetLeverage` retains the
+  opposite isolated rail from native config/settings, validates both rails and
+  sends the required pair. `isolated_side_leverage_keeps_the_other_payload_and_setting_leg`
+  covers Long/Short/omitted side; `weex_side_is_coupled_in_cross_and_rejections_keep_settings`
+  covers coupled cross and rejection preservation. The existing package CLAUDE
+  already records these contracts. `RustEngineExchange::fetchLeverageForSymbol`
+  returns fetched native rails under the Settings capability, not market max.
+- `history.rs::FillRow` accepts id/tradeId/fillId. An absent identity field
+  rejects deserialization and therefore the query; an empty identity string
+  still parses and is skipped. The cited malformed-row regression covers invalid
+  price, not absent/empty identity. Inventing identity is
+  unsafe, and the empty-string skip remains a limitation. Income with neither
+  asset nor its coin alias rejects that page; range walks continue with an
+  explicit incomplete marker. It cannot safely default to USDT without accounting
+  evidence. Rust refuses unverified IndexPrice placement; TS silently maps it to
+  MARK_PRICE, which is not evidence that native index semantics are supported.
+- No code or caller contract changes. Audit entries now distinguish stale
+  findings from deliberately retained risky changes; no new tests are needed
+  for these documentation corrections. Existing focused regression evidence and
+  CI support the revalidation.
+- Re-ran the three cited isolated-side/cross/rejected-write/malformed-fill
+  regressions successfully. Diff whitespace check passes; full CI follows.
