@@ -326,6 +326,8 @@ fills omit both. MEXC/WEEX preserve reported realized PnL and absolute fees.
 Synthetic/cumulative-order fills invent no financial values. Historical
 execution PnL retains its separate gross convention; this does not resolve
 B11 completeness forwarding/coverage or owner-run backfills.
+Order mapping also retains generic `Order.triggerType` alongside the existing
+TP/SL-specific trigger fields; no caller signature changes.
 
 #### Events and worker protocol
 
