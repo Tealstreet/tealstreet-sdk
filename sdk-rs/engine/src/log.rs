@@ -120,8 +120,12 @@ pub struct LogEvent {
     pub fields: Vec<(&'static str, Value)>,
 }
 
-/// Codes counted in [`Health`]. The engine counts socket closes and HTTP
-/// failures itself; venues emit the rest through `Cx::event`.
+/// Codes counted in [`Health`]. The engine counts socket closes, reconnects
+/// on a declared socket role, HTTP failures, and auth failures it sees
+/// (`deactivate`, and auth-kind startup or command failures); venues emit the
+/// rest through `Cx::event`. Venues tag every credential rejection
+/// `auth.rejected`: one engine event counts at most one auth failure, however
+/// many of these paths report it.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
@@ -131,6 +135,53 @@ pub mod code {
     pub const RATE_LIMITED: &str = "rate_limited";
     pub const SNAPSHOT_DISCARDED: &str = "snapshot.discarded";
     pub const ROW_SKIPPED: &str = "row.skipped";
+
+    // Not counted. Hosts and apps match these codes, never message text.
+    /// A socket dropped and the venue is reconnecting it.
+    pub const WS_DISCONNECTED: &str = "ws.disconnected";
+    /// A private or user-data stream could not be established or kept alive.
+    pub const STREAM_UNAVAILABLE: &str = "stream.unavailable";
+    /// A frame or response could not be decoded and was ignored.
+    pub const STREAM_MALFORMED: &str = "stream.malformed";
+    /// The venue refused a subscription, or one would exceed its limits.
+    pub const SUBSCRIPTION_REJECTED: &str = "subscription.rejected";
+    /// A REST read failed; the venue retries on its own schedule.
+    pub const REQUEST_FAILED: &str = "request.failed";
+    /// Reads are paused after the venue limited them.
+    pub const REQUEST_PAUSED: &str = "request.paused";
+    /// A price needed for valuation is missing; the previous value is kept.
+    pub const VALUATION_UNAVAILABLE: &str = "valuation.unavailable";
+    /// The venue rejected an order write.
+    pub const ORDER_REJECTED: &str = "order.rejected";
+    /// One leg of a multi-order command (bracket, close, replace) failed.
+    pub const CHILD_LEG_FAILED: &str = "child_leg.failed";
+    /// Existing orders were cancelled or replaced as part of a command.
+    pub const ORDERS_REPLACED: &str = "orders.replaced";
+    /// A history walk stopped before covering its whole range.
+    pub const HISTORY_INCOMPLETE: &str = "history.incomplete";
+    /// A request asked for something this venue does not support.
+    pub const COMMAND_UNSUPPORTED: &str = "command.unsupported";
+    /// Account options are invalid, so the venue cannot start as configured.
+    pub const CONFIG_INVALID: &str = "config.invalid";
+    /// A setting change was applied, but may behave unexpectedly as the user asked it.
+    pub const SETTING_CAUTION: &str = "setting.caution";
+    /// Startup progress, such as markets loaded.
+    pub const STARTUP_PROGRESS: &str = "startup.progress";
+    /// A routine account summary, logged at Debug.
+    pub const BALANCE_SUMMARY: &str = "balance.summary";
+
+    /// The code for a startup refusal, from the error's kind: only a
+    /// credential rejection is `auth.rejected`.
+    pub fn for_startup_error(error: &crate::error::VenueError) -> &'static str {
+        use crate::error::ErrorKind;
+        match error.kind {
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission) => {
+                AUTH_REJECTED
+            }
+            Some(ErrorKind::InvalidInput | ErrorKind::Unsupported) => CONFIG_INVALID,
+            _ => REQUEST_FAILED,
+        }
+    }
 }
 
 /// Counters since engine construction, read by hosts through `getHealth()`.
@@ -144,6 +195,9 @@ pub struct Health {
     pub rate_limited: u32,
     pub snapshots_discarded: u32,
     pub rows_skipped: u32,
+    /// Engine clock time of the newest frame on a private-role socket. Venues
+    /// that carry public feeds on that socket (Hyperliquid) advance it with them.
+    pub last_private_message_ms: Option<f64>,
 }
 
 impl Health {

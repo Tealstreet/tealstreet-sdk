@@ -7,6 +7,7 @@ const primaryBooks = Object.freeze({
   asterdex: 'BTCUSDT,ETHUSDT',
   woo: 'BTCUSDT,ETHUSDT',
   binance: 'BTCUSDT,ETHUSDT,SOLUSDT',
+  bitunix: 'BTCUSDT,ETHUSDT',
   orderly: 'BTCUSDC,ETHUSDC',
   coinbase: 'BTC-USD,ETH-USD',
   bitget: 'BTCUSDT,ETHUSDT',

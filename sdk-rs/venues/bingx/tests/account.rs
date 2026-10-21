@@ -7,6 +7,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const KEY: &str = "/openApi/user/auth/userDataStream";
 const MODE: &str = "/openApi/swap/v1/positionSide/dual";
 const BALANCE: &str = "/openApi/swap/v3/user/balance";
@@ -67,6 +70,7 @@ impl Harness {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
             }
         }
@@ -125,6 +129,22 @@ impl Harness {
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
         let (timer, _) = self.timers.remove(i);
         self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+    /// Whether a failed-read retry is armed at `sent` plus the engine's
+    /// jittered `[0.75, 1.0] * nominal`.
+    fn retry_index(&self, sent: f64, nominal: f64) -> Option<usize> {
+        self.timers
+            .iter()
+            .position(|(_, at)| (0.75 * nominal..=nominal).contains(&(at - sent)))
+    }
+    /// Fires that retry at its nominal due time, never before its jittered one.
+    fn fire_retry(&mut self, sent: f64, nominal: f64) {
+        let i = self.retry_index(sent, nominal).unwrap_or_else(|| {
+            panic!("no {nominal} ms retry after {sent}; have {:?}", self.timers)
+        });
+        let (timer, _) = self.timers.remove(i);
+        self.now = sent + nominal;
         self.event(Event::TimerFired { timer });
     }
     fn fire_latest_due(&mut self, at: f64) {
@@ -724,6 +744,173 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = Harness::ready();
+    let now = h.now;
+    let engine = &mut h.engine;
+    let (now, mut reads) = policy_poll_read(engine, now, "positions");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("balance") {
+                BALANCES
+            } else if r.url.contains("positions") {
+                POSITION
+            } else {
+                r#"{"code":0,"data":{"orders":[]}}"#
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
 // ETH-USDT is a malformed contract row (identity only); MISSING-USDT is not listed at all.
 const PARTIAL_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125},{"symbol":"ETH-USDT","asset":"ETH"}]}"#;
 const BOTH_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#;
@@ -824,7 +1011,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     h.take(MODE);
     h.requests.clear();
     let sockets = h.sockets.len();
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     h.respond("/quote/contracts", 200, BOTH_MARKETS);
     assert!(
         h.engine.store().market("ETHUSDT").is_some(),
@@ -917,7 +1104,7 @@ fn a_failed_funding_read_starts_the_private_side_and_its_retry_fills_funding() {
     let ticker = &h.engine.store().tickers()[0];
     assert_eq!((ticker.last, ticker.funding_rate), (60000.0, 0.0));
     h.take(KEY);
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     h.respond("/quote/premiumIndex", 200, PREMIUM);
     let ticker = &h.engine.store().tickers()[0];
     assert_eq!((ticker.mark, ticker.funding_rate), (60001.0, 0.0001));
@@ -1139,7 +1326,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     h.respond(BALANCE, 200, BALANCES);
     h.respond(ORDERS, 200, OPEN);
     let listed = h.engine.store().market("BTCUSDT").cloned().unwrap();
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     // BTC-USDT drops out of the list while ETH-USDT stays malformed.
     h.respond(
         "/quote/contracts",
@@ -1163,14 +1350,14 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut h = with_markets(PARTIAL_MARKETS);
-    let (mut at, mut delay) = (2000.0, 1000.0);
+    let (mut sent, mut delay) = (1000.0, 1000.0);
     for _ in 0..5 {
-        h.fire_at(at);
+        h.fire_retry(sent, delay);
         h.respond("/quote/contracts", 200, PARTIAL_MARKETS);
+        sent += delay;
         delay *= 2.0;
-        at += delay;
     }
-    assert!(!h.timers.iter().any(|(_, t)| *t == at), "no sixth re-read");
+    assert!(h.retry_index(sent, 30_000.0).is_none(), "no sixth re-read");
     assert!(h.logs.iter().any(|log| log.contains("stops re-reading")));
     assert!(h.engine.store().market("BTCUSDT").is_some());
 }
@@ -1222,4 +1409,28 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         assert!(h.engine.store().hedged(), "stale step {step}");
         read = h.take(MODE);
     }
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let markets = PARTIAL_MARKETS.replace(
+        r#"{"symbol":"ETH-USDT","asset":"ETH"}"#,
+        r#"{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":400,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100}"#,
+    );
+    let mut h = with_markets(&markets);
+    assert!(h.engine.store().market("ETHUSDT").is_none());
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    h.fire_at(3000.0);
+    let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
+    h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
 }

@@ -69,3 +69,8 @@ pub fn ready_with_timers(
 pub fn message(e: &mut Engine<TxFlow>, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}

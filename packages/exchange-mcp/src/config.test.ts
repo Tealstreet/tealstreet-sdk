@@ -55,6 +55,15 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.engine).toBeUndefined();
   });
 
+  it('accepts Bitunix Rust futures while leaving the default engine unset', () => {
+    const config = readConfig({ EXCHANGE: 'bitunix', EXCHANGE_ENGINE: 'rust' });
+    expect(config.exchange).toBe('bitunix');
+    expect(config.options.engine).toBe('rust');
+    expect(config.options.enableInverseMarkets).toBe(false);
+    expect(config.options.enableOptionMarkets).toBe(false);
+    expect(readConfig({ EXCHANGE: 'bitunix' }).options.engine).toBeUndefined();
+  });
+
   it('accepts the registered TxFlow Rust testnet adapter', () => {
     const config = readConfig({ EXCHANGE: 'txflow', EXCHANGE_ENGINE: 'rust', EXCHANGE_TESTNET: 'true' });
     expect(config.exchange).toBe('txflow');
@@ -65,7 +74,6 @@ describe('readConfig', () => {
   it.each([
     [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
     [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
-    [{ EXCHANGE: 'bitunix', EXCHANGE_ENGINE: 'rust' }, 'EXCHANGE_ENGINE=rust is not available on bitunix'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],

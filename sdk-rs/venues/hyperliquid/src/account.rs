@@ -351,7 +351,13 @@ impl Hyperliquid {
             if !self.options.public_data_only && self.user().is_some() {
                 self.refresh_spot(cx, true);
                 self.refresh_orders_scope(cx, "");
-                self.account.sync_timer = Some(cx.set_timer(10_000.0));
+                self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                    10_000.0,
+                    safe_cex_engine::PollTimerBounds {
+                        minimum_interval_ms: 10_000.0,
+                        ..Default::default()
+                    },
+                ));
             }
             return;
         }
@@ -387,7 +393,13 @@ impl Hyperliquid {
         self.check_builder(cx);
         self.refresh_account(cx);
         if !self.dex_names.is_empty() {
-            self.account.sync_timer = Some(cx.set_timer(120_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                120_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 120_000.0,
+                    ..Default::default()
+                },
+            ));
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -979,14 +991,26 @@ impl Hyperliquid {
         if self.account.sync_timer == Some(timer) && self.spot {
             self.refresh_spot(cx, false);
             self.refresh_orders_scope(cx, "");
-            self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                10_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 10_000.0,
+                    ..Default::default()
+                },
+            ));
             return;
         }
         if self.account.sync_timer == Some(timer) {
             for dex in self.dex_names.clone() {
                 self.refresh_state(cx, &dex);
             }
-            self.account.sync_timer = Some(cx.set_timer(120_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                120_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 120_000.0,
+                    ..Default::default()
+                },
+            ));
         }
     }
     fn dex_of<'a>(&self, cx: &'a Cx<'_, Pending>, symbol: &str) -> &'a str {
@@ -1407,9 +1431,16 @@ impl Hyperliquid {
             };
             let available = pending.available;
             let ws = pending.ws;
-            self.account.pending_spot = None;
+            let pending = self.account.pending_spot.take().expect("pending spot");
             self.warn_unvalued(cx, unvalued);
             self.commit_collateral(cx, equity, hold, available, ws);
+            self.publish_spot_coins(
+                cx,
+                pending
+                    .balances
+                    .iter()
+                    .map(|(coin, total, _)| (coin.as_str(), *total)),
+            );
         }
         if self.account.mode != Mode::Standard && self.account.spot.is_none() {
             return;
@@ -1640,6 +1671,39 @@ impl Hyperliquid {
         self.warn_unvalued(cx, unvalued);
         self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
+        self.publish_spot_coins(
+            cx,
+            state.balances.iter().map(|b| (b.coin.as_ref(), b.total)),
+        );
+    }
+    /// Spot holdings for the margin panel, as TS shows them; USD totals stay unified.
+    fn publish_spot_coins<'a>(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        balances: impl Iterator<Item = (&'a str, f64)>,
+    ) {
+        let coins = balances
+            .filter(|(_, total)| *total != 0.0)
+            .map(|(coin, total)| CoinBalance {
+                base: coin.to_string(),
+                amount: total,
+                notional: total * self.collateral_price(cx, coin).unwrap_or(0.0),
+            })
+            .collect();
+        cx.store.set_coin_balances(coins);
+    }
+    /// The USD price collateral valuation uses for one coin, when it has one.
+    fn collateral_price(&self, cx: &Cx<'_, Pending>, coin: &str) -> Option<f64> {
+        if ["USDC", "USDT", "USD", "USDH"]
+            .iter()
+            .any(|stable| coin.eq_ignore_ascii_case(stable))
+        {
+            return Some(1.0);
+        }
+        let ticker = cx.store.ticker(self.symbol(coin)?)?;
+        [ticker.mark, ticker.last]
+            .into_iter()
+            .find(|price| price.is_finite() && *price > 0.0)
     }
     pub(crate) fn map_order(&self, cx: &Cx<'_, Pending>, row: &OrderRow<'_>) -> Option<Order> {
         let symbol = self.symbol(&row.coin)?.to_owned();

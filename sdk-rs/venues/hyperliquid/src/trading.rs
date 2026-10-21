@@ -417,9 +417,11 @@ impl Hyperliquid {
             if o.kind != OrderType::Market && o.price.is_none_or(|p| !p.is_finite() || p <= 0.0) {
                 return Err("Invalid Hyperliquid order price".into());
             }
-            if [o.stop_loss, o.take_profit].into_iter().flatten().any(|p| {
-                !p.is_finite() || p < 0.0 || (!self.spot_market(cx, &o.symbol) && p == 0.0)
-            }) {
+            if [o.stop_loss, o.take_profit]
+                .into_iter()
+                .flatten()
+                .any(|p| !p.is_finite() || p < 0.0)
+            {
                 return Err("Invalid bracket trigger price".into());
             }
             if o.kind != OrderType::Limit {
@@ -528,7 +530,8 @@ impl Hyperliquid {
         let mut wires = vec![main];
         if opts.kind == OrderType::Limit {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
-                if let Some(trigger) = value.filter(|p| !spot || *p != 0.0) {
+                // Like TS, a zero bracket price means no bracket on every market.
+                if let Some(trigger) = value.filter(|p| *p != 0.0) {
                     wires.push(OrderWire {
                         a: asset,
                         b: opts.side != OrderSide::Buy,

@@ -2,9 +2,11 @@
 pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
@@ -82,7 +84,7 @@ fn log_skip(
         logged.clear();
     }
     if logged.insert(key) {
-        cx.log(level, message);
+        cx.notice(Level::from(level), code::ROW_SKIPPED, message);
     }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
@@ -400,11 +402,21 @@ impl PhemexPerpetuals {
             0
         };
         let wait = if self.account.failed {
-            Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures)
+            cx.jittered(Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures))
         } else {
             2_000.
         };
-        self.account.refresh = Some(cx.set_timer(wait.max(self.paused_until - cx.now)));
+        self.account.refresh = Some(cx.set_poll_timer_with_bounds(
+            2_000.,
+            safe_cex_engine::PollTimerBounds {
+                not_before_ms: self.paused_until.max(if self.account.failed {
+                    cx.now + wait
+                } else {
+                    f64::NEG_INFINITY
+                }),
+                ..Default::default()
+            },
+        ));
     }
     pub(crate) fn account_item(
         &mut self,
@@ -450,8 +462,9 @@ impl PhemexPerpetuals {
                     message,
                 );
             } else if row.size != 0.0 {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SNAPSHOT_DISCARDED,
                     "Phemex owned position market unavailable; preserving previous snapshot",
                 );
                 request.hold = true;
@@ -616,8 +629,9 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!(
                 "Phemex {} account read: {error}",
                 CURRENCIES[request.currency]
@@ -707,7 +721,11 @@ impl PhemexPerpetuals {
             return false;
         }
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
-            cx.log(LogLevel::Warning, "Phemex malformed private frame");
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Phemex malformed private frame",
+            );
             return true;
         };
         if message.id == Some(999) {
@@ -732,8 +750,9 @@ impl PhemexPerpetuals {
                     ),
                 );
             } else {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
                     "Phemex private websocket authentication rejected",
                 );
                 cx.close(socket);
@@ -763,8 +782,9 @@ impl PhemexPerpetuals {
         }
         let snapshot = message.kind == "snapshot";
         if snapshot && self.account.snapshot {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "Phemex duplicate private snapshot ignored",
             );
             return true;
@@ -785,8 +805,9 @@ impl PhemexPerpetuals {
         let orders = match orders {
             Ok(rows) => rows,
             Err(error) => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
                     format!("Phemex invalid private orders: {error}"),
                 );
                 return true;
@@ -795,8 +816,9 @@ impl PhemexPerpetuals {
         let positions = match positions {
             Ok(rows) => rows,
             Err(error) => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
                     format!("Phemex invalid private positions: {error}"),
                 );
                 return true;
@@ -805,8 +827,9 @@ impl PhemexPerpetuals {
         let accounts = match accounts {
             Ok(rows) => rows,
             Err(error) => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
                     format!("Phemex invalid private accounts: {error}"),
                 );
                 return true;
@@ -824,7 +847,7 @@ impl PhemexPerpetuals {
             })
             .collect::<Vec<_>>();
         for message in skipped {
-            cx.log(LogLevel::Warning, message);
+            cx.notice(Level::Warn, code::ROW_SKIPPED, message);
         }
         if orders.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| {
@@ -833,8 +856,9 @@ impl PhemexPerpetuals {
                     && cx.store.market(&row.symbol.to_ascii_uppercase()).is_none()
             })
         }) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "Phemex working order market unavailable; preserving previous orders",
             );
             return true;
@@ -846,8 +870,9 @@ impl PhemexPerpetuals {
                     && row.orders(cx.now).is_none()
             })
         }) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "Phemex malformed order mapping; retaining store and private caches",
             );
             return true;
@@ -862,7 +887,7 @@ impl PhemexPerpetuals {
                 let symbol = row.symbol.to_ascii_uppercase();
                 let Some(market) = cx.store.market(&symbol) else {
                     if row.size != 0.0 {
-                        cx.log(LogLevel::Warning, "Phemex owned position market unavailable; preserving previous snapshot");
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Phemex owned position market unavailable; preserving previous snapshot");
                         return true;
                     }
                     continue;
@@ -892,15 +917,17 @@ impl PhemexPerpetuals {
                     .or_else(|| self.account.context(&symbol));
                 // A bad row keeps the store's copy; the rest of the frame still applies.
                 let Some((context, position)) = row.map(cx.store, prior) else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("Phemex skipped unmappable {symbol} position row"),
                     );
                     continue;
                 };
                 if !row.currency.is_empty() && row.currency != CURRENCIES[currency] {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("Phemex skipped {symbol} position with mismatched settlement"),
                     );
                     continue;
@@ -957,8 +984,9 @@ impl PhemexPerpetuals {
             rows.iter()
                 .any(|row| CURRENCIES.contains(&row.currency.as_ref()) && row.used < 0.)
         }) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Phemex skipped an invalid account row; applying the rest of the frame",
             );
         }
@@ -1185,8 +1213,9 @@ impl PhemexPerpetuals {
             return;
         }
         let ids: Vec<_> = lost.iter().map(|(id, _)| id.as_str()).collect();
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::ORDERS_REPLACED,
             format!(
                 "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
                  it is canceled if the open-order read after its signed expiry finds it",
@@ -1246,8 +1275,9 @@ impl PhemexPerpetuals {
         }
         entry.cancel.retain(|(id, _)| !handled.contains(id));
         if !filled.is_empty() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex order {} landed after cancel-all on {symbol}; check the position",
                     filled.join(", ")
@@ -1333,8 +1363,9 @@ impl PhemexPerpetuals {
         let mut complete = true;
         for raw in rows {
             let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!(
                         "Phemex skipped an unreadable {} open-order row",
                         read.symbol
@@ -1347,8 +1378,9 @@ impl PhemexPerpetuals {
                 continue;
             }
             if row.unrecognized() {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!(
                         "Phemex skipped open order {} with unsupported status {} or type {}",
                         row.order_id, row.status, row.kind
@@ -1357,8 +1389,9 @@ impl PhemexPerpetuals {
                 continue;
             }
             if row.orders(cx.now).is_none() {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!("Phemex skipped unmappable open order {}", row.order_id),
                 );
                 complete = false;
@@ -1387,8 +1420,7 @@ impl PhemexPerpetuals {
             // could hide the lost placement; stay fenced and say so once.
             entry.reading = false;
             entry.abandoned = true;
-            cx.log(
-                LogLevel::Error,
+            cx.notice(Level::Error, code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex {symbol} open orders include rows this engine cannot read; \
                      an order from the unknown placement may stay open, cancel those orders individually"
@@ -1423,13 +1455,14 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
             entry.reading = false;
             entry.failures = entry.failures.saturating_add(1);
-            let wait = Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures);
+            let wait = cx.jittered(Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures));
             entry.not_before = entry.not_before.max(cx.now + wait);
         }
         // Keep the cause, never the response body.
         let cause = error.split_once(": ").map_or(error, |(cause, _)| cause);
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!(
                 "Phemex {} open-order reconciliation failed: {cause}; retrying",
                 read.symbol
@@ -1478,7 +1511,7 @@ impl PhemexPerpetuals {
                     .or_insert(version);
             } else {
                 self.account.uncertainty_overflow = true;
-                cx.log(LogLevel::Warning,"Phemex execution reconciliation capacity exceeded; reconnecting for an authoritative snapshot");
+                cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"Phemex execution reconciliation capacity exceeded; reconnecting for an authoritative snapshot");
                 if let Some(socket) = self.account.socket {
                     cx.close(socket);
                     self.account_close(cx, socket, 1006);
@@ -1523,11 +1556,18 @@ impl PhemexPerpetuals {
             self.account.cycle += 1;
             self.account.pending = 0;
             self.account.failures = self.account.failures.saturating_add(1);
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Phemex private reconciliation exceeded 20-second deadline; retaining state",
             );
-            self.account.refresh = Some(cx.set_timer(2_000f64.max(self.paused_until - cx.now)));
+            self.account.refresh = Some(cx.set_poll_timer_with_bounds(
+                2_000.,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms: self.paused_until.max(cx.now + 2_000.),
+                    ..Default::default()
+                },
+            ));
             return true;
         }
         if !self.account.supervisor.owns_timer(timer) {

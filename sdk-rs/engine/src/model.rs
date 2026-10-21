@@ -306,6 +306,15 @@ pub struct Precision {
     pub price: f64,
 }
 
+impl Precision {
+    /// Orders round to these steps; a market without two positive finite steps is malformed.
+    pub fn is_tradable(&self) -> bool {
+        [self.amount, self.price]
+            .iter()
+            .all(|step| step.is_finite() && *step > 0.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Limits {
     pub amount: MinMax,
@@ -671,6 +680,20 @@ fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_two_positive_finite_steps_are_tradable() {
+        let precision = |amount, price| Precision { amount, price };
+        assert!(precision(0.001, 0.1).is_tradable());
+        for (amount, price) in [
+            (0.0, 0.1),
+            (0.001, -0.1),
+            (f64::NAN, 0.1),
+            (0.001, f64::INFINITY),
+        ] {
+            assert!(!precision(amount, price).is_tradable(), "{amount} {price}");
+        }
+    }
 
     #[test]
     fn order_options_round_trip_without_turning_absent_identity_into_caller_null() {

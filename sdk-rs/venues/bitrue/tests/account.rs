@@ -4,6 +4,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_bitrue::{Bitrue, Options};
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const MARKET: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":10,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
 const EMPTY: &str = r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[]}]}}"#;
 const POSITION: &str = r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[{"contractName":"E-BTC-USDT","positions":[{"side":"BUY","volume":2,"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200,"forceLiquidationPrice":50}]}]}]}}"#;
@@ -131,20 +134,24 @@ impl Harness {
     fn private_retry(&mut self, nominal: f64) {
         // Follow the supervisor's actual jittered retry rather than the retired
         // fixed listen-key retry schedule. Account polling timers stay separate.
+        self.fire_retry(nominal);
+    }
+    /// Fires the newest timer jittered from `nominal` after now; returns its delay.
+    fn fire_retry(&mut self, nominal: f64) -> f64 {
         let at = self
             .actions
             .iter()
             .rev()
             .find_map(|action| match action {
-                Action::SetTimer { at_ms, .. }
-                    if (nominal * 0.75..=nominal).contains(&(*at_ms - self.now)) =>
-                {
+                Action::SetTimer { at_ms, .. } if jittered(*at_ms - self.now, nominal) => {
                     Some(*at_ms)
                 }
                 _ => None,
             })
-            .expect("private supervisor scheduled its bounded retry");
+            .unwrap_or_else(|| panic!("no retry jittered from {nominal}: {:?}", self.actions));
+        let delay = at - self.now;
         self.fire_at(at);
+        delay
     }
     fn fills(&mut self) -> Vec<(f64, f64)> {
         let Some(frame) = self.e.take_frame(self.now) else {
@@ -166,6 +173,12 @@ impl Harness {
             .collect()
     }
 }
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 #[test]
 fn futures_listen_key_subscriptions_ping_timestamp_and_keepalive() {
     let mut h = Harness::new();
@@ -740,7 +753,7 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
             ..
         })
     )));
-    h.fire_at(700.0);
+    h.fire_retry(500.0);
     assert!(
         h.pending
             .iter()
@@ -761,12 +774,10 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(200.0);
     h.reply(ETH, FAILED);
-    let mut at = 200.0;
     for delay in [
         500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0, 30_000.0, 30_000.0,
     ] {
-        at += delay;
-        h.fire_at(at);
+        h.fire_retry(delay);
         h.reply(ETH, FAILED);
     }
     assert_eq!(h.e.store().orders().len(), 1);
@@ -785,8 +796,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     assert!(!h.pending.iter().any(|r| r.url.contains(ETH)));
 
-    at += 30_000.0;
-    h.fire_at(at);
+    h.fire_retry(30_000.0);
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
@@ -800,9 +810,35 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(h.now + 200.0);
     h.reply(ETH, FAILED);
-    h.fire_at(h.now + 500.0);
+    h.fire_retry(500.0);
     assert!(h.pending.iter().any(|r| r.url.contains(ETH)));
     assert_eq!(errors(&h), 2);
+}
+
+#[test]
+fn failed_symbol_order_read_retries_are_jittered() {
+    const ETH: &str = "/openOrders?contractName=E-ETH-USDT";
+    const FAILED: &str = r#"{"code":"-1","msg":"symbol unavailable"}"#;
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let mut h = Harness::with_market(&markets);
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders?contractName=E-BTC-USDT", ORDER);
+    h.fire_at(200.0);
+    h.reply(ETH, FAILED);
+    let nominal = [500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0];
+    let mut delays = Vec::new();
+    for nominal in nominal {
+        delays.push(h.fire_retry(nominal));
+        h.reply(ETH, FAILED);
+    }
+    assert!(
+        delays
+            .iter()
+            .zip(nominal)
+            .any(|(delay, nominal)| *delay < nominal),
+        "failed order reads must not retry in lockstep: {delays:?}"
+    );
 }
 
 #[test]
@@ -1120,4 +1156,166 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
             snapshot = h.take("/account");
         }
     }
+}
+
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = Harness::new();
+    h.seed();
+    let engine = &mut h.e;
+    let (now, mut reads) = policy_poll_read(engine, 0.0, "/account");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = EMPTY;
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
 }

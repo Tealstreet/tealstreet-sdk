@@ -10,7 +10,10 @@ const BTC = 'BTC-USD-PERP', ETH = 'ETH-USD-PERP';
 const epoch = 1710000000000;
 const records = [{ t: 0, type: 'meta', epoch, private: true }];
 let time = 0, commands = 0;
-const http = (method, path, body, requestBody, afterCommand, extra = {}) => records.push({ t: 0, type: 'http', method, url: REST + path,
+// A write belongs to the command just issued; its stage holds back that
+// command's snapshots until the venue acknowledges it.
+const http = (method, path, body, requestBody, afterCommand = method !== 'GET' && !path.startsWith('/auth/') && commands ? commands : undefined, extra = {}) =>
+  records.push({ t: 0, type: 'http', method, url: REST + path,
   status: 200, body: JSON.stringify(body), ...(requestBody === undefined ? {} : { requestBody }),
   ...(afterCommand === undefined ? {} : { afterCommand }), ...extra });
 const ws = (channel, data) => records.push({ t: (time += 100), type: 'ws', url: SOCKET,

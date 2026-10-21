@@ -24,7 +24,7 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
     start: empty,
     command: (json) => {
       const command = JSON.parse(json);
-      if (command.op === 'setTickerSymbols') return '[]';
+      if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(verdict()) }]);
     },

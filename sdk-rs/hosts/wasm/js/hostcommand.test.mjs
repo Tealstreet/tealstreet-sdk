@@ -73,7 +73,7 @@ test('synchronous completions, validation errors and no-reply events allocate no
     setTimeout() { timerCalls++; throw new Error('unnecessary timer'); }, clearTimeout() {} });
   assert.equal(await host.command({ op: 'getAccount' }), 42);
   await assert.rejects(host.command({ op: 'bad' }), /native validation/);
-  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setTickInterval', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
+  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
     await host.command({ op });
   }
   assert.equal(timerCalls, 0);
@@ -458,4 +458,20 @@ test('command deadlines use the replay virtual clock and leave sibling hosts iso
   } finally {
     clock.restore();
   }
+});
+
+test('a history.incomplete event naming the command marks its rows incomplete', async () => {
+  const r = rig();
+  const flagged = r.host.command({ op: 'fetchIncome' });
+  const other = r.host.command({ op: 'fetchIncome' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'truncated', fields: { command: 1 } },
+    { op: 'done', command: 1, result: '[{"id":"a"}]' },
+    { op: 'done', command: 2, result: '[{"id":"b"}]' },
+  ]));
+  const rows = await flagged;
+  assert.equal(rows.incomplete, true);
+  assert.deepEqual(Object.keys(rows), ['0'], 'still a plain array to existing callers');
+  assert.equal(JSON.stringify(rows), '[{"id":"a"}]');
+  assert.equal((await other).incomplete, undefined);
 });

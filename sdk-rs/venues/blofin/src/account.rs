@@ -1,7 +1,9 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
 use safe_cex_engine::Fill;
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
@@ -184,7 +186,7 @@ impl Blofin {
         match execution_prefix(self.account.fills.get(id).copied(), qty, value) {
             Ok(true) => self.account.execution_progress(id, qty, value),
             Ok(false) => {}
-            Err(error) => cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
+            Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
         }
     }
     pub(crate) fn fetch_leverage(
@@ -323,7 +325,7 @@ impl Blofin {
         }
         self.account.session_started = cx.now;
         self.private_connect(cx);
-        self.account.tick = Some(cx.set_timer(10_000.0));
+        self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
     }
@@ -416,7 +418,11 @@ impl Blofin {
         if let Some(socket) = self.account.connection.socket.take() {
             cx.close(socket);
         }
-        cx.log(LogLevel::Error, &error.message);
+        cx.notice(
+            Level::Error,
+            code::for_startup_error(&error),
+            &error.message,
+        );
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -443,7 +449,7 @@ impl Blofin {
         let nonce = match safe_cex_crypto::uuid::uuid() {
             Ok(n) => n,
             Err(e) => {
-                cx.log(LogLevel::Error, e);
+                cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e);
                 cx.close(socket);
                 self.private_close(cx, socket);
                 return;
@@ -863,14 +869,15 @@ impl Blofin {
                     {
                         if self.malformed_markets.contains(p.inst_id.as_ref()) {
                             *failed = true;
-                            cx.log(LogLevel::Warning, "BloFin owned position has unavailable market metadata; preserving account snapshot");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "BloFin owned position has unavailable market metadata; preserving account snapshot");
                             return;
                         }
                         // As the stream does, account totals still cover the native row.
                         *used += p.maintenance_margin.0;
                         *upnl += p.unrealized_pnl.0;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "Skipping BloFin position on uncatalogued market {}",
                                 p.inst_id
@@ -917,12 +924,13 @@ impl Blofin {
                     {
                         if self.malformed_markets.contains(o.inst_id.as_ref()) {
                             *failed = true;
-                            cx.log(LogLevel::Warning, "BloFin working order has unavailable market metadata; preserving order snapshot");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "BloFin working order has unavailable market metadata; preserving order snapshot");
                             return;
                         }
                         // Still counted for paging; it maps to no stored order.
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Skipping BloFin order on uncatalogued market {}", o.inst_id),
                         );
                     }
@@ -966,7 +974,7 @@ impl Blofin {
                     }
                     let pause = rate_limit_pause_ms(&response, RATE_LIMIT_PAUSE_MS);
                     self.setting_retry(cx, read, pause);
-                    cx.log(LogLevel::Error, e);
+                    cx.notice(Level::Error, code::REQUEST_FAILED, e);
                 }
                 return;
             }
@@ -1066,7 +1074,11 @@ impl Blofin {
                     serde_json::from_str::<Data<ModeRow<'_>>>(response.body)
                 {
                     if !matches!(m.margin_mode.as_ref(), "cross" | "isolated") {
-                        cx.log(LogLevel::Error, "Malformed BloFin margin mode");
+                        cx.notice(
+                            Level::Error,
+                            code::STREAM_MALFORMED,
+                            "Malformed BloFin margin mode",
+                        );
                         self.setting_unsettled(cx, StartupRead::Margin);
                         return;
                     }
@@ -1090,7 +1102,11 @@ impl Blofin {
                     self.setting_unsettled(cx, StartupRead::Margin);
                     self.bootstrap_account(cx);
                 } else {
-                    cx.log(LogLevel::Error, "Malformed BloFin margin mode");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Malformed BloFin margin mode",
+                    );
                     self.setting_unsettled(cx, StartupRead::Margin);
                 }
             }
@@ -1099,7 +1115,11 @@ impl Blofin {
                     serde_json::from_str::<Data<ModeRow<'_>>>(response.body)
                 {
                     if !matches!(m.position_mode.as_ref(), "net_mode" | "long_short_mode") {
-                        cx.log(LogLevel::Error, "Malformed BloFin position mode");
+                        cx.notice(
+                            Level::Error,
+                            code::STREAM_MALFORMED,
+                            "Malformed BloFin position mode",
+                        );
                         self.setting_unsettled(cx, StartupRead::Mode);
                         return;
                     }
@@ -1110,7 +1130,11 @@ impl Blofin {
                     self.setting_unsettled(cx, StartupRead::Mode);
                     self.bootstrap_account(cx);
                 } else {
-                    cx.log(LogLevel::Error, "Malformed BloFin position mode");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Malformed BloFin position mode",
+                    );
                     self.setting_unsettled(cx, StartupRead::Mode);
                 }
             }
@@ -1375,7 +1399,7 @@ impl Blofin {
             Request::Margin { .. } => self.setting_unsettled(cx, StartupRead::Margin),
             Request::Mode { .. } => self.setting_unsettled(cx, StartupRead::Mode),
         }
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
     }
     pub(crate) fn private_message(
         &mut self,
@@ -1409,8 +1433,9 @@ impl Blofin {
                 self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
                 return;
             }
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::STREAM_UNAVAILABLE,
                 format!("BloFin login rejected: {}", message.code),
             );
             cx.close(socket);
@@ -1474,8 +1499,9 @@ impl Blofin {
                             filled,
                         }) = serde_json::from_str::<StreamOrder<'_>>(raw.get())
                         else {
-                            cx.log(
-                                LogLevel::Error,
+                            cx.notice(
+                                Level::Error,
+                                code::ROW_SKIPPED,
                                 "Malformed BloFin order row; retaining known order",
                             );
                             continue;
@@ -1556,7 +1582,7 @@ impl Blofin {
                                 }
                             }
                             Err(_) => {
-                                cx.log(LogLevel::Error, "Malformed BloFin position row; retaining known position and balance totals");
+                                cx.notice(Level::Error, code::ROW_SKIPPED, "Malformed BloFin position row; retaining known position and balance totals");
                                 #[derive(serde::Deserialize)]
                                 struct Identity<'a> {
                                     #[serde(borrow, rename = "instId")]
@@ -1627,7 +1653,7 @@ impl Blofin {
             if updated > 0.0 && updated < self.account.session_started {
                 self.account.historical_execution_floor(id, qty);
             } else {
-                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: invalid cumulative quote value; retained proven execution baseline"));
+                cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: invalid cumulative quote value; retained proven execution baseline"));
             }
             return;
         }
@@ -1662,12 +1688,11 @@ impl Blofin {
                 // A delayed terminal row absent from the startup open-order census
                 // cannot distinguish old fills from its unobserved startup suffix.
                 self.seed_execution_prefix(cx, id, qty, Some(execution.value));
-                cx.log(
-                    if updated == 0.0 || updated >= self.account.reporting_started {
-                        LogLevel::Error
+                cx.notice(if updated == 0.0 || updated >= self.account.reporting_started {
+                        Level::Error
                     } else {
-                        LogLevel::Warning
-                    },
+                        Level::Warn
+                    }, code::VALUATION_UNAVAILABLE,
                     format!("BloFin execution prefix unavailable for existing order {id}; cannot distinguish historical fills from live executions; refreshed cumulative baseline"),
                 );
             } else {
@@ -1690,7 +1715,7 @@ impl Blofin {
                         },
                     );
                 if let Err(error) = execution_prefix(prefix, qty, Some(execution.value)) {
-                    cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline"));
+                    cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline"));
                     return;
                 }
                 if self.account.startup_executions.len() == 500
@@ -1743,7 +1768,7 @@ impl Blofin {
                 match execution_prefix(previous, execution.qty, Some(execution.value)) {
                     Ok(true) => { unknown.insert(execution.fill.order_id.clone(), (execution.qty, execution.value)); }
                     Ok(false) => {}
-                    Err(error) => cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: {error}; retained proven execution baseline", execution.fill.order_id)),
+                    Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: {error}; retained proven execution baseline", execution.fill.order_id)),
                 }
             }
         }
@@ -1803,7 +1828,7 @@ impl Blofin {
             self.account
                 .execution_progress(&fill.order_id, qty, Some(value));
             if !historical {
-                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: missing cumulative quote baseline; cannot recover execution price; refreshed execution baseline", fill.order_id));
+                cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: missing cumulative quote baseline; cannot recover execution price; refreshed execution baseline", fill.order_id));
             }
             return;
         };
@@ -1812,7 +1837,7 @@ impl Blofin {
             if historical {
                 self.account.historical_execution_floor(&fill.order_id, qty);
             } else {
-                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: nonpositive cumulative quote interval; retained proven execution baseline", fill.order_id));
+                cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: nonpositive cumulative quote interval; retained proven execution baseline", fill.order_id));
             }
             return;
         }
@@ -1866,9 +1891,22 @@ impl Blofin {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
             }
-            self.account.tick = Some(
-                cx.set_timer(Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)),
-            );
+            let not_before_ms = if self.account.auth_failures > 0 {
+                // Only auth-failure retries spread; healthy ticks keep their cadence.
+                cx.now
+                    + cx.jittered(
+                        Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures),
+                    )
+            } else {
+                f64::NEG_INFINITY
+            };
+            self.account.tick = Some(cx.set_poll_timer_with_bounds(
+                10_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms,
+                    ..Default::default()
+                },
+            ));
             return true;
         }
         if self.account.debounce == Some(timer) {

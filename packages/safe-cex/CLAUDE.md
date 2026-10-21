@@ -199,6 +199,19 @@ allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
 
+## Rust incomplete history
+
+A Rust history read that cannot be walked completely still returns the rows it
+read, with a `history.incomplete` warning event that names its `command`. The
+host then marks the returned array with a non-enumerable `incomplete: true`.
+Kraken (a full 500-row `account-log` page its since-only cursor cannot advance)
+and Binance (exhausted income chunks) set it. Existing callers see a plain array.
+A consumer recording coverage must not treat a flagged result as complete; the
+in-package journal (`journal/buildRecords.ts`) does not read it yet. Structured
+clone drops the property, so a worker or server hop must forward it, translating
+`fields.command` (the engine's id) to its own request id as it does for `done`.
+The event is a Warn: a host whose minimum level is Error drops it, and the flag.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only
@@ -656,8 +669,16 @@ signing and delegated signing share the same payload. Binance and Bybit skip
 the private websocket with this REST signer. Paradex obtains its JWT through
 the payload signer and uses that JWT on its private websocket too.
 The Rust Paradex host returns signatures as typed engine events; callers keep
-the same callback contract. Tests: `src/__tests__/payload-signer.test.ts` and
-`src/__tests__/paradex.payload-signer.test.ts`.
+the same callback contract. No other Rust venue consumes a payload signer. `runsOnRustEngine` keeps
+Bybit- and Binance-family accounts with one on TS, whose signers honour it.
+Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
+payload signer while `canSign` counts it, so those accounts stay on the engine.
+A Rust account that would run privately with a payload signer refuses at
+startup, before any engine or transport work: an `ExchangeError` with
+`kind: 'unsupported'`, `outcome: 'notSent'`, which `validateAccount` reports
+with its kind. Lighter's payload-only accounts still start public. Tests: `src/__tests__/payload-signer.test.ts`,
+`src/__tests__/paradex.payload-signer.test.ts` and
+`src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
 
@@ -1131,6 +1152,19 @@ number.
 The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
+
+Every Rust SDK account sends `setPollScale` before native startup and when the
+multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
+over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
+(Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
+cadences rather than replacing them with the metadata tick. The resolved tick also
+travels as `ceiling`, so a server multiplier or the auth-backoff cap bounds the
+slowed cadence as before unless a venue's native cadence is already slower. Effective option
+changes are checked at the existing store flush cadence. Infinity is the explicit
+scale `null`; venue constructor options do not carry a second polling policy. Unchanged values are suppressed, failed delivery stays
+eligible for retry, and disposal removes the multiplier listener. These controls
+govern periodic reconciliation, not socket supervision or explicit reads. Base
+auth-streak propagation alone does not prove classified native auth feedback.
 
 ## Debugging exchange REST traffic
 

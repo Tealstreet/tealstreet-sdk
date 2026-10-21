@@ -249,11 +249,10 @@ fn main() {
             text: "reorder",
         },
     );
-    assert!(
-        engine.take_market_frame(1003.).is_none(),
-        "pending MARKETS must retain all market-flush rows"
-    );
-    let reordered = hex(engine.take_frame(1004.).unwrap());
+    // Pending fills promote the market flush to a full frame: MARKETS first,
+    // then every queued market-flush row, so none is published ahead of it.
+    let reordered = hex(engine.take_market_frame(1003.).unwrap());
+    assert!(engine.take_frame(1004.).is_none(), "nothing is sent twice");
     engine.handle(
         1005.,
         Event::WsMessage {

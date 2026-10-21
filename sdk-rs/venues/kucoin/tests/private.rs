@@ -1,11 +1,16 @@
 //! Fixtures follow KuCoin Classic Futures documented account and private-order examples.
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_kucoin::{Kucoin, Options};
+use support::jittered;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 500.0;
+
 const MARKET: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100","bestBidPrice":"99","bestAskPrice":"101"}]}"#;
 const EMPTY: &str =
@@ -846,6 +851,216 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 90_500.0);
+    engine.handle(
+        now + 90_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 90_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = Harness::new();
+    h.ready();
+    let now = h.now;
+    let engine = &mut h.engine;
+    let (now, mut reads) = policy_poll_read(engine, now, "/positions");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("/positions") {
+                r#"{"code":"200000","data":[]}"#
+            } else if r.url.contains("account-overview") {
+                r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#
+            } else {
+                EMPTY
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn urgent_repair_replaces_parked_poll_without_orphan_registration() {
+    let mut h = Harness::new();
+    h.ready();
+    h.event(Event::PollScaleChanged {
+        scale: f64::INFINITY,
+    });
+    h.actions.clear();
+    h.ws("/contract/position:XBTUSDTM", POSITION);
+    h.advance(500.0);
+    let reads: Vec<_> = h
+        .actions
+        .drain(..)
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(reads.iter().any(|r| r.url.contains("/positions")));
+    for r in reads {
+        let body = if r.url.contains("/positions") {
+            r#"{"code":"200000","data":[]}"#
+        } else {
+            EMPTY
+        };
+        h.respond(&r, 200, body);
+    }
+    h.actions.clear();
+    h.event(Event::PollScaleChanged {
+        scale: 1_000.0 / POLL_MS,
+    });
+    let times: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(*at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![h.now + 1_000.0]);
+}
 // ETHUSDCM is deliberately filtered (USDC-settled); BADUSDTM is malformed (numeric status).
 const PARTIAL_MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100},{"symbol":"ETHUSDCM","baseCurrency":"ETH","quoteCurrency":"USDC","settleCurrency":"USDC","status":"Open","lotSize":1,"tickSize":0.01,"multiplier":0.01,"maxOrderQty":100000,"maxLeverage":100},{"symbol":"BADUSDTM","baseCurrency":"BAD","quoteCurrency":"USDT","settleCurrency":"USDT","status":1,"lotSize":1,"tickSize":0.01,"multiplier":1,"maxOrderQty":100000,"maxLeverage":100}]}"#;
 
@@ -877,7 +1092,7 @@ fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
             format!("Skipping KuCoin position on uncatalogued market {symbol}")
         };
         assert!(h.actions.iter().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))), "{symbol}");
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(&needle))), "{symbol}");
     }
 }
 
@@ -913,7 +1128,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     assert_eq!(store.orders().len(), 1);
     assert_eq!(store.orders()[0].id, "5cdfc138b21023a909e5ad55");
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
 }
 
 #[test]
@@ -952,7 +1167,9 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let i = h
         .actions
         .iter()
-        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1610000001000.0))
+        .position(|a| {
+            matches!(a, Action::SetTimer { at_ms, .. } if jittered(*at_ms - 1610000000000.0, 1000.0))
+        })
         .expect("partial catalogue retry");
     let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
         unreachable!()
@@ -991,7 +1208,7 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
     assert_eq!(h.engine.store().orders(), before);
     assert!(h.fill_rows().is_empty());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("market unavailable"))));
 }
 
 #[test]
@@ -1110,4 +1327,35 @@ fn unmappable_position_row_keeps_the_stored_position() {
         &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
     );
     assert_eq!(h.engine.store().positions(), before.as_slice());
+}
+
+#[test]
+fn a_match_without_match_price_fills_at_the_order_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.engine.take_frame(h.now);
+    let matched = r#"{"orderId":"5cdfc138b21023a909e5ad55","symbol":"XBTUSDTM","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","size":10,"filledSize":3,"remainSize":7,"matchSize":1,"tradeId":"1794175373645","ts":1610000000001000000}"#;
+    h.ws("/contractMarket/tradeOrders", matched);
+    assert_eq!(h.fill_rows(), vec![(90.0, 0.001)]);
+}
+
+#[test]
+fn a_balance_row_missing_secondary_fields_still_updates_the_balance() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply(
+        "/account-overview",
+        r#"{"code":"200000","data":{"availableBalance":"1950","accountEquity":"2010"}}"#,
+    );
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    h.reply("/orders?", &Harness::page(ORDER, 1));
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().balance);
+    assert_eq!(h.engine.store().balance().total, 2010.0);
 }

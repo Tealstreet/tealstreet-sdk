@@ -227,7 +227,7 @@ export class EngineHost {
     let timeoutMs;
     try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
     catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -320,6 +320,15 @@ export class EngineHost {
   snapshot() {
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const frame = this.invoke(this.engine.snapshotFrame, this.transport.now());
+    if (this.deadError) throw this.deadError;
+    return frame.buffer;
+  }
+
+  /** Current private state and unflushed catalog; caller applies/forwards it. */
+  accountSnapshot() {
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.accountSnapshotFrame !== 'function') throw new Error('Engine does not support private account snapshots');
+    const frame = this.invoke(this.engine.accountSnapshotFrame, this.transport.now());
     if (this.deadError) throw this.deadError;
     return frame.buffer;
   }
@@ -729,6 +738,11 @@ export class EngineHost {
         break;
       case 'event': {
         const { level, code, message, fields = {} } = action;
+        // A history read that could not be walked completely names its command.
+        if (code === 'history.incomplete' && typeof fields.command === 'number') {
+          const pending = this.commands.get(fields.command);
+          if (pending) pending.incomplete = true;
+        }
         if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
         else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
         break;
@@ -796,6 +810,8 @@ export class EngineHost {
           let result;
           try { result = action.result === undefined ? undefined : JSON.parse(action.result); }
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
+          // Optional and non-enumerable: rows stay a plain array for existing callers.
+          if (pending.incomplete && Array.isArray(result)) Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler

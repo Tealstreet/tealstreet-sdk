@@ -469,7 +469,7 @@ impl Bitrue {
             .map(|m| m.symbol.clone())
             .collect();
         self.refresh_orders(cx, vec![]);
-        self.account.tick = Some(cx.set_timer(2_000.0));
+        self.account.tick = Some(cx.set_poll_timer(2_000.0));
     }
     fn acquire_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.listen_pending {
@@ -610,8 +610,8 @@ impl Bitrue {
                 if let Some(timer) = backoff.retry.take() {
                     cx.clear_timer(timer);
                 }
-                backoff.retry =
-                    Some(cx.set_timer(ORDER_RETRY.delay(backoff.failures.saturating_sub(1))));
+                let delay = cx.jittered(ORDER_RETRY.delay(backoff.failures.saturating_sub(1)));
+                backoff.retry = Some(cx.set_timer(delay));
             }
         }
         if self.account.initial_orders.is_empty() {
@@ -766,7 +766,7 @@ impl Bitrue {
                 );
             }
         } else if self.account.tick == Some(timer) {
-            self.account.tick = Some(cx.set_timer(2_000.0));
+            self.account.tick = Some(cx.set_poll_timer(2_000.0));
             self.refresh_account(cx);
         } else if self.account.fast == Some(timer) {
             self.account.fast = None;

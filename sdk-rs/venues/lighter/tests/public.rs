@@ -385,8 +385,8 @@ fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors(
                 _ => None,
             })
             .unwrap();
-        assert_eq!(at, 1000. + delay);
-        e.handle(at, Event::TimerFired { timer });
+        assert!(support::jittered(at - 1000., delay), "{at}");
+        e.handle(1000. + delay, Event::TimerFired { timer });
         assert!(!e.store().loaded().markets);
     }
     let id = e

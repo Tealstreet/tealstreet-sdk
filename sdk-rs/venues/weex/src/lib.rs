@@ -456,8 +456,8 @@ impl WeexFutures {
             b.last = None;
             b.buffer.clear();
             b.failures += 1;
-            let delay = Backoff::new(1_000.0, 5, 60_000.0)
-                .delay(b.failures.saturating_sub(1))
+            let delay = cx
+                .jittered(Backoff::new(1_000.0, 5, 60_000.0).delay(b.failures.saturating_sub(1)))
                 .max(self.paused_until - cx.now);
             b.retry = Some(cx.set_timer(delay));
         }
@@ -697,9 +697,10 @@ impl Venue for WeexFutures {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
             Task::Markets(rows) => {
-                match serde_json::from_str::<Symbol<'_>>(item) {
-                    Ok(r) => rows.extend(r.market()),
-                    Err(_) => {
+                match serde_json::from_str::<Symbol<'_>>(item).map(Symbol::market) {
+                    Ok(Some(market)) if market.precision.is_tradable() => rows.push(market),
+                    Ok(None) => {}
+                    _ => {
                         p.skipped.push(row_symbol(item));
                         safe_cex_engine::startup::skipped_row(cx);
                     }

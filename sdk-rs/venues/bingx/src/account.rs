@@ -2,14 +2,16 @@
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
+use safe_cex_engine::Level;
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json::ArrayAt};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const LISTEN_KEY: &str = "/openApi/user/auth/userDataStream";
@@ -164,7 +166,7 @@ fn log_snapshot_skips(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String], 
     if *streak >= UNIDENTIFIED_ESCALATION {
         crate::log_skipped_at(
             cx,
-            LogLevel::Error,
+            Level::Error,
             kind,
             skipped,
             &format!(
@@ -277,8 +279,9 @@ impl Account {
             return false;
         }
         if self.skipped_markets.contains(symbol) && self.reported_markets.insert(symbol.into()) {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::ROW_SKIPPED,
                 format!(
                     "BingX account data for {symbol} is hidden: its contract row was malformed"
                 ),
@@ -304,7 +307,7 @@ impl Account {
         self.fetch_balance(cx, credentials);
         self.fetch_orders(cx, credentials);
         self.poll_count = 1;
-        self.poll = Some(cx.set_timer(POLL_MS));
+        self.poll = Some(cx.set_poll_timer(POLL_MS));
     }
 
     fn request(
@@ -528,7 +531,7 @@ impl Account {
             self.repair = None;
             self.fetch_positions(cx, credentials);
         } else if self.poll == Some(timer) {
-            self.poll = Some(cx.set_timer(POLL_MS));
+            self.poll = Some(cx.set_poll_timer(POLL_MS));
             if !self.mode_known {
                 self.fetch_mode(cx, credentials);
             }
@@ -590,13 +593,13 @@ impl Account {
                     if row.position_amt != 0.0 {
                         if self.skipped_markets.contains(&symbol) {
                             *unavailable = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                                 "BingX owned position market unavailable; preserving previous snapshot",
                             );
                         } else {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Skipping BingX position on uncatalogued market {symbol}"),
                             );
                         }
@@ -693,13 +696,13 @@ impl Account {
                     if order.status == OrderStatus::Open {
                         if self.skipped_markets.contains(&order.symbol) {
                             *unavailable = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                                 "BingX working order market unavailable; preserving previous orders",
                             );
                         } else {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!(
                                     "Skipping BingX order on uncatalogued market {}",
                                     order.symbol
@@ -743,8 +746,9 @@ impl Account {
                             || m.contains("does not exist"))
                 })
             {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_UNAVAILABLE,
                     "BingX listen key expired; obtaining a fresh key",
                 );
                 self.fresh_key(cx, credentials);
@@ -811,7 +815,11 @@ impl Account {
                         cx.store.set_hedged(row.data.dual);
                         self.fetch_positions(cx, credentials);
                     }
-                    Err(_) => cx.log(LogLevel::Error, "BingX malformed position mode response"),
+                    Err(_) => cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "BingX malformed position mode response",
+                    ),
                 }
                 if !current {
                     self.fetch_mode(cx, credentials);
@@ -825,7 +833,11 @@ impl Account {
             } => {
                 self.balance_in_flight = None;
                 if failed {
-                    cx.log(LogLevel::Error, "BingX malformed balance snapshot");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "BingX malformed balance snapshot",
+                    );
                     return;
                 }
                 let current = revision == self.balance_revision;
@@ -833,8 +845,9 @@ impl Account {
                     if let Some(balance) = usdt.or(first) {
                         cx.store.set_balance(balance);
                     } else {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
                             "BingX balance snapshot contained no settlement asset",
                         );
                     }
@@ -941,8 +954,9 @@ impl Account {
         {
             return;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("BingX private request failed: {error}"),
         );
         match request {

@@ -1,16 +1,18 @@
 //! Authenticated account snapshots and monotonic execution reconciliation.
 use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
+    Command, CommandId, Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -413,7 +415,7 @@ impl Woo {
     fn account_skipped(&mut self, cx: &mut Cx<'_, Pending>, kind: &'static str, s: &Skipped) {
         match s.summary(kind) {
             Some(text) if self.account.skip_logged.get(kind) != Some(&text) => {
-                cx.log(LogLevel::Warning, text.clone());
+                cx.notice(Level::Warn, code::ROW_SKIPPED, text.clone());
                 self.account.skip_logged.insert(kind, text);
             }
             Some(_) => (),
@@ -430,8 +432,9 @@ impl Woo {
     // Exposure the store cannot show must be visible once, not every poll.
     fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {
         if self.account.hidden.insert(format!("{kind}:{symbol}")) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!("WOO {kind} on {symbol} cannot be shown: market or ticker unavailable"),
             );
         }
@@ -554,7 +557,7 @@ impl Woo {
         }
         self.account_connect(cx);
         self.account_refresh(cx);
-        self.account.timer = Some(cx.set_timer(2000.0));
+        self.account.timer = Some(cx.set_poll_timer(2000.0));
     }
     fn account_info_read(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.info_pending {
@@ -573,7 +576,7 @@ impl Woo {
             Pending::Account(req),
         ) {
             self.account.info_pending = false;
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::REQUEST_FAILED, e);
         }
     }
     fn account_positions_read(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -598,7 +601,7 @@ impl Woo {
             Ok(id) => cx.stream_response(id, ArrayAt::Path(&["data", "positions"])),
             Err(e) => {
                 self.account.positions_pending = false;
-                cx.log(LogLevel::Error, e);
+                cx.notice(Level::Error, code::REQUEST_FAILED, e);
             }
         }
     }
@@ -644,7 +647,7 @@ impl Woo {
             ),
             Err(e) => {
                 self.account.orders = None;
-                cx.log(LogLevel::Error, e);
+                cx.notice(Level::Error, code::REQUEST_FAILED, e);
             }
         }
     }
@@ -954,8 +957,9 @@ impl Woo {
                     // Only exposure that may sit on a skipped catalogue row is ambiguous.
                     if self.catalogue_may_list(&r.symbol) {
                         *bad = true;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "WOO owned position market unavailable; preserving previous snapshot",
                         );
                     } else if r.symbol.starts_with("PERP_") {
@@ -980,7 +984,7 @@ impl Woo {
                 });
                 let Some(mark) = mark else {
                     *bad = true;
-                    cx.log(LogLevel::Error, "WOO position mark unavailable; preserving previous positions and valuation");
+                    cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, "WOO position mark unavailable; preserving previous positions and valuation");
                     return;
                 };
                 let contracts = r.holding.abs();
@@ -1066,8 +1070,9 @@ impl Woo {
                             && self.catalogue_may_list(raw)
                         {
                             *bad = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::SNAPSHOT_DISCARDED,
                                 "WOO working order market unavailable; preserving previous orders",
                             );
                         } else if raw.starts_with("PERP_") {
@@ -1182,12 +1187,17 @@ impl Woo {
                     .payload()
                     .and_then(|s| serde_json::from_str::<Info<'_>>(s).map_err(|e| e.to_string()))
                 else {
-                    cx.log(LogLevel::Error, "Invalid WOO account information");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Invalid WOO account information",
+                    );
                     return;
                 };
                 if info.account_mode != "FUTURES" {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::CONFIG_INVALID,
                         format!(
                             "WOO X account is in {} mode, only FUTURES mode is supported",
                             info.account_mode
@@ -1196,7 +1206,11 @@ impl Woo {
                     return;
                 }
                 if info.position_mode != "ONE_WAY" && info.position_mode != "HEDGE_MODE" {
-                    cx.log(LogLevel::Error, "Invalid WOO position mode");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Invalid WOO position mode",
+                    );
                     return;
                 }
                 if !self.account.writes.contains_key("$mode") {
@@ -1222,7 +1236,11 @@ impl Woo {
                 self.account.positions_pending = false;
                 self.account_skipped(cx, "positions", &skipped);
                 if bad {
-                    cx.log(LogLevel::Error, "Invalid WOO positions page");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid WOO positions page",
+                    );
                     return;
                 }
                 if self.account_revision("$mode") > revision
@@ -1343,7 +1361,11 @@ impl Woo {
                 }
                 if bad {
                     self.account.orders = None;
-                    cx.log(LogLevel::Error, "Invalid WOO open-order page");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid WOO open-order page",
+                    );
                     return;
                 }
                 self.account_skipped(
@@ -1353,7 +1375,11 @@ impl Woo {
                 );
                 let Ok(meta) = serde_json::from_str::<Page>(response.body) else {
                     self.account.orders = None;
-                    cx.log(LogLevel::Error, "Invalid WOO open-order envelope");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid WOO open-order envelope",
+                    );
                     return;
                 };
                 let meta = if algo {
@@ -1365,7 +1391,11 @@ impl Woo {
                     meta.filter(|meta| meta.records_per_page > 0 && meta.current_page == page)
                 else {
                     self.account.orders = None;
-                    cx.log(LogLevel::Error, "Invalid WOO open-order page metadata");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid WOO open-order page metadata",
+                    );
                     return;
                 };
                 let more = meta.total > meta.records_per_page.saturating_mul(u64::from(page));
@@ -1394,7 +1424,11 @@ impl Woo {
                 if more {
                     if !added || page >= 1000 {
                         self.account.orders = None;
-                        cx.log(LogLevel::Error, "WOO order pagination did not advance");
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
+                            "WOO order pagination did not advance",
+                        );
                         return;
                     }
                     self.account_orders_page(cx, generation, algo, page + 1);
@@ -1500,7 +1534,7 @@ impl Woo {
                 if let Some(command) = command {
                     cx.done(command, result);
                 } else if let Err(e) = result {
-                    cx.log(LogLevel::Warning, e);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, e);
                 }
             }
         }
@@ -1560,7 +1594,7 @@ impl Woo {
                 }
             }
         }
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
     }
     fn account_schedule_fill_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.refresh.is_some() || self.account.refresh_attempt >= 4 {
@@ -1840,8 +1874,9 @@ impl Woo {
                     }
                     cx.send(socket, r#"{"event":"ping"}"#);
                 } else {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::AUTH_REJECTED,
                         if msg.message.is_empty() {
                             "WOO X private websocket authentication failed".into()
                         } else {
@@ -1919,7 +1954,7 @@ impl Woo {
             return true;
         }
         if self.account.timer == Some(timer) {
-            self.account.timer = Some(cx.set_timer(2000.0));
+            self.account.timer = Some(cx.set_poll_timer(2000.0));
             self.account.tick += 1;
             self.account
                 .terminal

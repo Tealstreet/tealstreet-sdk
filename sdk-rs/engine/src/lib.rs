@@ -16,6 +16,7 @@ pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
 pub mod paging;
+mod placement_acks;
 pub mod public_feed;
 pub mod socket;
 pub mod startup;
@@ -32,8 +33,9 @@ pub use capabilities::{
 pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
-    PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
-    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
+    PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget,
+    SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
+    unsupported_venue_action,
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
 pub use log::{Health, Level, LogEvent, Redacted, Value};

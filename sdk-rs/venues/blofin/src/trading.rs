@@ -366,16 +366,20 @@ impl Blofin {
         } else {
             "short"
         };
+        let tick = |p: f64| num::adjust(p, m.precision.price);
         let tp = if opts.kind == OrderType::TakeProfit {
-            price.or(opts.take_profit)
+            price.or(opts.take_profit.map(tick))
         } else {
-            opts.take_profit
+            opts.take_profit.map(tick)
         };
         let sl = if opts.kind == OrderType::StopLoss {
-            price.or(opts.stop_loss)
+            price.or(opts.stop_loss.map(tick))
         } else {
-            opts.stop_loss
+            opts.stop_loss.map(tick)
         };
+        for p in [tp, sl].into_iter().flatten() {
+            positive(p, "trigger price")?;
+        }
         let protection = Protection {
             tp_trigger_price: tp.map(num::format),
             tp_order_price: tp.map(|_| "-1".into()),
@@ -1173,6 +1177,20 @@ impl Blofin {
                     return;
                 }
             };
+            if matches!(job.commit, Commit::Margin(_))
+                && (cx.store.positions().iter().any(|p| p.contracts > 0.0)
+                    || cx
+                        .store
+                        .orders()
+                        .iter()
+                        .any(|o| o.status == OrderStatus::Open))
+            {
+                cx.notice(
+                    Level::Error,
+                    code::SETTING_CAUTION,
+                    "Changing margin type with open positions / orders is allowed but can cause unexpected behavior. Symbols with open positions will remain synced to previous mode until position is closed.",
+                );
+            }
             self.trading.busy = true;
             self.account.orders_revision += 1;
             for order in &job.creating {
@@ -1433,8 +1451,11 @@ impl Blofin {
                 count,
                 inst_id,
             } => {
+                // Multi-Position mode refuses the whole placement, rows or not.
+                let multi_position = reply.code == MULTI_POSITION_CODE
+                    || rows.iter().any(|row| row.code == MULTI_POSITION_CODE);
                 if reply.code != "0" || rows.len() != *count {
-                    unproven |= rows.len() != *count;
+                    unproven |= rows.len() != *count && reply.code != MULTI_POSITION_CODE;
                     error = Some(format!("BloFin placement {}: {}", reply.code, reply.msg));
                 }
                 let mut seen = HashSet::new();
@@ -1468,6 +1489,9 @@ impl Blofin {
                         }
                         request.job.ids.push(id);
                     }
+                }
+                if multi_position {
+                    error = Some(MULTI_POSITION_MESSAGE.into());
                 }
             }
             Effect::Cancel(targets) => {
@@ -1611,6 +1635,10 @@ impl Blofin {
         }
     }
 }
+
+/// BloFin refuses placements in Multi-Position mode with this code.
+const MULTI_POSITION_CODE: &str = "102143";
+const MULTI_POSITION_MESSAGE: &str = "BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.";
 
 /// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
 fn http_failure(status: u16, body: &str) -> VenueError {

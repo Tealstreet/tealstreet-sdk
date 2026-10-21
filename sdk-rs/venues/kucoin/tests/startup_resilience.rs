@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_kucoin::{Kucoin, Options};
+use support::jittered;
 const CATALOGUE: &str = r###"{"code":"200000","data":[{"broken":true},{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100}]}"###;
 fn public_engine() -> Engine<Kucoin> {
     Engine::new(Kucoin::new(Options {
@@ -38,7 +40,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -66,7 +68,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
     assert!(engine.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -167,10 +169,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -250,10 +249,7 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             let timer = engine
                 .drain_actions()
                 .find_map(|action| match action {
-                    Action::SetTimer {
-                        timer,
-                        at_ms: 1000.0,
-                    } => Some(timer),
+                    Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");

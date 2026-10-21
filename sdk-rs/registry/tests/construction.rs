@@ -29,11 +29,11 @@ fn private_only_accounts_cannot_own_a_direct_public_feed() {
     assert_eq!(
         rejected(
             "binance",
-            r#"{"privateOnly":true,"publicFeed":{"mode":"direct"}}"#
+            r#"{"publicDataOnly":true,"privateOnly":true,"publicFeed":{"mode":"direct"}}"#
         ),
         "privateOnly cannot use direct public feeds"
     );
-    construct("binance", r#"{"privateOnly":true}"#).unwrap();
+    construct("binance", r#"{"publicDataOnly":true,"privateOnly":true}"#).unwrap();
 }
 
 #[test]
@@ -97,7 +97,11 @@ fn hyperliquid_perpetuals_accept_the_spot_toggle() {
         r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,
     )
     .unwrap();
-    construct("hyperliquidspot", r#"{"enableSpotMarkets":true}"#).unwrap();
+    construct(
+        "hyperliquidspot",
+        r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -113,14 +117,21 @@ fn txflow_requires_testnet() {
 fn custom_endpoints_belong_to_hyrotrader_only() {
     let endpoints = r#""endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#;
     assert_eq!(
-        rejected("bybit", &format!("{{{endpoints}}}")),
+        rejected(
+            "bybit",
+            &format!(r#"{{"publicDataOnly":true,{endpoints}}}"#)
+        ),
         "Custom endpoints are supported only for HyroTrader"
     );
     assert_eq!(
-        rejected("hyrotrader", "{}"),
+        rejected("hyrotrader", r#"{"publicDataOnly":true}"#),
         "HyroTrader endpoints are not configured"
     );
-    construct("hyrotrader", &format!("{{{endpoints}}}")).unwrap();
+    construct(
+        "hyrotrader",
+        &format!(r#"{{"publicDataOnly":true,{endpoints}}}"#),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -232,7 +243,7 @@ fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
                 "{venue} {application}"
             );
         }
-        for (k, s) in [(key, valid), (valid, "not-base58!"), ("", valid)] {
+        for (k, s) in [(key, valid), (valid, "not-base58!")] {
             assert_eq!(
                 rejected(
                     venue,
@@ -286,4 +297,62 @@ fn asterdex_v1_with_wallet_keys_needs_the_main_wallet() {
         r#"{"key":"hmac-key","secret":"hmac-secret","asterdex":{"apiVersion":"v1"}}"#,
     )
     .unwrap();
+}
+
+#[test]
+fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
+    let message = "Rust engine private accounts require a local API key and secret; remote signing is unsupported";
+    for venue in [
+        "binance",
+        "bybit",
+        "okx",
+        "orderly",
+        "woo",
+        "hyperliquidspot",
+        "kraken",
+        "bitunix",
+    ] {
+        for options in [
+            r#"{"remoteSigning":true}"#,
+            r#"{"remoteSigning":true,"key":"k"}"#,
+            r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
+        ] {
+            assert_eq!(rejected(venue, options), message, "{venue} {options}");
+        }
+        // Incomplete credentials without a remote signer build a public account, as before
+        // (Orderly's own rules still apply to its private accounts).
+        if venue != "orderly" {
+            construct(venue, r#"{"key":"k"}"#).unwrap();
+        }
+    }
+    // Delegated and derived signers have their own rules.
+    for venue in [
+        "hyperliquid",
+        "paradex",
+        "lighter",
+        "coinbase",
+        "polymarket",
+        "breakoutprop",
+    ] {
+        assert_ne!(
+            construct(venue, r#"{"remoteSigning":true}"#)
+                .err()
+                .map(|error| error.message),
+            Some(message.into()),
+            "{venue}"
+        );
+    }
+    // AsterDEX signs with the wallet private key, from auth or the secret.
+    construct(
+        "asterdex",
+        r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        rejected(
+            "asterdex",
+            r#"{"remoteSigning":true,"key":"k","secret":"  "}"#
+        ),
+        message
+    );
 }

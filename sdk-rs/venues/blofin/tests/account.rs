@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Action, Event};
 use support::*;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 #[test]
 fn startup_authenticates_and_loads_account_atomically() {
     let mut h = Harness::new();
@@ -390,7 +393,7 @@ fn owned_position_on_malformed_market_rejects_scope_but_other_missing_rows_are_s
             assert_eq!(h.e.store().positions(), previous);
             assert_eq!(*h.e.store().balance(), balance);
             assert!(!h.pending.iter().any(|r| r.url.contains("asset/balances")));
-            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position has unavailable market metadata"))));
+            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("owned position has unavailable market metadata"))));
         } else {
             h.reply("balances", BALANCES);
             assert_eq!(h.e.store().positions().len(), 1, "{inst} {kind} {quantity}");
@@ -440,7 +443,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     for kind in ["position", "order"] {
         let needle = format!("Skipping BloFin {kind} on uncatalogued market ETH-USD");
         assert!(
-            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))),
+            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains(&needle))),
             "{kind}"
         );
     }
@@ -466,7 +469,7 @@ fn working_order_on_malformed_market_rejects_authoritative_order_scope() {
     h.collect();
     h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BAD-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
     assert_eq!(h.e.store().orders(), previous);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("working order has unavailable market metadata"))));
 }
 #[test]
 fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
@@ -476,7 +479,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");
@@ -506,6 +509,257 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         h.actions
     );
     assert!(h.e.store().loaded().positions);
+}
+
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = Harness::new();
+    h.seed();
+    let engine = &mut h.e;
+    let (now, mut reads) = policy_poll_read(engine, 0.0, "account/positions");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("balances") {
+                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#
+            } else {
+                r#"{"code":"0","data":[]}"#
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
+    let mut h = Harness::new();
+    h.seed();
+    let engine = &mut h.e;
+    let now = 0.0;
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
+            _ => None,
+        })
+        .expect("fast account poll");
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
+    let output: Vec<_> = engine.drain_actions().collect();
+    let reads: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reads.len(), 2, "balance and positions fail authentication");
+    // Keep any next periodic timer for a loop that rearms before HTTP completes.
+    for r in reads {
+        engine.handle(
+            now + 1_500.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 401,
+                    headers: "",
+                    body: r#"{"code":"152401","msg":"invalid key"}"#,
+                },
+            },
+        );
+    }
+    // BloFin determines its next auth backoff on the following poll tick.
+    let next = output
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == now + 3_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("next account tick");
+    engine.handle(now + 3_000.0, Event::TimerFired { timer: next });
+    engine.drain_actions().for_each(drop);
+    // The jittered failure floor is fixed once and must survive every policy change.
+    let mut floor = None;
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
+        engine.handle(
+            now + 3_000.0 + offset,
+            Event::PollScaleChanged {
+                scale: interval_ms / POLL_MS,
+            },
+        );
+        let times: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        if interval_ms.is_infinite() {
+            assert!(times.is_empty());
+        } else {
+            let at = *times.first().expect("one rearmed poll");
+            assert_eq!(times, vec![at]);
+            let delay = at - (now + 3_000.0);
+            assert!(
+                (0.75 * 40_000.0..=40_000.0).contains(&delay),
+                "jittered failure backoff {delay}"
+            );
+            assert_eq!(*floor.get_or_insert(at), at);
+        }
+    }
 }
 
 #[test]
@@ -1072,7 +1326,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
             h.e.take_frame(START + 13.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
         h.e.handle(
             START + 14.0,
             Event::WsMessage {
@@ -1131,7 +1385,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
         h.e.take_frame(START + 4.0)
             .is_none_or(|f| executions(f).is_empty())
     );
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution price unavailable for order 123")&&message.contains("missing cumulative quote baseline"))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123")&& event.message.contains("missing cumulative quote baseline"))));
     h.e.handle(
         START + 5.0,
         Event::WsMessage {
@@ -1192,7 +1446,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
             h.e.take_frame(START + 3.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
     }
 }
 #[test]
@@ -1261,7 +1515,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
             h.e.take_frame(START + 4.0)
                 .is_none_or(|frame| executions(frame).is_empty())
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
         let seed = startup_execution(
             "123",
             8,
@@ -1400,7 +1654,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
             [(260.0 - f64::from(known_average), 0.004)],
             "startup/eviction must retain the last proven cumulative quote (evict={evict})"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))));
     }
 }
 #[test]
@@ -1449,10 +1703,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
         );
         assert!(!h.actions.iter().any(|action| matches!(
             action,
-            Action::Notice(safe_cex_engine::Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
-                ..
-            })
+            Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error
         )));
         let live = startup_execution(
             "123",
@@ -1475,7 +1726,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
                 .is_none_or(|frame| executions(frame).is_empty()),
             "a missing historical quote cannot replay historical quantity4..6 as live"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("missing cumulative quote baseline"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("missing cumulative quote baseline"))));
         let suffix = startup_execution("123", 10, 140, START - 100.0, START + 6.0, "filled");
         for now in [START + 7.0, START + 8.0] {
             h.e.handle(
@@ -1543,8 +1794,8 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
     );
     assert!(h.e.store().order("456").is_some());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            if message.contains("Malformed BloFin order row"))));
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("Malformed BloFin order row"))));
 }
 fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
     actions.iter().find_map(|a| match a {
@@ -1556,7 +1807,7 @@ fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
 fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     let (retry, at) = new_timer(&h.actions)
-        .filter(|(_, at)| *at == 1000.0)
+        .filter(|(_, at)| jittered(*at, 1000.0))
         .expect("partial catalogue retry");
     h.seed();
     h.ws(&format!(
@@ -1598,7 +1849,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
-    let mut retry = new_timer(&h.actions).filter(|(_, at)| *at == 1000.0);
+    let mut retry = new_timer(&h.actions).filter(|(_, at)| jittered(*at, 1000.0));
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
         h.e.handle(at, Event::TimerFired { timer });
@@ -1610,5 +1861,47 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         assert!(rereads <= 5, "re-read is bounded");
     }
     assert_eq!(rereads, 5);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("stops re-reading"))));
+}
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
+#[test]
+fn auth_failure_ticks_are_jittered_while_healthy_ticks_keep_their_cadence() {
+    let mut h = Harness::new();
+    h.seed();
+    let mut now = 10_000.0;
+    let mut tick = h.tick;
+    let fire = |h: &mut Harness, timer, now: f64| {
+        h.actions.clear();
+        h.e.handle(now, Event::TimerFired { timer });
+        h.collect();
+        h.actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms - now >= 7_500.0 => {
+                    Some((*timer, *at_ms - now))
+                }
+                _ => None,
+            })
+            .expect("next tick")
+    };
+    let (next, delay) = fire(&mut h, tick, now);
+    assert_eq!(delay, 10_000.0, "healthy polling cadence is exact");
+    h.reply(
+        "orders-pending",
+        r#"{"code":"152401","msg":"Access key does not exist","data":[]}"#,
+    );
+    let mut delays = Vec::new();
+    (tick, now) = (next, now + delay);
+    for _ in 0..6 {
+        let (next, delay) = fire(&mut h, tick, now);
+        delays.push(delay);
+        (tick, now) = (next, now + delay);
+    }
+    assert!(delays.iter().all(|d| jittered(*d, 20_000.0)), "{delays:?}");
+    assert!(delays.iter().any(|d| *d < 20_000.0), "{delays:?}");
 }

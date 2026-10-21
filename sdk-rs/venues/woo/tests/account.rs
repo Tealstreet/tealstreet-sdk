@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const INFO: &str = r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY","freeCollateral":"900.125","totalCollateral":"1000.125","totalAccountValue":"1100.125"}}"#;
 const POS: &str = r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS","estLiqPrice":50000}]}}"#;
 const ORDER: &str = r#"{"symbol":"PERP_BTC_USDT","order_id":9007199254740993,"status":"NEW","side":"BUY","type":"LIMIT","quantity":0.02,"executed":0.005,"price":59000,"reduce_only":false,"client_order_id":123}"#;
@@ -77,7 +80,7 @@ fn start_with_retry(
         })
         .unwrap();
     let retry = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == 1010.0 => Some(*timer),
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 10.0, 1000.0) => Some(*timer),
         _ => None,
     });
     let reads = actions
@@ -937,7 +940,7 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.02);
     assert!(e.drain_actions().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO positions: skipped 1")
     )));
 }
@@ -959,7 +962,7 @@ fn invalid_known_position_row_keeps_its_stored_copy() {
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.01);
     assert!(e.drain_actions().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("BTCUSDT")
     )));
 }
@@ -1082,7 +1085,12 @@ fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
         response(&mut e, &p, at + 5.0, &body);
         let actions: Vec<_> = e.drain_actions().collect();
         for a in &actions {
-            if let Action::Notice(Notice::Log { message, .. }) = a {
+            if let Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) = a
+            {
                 skipped += usize::from(message.contains("WOO positions: skipped"));
                 hidden += usize::from(message.contains("PERP_ETH_USDT cannot be shown"));
             }
@@ -1132,9 +1140,132 @@ fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapsh
         } else {
             assert_eq!(e.store().orders(), before);
             assert!(e.drain_actions().any(|action| matches!(action,
-                Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+                Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
         }
     }
+}
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (mut e, _, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    let now = 1000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.contains("/v3/positions")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.contains("accountinfo") {
+                INFO.to_owned()
+            } else if r.url.contains("/v3/positions") {
+                POS.to_owned()
+            } else if r.url.contains("algo") {
+                algos(ALGO)
+            } else {
+                page(ORDER)
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
 
 #[test]

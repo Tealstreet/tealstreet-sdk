@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_kraken::sign::Signer;
 use spot_support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 #[test]
 fn official_spot_auth_vector_and_form_nonce_are_exact() {
     let signer = Signer::new(
@@ -450,7 +453,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
     assert!(actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
@@ -472,7 +475,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("invalid secret"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
     assert!(
         !actions
             .iter()
@@ -510,6 +513,125 @@ fn filled_lifecycle_without_trade_does_not_invent_an_execution() {
     );
     assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
 }
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (mut e, _, _) = ready(false);
+    let now = NOW + 1000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.ends_with("Balance")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.ends_with("Balance") {
+                BALANCE
+            } else {
+                OPEN
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
 #[test]
 fn balance_frames_faster_than_the_balance_read_cannot_starve_the_balance() {
     let (mut e, _, private) = ready(false);

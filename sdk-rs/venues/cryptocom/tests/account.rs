@@ -3,6 +3,9 @@ use safe_cex_engine::model::TimeInForce;
 use safe_cex_engine::{Action, Event, LogLevel, Notice};
 use support::*;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 #[test]
 fn private_auth_is_delayed_and_subscriptions_wait_for_ack() {
     let mut h = Harness::new();
@@ -13,7 +16,7 @@ fn private_auth_is_delayed_and_subscriptions_wait_for_ack() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -347,6 +350,126 @@ const BTC_POSITION: &str =
     r#"{"instrument_name":"BTCUSD-PERP","quantity":"1","cost":"100","update_timestamp_ms":1}"#;
 
 #[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let mut h = Harness::new();
+    h.load();
+    let mut e = h.engine;
+    let now = 1_610_000_001_000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.contains("get-positions")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.contains("user-balance") {
+                BALANCE
+            } else {
+                EMPTY
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
+#[test]
 fn owned_position_and_order_on_filtered_market_are_skipped_and_the_chain_commits() {
     let mut h = Harness::with_instruments(&catalogue("50"));
     let filtered = BTC_POSITION.replace("BTCUSD-PERP", "ETHUSD-PERP");
@@ -422,7 +545,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");
@@ -689,4 +812,24 @@ fn pushed_balance_publishes_per_coin_balances_with_the_aggregate() {
     );
     assert_eq!(h.engine.store().balance().total, 2100.0);
     assert_eq!(coins(&h).len(), 2);
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let valid = r#""symbol":"BADUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"X","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"#;
+    let zero_tick = r#""symbol":"BADUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"X","quote_ccy":"USD","price_tick_size":"0","qty_tick_size":"0.001","quote_decimals":400,"#;
+    let markets = catalogue(r#""50""#).replace(valid, zero_tick);
+    assert_ne!(markets, catalogue(r#""50""#));
+    let mut h = Harness::with_instruments(&markets);
+    assert!(h.engine.store().market("BADUSD-PERP").is_none());
+    h.reply("get-positions", &rows(&[BTC_POSITION]));
+    h.reply("user-balance", BALANCE);
+    h.reply("private/get-open-orders", EMPTY);
+    h.reply("advanced/get-open-orders", EMPTY);
+    next_tick(&mut h);
+    let changed = BTC_POSITION.replace("\"1\"", "\"3\"").replace(":1}", ":2}");
+    let malformed = BTC_POSITION.replace("BTCUSD-PERP", "BADUSD-PERP");
+    h.reply("get-positions", &rows(&[&changed, &malformed]));
+    assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
+    assert!(warned(&h, "owned position market unavailable"));
 }

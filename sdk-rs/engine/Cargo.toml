@@ -17,6 +17,8 @@ command-asterdex = []
 command-apexomni = []
 command-polymarket = []
 command-kucoinspot = []
+# Bitunix opts in; other single-venue WASM builds omit the versioned-envelope selector.
+any-field-envelope = []
 # Bybit opts in through its dependency so unrelated single-venue WASM builds
 # omit option-query deserialization and semantic frame storage/writers.
 # Public Command variants and unsupported-IV guards remain available everywhere.
