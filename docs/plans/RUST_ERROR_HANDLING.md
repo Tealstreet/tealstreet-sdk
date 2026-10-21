@@ -16,3 +16,12 @@ from `feat/rust-bridge-fixes` (claude-bridge); this lane builds on them.
 5. Shared venue error parsers, one family per PR, replacing `malformed` flags.
 
 All five landed on `feat/rust-rewrite` (2026-10-21).
+
+## WebSocket login-code verification (2026-10-21)
+
+Plan: verify OKX and Bitget terminal startup login codes against current primary
+venue tables. Remove obsolete unverified OKX terminal codes; reject fractional
+Bitget lookalikes before floating-point conversion. Preserve transient retry,
+clock/signature handling, established accounts and native diagnostics. Add
+startup/reconnect regressions, run both venues plus Binance and strict gates,
+and obtain independent review before green CI and merge.
