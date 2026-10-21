@@ -901,13 +901,10 @@ fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
     let submit = http(&mut e, "sendTx");
     assert_eq!(wire(&submit)["ReduceOnly"], 1);
     ack(&mut e, &submit);
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            ..
-        })
-    )));
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+    );
     e.handle(NOW + 11000.0, Event::TimerFired { timer: timer.0 });
     assert!(!e.drain_actions().any(|a| matches!(
         a,
