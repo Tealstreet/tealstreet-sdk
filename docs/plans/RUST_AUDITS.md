@@ -615,6 +615,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+- ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
+  carry the actual request command before retained rows complete. Both native
+  regressions check exact ownership and order at Error-only logging, preserving
+  row counts and existing window/cap policy.
 - ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
   and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
   their headers; reset and Retry-After hints extend all waiting category retries
@@ -961,17 +965,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
-  ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
-  carry the actual request command before retained rows complete. Both native
-  regressions check exact ownership and order at Error-only logging, preserving
-  row counts and existing window/cap policy.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
