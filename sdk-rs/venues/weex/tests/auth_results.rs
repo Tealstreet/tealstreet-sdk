@@ -179,3 +179,54 @@ fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_read() {
     // Algo orders still refuse the key, so normal orders' success is no evidence.
     assert!(orders(&reply(&mut e, &normal, 200, "[]")).is_empty());
 }
+
+#[test]
+fn row_failures_do_not_withhold_successful_envelope_evidence() {
+    for read in [false, true] {
+        for (path, scope) in [
+            ("/balance", AccountReadScope::Balance),
+            ("/position", AccountReadScope::Positions),
+            ("/openOrders", AccountReadScope::Orders),
+            ("openAlgoOrders", AccountReadScope::Orders),
+        ] {
+            let (mut e, all) = started(read);
+            let r = http(&all, path);
+            let a = reply(&mut e, &r, 200, "[false]");
+            assert_eq!(
+                auth(&a),
+                [(
+                    if read {
+                        CredentialSlot::Secondary
+                    } else {
+                        CredentialSlot::Primary
+                    },
+                    scope,
+                    AuthOutcome::Accepted
+                )],
+                "{path}"
+            );
+        }
+    }
+}
+
+#[test]
+fn accepted_credentials_still_commit_good_balance_peers_and_report_bad_rows() {
+    let (mut e, all) = started(true);
+    let r = http(&all, "/balance");
+    let a = reply(
+        &mut e,
+        &r,
+        200,
+        r#"[false,{"asset":"USDT","balance":42,"availableBalance":40}]"#,
+    );
+    assert_eq!(
+        auth(&a),
+        [(
+            CredentialSlot::Secondary,
+            AccountReadScope::Balance,
+            AuthOutcome::Accepted
+        )]
+    );
+    assert_eq!(e.store().balance().total, 42.0);
+    assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+}
