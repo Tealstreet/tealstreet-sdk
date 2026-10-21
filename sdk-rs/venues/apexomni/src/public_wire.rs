@@ -1,5 +1,5 @@
 //! Borrowed quote records. Parsing rejects non-finite financial values.
-use safe_cex_engine::de::{number_or_blank_zero, optional_number_or_blank};
+use safe_cex_engine::de::{number, number_or_blank_zero, optional_number_or_blank};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -115,7 +115,7 @@ pub struct Candle {
 }
 #[derive(Deserialize)]
 pub struct Kline {
-    #[serde(deserialize_with = "number_or_blank_zero")]
+    #[serde(deserialize_with = "number")]
     pub t: f64,
     #[serde(deserialize_with = "number_or_blank_zero")]
     pub o: f64,

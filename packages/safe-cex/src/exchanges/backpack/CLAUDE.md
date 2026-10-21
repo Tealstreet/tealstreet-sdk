@@ -588,3 +588,13 @@ scripts beside the exchange runtime implementation.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientId` as a number. Backpack types it `uint32`, so the rule accepts only canonical decimal strings `1..4294967295` — the only form whose `String()` is the caller's value. A caller ID routes the order through `placeOrder`, never a native batch pair, because batch pairs mint their own correlation IDs.
+
+## Rust nullable trigger readbacks
+
+REST order quantity can be missing/null only when positive native triggerPrice
+and triggerQuantity plus bounded executedQuantity prove the amount. Account,
+history, trigger repair and replacement acknowledgements use one admission guard;
+blank/malformed present quantities reject. Missing ordinary quantity now rejects
+instead of defaulting to zero. Invalid data preserves known orders and cannot
+start repair cancellation or remove the old identity on a malformed replacement.
+Existing present-quantity precedence, WS q/Y and terminal-before-ACK guards remain.

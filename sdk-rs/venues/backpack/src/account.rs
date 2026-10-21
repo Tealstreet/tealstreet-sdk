@@ -210,15 +210,16 @@ fn unpriced(store: &safe_cex_engine::Store, symbol: &str) -> bool {
         .is_none_or(|t| t.last <= 0.0 && t.mark <= 0.0)
 }
 
-pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
+pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Result<Order, &'static str> {
+    let quantity = row.base_quantity()?;
     let side = side(&row.side);
     let trigger = row.trigger_price.map(|n| n.0);
     let amount = if trigger.is_some() {
-        row.trigger_quantity.map_or(row.quantity, |n| n.0)
+        row.trigger_quantity.map_or(quantity, |n| n.0)
     } else {
-        row.quantity
+        quantity
     };
-    Order {
+    Ok(Order {
         id: row.id.into_owned(),
         parent_id: None,
         status: status(&row.status),
@@ -247,7 +248,7 @@ pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
                 ..Default::default()
             },
         ),
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -519,7 +520,6 @@ impl Backpack {
                     self.reject_order(cx, rows, hold, item);
                     return;
                 };
-                self.account.order_skips.remove(r.id.as_ref());
                 if cx.store.market(&r.symbol).is_none() {
                     // Only a working order on a malformed market holds the snapshot.
                     if self.report_skipped_market(cx, &r.symbol) {
@@ -528,13 +528,22 @@ impl Backpack {
                         self.report_unlisted_market(cx, &r.symbol);
                     }
                 } else {
-                    if r.trigger_price.is_some()
-                        && r.trigger_by.is_none()
-                        && let Ok(repair) = self.trigger_repair(cx, &r)
-                    {
+                    // Prepare a candidate without queuing any side effect. The native
+                    // amount still has to pass the shared strict order mapper below.
+                    let repair = if r.trigger_price.is_some() && r.trigger_by.is_none() {
+                        self.trigger_repair(cx, &r).ok()
+                    } else {
+                        None
+                    };
+                    let Ok(mapped) = order(r, cx.store) else {
+                        self.reject_order(cx, rows, hold, item);
+                        return;
+                    };
+                    // A row counts as mapped only after quantity admission succeeds.
+                    self.account.order_skips.remove(mapped.id.as_str());
+                    if let Some(repair) = repair {
                         repairs.push(repair);
                     }
-                    let mapped = order(r, cx.store);
                     self.note_unpriced_trigger(cx.store, &mapped);
                     rows.push(mapped);
                 }

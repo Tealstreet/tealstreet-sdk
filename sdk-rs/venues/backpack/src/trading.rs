@@ -733,7 +733,7 @@ impl Backpack {
                         if let Some(old_id) = job.replaces.as_deref() {
                             let native: crate::wire::OrderRow<'_> =
                                 serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                            let mapped = crate::account::order(native, cx.store);
+                            let mapped = crate::account::order(native, cx.store)?;
                             cx.store.remove_orders(&[old_id]);
                             if cx.store.order(&mapped.id).is_none() {
                                 cx.store.upsert_order(mapped);
@@ -980,7 +980,8 @@ impl Backpack {
             .store
             .market(&row.symbol)
             .ok_or("Backpack repair market missing")?;
-        let amount = row.trigger_quantity.as_ref().map_or(row.quantity, |n| n.0);
+        let quantity = row.base_quantity()?;
+        let amount = row.trigger_quantity.as_ref().map_or(quantity, |n| n.0);
         let trigger = formatted(
             row.trigger_price
                 .as_ref()

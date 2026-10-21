@@ -117,3 +117,17 @@ The existing matching sweep-branch flag supplies five private pairs in CI;
 normal jobs retain one. Require fresh two-case suite verification, independent
 review, full green head CI, a separate landing guard and an audited merge
 receipt before reporting the merge and moving to MEXC.
+
+## MEXC phase
+
+Enable MEXC's virtual private clock using the fixture's existing epoch.
+Keep wire data, protocol validators, large native identities, auth feedback
+and production behavior unchanged. Use a fingerprint-matching CI engine for
+five private pairs; compare complete nonmetric outputs, including fills,
+settings and transport receipts. Remove only exact unobserved keys from the
+active tape-bound declaration after reviewing the raw evidence. Preserve
+historical tape entries and public declarations.
+
+Require the existing matching-branch five-pair CI mode, fresh full-suite
+verification, independent review, green head CI, a separate landing guard
+and audited merge receipt before reporting and moving to Polymarket.

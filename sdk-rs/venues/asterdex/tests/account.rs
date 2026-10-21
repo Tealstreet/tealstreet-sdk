@@ -1170,3 +1170,54 @@ fn a_repeated_position_skip_logs_once_until_the_row_maps_again() {
     read(&mut h, bad);
     assert_eq!(h.errors.len(), 2);
 }
+
+#[test]
+fn explicit_flat_event_without_entry_or_cumulative_pnl_closes_only_reported_leg() {
+    let mut h = H::new();
+    h.engine.store_mut().set_positions(vec![]);
+    h.ws(account(json!(10), "1", "LONG"));
+    h.ws(account(json!(11), "-1", "SHORT"));
+    let mut close = account(json!(12), "0", "LONG");
+    close["a"]["P"][0].as_object_mut().unwrap().remove("ep");
+    close["a"]["P"][0].as_object_mut().unwrap().remove("cr");
+    h.ws(close);
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert_eq!(h.engine.store().positions()[0].side, PositionSide::Short);
+    assert_eq!(h.engine.store().balance().total, 1010.0);
+}
+
+#[test]
+fn missing_or_malformed_entry_never_flattens_unproven_exposure() {
+    for amount in [Some("1"), Some("bad"), None, Some("0")] {
+        let mut h = H::new();
+        let before = h.engine.store().positions().to_vec();
+        let mut event = account(json!(10), amount.unwrap_or("0"), "BOTH");
+        if amount.is_none() {
+            event["a"]["P"][0].as_object_mut().unwrap().remove("pa");
+        }
+        if amount == Some("0") {
+            event["a"]["P"][0]["ep"] = json!("bad");
+        } else {
+            event["a"]["P"][0].as_object_mut().unwrap().remove("ep");
+        }
+        h.ws(event);
+        assert_eq!(h.engine.store().positions(), before);
+        // Rejected payloads cannot consume the event timestamp.
+        h.ws(account(json!(10), "2", "BOTH"));
+        assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+    }
+}
+
+#[test]
+fn present_null_or_non_string_flat_entry_is_rejected() {
+    for entry in [Value::Null, json!(0), json!(true), json!(""), json!("bad")] {
+        let mut h = H::new();
+        let before = h.engine.store().positions().to_vec();
+        let mut event = account(json!(10), "0", "BOTH");
+        event["a"]["P"][0]["ep"] = entry;
+        h.ws(event);
+        assert_eq!(h.engine.store().positions(), before);
+        h.ws(account(json!(10), "2", "BOTH"));
+        assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+    }
+}
