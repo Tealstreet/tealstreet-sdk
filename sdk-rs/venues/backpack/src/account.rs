@@ -747,6 +747,7 @@ impl Backpack {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
+                        id: None,
                         order_id: d.i.to_string(),
                         symbol: d.s.to_string(),
                         side,

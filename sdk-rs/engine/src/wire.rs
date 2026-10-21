@@ -25,6 +25,8 @@ pub mod section {
     pub const POSITIONS: u16 = 8;
     pub const BALANCE: u16 = 9;
     pub const STATUS: u16 = 10;
+    /// Revision 2 adds optional execution identity refs after revision-1 symbol
+    /// refs, then aligned realized-PnL and fee columns (NaN when unreported).
     pub const FILLS: u16 = 11;
     /// Scalar leverage retains its offset; revision one appends buy/sell
     /// leverage columns and stable symbol references.

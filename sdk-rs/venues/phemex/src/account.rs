@@ -1515,6 +1515,7 @@ impl PhemexPerpetuals {
             }
         }
         cx.fill(Fill {
+            id: None,
             order_id: row.order_id.to_string(),
             symbol: row.symbol.to_string(),
             side,
