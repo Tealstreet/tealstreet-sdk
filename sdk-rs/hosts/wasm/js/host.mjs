@@ -203,8 +203,8 @@ export class EngineHost {
         default: return fn.call(this.engine, a, b, c, d);
       }
     } catch (error) {
-      // A trap is a RuntimeError; V8 raises wasm stack overflow as RangeError. The
-      // engine imports no JS, so neither can come from a callback: both are fatal.
+      // A trap is a RuntimeError. A RangeError here unwound wasm mid-mutation (stack
+      // overflow, allocation failure in an import, result decode) with its borrow held.
       const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
         || error instanceof RangeError;
       if (!fatal) throw error;

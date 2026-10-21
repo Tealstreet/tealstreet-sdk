@@ -91,8 +91,8 @@ for (const method of methods) {
 }
 
 test('a native stack overflow (V8 RangeError) is contained like a trap', async () => {
-  // wasm stack overflow surfaces as RangeError, not RuntimeError; the engine is
-  // left mid-mutation with its wasm-bindgen borrow held, so it cannot be reused.
+  // wasm stack overflow surfaces as RangeError, not RuntimeError; it unwinds the
+  // engine mid-mutation with its wasm-bindgen borrow held, so it cannot be reused.
   const overflow = new RangeError('Maximum call stack size exceeded');
   const r = rig({ command() { throw overflow; } });
   await assert.rejects(r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'c-1' }] }), (error) =>
