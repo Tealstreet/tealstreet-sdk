@@ -8,7 +8,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"[{"broken":true},{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"###;
 fn public_engine() -> Engine<Backpack> {
-    Engine::new(Backpack::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -76,7 +76,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(Backpack::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=".into()),
         ..Default::default()

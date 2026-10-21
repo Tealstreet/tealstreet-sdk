@@ -345,7 +345,13 @@ impl Blofin {
         let headers = if matches!(request.query, Query::PublicTrades { .. }) {
             Ok(vec![])
         } else {
-            self.headers(&path, Method::Get, cx.now, "")
+            self.headers(
+                |bytes| cx.fill_signing_entropy(bytes),
+                &path,
+                Method::Get,
+                cx.now,
+                "",
+            )
         };
         match headers {
             Ok(headers) => {

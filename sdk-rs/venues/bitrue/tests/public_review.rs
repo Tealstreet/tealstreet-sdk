@@ -46,7 +46,7 @@ fn completions(actions: &[Action]) -> Vec<(u32, Result<String, String>)> {
         .collect()
 }
 fn boot() -> (Engine<Bitrue>, SocketId) {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

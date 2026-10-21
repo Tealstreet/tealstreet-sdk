@@ -416,7 +416,7 @@ impl Lighter {
         }
         let mut headers = Vec::new();
         if request.account.is_some() {
-            match self.account_auth(cx.now) {
+            match self.account_auth(cx) {
                 Ok(auth) => headers.push(("authorization", auth)),
                 Err(error) => {
                     cx.fail(request.command, error);

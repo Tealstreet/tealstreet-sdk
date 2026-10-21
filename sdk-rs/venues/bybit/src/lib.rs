@@ -2514,7 +2514,7 @@ impl Venue for BybitLinear {
 #[cfg(test)]
 mod public_decoder_tests {
     use super::*;
-    use safe_cex_engine::{Engine, Event};
+    use safe_cex_engine::Event;
 
     #[test]
     fn numeric_ticker_deltas_preserve_sparse_fields_and_product_conversions() {
@@ -2542,7 +2542,7 @@ mod public_decoder_tests {
             });
             venue.select_category(category);
             venue.public.socket = Some(socket);
-            let mut engine = Engine::new(venue);
+            let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
             engine.store_mut().set_tickers(vec![Ticker {
                 id: symbol.into(),
                 symbol: symbol.into(),
@@ -2645,7 +2645,7 @@ mod public_decoder_tests {
                 sync: Sync::Waiting,
             },
         );
-        let mut engine = Engine::new(venue);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.handle(0.0, Event::WsMessage { socket, text: r#"{"topic":"orderbook.1000.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","1"]],"a":[["101","2"]],"u":1}}"# });
         for text in [
             r#"{"topic":"orderbook.1000.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[["100","99"]],"a":[["101",3]],"u":2}}"#,

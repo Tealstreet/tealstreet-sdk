@@ -7,7 +7,7 @@ fn contracts() -> &'static str {
     r#"[{"symbol":"E-BTC-USDT","pricePrecision":2,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":1000,"maxLimitVolume":2000,"minOrderMoney":1,"status":1},{"symbol":"E-ETH-USDT","pricePrecision":2,"multiplier":0.01,"minOrderVolume":1,"maxMarketVolume":1000,"status":1}]"#
 }
 fn boot() -> (Engine<Bitrue>, SocketId) {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -260,7 +260,7 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
 }
 #[test]
 fn subscriptions_before_markets_are_retained() {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -386,7 +386,7 @@ impl Suppressed {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

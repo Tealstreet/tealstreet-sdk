@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
 alloy-dyn-abi.workspace = true
 alloy-signer = { workspace = true, features = ["eip712"] }
 alloy-signer-local.workspace = true

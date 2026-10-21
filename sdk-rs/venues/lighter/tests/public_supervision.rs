@@ -42,7 +42,7 @@ impl Rig {
         Self::with_policy(PublicFeedPolicy::Direct).0
     }
     fn with_policy(policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
-        let mut engine = Engine::new(Lighter::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
             public_data_only: true,
             ..Options::default()
         }));

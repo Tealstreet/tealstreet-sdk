@@ -138,7 +138,7 @@ fn charts_are_public_and_convert_ms_to_seconds() {
 }
 #[test]
 fn public_socket_role_is_explicit() {
-    let mut e = Engine::new(Kraken::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -236,7 +236,7 @@ fn failed_or_incomplete_candles_are_explicit_errors() {
 }
 #[test]
 fn live_instrument_aliases_and_negative_precision_are_valid() {
-    let mut e = Engine::new(Kraken::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options::default()));
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(
@@ -252,7 +252,7 @@ fn live_instrument_aliases_and_negative_precision_are_valid() {
 }
 #[test]
 fn malformed_credentials_report_a_signing_error_before_private_activation() {
-    let mut e = Engine::new(Kraken::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options {
         key: Some("fixture".into()),
         secret: Some("invalid base64!".into()),
         ..Default::default()
@@ -333,7 +333,7 @@ fn blank_stream_book_quantity_never_deletes_a_live_level() {
 
 #[test]
 fn initial_rest_tickers_keep_newer_live_fields_and_omitted_live_peers() {
-    let mut engine = Engine::new(Kraken::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

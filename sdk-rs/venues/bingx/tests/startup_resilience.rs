@@ -8,7 +8,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":0,"data":[{"broken":true},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"###;
 fn public_engine() -> Engine<Bingx> {
-    Engine::new(Bingx::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -76,7 +76,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(Bingx::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

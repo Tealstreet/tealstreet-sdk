@@ -1,11 +1,11 @@
 mod support;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
 fn engine() -> TestEngine {
     let (seed, _) = started();
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         key: Some("fixture-key".into()),
         secret: Some("fixture-secret".into()),
         application_id: Some("fixture-app".into()),

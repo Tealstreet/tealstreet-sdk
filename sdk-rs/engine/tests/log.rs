@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::log::{MAX_LOG_BYTES, REDACTED, code};
 use safe_cex_engine::{
@@ -95,7 +96,7 @@ impl Venue for Logger {
 }
 
 fn engine() -> Engine<Logger> {
-    let mut engine = Engine::new(Logger);
+    let mut engine = support::seeded_engine(Logger);
     engine.start(0.);
     engine
 }

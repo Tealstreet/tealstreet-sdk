@@ -812,9 +812,9 @@ fn failed_final_detail_read_is_not_retried_and_never_places() {
 
 #[test]
 fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
-    use safe_cex_engine::{Engine, SocketId, TimerId};
+    use safe_cex_engine::{SocketId, TimerId};
     use safe_cex_venue_blofin::{Blofin, Options};
-    let mut e = Engine::new(Blofin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),

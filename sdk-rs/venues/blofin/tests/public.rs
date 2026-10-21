@@ -28,7 +28,7 @@ fn reply(engine: &mut Engine<Blofin>, id: RequestId, body: &str) {
     );
 }
 fn seeded() -> (Engine<Blofin>, SocketId) {
-    let mut engine = Engine::new(Blofin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -98,7 +98,7 @@ fn full_depth_snapshot_update_gap_and_recovery() {
 }
 #[test]
 fn http_200_api_error_does_not_load_markets() {
-    let mut e = Engine::new(Blofin::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.0);
     let id = request(&mut e);
     reply(
@@ -319,7 +319,7 @@ fn all_market_subscriptions_fit_4096_bytes() {
         .map(|i| row.replace("BTC-USDT", &format!("COIN{i}-USDT")))
         .collect::<Vec<_>>()
         .join(",");
-    let mut e = Engine::new(Blofin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -388,7 +388,7 @@ fn full_top_five_preserves_deeper_prices_and_thin_or_empty_sides_clear_them() {
 
 #[test]
 fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_startup() {
-    let mut engine = Engine::new(Blofin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),

@@ -5,7 +5,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::wire::{book_top, section, sections};
 use safe_cex_engine::{
-    Command, Cx, Engine, Event, HttpRequest, Method, Response, SocketId, TimerId, Venue,
+    Command, Cx, Event, HttpRequest, Method, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_native::{Events, FrameServer, Host, HostEvent, ServerConfig, Transport};
 use serde::Deserialize;
@@ -182,7 +182,7 @@ impl Fixture {
             let mut book = Book::default();
             book.apply(BookSide::Bids, 99., 1.);
             book.apply(BookSide::Asks, 101., 1.);
-            let mut engine = Engine::new(TestVenue {
+            let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
                 label,
                 book,
                 observed: commands,
@@ -683,7 +683,7 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
                 poll_timer: None,
             };
             let transport_calls = Rc::new(Cell::new(0));
-            let mut engine = Engine::new(venue());
+            let mut engine = safe_cex_engine::test_support::seeded_engine(venue());
             // A legal engine call creates an unfinished command1 and queued HTTP
             // effect before the server can allocate the same internal ID.
             engine.handle(
@@ -710,7 +710,7 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
 
             // Rejection reserves neither the account name nor token. Existing
             // command-free startup remains valid and runs its queued effects once.
-            let mut fresh = Engine::new(venue());
+            let mut fresh = safe_cex_engine::test_support::seeded_engine(venue());
             fresh.start(1.);
             server
                 .add_account(

@@ -544,9 +544,9 @@ fn split_order_rejection_cannot_resend_already_accepted_chunks() {
 }
 #[test]
 fn full_tpsl_without_credentials_completes_with_error() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
-        Default::default(),
-    ));
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bitunix::BitunixFutures::new(Default::default()),
+    );
     let mut o = order("");
     o.kind = safe_cex_engine::model::OrderType::StopLoss;
     o.amount = 0.0;

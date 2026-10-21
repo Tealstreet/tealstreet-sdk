@@ -74,7 +74,7 @@ fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
 }
 
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1436,7 +1436,7 @@ fn malformed_rejected_and_ambiguous_create_never_retry() {
 
 #[test]
 fn unknown_context_and_public_only_fail_closed() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1450,7 +1450,7 @@ fn unknown_context_and_public_only_fail_closed() {
     );
     assert!(done(&a).is_err());
     assert!(writes(&a).is_empty());
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         key: Some("key".into()),
         secret: Some("secret".into()),

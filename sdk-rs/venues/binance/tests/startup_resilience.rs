@@ -10,7 +10,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"###;
 fn public_engine() -> Engine<BinanceFutures> {
-    Engine::new(BinanceFutures::new(Options {
+    safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -78,7 +78,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(BinanceFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

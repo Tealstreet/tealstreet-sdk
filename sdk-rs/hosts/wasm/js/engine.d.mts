@@ -1,11 +1,15 @@
 /** The wasm-bindgen engine module (`pkg/web` or `pkg/node`, built by `yarn rust:build-wasm`). */
-import type { WasmEngineLike } from './host.mjs';
+import type { EntropyProvider, WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
   construction(): string;
   /** Native construction failures throw Error with JSON-encoded venueError detail. */
   constructor(venue: string, optionsJson: string);
+  /** Configure identity/ID and jitter entropy before startup; signing stays independent. */
+  setEntropy(source: EntropyProvider): void;
+  /** Explicit independent override for signing nonces and salts, before startup only. */
+  setSigningEntropy(source: EntropyProvider): void;
   /** JSON-encoded health counters. */
   health(): string;
   start(now: number): string;

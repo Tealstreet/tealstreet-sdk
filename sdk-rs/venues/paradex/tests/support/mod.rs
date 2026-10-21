@@ -25,7 +25,7 @@ impl Harness {
         Self::empty_with_policy(options, PublicFeedPolicy::Direct)
     }
     pub fn empty_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut e = Engine::new(Paradex::new(options));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(options));
         e.set_public_feed_policy(policy).unwrap();
         e.start(1_700_000_000_000.);
         let mut h = Self {

@@ -31,7 +31,7 @@ impl Harness {
         broker_attribution: bool,
         now: f64,
     ) -> Self {
-        let mut e = Engine::new(Blofin::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
