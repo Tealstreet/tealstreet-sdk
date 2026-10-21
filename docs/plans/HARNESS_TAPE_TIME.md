@@ -443,3 +443,27 @@ exactly, including all 53/62 records. Regression tests exercise actual Tape
 reads before/after every ACK and before issuing the next command, with elapsed
 time beyond future snapshots, across core/HIP-3 and the embedded Spot lifecycle.
 The original generator fails both causal regressions; wire-identity checks pass.
+
+## Orderly broker family phase
+
+Enable private tape time in the shared Orderly harness factory for orderly,
+tealstreet-dex, kodiakfi, woofi, mode, salsadex and what on mainnet/testnet.
+Preserve existing epoch1765805280000 and all fourteen fixture byte streams,
+broker/network identities, independent Ed25519/freshness checks, request/socket
+correlation, heartbeat roles, the 1000ms polling floor and staged reads.
+Inspect command/ACK visibility before declaring any differences: read snapshots
+have command stages, while current mutation replies are unstaged. Investigate
+any future-state diagnostics rather than assuming they are valid allowances.
+
+Use authentic CI wasm with a hard current-tree fingerprint check for five
+private pairs per tape, comparing all140 complete outputs except top-level
+metrics, including full IDs and timestamps. Narrow only exact unused tape-bound
+keys, reviewing any new diagnostic with its cause before declaring it. Keep
+production, generators, entropy, validators, comparators, canonicalization and
+ordinary one-pair CI defaults unchanged unless actual evidence requires a
+separately reviewed repair. The existing matching sweep branch runs all14 calls
+five times; require all15 mandatory cases, zero unexpected/unused private keys,
+independent plan/code/raw reviews, focused checks and full current-head CI.
+Record every raw hash, run the fresh dependency guard separately from merge,
+audit/report actual parents/files and merge pin, then extend the final clock
+assertion and clarify the WEEX client-ID reason in separate follow-ups.
