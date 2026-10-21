@@ -36,3 +36,22 @@ WEEX metadata #1675 and command-owned empty-fill markers #1670.
    combined-host capability test, focused SDK test/typecheck/lint, strict
    Clippy/fmt/bans, full final CI and fresh separate guard before actual merge
    verification/overseer and caller receipts. No local release/full replay builds.
+
+
+Implementation evidence:
+- Eight original-source groups fail through actual standalone decoder/native
+  dispatch, then pass. Exact default/custom-limit URL, null-coalesced aliases,
+  huge raw integer/string version, native order/zeros/cumulative base amounts,
+  strict financial/overflow rejection, public native/HTTP/read failures and
+  reverse concurrent/duplicate ownership are pinned.
+- Shared429 Retry-After precedence defers a new command on its own timer and
+  completes only that owner after dispatch, with no failed-owner retry.
+- Seeded tiny-contractVal/live depth tests prove query base quantities remain
+  unscaled; REST success/native auth-looking failure cannot change live book,
+  ticker/account state or sequence. Next WS delta and an outstanding query across
+  unsubscribe/resubscribe preserve independent query/subscription generations.
+- Final local gates pass:416 WEEX+Binance native tests including existing
+  metadata/settings/history coverage; default combined-host capability fixture,
+  22 SDK bridge tests, typecheck, explicit no-ignore ESLint and strict venue
+  Clippy/format/bans. Two independent final implementation reviews CLEAR.
+  Full exact-head CI and current landing integration/separate guard remain.
