@@ -1031,30 +1031,7 @@ impl BybitLinear {
                 markets.extend(self.catalogs.get(&category).into_iter().flatten().cloned());
             }
             cx.store.set_markets(markets);
-            let classifications = cx
-                .store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    let mut row = self.classification.get(&market.symbol)?.clone();
-                    row.market = index as u32;
-                    Some(row)
-                })
-                .collect();
-            cx.store.set_instrument_classifications(classifications);
-            let derivatives = cx
-                .store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    let mut row = self.derivatives.get(&market.symbol)?.clone();
-                    row.market = index as u32;
-                    Some(row)
-                })
-                .collect();
-            cx.store.set_derivative_products(derivatives);
+            publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
             let category = self.category;
             for other in self.categories() {
@@ -1545,7 +1522,7 @@ fn on_item_public(
             Then::Markets {
                 markets, rejected, ..
             } => {
-                let Ok(m) = serde_json::from_str::<Instrument>(item) else {
+                let Ok(m) = decode_instrument(item) else {
                     *rejected = true;
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
@@ -1791,6 +1768,53 @@ fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
             volume * last
         },
     }
+}
+
+// Startup and explicit refresh use one decoder without sharing their admission policy.
+#[inline(never)]
+fn decode_instrument(item: &str) -> serde_json::Result<Instrument<'_>> {
+    serde_json::from_str(item)
+}
+
+#[inline(never)]
+fn classification_from_wire(row: &Instrument<'_>) -> InstrumentClassification {
+    InstrumentClassification {
+        market: 0,
+        symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
+        market_region: row.market_region.as_ref().map(ToString::to_string),
+        underlying_ticker: row.underlying_ticker.as_ref().map(ToString::to_string),
+    }
+}
+
+// Keep metadata aligned with the just-published market table in both discovery paths.
+#[inline(never)]
+fn publish_product_metadata(
+    store: &mut safe_cex_engine::Store,
+    classifications: &HashMap<String, InstrumentClassification>,
+    derivatives: &HashMap<String, DerivativeProduct>,
+) {
+    let classifications = store
+        .markets()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, market)| {
+            let mut row = classifications.get(&market.symbol)?.clone();
+            row.market = index as u32;
+            Some(row)
+        })
+        .collect();
+    store.set_instrument_classifications(classifications);
+    let derivatives = store
+        .markets()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, market)| {
+            let mut row = derivatives.get(&market.symbol)?.clone();
+            row.market = index as u32;
+            Some(row)
+        })
+        .collect();
+    store.set_derivative_products(derivatives);
 }
 
 fn market_from_wire(m: &Instrument<'_>, variant: Variant, category: Category) -> Market {
@@ -2143,20 +2167,10 @@ impl Venue for BybitLinear {
             Then::Options(request) => options::on_item(request, item),
             then => {
                 if matches!(then, Then::Markets { .. })
-                    && let Ok(row) = serde_json::from_str::<Instrument>(item)
+                    && let Ok(row) = decode_instrument(item)
                 {
-                    self.classification.insert(
-                        row.symbol.to_string(),
-                        InstrumentClassification {
-                            market: 0,
-                            symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
-                            market_region: row.market_region.as_ref().map(ToString::to_string),
-                            underlying_ticker: row
-                                .underlying_ticker
-                                .as_ref()
-                                .map(ToString::to_string),
-                        },
-                    );
+                    self.classification
+                        .insert(row.symbol.to_string(), classification_from_wire(&row));
                     if let Some(product) = derivative_from_wire(&row, self.category) {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }

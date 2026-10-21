@@ -122,3 +122,8 @@ mismatch diagnostics remain separate in #1590.
 Primary instrument contract: https://bybit-exchange.github.io/docs/v5/market/instrument
 Independent adversarial review is clear after strict option-term validation and
 corrected inverse-category fixture/preconditions.
+
+Startup and explicit refresh share one Instrument decoder and one metadata
+publication traversal to avoid retaining duplicate generated code. Their row
+admission and error policies remain separate; refresh keeps its strict envelope
+and atomic catalogue validation. CI measures the optimized WASM and replay costs.

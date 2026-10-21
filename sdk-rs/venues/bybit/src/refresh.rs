@@ -189,7 +189,7 @@ impl BybitLinear {
         {
             return;
         }
-        let Ok(row) = serde_json::from_str::<Instrument>(item) else {
+        let Ok(row) = decode_instrument(item) else {
             page.rejected = true;
             return;
         };
@@ -226,15 +226,8 @@ impl BybitLinear {
             page.rejected = true;
             return;
         }
-        page.classifications.insert(
-            market.symbol.clone(),
-            InstrumentClassification {
-                market: 0,
-                symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
-                market_region: row.market_region.as_ref().map(ToString::to_string),
-                underlying_ticker: row.underlying_ticker.as_ref().map(ToString::to_string),
-            },
-        );
+        page.classifications
+            .insert(market.symbol.clone(), classification_from_wire(&row));
         if let Some(product) = product {
             page.derivatives.insert(market.symbol.clone(), product);
         }
@@ -440,32 +433,7 @@ impl BybitLinear {
         cx.store.set_markets(markets);
         // Store settings are already keyed by symbol, including removed markets.
         // set_markets preserves them; do not replace that financial cache.
-        cx.store.set_instrument_classifications(
-            cx.store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    classifications.get(&market.symbol).cloned().map(|mut row| {
-                        row.market = index as u32;
-                        row
-                    })
-                })
-                .collect(),
-        );
-        cx.store.set_derivative_products(
-            cx.store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    derivatives.get(&market.symbol).cloned().map(|mut row| {
-                        row.market = index as u32;
-                        row
-                    })
-                })
-                .collect(),
-        );
+        publish_product_metadata(cx.store, &classifications, &derivatives);
         for symbol in &added {
             cx.store.ensure_ticker(symbol);
         }
