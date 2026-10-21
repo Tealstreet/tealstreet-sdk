@@ -29,7 +29,7 @@ bootstrap remainder handed over from the public-startup work
    rows belong to claude-cbzmw6; WOO/AsterDEX/WEEX/ApeX/Polymarket rows to the
    venues-b lane.
 7. Startup discovery retries honour 418/429 and `Retry-After` (#1481);
-   Bybit HTTP-200 retCode 10006 remains below.
+   Bybit HTTP-200 retCode 10006 is covered by the follow-up below.
 
 Not done, by decision: BreakoutProp authenticated discovery startup. The venue
 is disabled in production and preview (`enabled: false`,
@@ -107,3 +107,14 @@ Clippy/fmt, independent review, CI and a separate current-landing trial/guard.
 
 After this phase, reconcile skipped-row auth evidence per RUST_AUTH_RESULTS as
 a separate bridge follow-up PR; explicit network resync stays parked.
+
+Implemented with a private Bybit pause helper and typed stream-error forwarding.
+Ten new regressions cover the actual missing-list and list-bearing envelopes,
+market/ticker/option-seed retries, hint precedence and bounds, ordinary response
+suppression, monotonic windows and cross-category extension without extra
+backoff attempts. Eight fail before the fix, then all pass. Other streaming
+errors, optional-product degradation, private reads and writes keep their
+existing handling. No downstream callers change.
+All 532 Bybit/Binance tests, strict scoped Clippy and formatting pass; independent
+review is clean. The existing headerless-10006 public regression now checks the
+ten-second fallback while preserving its error and recovery assertions.
