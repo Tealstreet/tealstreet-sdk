@@ -1343,3 +1343,12 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.
