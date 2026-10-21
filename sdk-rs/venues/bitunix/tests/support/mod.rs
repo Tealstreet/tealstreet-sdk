@@ -44,8 +44,6 @@ pub fn startup() -> (TestEngine, SocketId) {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
     let mut private = None;
     loop {
         let actions: Vec<_> = e.drain_actions().collect();
@@ -61,7 +59,9 @@ pub fn startup() -> (TestEngine, SocketId) {
                     e.handle(0.0, Event::WsOpened { socket });
                 }
                 Action::Http(r) => {
-                    let body = if r.url.contains("get_pending_positions") {
+                    let body = if r.url.ends_with("/tickers") {
+                        TICKERS
+                    } else if r.url.contains("get_pending_positions") {
                         POSITIONS
                     } else if r.url.contains("/tpsl/") {
                         TPSL
