@@ -11,15 +11,9 @@ describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-  const independentVenues: ExchangeName[] = [
-    'bitget',
-    'bitgetinverse',
-    'bitgetusdc',
-    'bingx',
-    'mexc',
-    'phemex',
-    'weex',
-  ];
+  // Venues answering leverage reads from their published rails. BingX and WEEX
+  // read the venue (`onRead`); their crates test per-leg reads and write fencing.
+  const independentVenues: ExchangeName[] = ['bitget', 'bitgetinverse', 'bitgetusdc', 'mexc', 'phemex'];
   it.each(independentVenues)('keeps confirmed %s leg settings when leverage is read', async (name) => {
     const store = new DefaultStore();
     const market: Market = {

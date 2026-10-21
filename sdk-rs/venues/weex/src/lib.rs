@@ -254,7 +254,6 @@ impl WeexFutures {
             cx.request(Method::Get, url, vec![], None, pending);
         }
     }
-    #[allow(clippy::too_many_arguments)]
     /// A fresh symbol configuration read, as the TS adapter's leverage query does.
     fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
         let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
@@ -348,6 +347,7 @@ impl WeexFutures {
             serde_json::to_string(&fetched).map_err(|e| e.to_string()),
         );
     }
+    #[allow(clippy::too_many_arguments)]
     fn signed_request(
         &self,
         cx: &mut Cx<'_, Pending>,
