@@ -274,3 +274,8 @@ independent reviews, fresh mandatory public/private verification, five identical
 current-head CI pairs and full green checks. Run the Phemex dependency guard
 separately from the merge, audit actual parents/files, report the merge, and
 move to standalone Hyperliquid Spot.
+
+Five focused pairs with startup rewind preserved produced identical complete
+nonmetric outputs within each implementation. All 33 private keys remain exact,
+with zero unexpected or unobserved keys. Keep the fixture, absent epoch metadata
+and both private/public declaration entries unchanged.
