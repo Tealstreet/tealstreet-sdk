@@ -374,3 +374,16 @@ generated ID and preserves both virtual siblings when editing one leg.
   and no signature or comparison thresholds change. Harness passes 286
   tests; SDK typecheck/lint and 33 focused wrapper tests pass. Final
   post-merge results are also posted on PR #1324 before green-CI merge.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Preserve operand decimal precision when subtracting filled size from order
+   amount, including a late fill during default-size amendment. Do not snap
+   public remaining size to a market lot step or broaden fill accumulation work.
+2. Isolate typed invalid zero-price REST candles with coded row warnings and
+   retain sorted valid peers. Keep malformed timestamps/envelopes and a nonempty
+   unusable result visibly failed; valid empty histories remain successful.
+3. Record explicit client-ID rejection on multi-leg/protective work and verified
+   leverage writes as retained risks to change; revalidate private route ownership.
+4. Reproduce safe gaps, focused ApeX/Binance gates, touched fmt/strict Clippy/bans,
+   independent review, caller/spec notes and exact-head CI; respect merge hold.
