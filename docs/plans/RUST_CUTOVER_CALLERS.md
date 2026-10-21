@@ -157,6 +157,10 @@ read fencing checks #1621 at `7adb43c4beb`. History-marker ownership remains a
 separate follow-up.
 The BingX partial-error follow-up checks #1617 at `4e2f92c2622`, with its
 existing host/worker fields and NX scaled-order consumer rechecked below.
+The host-entropy follow-up checks #1624 at `0cd8f2b1657`; production defaults
+and custom-host requirements below use the actual merge. NX construction roots
+were checked read-only at `65e086a3c90`; shipped NX runtime verification remains
+a cutover requirement, not evidence supplied by this source audit.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -229,6 +233,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1620 / `4592d985e` | Ordinary Bybit REST/WS order and position rows isolate malformed peers while retaining rejected cached parents/protection or symbol exposure/Greeks. Unknown identity protects absence removal; valid peers can progress, with coherent same-symbol modes. Rejected WS evidence protects pending REST joins and coalesces read repair without globally starving unrelated rows. Warn `row.skipped` uses existing diagnostics; Hyro, execution/wallet/history handling and caller shapes stay separate. |
 | #1617 / `4e2f92c26` | BingX sequential placement failure now retains earlier acknowledged native IDs in existing typed/legacy partial-error details after a later rejection, transport loss or malformed acknowledgement. Existing classification/outcome and unsent-tail behavior remain; reconcile known effects and any uncertain failed step before retrying. No new API or automatic write retry. |
 | #1621 / `7adb43c4b` | Ordinary Bybit accepted leverage writes, including native `110043` not-modified acknowledgements, fence older in-flight position joins before publishing the selected leverage. A stale join cannot restore old leverage/settings; an active join coalesces a fresh read after settling. Refused writes leave authoritative reads eligible. Hyro's atomic path, position-mode semantics, caller API and write retries are unchanged. |
+| #1624 / `0cd8f2b16` | Core engine/registry construction requires explicit identity and signing entropy; missing providers fail as typed `invalidInput`. Production WASM/JS hosts bind WebCrypto and native factories bind OS randomness. Optional JS `entropy`/`signingEntropy` overrides are independent, checked and installed before start. Existing SDK factory callers need secure runtime availability proof rather than new account fields or constructor arguments; custom core hosts must supply providers. See [Host entropy and NX construction](#host-entropy-and-nx-construction-1624). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -359,6 +364,62 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 | SDK bridge → HyroTrader registry | Optional `EngineOptions.hyrotrader` carries raw `mode` plus `production`/`simulator` maps, each with `rest`, `publicWs`, `privateWs` and their `livenet`/`testnet` URLs. Rust selects simulator for `mode: 'demo'` or an empty production REST livenet URL (even for testnet accounts), then selects the requested network. All three selected URLs must be configured or construction rejects with `HyroTrader REST/public/private URLs are not configured`. Raw config takes precedence over explicit `endpoints`; omitting it preserves legacy native/harness explicit endpoints. Application callers keep `extra.hyrotraderMode` and `testnet`; this is no new live-connectivity evidence. |
 | Native private `payloadSigner` refusal | `payloadSigner` is parsed across features. After public-mode derivation, private non-Paradex construction refuses it as `unsupported`/`notSent`, including with a local secret, before HTTP/WS I/O or a signing callback. Public accounts bypass the refusal, including the existing Aster/Lighter payload-only public fallback. Paradex delegated signing and the Bybit/Binance TS factory exceptions remain. |
 | Raw WASM constructor → SDK startup | Registry construction failures throw a JS `Error` with JSON-encoded `venueError` detail. The SDK wraps valid detail in `ExchangeError`, preserving message/classification; `validateAccount()` still reports `kind: 'unsupported'` for the payload-signer refusal. Errors without usable detail retain their original form for older/custom loaders; invalid options JSON remains a plain constructor error. No constructor arguments or application call shapes change. |
+
+#### Host entropy and NX construction (#1624)
+
+Core `Engine::new(venue, Option<Entropy>)` now returns a `Result` and refuses
+`None` with typed `invalidInput`; registry `build` also takes that provider.
+Native `production_entropy()` supplies independent OS-backed identity/signing
+sources, including `FrameServer` construction. Custom Rust hosts must pass a
+provider at construction; native `with_entropy` / `with_signing_entropy` and
+engine setters can replace their respective sources only before startup.
+Direct Rust signing-helper callers also supply entropy explicitly: Lighter
+`Signer` signing/auth methods, Coinbase `Credentials::jwt`/`headers`, and
+Bitunix `sign::headers`. SDK venue adapters already pass signing entropy.
+
+JS `EngineHost` keeps its existing constructor and adds optional fourth-options
+`entropy?: (length: number) => Uint8Array` and independent `signingEntropy?` with
+the same signature. Results must have exactly the requested byte count and are
+copied; malformed or failing callbacks produce typed `invalidInput`. Explicit
+overrides require the matching raw `setEntropy` / `setSigningEntropy` method
+and are installed before start; these methods remain optional on
+`WasmEngineLike`. Identity covers IDs, jitter and host receipt sessions; changing
+identity entropy never seeds signing. Signing retains its engine cryptographic
+source unless explicitly overridden, so deterministic signing fixtures must
+supply their own separate override.
+
+Production JS host identity defaults to `globalThis.crypto.getRandomValues`.
+Raw WASM construction independently binds WebCrypto for both engine sources,
+lazily preferring `globalThis.crypto` before `self`/`window` and accepting only
+callable `getRandomValues`. An empty or throwing shim does not mask a usable
+higher-priority provider. Missing usable constructor-time WebCrypto fails with
+typed `invalidInput`; a later EngineHost override cannot repair an already
+failed raw WASM constructor. There is no weak-random fallback. The SDK's
+`RustEngineExchange` still constructs the raw engine then `EngineHost` with
+only `commandTimeoutMs` in its fourth options (`rust.exchange.ts:863-886`).
+Application/account option shapes therefore remain unchanged.
+
+**Required cutover verification:** confirm secure entropy in every engine-owning
+NX realm and its shipped bundle. These roots use the SDK's secure defaults;
+this source audit does not require redundant app constructor arguments. Keep
+provider functions local to the owning host, outside account JSON and
+worker/hosted messages. Public-only engines also need identity/jitter entropy.
+
+| NX runtime / read-only evidence at `65e086a3c90` | Required integration proof |
+| --- | --- |
+| Dedicated web worker: `apps/web/src/utils/shim/worker/workerFactories.ts:113-115,440-451` → `StoreWorkerEntry.ts:13-25` → SDK store worker/ExchangeWorker → Rust host. WorkerShim fallback invokes the same entry in the window realm (`WorkerShim.ts:13-32`). | Verify WebCrypto in the dedicated worker and window fallback separately. The synthetic `workerSelf` only supplies messaging; adding entropy to that object would not configure the host. |
+| Hosted private/account VWC: `services/exchange-server/src/server.ts:1000-1006,1056-1069` creates an instance and passes it to `storeWebworkerStart`; its constructor (`virtual-worker-context.ts:117-125`) stores instance fields. Separate shared public engine: `public-exchange-manager.ts:74-89` / `public-virtual-worker-context.ts:44-46`. | Verify Bun's actual server realm supplies WebCrypto before both private and public-engine construction, including restarts. A provider attached only to private-account setup would miss the public engine. |
+| Standalone CLI: `apps/cli/src/platform-adapter.ts:59-63,238-251` uses the SDK factory/start path; `scripts/build.sh:69-79` compiles Bun. `bin/tealstreet.cjs:1-8` only launches that binary. | Verify WebCrypto in the compiled Bun binary, which owns the engine, as well as any supported development runtime; the Node launcher is not the engine realm. |
+
+No production global `window`/`self` shim was found in the hosted/CLI roots or
+relevant workspace source inspected. Hosted VWC objects do not define those
+globals; CLI's first import only replaces `globalThis.WebSocket`
+(`apps/cli/src/index.ts:1-4`, `ws-shim.ts:50,69-76`). The empty `window = {}`
+setup is test-only (`packages/safe-cex/config/test/setupVitest.ts:4-8`, selected
+by `vitest.config.ts:17`); no production-root import was found. This is static
+source evidence, not a deployed-binary assertion. #1624's actual-WASM shim
+regressions and SDK/Workers/packaged-loader CI passed, providing SDK-side proof;
+they do not replace the NX shipped-runtime checks above or B1's delivery choice.
 
 #### Capability detection
 
