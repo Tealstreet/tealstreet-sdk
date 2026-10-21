@@ -1389,5 +1389,7 @@ fn a_market_whose_amount_step_overflows_is_malformed_and_holds_its_exposure() {
         "previous snapshot kept"
     );
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+            if message.contains("owned position market unavailable"))));
 }

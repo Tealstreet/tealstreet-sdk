@@ -540,9 +540,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
   doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
-  spot vault signs as vault (TS as master) — confirm; more terminal statuses;
-  `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
-  not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
+  spot vault signs as vault (TS as master) — confirm; ~~more terminal statuses~~
+  (Rust treats every `*Canceled`/`*Rejected` as terminal, a superset of TS);
+  ~~`stopLoss: 0` rejects whole order~~ (0 means no bracket on every market, as
+  TS); ~~signed fees~~ (deliberate: TS `abs` mislabels rebates); ~~unified
+  balance spot slices not populated~~ (spot holdings publish as `coins`;
+  currencies stay unset because TS's `currencies.USDC` is a synthetic sizing
+  slice, not the raw spot row); fills lack execution id, realized PnL and fee
+  (engine `Fill`; claude-i2upd7).
 
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
@@ -552,15 +557,30 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   ~~REST candles with `from`+`limit` return the oldest N instead of newest, no
   1500 cap (`lib.rs:1439`)~~; ~~COIN-M strict batch discards placed ids on a partial
   reject (`trading.rs:397,700`)~~; ~~PM `close: true` with an amount closes the whole
-  position (`trading.rs:1087`)~~; COIN-M unpriced coin excluded from totals
-  (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
+  position (`trading.rs:1087`)~~; ~~COIN-M unpriced coin excluded from totals
+  (TS counts 1:1 — confirm)~~ (deliberate: an unpriced coin waits for a price,
+  then counts $0 with its native amount kept, where TS adds a fabricated $1 per
+  coin; `inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd`); ~~CancelOrders with unknown ids reports success
   without sending (`trading.rs:224`)~~ (explicit errors; see
   [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
   unsupported~~; ~~USD-M journal (`fetchHistoricalPositions`) not wired in the host~~ (folds
   per-symbol fills as TS).
-- Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
-  STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
+- Low: ~~fixed `recvWindow`~~; ~~Binance UI STOP orders amend to stop-market~~
+  (native `STOP`/`TAKE_PROFIT`/`*_LIMIT` stops refuse amend as `unsupported`
+  before any write: re-placing them as `STOP_MARKET` at the old limit price would
+  trigger at a different price).
+- Known risks, kept by decision (overseer, 2026-10-21):
+  - closePosition conflict cancel in batches: `trading.rs` cancels an existing
+    full-position stop for every `PlaceOrders`, batches included, while TS only
+    does so for single `placeOrder` (its batches hit -4130 and keep the old stop).
+    Kept: replacing the stop is what the caller asked for, and parity would change
+    which orders are sent.
+  - PM -2011 plain cancel marks canceled: outside an amendment, a PM -2011 is
+    treated as already gone and silent, where TS shows the error and keeps the
+    row. A cancel on the wrong endpoint or with stale ownership could hide a live
+    order locally until the next snapshot. Kept: changing cancel reconciliation is
+    RISKY without live -2011 evidence; snapshot reconciliation bounds the window.
 - Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
   Native unsupported histories reject; SDK methods expose matching branded Base
   fallbacks. Existing unknown-ID mixed-batch cancellation preflight was reverified.
@@ -626,9 +646,16 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Fixed: a well-formed row of an unsupported type keeps its last known state (or is
   reported as not shown) while other orders commit; malformed rows still preserve
   the whole last-good snapshot. Hyro stays strict.
-- Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
-  breadth; split-lot error handling; classic upnl; inverse reference price;
-  demo key hint, recvWindow, rate limiter; Hyro early pings.
+- Low: ~~OHLCV from+limit~~ (a limit asks for the newest bars up to `to`, as
+  TS); no market refresh (needs an engine refresh command); ~~Hyro market filter;
+  subscription breadth~~ (decided: USDT perpetuals only, Hyro's own rule; foreign
+  categories are dropped by row, bandwidth only); split-lot error handling (RISKY:
+  one unformattable lot rejects the batch before writes, where TS skips
+  that order); ~~classic upnl; inverse reference price~~ (Rust is the
+  same or better: live upnl on every account type, row mark before tickers);
+  demo key hint (open: needs a signed probe of the other host on a 10003);
+  ~~recvWindow~~ (decided: capped at 20 s); rate limiter (RISKY: send timing);
+  Hyro early pings (unproven; check supervisor staleness first).
 - Confirm (TS bugs Rust fixed): spot amount precision, option books socket, spot
   cancel-all groups, spot trailing/full TP/SL endpoint, inverse position-mode
   category, stop with only price, category-filtered private topics,

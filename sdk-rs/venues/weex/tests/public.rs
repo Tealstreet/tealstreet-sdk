@@ -521,6 +521,8 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert!(e.store().market("BTCUSDT").is_some());
         assert!(e.store().market("ETHUSDT").is_none(), "{bad}");
         assert!(e.drain_actions().any(|a| matches!(a,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("ETHUSDT"))));
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+                if message.contains("ETHUSDT"))));
     }
 }
