@@ -418,7 +418,11 @@ impl Blofin {
         if let Some(socket) = self.account.connection.socket.take() {
             cx.close(socket);
         }
-        cx.notice(Level::Error, code::AUTH_REJECTED, &error.message);
+        cx.notice(
+            Level::Error,
+            code::for_startup_error(&error),
+            &error.message,
+        );
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -1431,7 +1435,7 @@ impl Blofin {
             }
             cx.notice(
                 Level::Error,
-                code::AUTH_REJECTED,
+                code::STREAM_UNAVAILABLE,
                 format!("BloFin login rejected: {}", message.code),
             );
             cx.close(socket);

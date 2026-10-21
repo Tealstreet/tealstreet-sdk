@@ -936,7 +936,11 @@ impl Okx {
                 cx.close(socket);
             }
         }
-        cx.notice(Level::Error, code::AUTH_REJECTED, &error.message);
+        cx.notice(
+            Level::Error,
+            code::for_startup_error(&error),
+            &error.message,
+        );
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -1375,7 +1379,7 @@ impl Okx {
                 }
                 cx.notice(
                     Level::Error,
-                    code::AUTH_REJECTED,
+                    code::STREAM_UNAVAILABLE,
                     format!("OKX login {}: {}", message.code, message.msg),
                 );
             }

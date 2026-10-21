@@ -1794,7 +1794,11 @@ impl BybitLinear {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
                 cx.notice(
                     Level::Error,
-                    code::AUTH_REJECTED,
+                    if op == "auth" {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::SUBSCRIPTION_REJECTED
+                    },
                     format!("[WS]{op}:{message}"),
                 );
                 // An unauthenticated socket answers pings but carries no topics.
@@ -2146,7 +2150,7 @@ impl BybitLinear {
                         }
                     }
                     // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.notice(Level::Warn, code::AUTH_REJECTED,
+                    Err(message) => cx.notice(Level::Warn, code::REQUEST_FAILED,
                         format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"),
                     ),
                 }
