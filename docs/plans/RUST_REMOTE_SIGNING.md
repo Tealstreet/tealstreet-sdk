@@ -10,7 +10,7 @@ committed. This doc costs porting remote signing into the engine so that
 decision can be made with numbers. Cutover status lives in
 [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) (B2).
 
-Sources: SDK `origin/feat/rust-rewrite` `193077a0ae`; tealstreet-next
+Sources: SDK `origin/feat/rust-rewrite` `4b8212be36`; tealstreet-next
 `origin/master` `41e538d78d`, read only. **NX** marks tealstreet-next paths.
 
 ## Today
@@ -68,13 +68,18 @@ Sources: SDK `origin/feat/rust-rewrite` `193077a0ae`; tealstreet-next
 - Lighter's `lighterRemoteSigner` is only a read-only flag (no transaction
   signing); Paradex's `remoteSigner` path wraps the transport in TS
   (`paradex.signing.ts`), not the engine.
-- **B2 hedge (#1498, open at this writing).** `runsOnRustEngine` keeps every keyless remote-signed
-  account on the TS venue, and a direct engine refuses it with a clear reason.
-  That keeps every **opt-in** venue working through cutover with no port. It
-  cannot help the 9 **default-Rust** names, whose TS classes are deleted:
-  hosted Coinbase, Coinbase spot and the 6 Orderly brokers fail at startup, and
-  the browser cannot sign for them either (`signingHost` builds a
-  `RustEngineExchange`, which has no `xhr`). TxFlow has no hosted users.
+- **Hosted accounts run TS today (shipped).**
+  - #1498: `runsOnRustEngine` keeps every keyless remote-signed account
+    (`isKeylessRemoteSigned`) on the TS venue; a directly built engine refuses it
+    with `keyless remote-signed accounts run on the TS venue`.
+  - #1505: master's TS Coinbase and Orderly are restored as hosted-signing-only
+    venues (`exchanges/hostedSigningVenues.ts`), loaded for hosted accounts on
+    those default-Rust names; a browser `RustEngineExchange` signs
+    `signHttpRequest`/`signWsAuth` through them.
+  - #1510: a non-Paradex, non-Lighter `payloadSigner` account also stays on TS.
+  - So every hosted account signs exactly as on master, with no
+    tealstreet-next change. TxFlow has no hosted users. The engine never sees a
+    remote signer.
 
 ## Venue signing inventory
 
@@ -176,20 +181,28 @@ signer that is a pure function of the request and a timestamp.
 | lighter | 3+ | tx signing; read-only today on both stacks |
 | **Full port** | **~30-45** | plus a hosted soak on exchange-server |
 
-## Coinbase and Orderly: restore TS vs port first
+## Keep hosted TS vs port signing into the engine
 
-The hedge covers every opt-in venue. Only the default-Rust names need more
-before cutover. Two options:
+For Coinbase and Orderly, option (a) from this doc's first version (#1500)
+shipped as #1505: restore TS Coinbase/Orderly, about 2 days, instead of porting
+those two first at about 9-11. So the decision left is
+whether to replace hosted TS with an engine port, and when.
 
-| | (a) Restore TS Coinbase/Orderly as keyless-only venues | (c) Port remote signing for Coinbase and Orderly first |
-| --- | --- | --- |
-| What | Restore master's TS venue files (their imports all resolve on landing; the `__tests__/reference` copies are not the source, since they carry replay-only patches such as Orderly's ungated broker-suffixed market ids). `createExchange`/`ExchangeWorker` load them for keyless remote-signed accounts on those names through an options-aware loader (`exchanges/hostedSigningVenues.ts`); `RustEngineExchange.signHttpRequest`/`signWsAuth` for those names delegate to a lazily built TS instance, so the browser signs as on master | Shared core (rows 1-2 of the design) plus the Coinbase and Orderly signer splits |
-| tealstreet-next change | none | none |
-| Effort | ~2-2.5 days (React Native unaffected: the 9 names are not offered on mobile) | ~8.5-11 days |
-| Risk | Low: hosted users get master's code path back. Cost: two implementations of these venues until the port or session keys land, and the frozen references must stay separate from the live copies | Moderate: new money-path signing protocol, first shipped on two venues; needs a hosted soak |
-| Thrown away later | All of it, when the engine signs remotely or session keys land | Nothing if the full port proceeds; the shared core is discarded if session keys replace remote signing |
+| | Keep hosted TS (shipped) | Port remote signing into the engine | Server-held session keys |
+| --- | --- | --- | --- |
+| What | Hosted accounts run the TS venue; local accounts run the engine | Shared core plus each hosted venue's signer split (design above) | The server holds a short-lived, scope-limited venue key per session and signs locally on the engine; the browser stops signing |
+| Effort | done; upkeep only | ~6-8 days core + per venue: Orderly 1, Coinbase 1.5-2, simple HMAC families 0.5-1 each, cryptocom/weex/backpack 1-1.5 each, hyperliquid/asterdex v3/grvt/apexomni 2-3 each, lighter 3+; ~30-45 total | not costed here: key issuance/rotation, custody and revocation per venue, plus a consent flow; engine side is close to zero (it already signs locally) |
+| Risk | Two implementations per hosted venue: hosted users run TS while local users run Rust, so fixes land twice and behaviour can drift; every TS venue class with hosted users stays undeletable; Coinbase/Orderly live copies must stay apart from the frozen replay references | New money-path protocol (parked requests, request-integrity check, outcome mapping, re-signing every resend); needs a hosted soak per venue; the browser still holds every secret | Custody: the server holds signing material; venue support for scoped or expiring keys varies, so not every venue can do it |
+| Kept if the plan changes | nothing; deleted on port or session keys | everything if remote signing stays long term; the shared core is thrown away if session keys win | everything; it removes remote signing entirely |
+| Unblocks | cutover now | deleting TS venues for hosted users | deleting TS venues and the remote-signer protocol |
 
-**Recommendation: (a).** It is about a quarter of the cost, restores exactly the
-behaviour hosted Coinbase and Orderly users had on master, and needs no change
-outside the SDK. (c) only pays off if the full port is chosen, which is the
-decision this doc exists to inform; doing (a) now does not prejudice it.
+**Recommendation:**
+- Keep hosted TS through cutover; it costs nothing more and is master's
+  behaviour.
+- Do not start the port until session keys are decided. They are the likely
+  long-term direction, and a port would be largely thrown away if they win.
+- If session keys are rejected, port the shared core first, then venues in
+  order of hosted usage (exchange-server account counts, which this doc does
+  not have). Orderly (1 day) and Coinbase (1.5-2) are the cheapest first
+  venues and retire the restored TS copies.
+- Each ported venue's TS class can be deleted once its hosted soak passes.
