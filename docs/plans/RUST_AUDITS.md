@@ -939,9 +939,15 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Kraken and Orderly~~: current keyed retention/coverage regressions and landed
   row repairs (#1459 `f903d7a9436`, #1493 `67a65e90e23`, #1517 `5c7913062ed`,
   #1524 `b69285f9909`, #1606 `363139a6cc7`) admit valid peers while retaining
-  rejected cached identities. Remaining: ordinary Bybit REST order/position
-  reconciliation and structurally malformed Bybit/Bitget WS order/position
-  arrays can still starve valid peers. Preserve identity/scope holds, settings
+  rejected cached identities. ~~Ordinary Bybit REST and structurally malformed
+  WS order/position rows can starve valid peers~~: bounded parent/symbol coverage
+  retains rejected exposure/protection/Greeks while healthy peers commit; unknown
+  identity holds absence, and ambiguous mode changes retain a coherent symbol.
+  Rejected WS identities protect pending REST joins without globally starving
+  unrelated rows, with coalesced read repair. Regression coverage includes both
+  structural/numeric failures, missing IDs, duplicate keys, option update/close,
+  mode coherence and repeated WS rejects during REST walks. Remaining: Bitget
+  structural WS order/position array rejection. Preserve actual revision/mode
   fences, strict financial execution coverage and Hyro's atomic handshake.
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
