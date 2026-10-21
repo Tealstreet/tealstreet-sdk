@@ -184,3 +184,20 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
   if (typeof venueCode === 'string' && venueCode) result.venueCode = venueCode;
   return Object.keys(result).length ? result : undefined;
 };
+
+/**
+ * Closed-set Sentry tags for a classified failure: kind, its health category,
+ * outcome and the venue's code. Never free text, so tags stay low-cardinality.
+ */
+export const exchangeErrorTags = (value: unknown): Record<string, string> => {
+  if (value === null || typeof value !== 'object') return {};
+  const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
+  const tags: Record<string, string> = {};
+  if (typeof kind === 'string' && KINDS.includes(kind)) {
+    tags.error_kind = kind;
+    tags.error_category = CATEGORIES[kind as ExchangeErrorKind];
+  }
+  if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) tags.error_outcome = outcome;
+  if (typeof venueCode === 'string' && /^[\w.-]{1,32}$/.test(venueCode)) tags.venue_code = venueCode;
+  return tags;
+};
