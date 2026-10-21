@@ -887,7 +887,8 @@ fn fill_details(frame: &[u8]) -> Vec<(u32, f64, f64)> {
             let f = |at: usize| f64::from_le_bytes(frame[at..at + 8].try_into().unwrap());
             return (0..count)
                 .map(|i| {
-                    let id = u32::from_le_bytes(frame[ids + i * 4..ids + i * 4 + 4].try_into().unwrap());
+                    let id =
+                        u32::from_le_bytes(frame[ids + i * 4..ids + i * 4 + 4].try_into().unwrap());
                     (id, f(extras + i * 16), f(extras + i * 16 + 8))
                 })
                 .collect();

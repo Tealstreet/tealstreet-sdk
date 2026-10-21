@@ -323,6 +323,9 @@ async function runRust() {
           amount: executed.rows[i * 2 + 1],
           price: executed.rows[i * 2],
           id: executed.orderId(i),
+          // FILLS revision 2: the venue's execution id and fee, when reported.
+          executionId: executed.fillId?.(i) ?? null,
+          ...(Number.isFinite(executed.details?.[i * 2 + 1]) && { fee: executed.details[i * 2 + 1] }),
         });
       }
     },

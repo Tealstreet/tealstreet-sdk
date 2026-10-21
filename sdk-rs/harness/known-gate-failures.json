@@ -17673,21 +17673,6 @@
       "tape": "sdk-rs/harness/tapes/hyperliquid-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 10 account.fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 9 account.fills[0].executionId"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "checkpoint 7 account.orders[0].clientOrderId"
@@ -17711,25 +17696,6 @@
           "keys": [
             "checkpoint 0 account.positions.length",
             "checkpoint 0 account.positions[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyperliquidspot",
-      "tapeSha256": "178577316af9b4bfb6ac3a120ba6b1eac4e53acca9baff015d57b9a3d0a0b96f",
-      "tape": "sdk-rs/harness/tapes/hyperliquidspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId"
           ]
         }
       ]
@@ -52701,25 +52667,6 @@
             "checkpoint 9 account.flatPositionPnl.length",
             "checkpoint 9 account.flatPositionPnl[0]",
             "checkpoint 9 account.flatPositionPnl[1]"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "hyperliquidspot",
-      "tapeSha256": "3a8228d2b2fca265f48998796e7406a4146bae9b0ea6a247ad8f60448ceec843",
-      "tape": "sdk-rs/harness/tapes/hyperliquidspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId"
           ]
         }
       ]

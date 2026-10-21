@@ -1270,7 +1270,7 @@ mod product_semantics {
             if kind == 11 {
                 assert_eq!(
                     u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
-                    1
+                    2
                 );
                 let data = &frame[at + 8..at + 8 + len];
                 let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
