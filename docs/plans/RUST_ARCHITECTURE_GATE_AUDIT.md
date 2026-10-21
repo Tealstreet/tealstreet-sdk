@@ -68,11 +68,11 @@ roster rows are refreshed using actual first-parent merge receipts.
 | Numeric decoding copies | `engine/src/de.rs`, `num.rs`; #1358 `722e878afb8` | Shared helpers landed. Preserve selected strict/lenient policies. |
 | Socket supervision | `engine/src/socket.rs`; #1350 `d17518bc5f5`, #1385 `6515470afe8`, #1406 `a20f8756519`, #1423 `ed60886b0ba`, #1433 `e923dffa5fc`, #1512 `b49b6f7a236` | Shared supervision/specs landed; protocol authentication remains venue-specific. |
 | Wasm-only registry | `registry/src`, both host factories; #1467 `193077a0ae1`, #1469 `b1f093d2624`, #1476 `0741419bf20`, #1519 `93638524384`, #1520 `418e4f6ebc4` | Shared registry/options/host-clock policy landed. |
-| Bybit model and venue-named features | `engine/src/model.rs` has `BybitBbo`, `bybit_bbo`, tick tolerance; `engine/Cargo.toml` has `command-asterdex`, `command-apexomni`, `command-polymarket`, `command-kucoinspot` | Still coupling debt. Preserve JSON/semantics in a separate engine batch. `command-apexomni` has no Rust cfg consumer; do not infer behavior from feature names. |
+| Bybit model and venue-named features | `engine/src/model.rs` has `BybitBbo`, `bybit_bbo`, tick tolerance; `engine/Cargo.toml` has `command-asterdex`, `command-apexomni`, `command-polymarket`, `command-kucoinspot` | Coupling debt only; owner deferred pure cleanup until after cutover. Preserve JSON/semantics in any later change. `command-apexomni` has no Rust cfg consumer; do not infer behavior from feature names. |
 | Ambient random client IDs | `engine/src/entropy.rs`, `Cx` hooks, host factories, bans; #1624 `0cd8f2b1657` | Explicit identity/signing entropy landed, with typed construction refusal and production cryptographic defaults. |
 | URL encoders | `engine/src/url.rs`; #1368 `e4cdde22cd3` | Shared dialects landed; signed payload spellings remain pinned. |
 | Paging / book stitching | `engine/src/paging.rs`, `book.rs`, `RUST_HISTORY_PAGING.md` | Paging helpers landed with documented exceptions. Shared level storage does not eliminate venue-specific snapshot/sequence/checksum contracts; no production defect follows from their count alone. |
-| Read-key selection / copied probes | `credentials.rs` shares DTO/validation/redaction/erasure only; Binance `signed_request`, KuCoin spot `request`, BloFin `headers`, Bitget `signed_headers` still choose credentials. #1427 `1435005aea3` supplies shared `ProbeVenue` | Selection still needs a shared policy, preserving primary-only exceptions and venue signing. Thirteen secondary-test files keep independent assertions; the copied probe implementation is stale. |
+| Read-key selection / copied probes | `credentials.rs` shares DTO/validation/redaction/erasure only; Binance `signed_request`, KuCoin spot `request`, BloFin `headers`, Bitget `signed_headers` still choose credentials. #1427 `1435005aea3` supplies shared `ProbeVenue` | Selection is duplicated, but no wrong-key defect was established; owner deferred pure deduplication until after cutover. Preserve primary-only exceptions and venue signing. Thirteen secondary-test files keep independent assertions; the copied probe implementation is stale. |
 | Documentation and roster | Retained evidence plus `README.md`; roster PRs #1309 `3acf9e46392`, #1310 `45d7a3fb988`, #1312 `373cc098643`, #1318 `f66bdc26f9a`, #1319 `31ec401f601`, #1393 `cb371229da1` | Owner decided index, not consolidation. #1344 closed unmerged; do not label its entire performance proposal landed. |
 | Manifest/scripts/comments | `sdk-rs/Cargo.toml`, root `package.json`, `.cargo/config.toml` | All 68 Rust scripts' 61 source paths/patterns resolve; 128 KiB matches 131072. No remaining broken-path/comment defect demonstrated. Feature-name debt remains separately open. |
 
@@ -107,11 +107,15 @@ transport receipts, commands and checkpoints stay in repeatability comparisons.
 
 ## Remaining ownership and decisions
 
-- **SDK/engine batches:** share credential selection while preserving GET-only,
-  private/public/write boundaries, primary-only requests, passphrase inheritance
-  and Bitget degraded balances; then address model/feature coupling without
-  changing external JSON, supported controls or computations. New short plans
-  and regressions precede those source changes.
+- **SDK/engine disposition:** no remaining production behavior defect was
+  established in the Architecture findings. Seventeen venue families repeat
+  credential selection, but their existing signing, primary-only exceptions,
+  availability rules, passphrase handling and transport routes are intentional.
+  The owner deferred this pure deduplication and model/feature-name cleanup until
+  after cutover: changing signing across families without demonstrated user
+  benefit is unwarranted. No source batch is scheduled by this audit. A future
+  demonstrated wrong-key or missing-read-key defect requires its own focused
+  regression and review; preserve external JSON, controls and computations.
 - **Harness owner (codex-mxb4mq):** Hyperliquid's normalized nonce/signature and
   absent independent request validator mean its proof is repeatability-only.
   Orderly's existing unstaged mutation ACKs/current command-snapshot visibility

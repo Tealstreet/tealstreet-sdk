@@ -419,7 +419,7 @@ against current code before fixing. Lifecycle differences alone are not defects.
 ## Architecture
 
 Re-verified on `b6cb612bc7c`; item-by-item source/merge evidence and remaining
-batches are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AUDIT.md).
+dispositions are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AUDIT.md).
 
 - ~~Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.~~
   Shared strict/lenient numeric helpers landed in #1358 (`722e878afb8`);
@@ -435,7 +435,8 @@ batches are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AUDIT.m
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
   **Still present:** `BybitBbo`, BBO/tick-tolerance placement fields and four
   venue-named command features. This is coupling/cleanup debt, not evidence of
-  incorrect routing. A cleanup must preserve existing JSON and trading rules.
+  incorrect routing. **Owner decision:** park pure cleanup until after cutover;
+  any later change must preserve existing JSON and trading rules.
 - ~~Client ids use OS randomness in the deterministic core (`crypto/src/uuid.rs`).~~
   Host-owned identity and separate signing entropy now enter through `Engine`/`Cx`;
   production hosts bind OS/WebCrypto and replay hosts inject tape-derived identity.
@@ -454,7 +455,9 @@ batches are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AUDIT.m
   private/write boundaries, passphrase inheritance and Bitget's degraded-balance
   primary-key exception when sharing it. ~~Copied per-venue test probes~~ were
   replaced by `engine::test_support::ProbeVenue` in #1427 (`1435005aea3`);
-  13 secondary-test files retain venue-specific assertions.
+  13 secondary-test files retain venue-specific assertions. **Owner decision:**
+  park selection deduplication until after cutover; this re-audit established no
+  wrong-key or missing-read-key production defect.
 - ~~`docs/plans` has 47 files; collapse the evidence documents; roster stale.~~
   **Owner decision:** retain the documents and use the single
   [topic/status/read-trigger/file index](README.md). The old in-progress port
