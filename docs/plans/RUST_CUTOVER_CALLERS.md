@@ -141,6 +141,8 @@ are documented separately below.
 The rejected-row follow-up checks #1603 at `7fcd7193fe1`; Orderly margin-mode
 row isolation checks #1606 at `363139a6cc7`. Neither adds a caller API or wire
 revision; the observable retention and diagnostic rules are recorded below.
+The Bybit discovery-limit follow-up checks #1608 at `f55918d236b`, with its
+startup cooldown changes separated from private reads and writes.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -201,6 +203,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1604 / `0d4f17a1b` | BingX revision/query-generation races and reads issued during pending settings writes fence stale store publication while returning usable cached buy/sell rails, with validated-read fallback independently per missing rail. Overlap alone no longer fails the read or causes `null`; genuine read failures remain possible. Current reads retain atomic leverage/margin publication; caller APIs and write retry behavior stay unchanged. |
 | #1603 / `7fcd7193f` | Migrated Binance, Coinbase and WEEX snapshot order-rejection paths and Kraken Futures order skips (Kraken spot unchanged), plus Coinbase spot holding skips emit `row.skipped` at Error when no stored copy is retained, Warn when one is kept. Bounded identity caches suppress repeats but allow a prior Warn to escalate when its retained copy is lost; mapping/clean reads re-arm reporting. Store retention and caller shapes stay unchanged. |
 | #1606 / `363139a6c` | Orderly margin-mode lists retain a rejected symbol's old default while valid peers commit; an unidentified row protects the old defaults scope. Clean empty lists still clear, structural failures and settings-revision fences still hold, and this path emits Warn-level `row.skipped`. No new caller shape. |
+| #1608 / `f55918d23` | Bybit discovery retains typed HTTP-200 `retCode: 10006` evidence and headers, including missing-list error envelopes, and delays retries using the later usable reset/Retry-After hint and existing deadline. Missing hints fall back to 10 s; hints are bounded by the shared 1 h cap and HTTP403 keeps its 10 min floor. Already-waiting categories are extended without extra attempts. No new caller API or private/write retry behavior. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -493,6 +496,23 @@ notices, including when no old default exists; it does not adopt #1603's
 Error-without-retention policy. Callers keep their APIs and can see valid peer
 margin defaults refresh while retaining the previous value of a symbol whose
 row was rejected.
+
+#### Bybit discovery cooldowns (#1608)
+
+Markets, tickers and option-seed discovery honor HTTP-200 `retCode: 10006`
+with or without a result list. A finite future `X-Bapi-Limit-Reset-Timestamp`
+(epoch milliseconds) and `Retry-After` extend the cooldown using the later
+usable hint; no usable hint falls back to 10 s. Hints are bounded by the shared
+1 h cap, HTTP403 retains its 10 min floor, and a shorter later hint cannot
+shorten an existing window. A reset header on success or an unrelated business
+error does not create this pause.
+
+The shared discovery deadline extends already-waiting category retries without
+increasing their attempt count or creating retries for idle categories. Callers
+can observe a longer wait for discovery readiness; existing host readiness
+limits still apply. Optional-product degradation, other stream errors, private
+reads and writes retain their handling. This adds no caller argument or new
+transport-wide/write retry gate.
 
 #### Events and worker protocol
 
