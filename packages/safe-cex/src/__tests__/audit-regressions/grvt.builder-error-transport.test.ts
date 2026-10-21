@@ -21,7 +21,10 @@ for (const [name, clone] of [
   ['structured clone', (value: StoreWorkerPayload) => structuredClone(value)],
   ['hosted JSON', (value: StoreWorkerPayload) => JSON.parse(JSON.stringify(value)) as StoreWorkerPayload],
 ] as const) {
-  it(`preserves native GRVT builder details through worker sender and matching ${name} receiver`, async () => {
+  it.each([
+    approval,
+    { code: 'GRVT_BUILDER_UNAUTHORIZED', reason: 'unauthorized', requiredRaw: 300 },
+  ])(`preserves $reason through worker sender and matching ${name} receiver`, async (approval) => {
     const main = new RustEngineExchange('grvt', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
     exchanges.push(main);
     // Deliberately plain Error: worker protocol must not depend on a JS prototype.
@@ -64,6 +67,7 @@ for (const [name, clone] of [
     expect(error).toBeInstanceOf(Error);
     expect(error).toMatchObject({ ...approval, kind: 'invalidInput', outcome: 'notSent', errorReported: true });
     expect(error).not.toHaveProperty('cause');
+    if (approval.reason === 'unauthorized') expect(error).not.toHaveProperty('authorizedRaw');
     expect(replies).toHaveLength(1);
     expect(replies[0].data).toMatchObject({ requestId: expect.any(String), success: false, result: approval });
   });

@@ -47,6 +47,6 @@ allow behavior. Exact native JSON keeps ordinary-error and legacy text intact.
 
 Focused engine/GRVT/Binance tests pass (667 tests across 39 targets including
 zero-test doc targets); the shared host suite passes 146 tests and SDK error/RPC
-suites pass 42 tests. Typecheck passes. CI must still check the full dependency
+suites pass 44 tests. Typecheck passes. CI must still check the full dependency
 matrix, compiled transports, replay/timing and fixed WASM budgets before merge.
 No local release WASM build or NX runtime test supplies these claims.
