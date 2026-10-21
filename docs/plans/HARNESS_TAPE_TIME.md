@@ -479,7 +479,10 @@ tie tests. Polling venues already qualify; add no new clock implementation.
 Clarify only the selected nine-key WEEX client-ID reason: current raw rows show
 TS null while Rust retains the recorded caller ID for the same order ID.
 Verify all nine paths and row identities in fresh five-pair evidence; preserve
-the tape SHA, all132 private keys and every other declaration/reason. No
+the tape SHA and all unrelated declarations/reasons. The overseer explicitly
+expanded this final PR to prune exactly20 stale WEEX fee keys: current CI and
+all five local pairs show Rust matching TS fees0.01/0.02. Preserve the other112
+keys and record current-head CI confirmation before merge. No
 production, fixture, normalization, validator, comparator or entropy change.
 Use the existing WEEX sweep branch for five private pairs, compare all ten
 complete outputs excluding only measured metrics, and require both mandatory

@@ -26,8 +26,21 @@ const weexTape = () => {
 };
 const ids = (response) => JSON.parse(response.body).map((row) => row.orderId ?? row.algoId);
 
-test('WEEX, ApeX Omni, Paradex and KuCoin private replays run on the virtual tape clock', () => {
-  for (const name of ['weex', 'apexomni', 'paradex', 'kucoin']) assert.equal(deterministicReplay(VENUES[name], true), true, name);
+test('all 50 covered venue configurations use deterministic private replay clocks', () => {
+  const covered = [
+    'apexomni', 'asterdex', 'backpack', 'binance', 'binanceinverse',
+    'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
+    'bitgetusdc', 'bitrue', 'bitunix', 'blofin', 'breakoutprop',
+    'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'coinbase',
+    'coinbasespot', 'cryptocom', 'grvt', 'hyperliquid', 'hyperliquidspot',
+    'hyrotrader', 'kodiakfi', 'kraken', 'krakenspot', 'kucoin',
+    'kucoinspot', 'lighter', 'lighter-robinhood', 'mexc', 'mode',
+    'okx', 'okxdemo', 'okxeu', 'okxeudemo', 'orderly',
+    'paradex', 'phemex', 'polymarket', 'salsadex', 'tealstreet-dex',
+    'txflow', 'weex', 'what', 'woo', 'woofi',
+  ];
+  assert.deepEqual(Object.keys(VENUES).sort(), covered);
+  for (const name of covered) assert.equal(deterministicReplay(VENUES[name], true), true, name);
 });
 
 test('a WEEX order snapshot is served only after its command write is acknowledged', () => {
