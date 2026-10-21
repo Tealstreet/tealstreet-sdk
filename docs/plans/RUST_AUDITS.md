@@ -761,8 +761,12 @@ TxFlow loses nothing (master TS was a placeholder).
   attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
-- Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
-  5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
+- Low: leverage sent as `10.0` (RISKY, `num::whole`); ~~fill without `matchPrice`
+  dropped~~ (fills at the order price, as TS); spot polls 5 s vs 500 ms (kept:
+  10× the REST load needs live rate-limit evidence); ~~per-symbol cancel-all~~
+  (stale: symbol cancels use `?symbol=` and cancel-all is one native call, as
+  TS); ~~partial balance rows ignored~~ (missing `orderMargin`/`unrealisedPNL` read
+  as zero; equity and free stay required).
 - Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
   keeping trigger type and post-only, standalone stop client id, open-order
   paging, spot partial snapshot, swallowed cancel errors.
