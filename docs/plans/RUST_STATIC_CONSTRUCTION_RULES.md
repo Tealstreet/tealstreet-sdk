@@ -21,3 +21,10 @@ The CI WASM fingerprint now includes the shared JSON, which is a real Rust build
 input. The added dirty/committed-input regression failed against the old input
 list. Independent review found no behavior changes. Optimized size savings and
 the existing compiled TS/Rust parity matrix are gated by fresh CI artifacts.
+
+CI run39588823047 measured the Bybit family at1,277,533 bytes, SHA256
+`e824d59f61c1f66620591607c632102a5f00d93626059807d539a2faf6d37df4`.
+That is31,464 bytes smaller than landing389's1,308,997 bytes, with65,955
+bytes remaining under the unchanged1,343,488-byte budget. Bybit replay passed.
+The local compiled parity matrix requires a generated combined WASM package,
+which is unavailable locally; fresh combined-engine CI runs it unchanged.
