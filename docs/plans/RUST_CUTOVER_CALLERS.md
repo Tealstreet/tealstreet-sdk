@@ -1369,3 +1369,11 @@ cached settings until authoritative confirmation. No write is replayed and no
 unconfirmed success is returned. Caller method signatures and quantities remain
 unchanged; native algo reduce-only defaults and protective trigger semantics stay
 as documented.
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.
