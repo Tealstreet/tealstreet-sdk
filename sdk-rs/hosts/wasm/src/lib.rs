@@ -39,7 +39,7 @@ compile_error!(
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, Health, LogLevel, Notice, RequestId, SocketId, TimerId, Value, Venue,
+    Action, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -170,10 +170,6 @@ enum ActionOut<'a> {
     },
     ClearTimer {
         timer: u32,
-    },
-    Log {
-        level: &'static str,
-        message: &'a str,
     },
     Event {
         level: &'static str,
@@ -315,14 +311,6 @@ fn encode(actions: &[Action]) -> String {
             Action::Notice(Notice::StartupFailed { error }) => {
                 ActionOut::StartupFailed { detail: error }
             }
-            Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
-                level: match level {
-                    LogLevel::Info => "info",
-                    LogLevel::Warning => "warning",
-                    LogLevel::Error => "error",
-                },
-                message,
-            },
             Action::Notice(Notice::Event(event)) => ActionOut::Event {
                 level: event.level.as_str(),
                 code: event.code,

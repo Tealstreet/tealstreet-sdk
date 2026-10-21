@@ -1,7 +1,5 @@
 //! Payload shapes: https://exchange-developer.crypto.com/exchange/v1/
-use safe_cex_engine::{
-    Action, Command, Engine, Event, LogLevel, Notice, RequestId, Response, SocketId,
-};
+use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 
 fn answer(engine: &mut Engine<Cryptocom>, body: &str) {
@@ -295,11 +293,7 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log {
-                level: LogLevel::Warning,
-                message,
-            })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 level: safe_cex_engine::Level::Warn,
                 message,
                 ..
@@ -333,7 +327,7 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("instrument")
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("instrument")
     )));
 
     let mut engine = Engine::new(Cryptocom::new(Options {
@@ -358,6 +352,6 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
     );
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("ticker")
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("ticker")
     )));
 }

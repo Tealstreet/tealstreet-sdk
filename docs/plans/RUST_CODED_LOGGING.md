@@ -7,7 +7,7 @@ Landing: `feat/rust-rewrite`. No deployment or tealstreet-next edits.
    code-based health classification and authoritative `getHealth()` snapshots.
    Keep text classification as the legacy TS fallback. Record downstream callers
    and deployment ordering in RUST_CUTOVER_CALLERS.md.
-2. PR6, after PR5 merges: migrate remaining engine log sites to stable codes,
+2. PR6 (merge after PR5): migrate remaining engine log sites to stable codes,
    delete Cx::log, LogLevel and Notice::Log, and update host protocols and tests.
 
 For each PR: focused regression tests (including changed text, misleading auth

@@ -7,7 +7,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -20,14 +20,14 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: String,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.notice(Level::from(level), code::ROW_SKIPPED, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 /// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped keys.
@@ -1306,11 +1306,7 @@ impl Coinbase {
                                         .to_owned(),
                                 ),
                             };
-                            let level = if stored {
-                                LogLevel::Warning
-                            } else {
-                                LogLevel::Error
-                            };
+                            let level = if stored { Level::Warn } else { Level::Error };
                             let key = format!("position:{}", symbol.as_deref().unwrap_or(""));
                             log_skip(cx, &mut self.account.skip_logged, key, level, message);
                             rows.reject(symbol);
@@ -1332,19 +1328,13 @@ impl Coinbase {
                             let logged = &mut self.account.skip_logged;
                             let Some((id, symbol)) = skipped_row(cx.store, text) else {
                                 let message = "Coinbase skipped unmappable order without an id";
-                                log_skip(cx, logged, "order:".into(), LogLevel::Warning, message);
+                                log_skip(cx, logged, "order:".into(), Level::Warn, message);
                                 s.unidentified = true;
                                 return Ok(());
                             };
                             let message =
                                 format!("Coinbase skipped unmappable order {id}: {error}");
-                            log_skip(
-                                cx,
-                                logged,
-                                format!("order:{id}"),
-                                LogLevel::Warning,
-                                message,
-                            );
+                            log_skip(cx, logged, format!("order:{id}"), Level::Warn, message);
                             s.skipped.insert(id, symbol);
                             return Ok(());
                         }
@@ -1802,7 +1792,7 @@ impl Coinbase {
                                 cx,
                                 &mut self.account.skip_logged,
                                 "holding:".into(),
-                                LogLevel::Warning,
+                                Level::Warn,
                                 "Coinbase skipped spot holding without an asset",
                             );
                             coins.reject(None);
@@ -1819,7 +1809,7 @@ impl Coinbase {
                                 cx,
                                 &mut self.account.skip_logged,
                                 format!("holding:{}", b.asset),
-                                LogLevel::Warning,
+                                Level::Warn,
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
                             );
                             coins.reject(Some(b.asset));
@@ -2241,7 +2231,7 @@ impl Coinbase {
                                     cx,
                                     &mut self.account.skip_logged,
                                     format!("order:{id}"),
-                                    LogLevel::Warning,
+                                    Level::Warn,
                                     format!("Coinbase skipped unmappable order {id}: {error}"),
                                 );
                                 s.skipped.insert(id, symbol);

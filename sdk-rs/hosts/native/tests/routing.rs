@@ -1703,7 +1703,7 @@ async fn routed_signed_network_notices(
     tokio::time::timeout(Duration::from_secs(3), async {
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
-            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Startup read failed; retry scheduled");
+            startup_failed |= matches!(&notice, Notice::Event(safe_cex_engine::LogEvent { message, ..}) if message == "Startup read failed; retry scheduled");
             command_failed |= matches!(&notice, Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }
@@ -1717,7 +1717,6 @@ async fn routed_signed_network_notices(
     for notice in &collected {
         let rendered = format!("{notice:?}");
         let payload = match notice {
-            Notice::Log { message, .. } => message.clone(),
             Notice::Event(event) => event.message.clone(),
             Notice::CommandDone { result, .. } => result.clone(),
             Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {

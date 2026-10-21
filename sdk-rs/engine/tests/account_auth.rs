@@ -1,10 +1,21 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{
-    AccountReadScope, Action, AuthOutcome, Command, CredentialSlot, Cx, Engine, Event, LogLevel,
-    Method, Notice, PayloadSignRequest, RequestId, Response, SignatureTarget, SocketId, TimerId,
-    Venue,
+    AccountReadScope, Action, AuthOutcome, Command, CredentialSlot, Cx, Engine, Event, Level,
+    LogEvent, Method, Notice, PayloadSignRequest, RequestId, Response, SignatureTarget, SocketId,
+    TimerId, Venue,
 };
+
+/// Diagnostic the fixture venue emits so tests can see which callback ran.
+const MARKER: &str = "test.marker";
+fn marker(level: Level, message: &str) -> Action {
+    Action::Notice(Notice::Event(LogEvent {
+        level,
+        code: MARKER,
+        message: message.into(),
+        fields: Vec::new(),
+    }))
+}
 
 struct AccountReads {
     streamed: bool,
@@ -81,13 +92,13 @@ impl Venue for AccountReads {
         *count += 1;
     }
     fn on_response(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
-        cx.log(LogLevel::Info, format!("response:{count}"));
+        cx.notice(Level::Info, MARKER, format!("response:{count}"));
     }
     fn on_stream_error(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
-        cx.log(LogLevel::Warning, format!("missing:{count}"));
+        cx.notice(Level::Warn, MARKER, format!("missing:{count}"));
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, usize>, _: usize, _: &str) {
-        cx.log(LogLevel::Error, "failed");
+        cx.notice(Level::Error, MARKER, "failed");
     }
     fn on_open(&mut self, _: &mut Cx<'_, usize>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, usize>, _: SocketId, _: &str) {}
@@ -147,13 +158,7 @@ fn buffered_evidence_is_attributed_and_precedes_unchanged_response_once() {
         let mut engine = engine(false, true, false);
         assert_eq!(
             complete(&mut engine, status, body),
-            vec![
-                evidence(verdict),
-                Action::Notice(Notice::Log {
-                    level: LogLevel::Info,
-                    message: "response:0".into()
-                })
-            ]
+            vec![evidence(verdict), marker(Level::Info, "response:0")]
         );
         assert!(complete(&mut engine, status, body).is_empty());
     }
@@ -193,10 +198,7 @@ fn streamed_rows_preserve_context_until_final_envelope() {
         engine.drain_actions().collect::<Vec<_>>(),
         vec![
             evidence(AuthOutcome::Accepted),
-            Action::Notice(Notice::Log {
-                level: LogLevel::Info,
-                message: "response:2".into()
-            })
+            marker(Level::Info, "response:2")
         ]
     );
 }
@@ -210,10 +212,7 @@ fn missing_stream_list_can_reject_but_cannot_report_recovery() {
         if !accepted {
             expected.push(evidence(AuthOutcome::Rejected));
         }
-        expected.push(Action::Notice(Notice::Log {
-            level: LogLevel::Warning,
-            message: "missing:0".into(),
-        }));
+        expected.push(marker(Level::Warn, "missing:0"));
         assert_eq!(actions, expected);
     }
 }
@@ -287,10 +286,7 @@ fn transport_and_sign_failure_drain_context_without_credential_evidence() {
         engine.handle(1., event);
         assert_eq!(
             engine.drain_actions().collect::<Vec<_>>(),
-            vec![Action::Notice(Notice::Log {
-                level: LogLevel::Error,
-                message: "failed".into()
-            })]
+            vec![marker(Level::Error, "failed")]
         );
         assert!(complete(&mut engine, 401, "").is_empty());
     }
@@ -322,10 +318,7 @@ fn invalid_utf8_buffer_cannot_report_http_status_auth() {
     );
     assert_eq!(
         engine.drain_actions().collect::<Vec<_>>(),
-        vec![Action::Notice(Notice::Log {
-            level: LogLevel::Error,
-            message: "failed".into()
-        })]
+        vec![marker(Level::Error, "failed")]
     );
 }
 
@@ -366,7 +359,7 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
             usize::from(accepted)
         );
         assert!(
-            matches!(actions.last(), Some(Action::Notice(Notice::Log { level: LogLevel::Info, message })) if message == "response:0")
+            matches!(actions.last(), Some(Action::Notice(Notice::Event(event))) if event.level == Level::Info && event.message == "response:0")
         );
     }
 }

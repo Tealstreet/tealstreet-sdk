@@ -772,7 +772,7 @@ fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
         } | Action::Http(_)
     )));
     assert!(actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("passphrase"))
+        |a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("passphrase"))
     ));
 }
 

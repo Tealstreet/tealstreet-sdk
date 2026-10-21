@@ -1,8 +1,8 @@
 //! Drives a Binance engine through scripted responses and frames.
 #![allow(dead_code)]
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, PublicFeedPolicy, RequestId,
-    Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, RequestId, Response,
+    SocketId, TimerId,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options};
 
@@ -23,7 +23,7 @@ pub struct Harness {
     /// Structured detail of failed commands.
     pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
     pub logs: Vec<String>,
-    /// Logs at `LogLevel::Error`, also present in `logs`.
+    /// Logs at `Level::Error`, also present in `logs`.
     pub errors: Vec<String>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
@@ -123,12 +123,6 @@ impl Harness {
                 }
                 Action::Notice(Notice::StartupFailed { error }) => {
                     panic!("unexpected Binance startup failure: {error}")
-                }
-                Action::Notice(Notice::Log { level, message }) => {
-                    if level == LogLevel::Error {
-                        self.errors.push(message.clone());
-                    }
-                    self.logs.push(message)
                 }
                 Action::Notice(Notice::Event(event)) => {
                     if event.level == safe_cex_engine::Level::Error {
