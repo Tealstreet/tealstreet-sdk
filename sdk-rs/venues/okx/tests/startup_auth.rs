@@ -77,6 +77,17 @@ impl Rig {
 }
 
 fn respond(engine: &mut Engine<Okx>, action: &Action, status: u16, body: &str, now: f64) {
+    respond_with(engine, action, status, "", body, now);
+}
+
+fn respond_with(
+    engine: &mut Engine<Okx>,
+    action: &Action,
+    status: u16,
+    headers: &str,
+    body: &str,
+    now: f64,
+) {
     let Action::Http(r) = action else {
         panic!("expected request")
     };
@@ -86,7 +97,7 @@ fn respond(engine: &mut Engine<Okx>, action: &Action, status: u16, body: &str, n
             request: r.id,
             response: Response {
                 status,
-                headers: "",
+                headers,
                 body,
             },
         },
@@ -118,7 +129,7 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
     let mut rig = Rig::default();
     let mut config = to_config(&mut engine, &mut rig);
     let failures: [(u16, &str); 7] = [
-        (429, "Too Many Requests"),
+        (500, "Internal Server Error"),
         (
             503,
             r#"{"code":"50001","msg":"Service temporarily unavailable","data":[]}"#,
@@ -370,4 +381,35 @@ fn transient_socket_login_failure_reconnects() {
         .is_some()
     );
     assert!(rig.failures.is_empty());
+}
+
+#[test]
+fn rate_limited_config_read_waits_out_the_rate_limit_window() {
+    // OKX's default matches its discovery pause; Retry-After overrides it.
+    for (status, headers, wait) in [
+        (429, "Retry-After: 120", 120_000.),
+        (418, "", 10_000.),
+        (429, "", 10_000.),
+    ] {
+        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut rig = Rig::default();
+        let config = to_config(&mut engine, &mut rig);
+        respond_with(
+            &mut engine,
+            &config,
+            status,
+            headers,
+            "Too Many Requests",
+            1.,
+        );
+        let mut early = rig.take(&mut engine);
+        early.extend(rig.run(&mut engine, wait));
+        assert!(
+            !early.iter().any(is_config),
+            "{status} {headers:?}: retried early"
+        );
+        let (at, _) = rig.until(&mut engine, is_config).expect("config retried");
+        assert_eq!(at, 1. + wait, "{status} {headers:?}");
+        assert!(rig.failures.is_empty());
+    }
 }

@@ -511,6 +511,32 @@ test('credential deactivation is an explicit host event', () => {
   assert.equal(deactivated, 1);
 });
 
+test('structured events reach onEvent, or onLog as legacy levels without Debug', () => {
+  const actions = JSON.stringify([
+    { op: 'event', level: 'debug', code: 'ws.closed', message: 'WebSocket closed', fields: { socket: 1 } },
+    { op: 'event', level: 'warn', code: 'ws.reconnect', message: 'reconnecting' },
+    { op: 'event', level: 'error', code: 'auth.rejected', message: 'rejected', fields: { key: '[redacted]' } },
+  ]);
+  const events = [];
+  new EngineHost({ start: () => actions }, { now: () => 1 }, { onEvent: (event) => events.push(event), onLog: () => assert.fail('onEvent wins') }).start();
+  assert.deepEqual(events, [
+    { level: 'debug', code: 'ws.closed', message: 'WebSocket closed', fields: { socket: 1 } },
+    { level: 'warn', code: 'ws.reconnect', message: 'reconnecting', fields: {} },
+    { level: 'error', code: 'auth.rejected', message: 'rejected', fields: { key: '[redacted]' } },
+  ]);
+  const logs = [];
+  new EngineHost({ start: () => actions }, { now: () => 1 }, { onLog: (level, message) => logs.push([level, message]) }).start();
+  assert.deepEqual(logs, [['warning', 'reconnecting'], ['error', 'rejected']]);
+});
+
+test('health counters are parsed from the engine and unavailable after disposal', () => {
+  const host = new EngineHost({ health: () => '{"wsOpened":2,"httpFailures":1}' }, { now: () => 1 });
+  assert.deepEqual(host.health(), { wsOpened: 2, httpFailures: 1 });
+  assert.equal(new EngineHost({}, {}).health(), undefined);
+  host.dispose();
+  assert.throws(() => host.health(), /engine disposed/);
+});
+
 test('a terminal startup failure reaches the host with its structured detail', () => {
   const failures = [];
   const detail = { message: 'Bybit rejected the API key (10003): API key is invalid.', kind: 'authInvalid', venueCode: '10003' };
@@ -958,4 +984,68 @@ test('a classified failure settles as an ExchangeError with its detail and the l
   assert.equal(error.partialOrderCount, 1);
   assert.equal(error.totalOrderCount, 2);
   assert.equal(error.failedOrderIndex, 1);
+});
+
+test('socket health tracks open, first frame and every close path per channel without per-frame callbacks', () => {
+  const sockets = [];
+  const closes = [];
+  const engine = {
+    start: () => JSON.stringify([
+      { op: 'wsConnect', socket: 1, url: 'wss://p', channel: 'private' },
+      { op: 'wsConnect', socket: 2, url: 'wss://q', channel: 'public' },
+      { op: 'wsConnect', socket: 3, url: 'wss://r' },
+    ]),
+    wsOpen: () => '',
+    wsMessage: (socket, text) => (text === 'drop' ? JSON.stringify([{ op: 'wsClose', socket }]) : ''),
+    wsClose: (socket, code) => { closes.push([socket, code]); return ''; },
+  };
+  let changes = 0;
+  const host = new EngineHost(engine, {
+    now: () => 1,
+    connect: (url, handlers) => {
+      const socket = { url, handlers, closed: false, close() { socket.closed = true; } };
+      sockets.push(socket);
+      return socket;
+    },
+  }, { onSocketChange: () => { changes++; } });
+  host.start();
+  const [privateSocket, publicSocket, unlabelled] = sockets;
+  privateSocket.handlers.onOpen();
+  privateSocket.handlers.onMessage('a');
+  privateSocket.handlers.onMessage('b');
+  privateSocket.handlers.onMessage('c');
+  assert.equal(changes, 2, 'open and first frame notify; later frames do not');
+  assert.equal(host.socketHealth().private.open, 1);
+  assert.equal(host.socketHealth().private.initialized, 1);
+  assert.ok(host.socketHealth().private.lastReceived > 0);
+
+  // A connect still in flight is left alone, as in TS.
+  publicSocket.handlers.onOpen();
+  assert.equal(host.reconnectSockets('public'), 1);
+  assert.equal(host.reconnectSockets('public'), 0);
+  assert.equal(unlabelled.closed, false);
+  assert.deepEqual(closes, [[2, 1006]]);
+  assert.equal(publicSocket.closed, true);
+  // The transport's own late close event is not counted twice.
+  publicSocket.handlers.onClose(1000);
+  assert.deepEqual(host.socketHealth().public, {
+    open: 0, initialized: 0, lastReceived: 0, lastCloseCode: 1006, lastCloseAt: host.socketHealth().public.lastCloseAt,
+    closes: 1, closeStreak: 1,
+  });
+
+  // An engine-initiated close and a frame from the closed socket.
+  privateSocket.handlers.onMessage('drop');
+  privateSocket.handlers.onMessage('late');
+  assert.equal(host.socketHealth().private.lastCloseCode, 1000);
+  assert.equal(host.socketHealth().private.initialized, 0);
+  assert.equal(host.socketHealth().private.open, 0);
+
+  // Sockets without an engine role count as public, like the transport's default.
+  unlabelled.handlers.onOpen();
+  unlabelled.handlers.onClose(4001);
+  assert.equal(host.socketHealth().public.lastCloseCode, 4001);
+  assert.equal(host.socketHealth().public.closes, 2);
+  assert.equal(host.socketHealth().business.closes, 0);
+  host.dispose();
+  assert.equal(host.reconnectSockets(), 0);
 });

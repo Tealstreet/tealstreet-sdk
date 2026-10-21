@@ -578,7 +578,7 @@ impl ApexOmni {
         cx.store.set_hedged(true);
         self.connect_private(cx);
         self.refresh_account(cx);
-        self.account.tick = Some(cx.set_timer(self.tick_interval()));
+        self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
     }
 
     fn tick_interval(&self) -> f64 {
@@ -597,13 +597,15 @@ impl ApexOmni {
         self.account.generation += 1;
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            format!(
-                "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                cx.now as u64, self.account.generation
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
+                    cx.now as u64, self.account.generation
+                ))
+                .channel(SocketChannel::Private),
             ),
-            SocketChannel::Private,
-        ));
+        );
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -670,7 +672,7 @@ impl ApexOmni {
         if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.refresh_account(cx);
-            self.account.tick = Some(cx.set_timer(self.tick_interval()));
+            self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
             return true;
         }
         if self.account.orders_heal == Some(timer) {

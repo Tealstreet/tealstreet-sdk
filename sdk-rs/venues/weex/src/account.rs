@@ -288,11 +288,13 @@ impl WeexFutures {
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials {
-            self.account.socket = Some(cx.connect_with_headers_channel(
-                PRIVATE_WS,
-                credentials.ws_headers(cx.now),
-                safe_cex_engine::SocketChannel::Private,
-            ));
+            self.account.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(PRIVATE_WS)
+                        .headers(credentials.ws_headers(cx.now))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                ),
+            );
             self.account.supervisor.connecting(cx);
         }
     }
@@ -667,10 +669,18 @@ impl WeexFutures {
             } else {
                 self.account.failures = 0;
             }
-            let delay = Backoff::new(2_000.0, 5, 60_000.0)
-                .delay(self.account.failures)
-                .max(self.paused_until - cx.now);
-            self.account.refresh = Some(cx.set_timer(delay));
+            let not_before_ms = self.paused_until.max(if self.account.failed {
+                cx.now + Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.failures)
+            } else {
+                f64::NEG_INFINITY
+            });
+            self.account.refresh = Some(cx.set_poll_timer_with_bounds(
+                2_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms,
+                    ..Default::default()
+                },
+            ));
         }
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {

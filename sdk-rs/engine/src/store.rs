@@ -44,6 +44,7 @@ pub struct Store {
     loaded: Loaded,
     latency: f64,
     changes: Changes,
+    rejected_empty_catalogue: bool,
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
     dirty_tickers: Vec<u32>,
@@ -156,7 +157,14 @@ impl Store {
             .map(|&index| &self.markets[index as usize])
     }
 
+    /// An empty catalogue is never authoritative: a venue outage can answer an
+    /// empty list, which would otherwise mark markets loaded and wipe the
+    /// previous catalogue. The engine reports each rejection as a warning.
     pub fn set_markets(&mut self, markets: Vec<Market>) {
+        if markets.is_empty() {
+            self.rejected_empty_catalogue = true;
+            return;
+        }
         let reindexed = self.markets.len() != markets.len()
             || self
                 .markets
@@ -194,6 +202,14 @@ impl Store {
             self.changes.settings |= !self.settings.is_empty();
         }
         self.set_loaded(|loaded| loaded.markets = true);
+    }
+
+    pub(crate) fn take_rejected_empty_catalogue(&mut self) -> bool {
+        std::mem::take(&mut self.rejected_empty_catalogue)
+    }
+
+    pub(crate) fn rejected_empty_catalogue(&self) -> bool {
+        self.rejected_empty_catalogue
     }
 
     pub(crate) fn markets_pending(&self) -> bool {
@@ -656,6 +672,23 @@ impl Store {
                 balance: true,
                 settings: true,
                 status: true,
+            },
+            ticker_deltas: Vec::new(),
+        }
+    }
+
+    /// Full private state, including an unflushed catalog needed for its indexes.
+    /// Change tracking and public events are left alone.
+    pub fn account_snapshot(&self) -> Pending {
+        Pending {
+            changes: Changes {
+                markets: self.changes.markets,
+                orders: true,
+                positions: true,
+                balance: true,
+                settings: true,
+                status: true,
+                ..Changes::default()
             },
             ticker_deltas: Vec::new(),
         }
@@ -1342,6 +1375,31 @@ mod tests {
         store.update_ticker("UNKNOWN", |ticker| ticker.last = 100.0);
         assert!(store.ticker("UNKNOWN").is_none());
         assert_eq!(store.tickers().len(), 2);
+    }
+
+    #[test]
+    fn an_empty_catalogue_is_never_applied() {
+        let mut store = Store::default();
+        store.set_markets(Vec::new());
+        assert!(
+            !store.loaded().markets,
+            "an empty first answer leaves markets unloaded"
+        );
+        assert!(store.take_rejected_empty_catalogue());
+        assert!(
+            !store.take_rejected_empty_catalogue(),
+            "each rejection is reported once"
+        );
+        store.set_markets(vec![market("AAA")]);
+        store.set_markets(Vec::new());
+        assert_eq!(
+            store.markets().len(),
+            1,
+            "an empty refresh keeps the previous catalogue"
+        );
+        assert!(store.market("AAA").is_some());
+        assert!(store.loaded().markets);
+        assert!(store.take_rejected_empty_catalogue());
     }
 
     fn market(symbol: &str) -> Market {

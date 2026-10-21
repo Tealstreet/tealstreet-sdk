@@ -963,7 +963,7 @@ impl Coinbase {
         }
         self.private_connect(cx);
         self.account_poll(cx, true);
-        self.account.tick = Some(cx.set_timer(5000.0));
+        self.account.tick = Some(cx.set_poll_timer(5000.0));
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.opened = false;
@@ -981,10 +981,12 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            "wss://advanced-trade-ws-user.coinbase.com",
-            SocketChannel::Private,
-        ));
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
+                    .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -1228,7 +1230,7 @@ impl Coinbase {
                     !cx.store.loaded().orders || cx.now - self.account.last_orders >= gap,
                 );
             }
-            self.account.tick = Some(cx.set_timer(5000.0));
+            self.account.tick = Some(cx.set_poll_timer(5000.0));
             return true;
         }
         false

@@ -803,8 +803,9 @@ with unknown quote basis, preventing later rows from replaying that history.
 Rust private startup is gated on the margin-mode and position-mode reads. Until
 each loads, any failure (429, 5xx, transport, non-JSON, malformed row, unknown
 code, a read raced by a settings write) retries that read through
-`startup::Backoff` (1 s doubling to 30 s, forever); the 10 s tick no longer
-re-reads them. Only documented key refusals end startup with one
+`startup::Backoff` (1 s doubling to 30 s, forever); a 418/429 waits at least its
+`Retry-After`, else 60 s (BloFin's one-minute limit window), and holds the other
+waiting settings read too. The 10 s tick no longer re-reads them. Only documented key refusals end startup with one
 `StartupFailed`: 152401/152408 (`AuthInvalid`), 152402 (`AuthExpired`), 152406
 (`AuthPermission`), and 152409 after one re-signed resend; 152405/152407/152410
 (timestamp/nonce) and 152404 stay transient. Before the account loads, a socket

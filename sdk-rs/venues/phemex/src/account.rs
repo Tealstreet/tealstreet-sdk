@@ -373,8 +373,12 @@ impl PhemexPerpetuals {
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.supervisor.connecting(cx);
-        self.account.socket =
-            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Private));
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
         self.account.authenticated = false;
         self.account.snapshot = false;
         self.account.snapshot_revision = self.account.order_revision;
@@ -400,7 +404,17 @@ impl PhemexPerpetuals {
         } else {
             2_000.
         };
-        self.account.refresh = Some(cx.set_timer(wait.max(self.paused_until - cx.now)));
+        self.account.refresh = Some(cx.set_poll_timer_with_bounds(
+            2_000.,
+            safe_cex_engine::PollTimerBounds {
+                not_before_ms: self.paused_until.max(if self.account.failed {
+                    cx.now + wait
+                } else {
+                    f64::NEG_INFINITY
+                }),
+                ..Default::default()
+            },
+        ));
     }
     pub(crate) fn account_item(
         &mut self,
@@ -1523,7 +1537,13 @@ impl PhemexPerpetuals {
                 LogLevel::Warning,
                 "Phemex private reconciliation exceeded 20-second deadline; retaining state",
             );
-            self.account.refresh = Some(cx.set_timer(2_000f64.max(self.paused_until - cx.now)));
+            self.account.refresh = Some(cx.set_poll_timer_with_bounds(
+                2_000.,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms: self.paused_until.max(cx.now + 2_000.),
+                    ..Default::default()
+                },
+            ));
             return true;
         }
         if !self.account.supervisor.owns_timer(timer) {
