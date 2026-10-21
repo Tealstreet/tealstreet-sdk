@@ -2754,6 +2754,16 @@ impl BybitLinear {
         }
     }
 
+    /// A read issued before an acknowledged setting cannot publish old rails.
+    pub(crate) fn note_leverage_ack(&mut self) {
+        // Hyro owns an atomic snapshot guarded by note_hyro_write/revision.
+        if self.variant.is_hyro() {
+            return;
+        }
+        self.account.position_version = self.account.position_version.wrapping_add(1);
+        self.account.positions_follow_up |= self.account.positions.is_some();
+    }
+
     pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
         // A response issued before the switch cannot restore the old mode.
         self.account.position_version += 1;
