@@ -8,10 +8,11 @@ mod wire;
 use base64::Engine as _;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -870,8 +871,9 @@ impl Venue for Hyperliquid {
                         .is_ok_and(|wallet| wallet.eq_ignore_ascii_case(key))
                 });
             if !matches_wallet {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    safe_cex_engine::Level::Error,
+                    code::AUTH_REJECTED,
                     "Hyperliquid spot invalid private key & wallet address pair",
                 );
                 cx.deactivate();
@@ -1300,7 +1302,11 @@ impl Venue for Hyperliquid {
             Command::UnsubscribeOrderBook { symbol } => self.book_sub(cx, symbol, false),
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Hyperliquid"));
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Hyperliquid"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();

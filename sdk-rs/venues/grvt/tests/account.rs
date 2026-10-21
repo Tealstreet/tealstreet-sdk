@@ -869,7 +869,10 @@ fn stale_headers_cannot_resurrect_session_while_refresh_login_is_incomplete() {
         Action::Notice(safe_cex_engine::Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
 }
 #[test]
@@ -892,7 +895,10 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
         Action::Notice(safe_cex_engine::Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     let retry = h
         .actions
@@ -1424,7 +1430,7 @@ fn skip_warnings(h: &Harness, kind: &str) -> usize {
             matches!(a, Action::Notice(safe_cex_engine::Notice::Log {
                 level: safe_cex_engine::LogLevel::Warning,
                 message,
-            }) if message.contains(&format!("GRVT {kind} row")))
+            }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
         })
         .count()
 }

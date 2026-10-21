@@ -5,14 +5,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
@@ -145,8 +146,9 @@ impl Skipped {
     }
     pub(crate) fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
         if let Some(first) = &self.first {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
                 format!(
                     "Crypto.com skipped {} unmappable {kind} rows (first: {first})",
                     self.count
@@ -432,7 +434,7 @@ impl Venue for Cryptocom {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.discovery_read(cx, false);
@@ -477,8 +479,9 @@ impl Venue for Cryptocom {
             } else if channel == 1 && envelope.method == "public/auth" {
                 let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
                 if code != 0 {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::AUTH_REJECTED,
                         format!(
                             "Crypto.com private login rejected: {} {}",
                             envelope.code, envelope.message
@@ -492,8 +495,9 @@ impl Venue for Cryptocom {
                     self.authenticated(cx, &envelope);
                 }
             } else if envelope.code != 0 {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
                     format!(
                         "Crypto.com API Error {}: {}",
                         envelope.code, envelope.message
@@ -512,7 +516,7 @@ impl Venue for Cryptocom {
             Ok::<_, serde_json::Error>(())
         })();
         if let Err(error) = result {
-            cx.log(LogLevel::Error, error.to_string());
+            cx.notice(Level::Error, code::STREAM_MALFORMED, error.to_string());
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -642,10 +646,15 @@ impl Venue for Cryptocom {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
                     if skipped.any() {
-                        cx.log(LogLevel::Error, "no mappable Crypto.com instrument rows");
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            "no mappable Crypto.com instrument rows",
+                        );
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::REQUEST_FAILED,
                             "Crypto.com instrument list has no usable rows",
                         );
                     }
@@ -692,7 +701,11 @@ impl Venue for Cryptocom {
                 skipped.report(cx, "ticker");
                 if rows.is_empty() {
                     if skipped.any() {
-                        cx.log(LogLevel::Error, "no mappable Crypto.com ticker rows");
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            "no mappable Crypto.com ticker rows",
+                        );
                     }
                     self.discovery.failed(cx, true);
                     return;
@@ -805,7 +818,7 @@ impl Venue for Cryptocom {
                 interval: timeframe,
             } => match interval(timeframe) {
                 Ok(timeframe) => self.add_channel(cx, format!("candlestick.{timeframe}.{symbol}")),
-                Err(error) => cx.log(LogLevel::Error, error),
+                Err(error) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, error),
             },
             Command::UnsubscribeCandles {
                 symbol,
@@ -906,8 +919,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Crypto.com stops re-reading a catalogue with {after} malformed markets"),
         );
     }

@@ -63,7 +63,11 @@ impl H {
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => self.logs.push(message),
                 _ => {}
             }
         }

@@ -1,7 +1,9 @@
 //! Rare reads return JSON; no history rows enter the live store.
 use crate::{Hyperliquid, Pending, account::side, wire::*};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Query, Response};
+use safe_cex_engine::{CommandId, Cx, Query, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -641,8 +643,9 @@ impl Hyperliquid {
             }
             Kind::Orders => {
                 if request.raw_count >= 2000 {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::HISTORY_INCOMPLETE,
                         "Hyperliquid order history reached its rolling retention limit",
                     );
                 }

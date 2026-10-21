@@ -4,6 +4,8 @@ use crate::account::{kind, side, status};
 use crate::sign::Params;
 use crate::wire::*;
 use crate::{Backpack, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
@@ -482,8 +484,9 @@ impl Backpack {
             self.history_request(cx, r);
         } else {
             if !r.skipped_fills.is_empty() {
-                cx.log(
-                    safe_cex_engine::LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
                     format!(
                         "Skipped {} malformed Backpack fill rows: {}",
                         r.skipped_fills.len(),

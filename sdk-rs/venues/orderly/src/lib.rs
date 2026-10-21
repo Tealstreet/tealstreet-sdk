@@ -5,12 +5,14 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -222,8 +224,9 @@ impl Orderly {
     }
     fn public_topic_available(&self, cx: &mut Cx<'_, Pending>) -> bool {
         if self.books.len() + self.candles.len() >= 97 {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
                 "Orderly public socket has reached its 100-topic limit",
             );
             false
@@ -257,7 +260,7 @@ impl Orderly {
         );
     }
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed, error: &str) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         self.seed_backoff.failed(cx, kind);
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, topic: &str, add: bool) {
@@ -471,7 +474,12 @@ impl Orderly {
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);
             }
-            return Err(format!("Orderly socket: {}", env.message));
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Orderly socket: {}", env.message),
+            );
+            return Ok(());
         }
         let Some(data) = env.data else {
             if env.event.is_empty()
@@ -657,7 +665,7 @@ impl Venue for Orderly {
         }
         if self.account.socket.socket == Some(socket) {
             if let Err(e) = self.private_message(cx, text) {
-                cx.log(LogLevel::Error, e);
+                cx.notice(Level::Error, code::STREAM_MALFORMED, e);
             }
             self.trade_reconcile(cx);
             return;
@@ -667,7 +675,7 @@ impl Venue for Orderly {
         }
         self.public.supervisor.received(cx.now);
         if let Err(e) = self.public_message(cx, text) {
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::STREAM_MALFORMED, e);
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -820,7 +828,7 @@ impl Venue for Orderly {
                 Pending::Candles { invalid, .. } => *invalid = true,
                 Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
             }
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::STREAM_MALFORMED, e);
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -1031,7 +1039,11 @@ impl Venue for Orderly {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !interval_valid(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Orderly"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Orderly"),
+                    );
                     return;
                 }
                 if cx.store.loaded().markets && !self.native.contains_key(&symbol) {

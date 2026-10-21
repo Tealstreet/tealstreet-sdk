@@ -4,14 +4,16 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -577,7 +579,7 @@ impl Venue for Bitrue {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.markets(cx);
@@ -843,7 +845,11 @@ impl Venue for Bitrue {
                 malformed,
             } => {
                 if !(200..300).contains(&response.status) || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Bitrue contracts read failed");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Bitrue contracts read failed",
+                    );
                     self.startup_retry.failed(cx, ());
                     return;
                 }
@@ -929,7 +935,11 @@ impl Venue for Bitrue {
         }
         match pending.job {
             Job::Markets { .. } => {
-                cx.log(LogLevel::Warning, format!("Bitrue contracts: {error}"));
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("Bitrue contracts: {error}"),
+                );
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
@@ -1038,7 +1048,11 @@ impl Venue for Bitrue {
                 interval: i,
             } => {
                 if interval(i).is_none() {
-                    cx.log(LogLevel::Error, i.unsupported("Bitrue"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("Bitrue"),
+                    );
                     return;
                 }
                 if let (Some(symbol), Some(mapped)) =
@@ -1179,8 +1193,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Bitrue stops re-reading a catalogue with {after} malformed markets"),
         );
     }

@@ -447,7 +447,11 @@ fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message.clone()),
             _ => None,
         })
         .collect();

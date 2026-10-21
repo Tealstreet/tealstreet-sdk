@@ -863,7 +863,7 @@ fn private_native_mark_works_without_public_tickers_and_missing_marks_preserve_s
     );
     assert_eq!(e.store().positions(), before);
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("position mark unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("position mark unavailable"))));
 }
 
 #[test]
@@ -978,7 +978,11 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
         actions(e)
             .into_iter()
             .filter_map(|a| match a {
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => Some(message),
                 _ => None,
             })
             .collect::<Vec<_>>()

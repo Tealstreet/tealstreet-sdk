@@ -151,7 +151,11 @@ fn ready_snapshot(
                     channel: Some(safe_cex_engine::SocketChannel::Private),
                     ..
                 } => private = Some(socket),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => logs.push(message),
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }

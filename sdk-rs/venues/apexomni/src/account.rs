@@ -1,16 +1,16 @@
 //! Atomic private snapshots, socket healing and execution identity.
 use crate::{ApexOmni, Pending, private_wire as wire, sign};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId,
-};
+use safe_cex_engine::{Command, CommandId, Cx, Fill, Response, SocketChannel, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -40,15 +40,15 @@ fn reject<T>(
     ids: Vec<String>,
 ) {
     if key.trim().is_empty() {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(Level::Warn, code::ROW_SKIPPED,
             format!("ApeX skipped malformed {kind} row without an identity; keeping the last known state"),
         );
         rows.reject(None);
         return;
     }
-    cx.log(
-        LogLevel::Warning,
+    cx.notice(
+        Level::Warn,
+        code::ROW_SKIPPED,
         format!("ApeX skipped malformed {kind} row {key}; keeping its last known state"),
     );
     for id in ids {
@@ -556,8 +556,9 @@ impl ApexOmni {
         // A bad seed only blocks order signing; monitoring and cancels still work.
         if let Err(error) = sign::validate_seed(self.options.omni_key_seed.as_deref().unwrap_or(""))
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 format!(
                     "{error}; ApeX order placement is disabled until the OmniKey seed is fixed"
                 ),
@@ -569,8 +570,9 @@ impl ApexOmni {
             .as_ref()
             .is_none_or(String::is_empty)
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "ApeX private account requires an API passphrase",
             );
             return;
@@ -616,7 +618,7 @@ impl ApexOmni {
         let login = match sign::ws_login(&self.options, cx.now) {
             Ok(login) => login,
             Err(error) => {
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::CONFIG_INVALID, error);
                 cx.close(socket);
                 self.account_close(cx, socket);
                 return true;
@@ -734,7 +736,7 @@ impl ApexOmni {
         ) {
             self.account.positions_pending = false;
             self.account.snapshot = None;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -753,7 +755,7 @@ impl ApexOmni {
         ) {
             self.account.orders_pending = false;
             self.account.snapshot = None;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -769,7 +771,7 @@ impl ApexOmni {
             None,
         ) {
             self.account.balance_pending = false;
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
         }
     }
 
@@ -792,8 +794,7 @@ impl ApexOmni {
                     .map_err(|e| e.to_string())
                     .and_then(|raw| {
                         if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                                 "ApeX position PnL unavailable; retaining prior valuation",
                             );
                         }
@@ -822,7 +823,7 @@ impl ApexOmni {
                     .and_then(|raw| {
                         if cx.store.market_by_id(&raw.symbol)
                             .or_else(|| cx.store.market(&raw.symbol)).is_none() {
-                            cx.log(LogLevel::Warning, "ApeX owned order has unavailable market metadata; preserving previous orders");
+                            cx.notice(Level::Warn, code::ROW_SKIPPED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
                         map_order(cx.store, &raw, cx.now)
@@ -961,8 +962,9 @@ impl ApexOmni {
                 let Some(balance) =
                     data.and_then(|data| serde_json::from_str::<wire::BalanceRow>(data.get()).ok())
                 else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
                         "ApeX balance payload missing or invalid; keeping last balance",
                     );
                     return;
@@ -987,8 +989,9 @@ impl ApexOmni {
                     value.is_finite().then_some(value)
                 });
                 let Some(upnl) = upnl else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::VALUATION_UNAVAILABLE,
                         "ApeX position PnL invalid; retaining previous balance",
                     );
                     return;
@@ -1012,8 +1015,9 @@ impl ApexOmni {
         }) {
             self.account.snapshot = None;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("ApeX private reconciliation: {error}; retaining last state"),
         );
     }
@@ -1056,8 +1060,9 @@ impl ApexOmni {
         }
         let snapshot = self.account.snapshot.take().expect("complete snapshot");
         if snapshot.revision < self.account.snapshot_floor {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "ApeX snapshot predates retired terminal guards; retaining last state",
             );
             return;
@@ -1155,8 +1160,9 @@ impl ApexOmni {
             .iter()
             .filter(|id| rows.iter().any(|row| row.id == **id))
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ORDER_REJECTED,
                 format!("ApeX order {id} is still open after its cancel was accepted"),
             );
         }
@@ -1238,8 +1244,14 @@ impl ApexOmni {
                 .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
         }
         if message.success == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            let rejected = if message.op == "login" {
+                code::AUTH_REJECTED
+            } else {
+                code::SUBSCRIPTION_REJECTED
+            };
+            cx.notice(
+                Level::Warn,
+                rejected,
                 format!("ApeX private socket rejected request: {}", message.ret_msg),
             );
             if message.op == "login" {
@@ -1275,8 +1287,9 @@ impl ApexOmni {
             ),
         ] {
             if let Some(skipped) = skipped.filter(|skipped| !skipped.is_empty()) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
                         skipped.join(", ")
@@ -1308,14 +1321,15 @@ impl ApexOmni {
             for raw in positions.rows {
                 self.note_unlisted(cx, &raw.symbol, "position");
                 if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::VALUATION_UNAVAILABLE,
                         "ApeX position PnL unavailable; retaining prior valuation",
                     );
                 }
                 let mapped = self.map_position(cx.store, &raw, cx.now);
                 if let Err(error) = &mapped {
-                    cx.log(LogLevel::Warning, error);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, error);
                 }
                 if let Ok(Some(mut position)) = mapped {
                     if let Some((_, at, leverage)) =
@@ -1528,13 +1542,14 @@ impl ApexOmni {
         let rows = match map_order(cx.store, raw, cx.now) {
             Ok(rows) => rows,
             Err(error) => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::ROW_SKIPPED, error);
                 return;
             }
         };
         let Some(order) = rows.first() else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "ApeX owned order has unavailable market metadata; preserving previous orders",
             );
             return;
@@ -1628,7 +1643,11 @@ impl ApexOmni {
                         "" | "UNKNOWN_ORDER_CANCEL_REASON" | "INTERNAL_FAILED" | "USER_CANCELED"
                     )
                 {
-                    cx.log(LogLevel::Error, raw.cancel_reason.as_ref());
+                    cx.notice(
+                        Level::Error,
+                        code::ORDER_REJECTED,
+                        raw.cancel_reason.as_ref(),
+                    );
                 }
             }
             OrderStatus::Closed => {

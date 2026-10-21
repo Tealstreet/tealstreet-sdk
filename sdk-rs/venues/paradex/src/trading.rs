@@ -4,12 +4,14 @@ use crate::{
     sign::Credentials,
     wire::StrictNumber as Number,
 };
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt,
-    Outcome, Response, VenueError,
+    Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
+    Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1020,7 +1022,12 @@ impl Trading {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
                         }
                     };
-                    cx.log(LogLevel::Error, message);
+                    let code = if leg.is_some() {
+                        code::CHILD_LEG_FAILED
+                    } else {
+                        code::ORDER_REJECTED
+                    };
+                    cx.notice(Level::Error, code, message);
                     // A failed entry orphans its children; a failed child must not skip its
                     // sibling, or a rejected TP would leave the position without its SL.
                     if leg.is_none() {

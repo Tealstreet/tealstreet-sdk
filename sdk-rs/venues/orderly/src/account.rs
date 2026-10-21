@@ -1,10 +1,12 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick as SocketTick;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -306,7 +308,7 @@ impl Orderly {
                 self.account.credentials = Some(c);
                 self.account_read(cx, Request::Info);
             }
-            Err(e) => cx.log(LogLevel::Error, e),
+            Err(e) => cx.notice(Level::Error, code::CONFIG_INVALID, e),
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -460,7 +462,7 @@ impl Orderly {
             Pending::Account(request),
             stream,
         ) {
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::CONFIG_INVALID, e);
         }
     }
     pub(crate) fn position(
@@ -915,8 +917,9 @@ impl Orderly {
                         }
                     };
                     skipped.push((symbol.clone(), pnl));
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match &symbol {
                             Some(symbol) => format!("Orderly skipped unmappable position {symbol}"),
                             None => "Orderly skipped unmappable position without a symbol".into(),
@@ -954,8 +957,9 @@ impl Orderly {
                         .ok()
                         .and_then(|r| self.orders(cx, r, *algo, &mut unknown).ok());
                     let Some(mapped) = mapped else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             match &key {
                                 Some(key) => format!("Orderly skipped unmappable order {key}"),
                                 None => "Orderly skipped unmappable order without an id".into(),
@@ -969,8 +973,9 @@ impl Orderly {
                         return Ok(());
                     };
                     for id in unknown {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Orderly skipped order {id} on an unknown market"),
                         );
                         coverage.reject(Some(id));
@@ -1000,7 +1005,7 @@ impl Orderly {
                 | Request::Orders { invalid, .. } => *invalid = true,
                 Request::Info => {}
             };
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::STREAM_MALFORMED, e);
         }
     }
     pub(crate) fn account_response(
@@ -1015,7 +1020,11 @@ impl Orderly {
                 && (400..500).contains(&response.status)
                 && !matches!(response.status, 408 | 429)
             {
-                cx.log(LogLevel::Error, "Orderly API key expired or rejected");
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
+                    "Orderly API key expired or rejected",
+                );
                 cx.deactivate();
                 return;
             }
@@ -1072,7 +1081,11 @@ impl Orderly {
                     return;
                 }
                 let Ok(meta) = serde_json::from_str::<PositionMeta>(data) else {
-                    cx.log(LogLevel::Error, "Orderly invalid collateral response");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Orderly invalid collateral response",
+                    );
                     return;
                 };
                 let kept = cx
@@ -1167,7 +1180,11 @@ impl Orderly {
                 }
                 let Ok(meta) = serde_json::from_str::<Page>(data) else {
                     self.account.inflight[2 + i] = false;
-                    cx.log(LogLevel::Error, "Orderly invalid order page");
+                    cx.notice(
+                        Level::Error,
+                        code::STREAM_MALFORMED,
+                        "Orderly invalid order page",
+                    );
                     return;
                 };
                 if meta.meta.as_ref().is_some_and(|m| {
@@ -1175,7 +1192,11 @@ impl Orderly {
                         || m.records_per_page.is_some_and(|n| n > 500)
                 }) {
                     self.account.inflight[2 + i] = false;
-                    cx.log(LogLevel::Error, "Orderly inconsistent pagination");
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
+                        "Orderly inconsistent pagination",
+                    );
                     return;
                 }
                 let more = meta
@@ -1185,7 +1206,11 @@ impl Orderly {
                 if more {
                     if page >= 50 || page_count == 0 {
                         self.account.inflight[2 + i] = false;
-                        cx.log(LogLevel::Error, "Orderly order pagination incomplete");
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            "Orderly order pagination incomplete",
+                        );
                         return;
                     }
                     self.account_read(
@@ -1269,7 +1294,7 @@ impl Orderly {
         request: Request,
         error: &str,
     ) {
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
         match request {
             Request::Info => {
                 if self.account.startup_retry.is_none() {
@@ -1326,7 +1351,7 @@ impl Orderly {
                 .unwrap(),
             ),
             Err(e) => {
-                cx.log(LogLevel::Error, e);
+                cx.notice(Level::Error, code::CONFIG_INVALID, e);
                 cx.close(socket);
                 self.private_close(cx, socket);
             }
@@ -1575,10 +1600,12 @@ impl Orderly {
             if env.success != Some(true) {
                 cx.close(socket);
                 self.private_close(cx, socket);
-                return Err(format!(
-                    "Orderly socket authentication rejected: {}",
-                    env.message
-                ));
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
+                    format!("Orderly socket authentication rejected: {}", env.message),
+                );
+                return Ok(());
             }
             if !self.account.authenticated {
                 self.account.authenticated = true;
@@ -1614,10 +1641,12 @@ impl Orderly {
         if env.success == Some(false) {
             cx.close(socket);
             self.private_close(cx, socket);
-            return Err(format!(
-                "Orderly private subscription rejected: {}",
-                env.message
-            ));
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Orderly private subscription rejected: {}", env.message),
+            );
+            return Ok(());
         }
         if !self.account.authenticated {
             return Ok(());

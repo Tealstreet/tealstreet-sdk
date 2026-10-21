@@ -4,12 +4,14 @@
 //! cumulative matched size; only uniquely identified trade executions emit fills.
 use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, RequestId, Response, Store, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, RequestId, Response, Store, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
@@ -332,8 +334,9 @@ impl Polymarket {
                 p.api_key.is_some() || p.api_secret.is_some() || p.api_passphrase.is_some()
             })
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Polymarket incomplete provided API credentials",
             );
             return;
@@ -347,8 +350,9 @@ impl Polymarket {
                     p.api_key.is_some() || p.api_secret.is_some() || p.api_passphrase.is_some()
                 })
             {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::CONFIG_INVALID,
                     "Polymarket private API requires a valid signer wallet",
                 );
             }
@@ -368,13 +372,18 @@ impl Polymarket {
             || signer != 0 && funder.is_none()
             || funder.is_some_and(|a| safe_cex_crypto::ethereum::get_address(a).is_err())
         {
-            cx.log(LogLevel::Error, "Polymarket invalid signature type/funder");
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Polymarket invalid signature type/funder",
+            );
             return;
         }
         if self.credentials.is_some() {
             if self.signed_headers_valid().is_err() {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::CONFIG_INVALID,
                     "Polymarket invalid provided API credentials",
                 );
                 return;
@@ -516,8 +525,9 @@ impl Polymarket {
         }
     }
     pub(crate) fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.log(
-            LogLevel::Error,
+        cx.notice(
+            Level::Error,
+            code::REQUEST_FAILED,
             "Polymarket private snapshot failed; preserving state",
         );
         match request {
@@ -583,15 +593,17 @@ impl Polymarket {
                             if !snapshot.ids.insert(id.to_string()) {
                                 snapshot.invalid = true;
                             }
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Polymarket skipped unmappable order {id}"),
                             );
                             snapshot.rows.reject(Some(id.into_owned()));
                         }
                         _ => {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 "Polymarket skipped unmappable order without an id",
                             );
                             snapshot.rows.reject(None);
@@ -651,11 +663,12 @@ impl Polymarket {
                     // otherwise its market is unlisted (e.g. closed), as in TS.
                     if self.catalogue_may_hold(row.slug) {
                         snapshot.invalid = true;
-                        cx.log(LogLevel::Warning,
+                        cx.notice(Level::Warn, code::ROW_SKIPPED,
                             "Polymarket owned holding has unavailable market metadata; preserving previous positions");
                     } else if self.account.unlisted.insert(row.asset.into()) {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "Polymarket holding {} has no loaded market; not shown",
                                 row.asset
@@ -679,17 +692,16 @@ impl Polymarket {
                     // A seed still loading may price it; a settled one never will.
                     if !self.discovery_settled() {
                         snapshot.invalid = true;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                             "Polymarket owned holding price unavailable; preserving previous positions",
                         );
                         return;
                     }
                     let symbol = market.symbol.clone();
                     let level = if cx.store.position(&symbol).is_some() {
-                        LogLevel::Warning
+                        Level::Warn
                     } else {
-                        LogLevel::Error
+                        Level::Error
                     };
                     log_skip(
                         cx,
@@ -1263,11 +1275,7 @@ fn reject_holding(
     asset: Option<&str>,
 ) {
     let level = |stored: bool| {
-        if stored {
-            LogLevel::Warning
-        } else {
-            LogLevel::Error
-        }
+        if stored { Level::Warn } else { Level::Error }
     };
     let Some(asset) = asset else {
         let level = level(!cx.store.positions().is_empty());
@@ -1301,14 +1309,14 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     account: &mut Account,
     asset: &str,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if account.skip_logged.len() >= SKIP_LOG_LIMIT {
         account.skip_logged.clear();
     }
     if account.skip_logged.insert(asset.to_owned()) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 

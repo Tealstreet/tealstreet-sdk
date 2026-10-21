@@ -34,7 +34,10 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );

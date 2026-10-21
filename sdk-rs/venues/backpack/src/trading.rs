@@ -3,9 +3,11 @@
 use crate::account::Next;
 use crate::sign::Params;
 use crate::{Backpack, Pending, REST};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -936,12 +938,12 @@ impl Backpack {
             request.step,
             Step::Place { optional: true, .. } | Step::Cancel { optional: true, .. }
         ) {
-            cx.log(LogLevel::Warning, &error.message);
+            cx.notice(Level::Warn, code::CHILD_LEG_FAILED, &error.message);
             self.run_trade(cx, request.command);
         } else {
             let job = self.trading.jobs.remove(&request.command);
             if job.as_ref().is_some_and(|job| job.internal) {
-                cx.log(LogLevel::Warning, &error.message);
+                cx.notice(Level::Warn, code::ORDER_REJECTED, &error.message);
             } else {
                 // A later refusal after a step took effect cannot mean nothing happened.
                 if job.is_some_and(|job| job.effective)
