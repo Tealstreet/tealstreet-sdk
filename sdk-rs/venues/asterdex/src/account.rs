@@ -781,7 +781,7 @@ impl AsterDex {
                     cx.log(
                         LogLevel::Error,
                         format!(
-                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {}s",
+                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {:.1}s",
                             delay / 1_000.0
                         ),
                     );
