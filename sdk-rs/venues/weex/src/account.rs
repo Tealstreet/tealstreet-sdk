@@ -612,8 +612,8 @@ impl WeexFutures {
         }
         if matches!(request.kind, Kind::Config | Kind::Metadata) {
             self.account.settings_failures += 1;
-            self.account.settings_retry_at =
-                cx.now + Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
+            let delay = Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
+            self.account.settings_retry_at = cx.now + cx.jittered(delay);
             self.account_finished(cx, false);
             return;
         }
@@ -669,9 +669,14 @@ impl WeexFutures {
             } else {
                 self.account.failures = 0;
             }
-            let delay = Backoff::new(2_000.0, 5, 60_000.0)
-                .delay(self.account.failures)
-                .max(self.paused_until - cx.now);
+            let nominal = Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.failures);
+            // Only a failed refresh retries; the zero-failure delay is polling cadence.
+            let delay = if self.account.failures > 0 {
+                cx.jittered(nominal)
+            } else {
+                nominal
+            };
+            let delay = delay.max(self.paused_until - cx.now);
             self.account.refresh = Some(cx.set_timer(delay));
         }
     }

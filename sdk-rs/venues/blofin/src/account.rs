@@ -1866,9 +1866,14 @@ impl Blofin {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
             }
-            self.account.tick = Some(
-                cx.set_timer(Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)),
-            );
+            let nominal = Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures);
+            // Healthy ticks keep their polling cadence; only auth-failure retries spread.
+            let delay = if self.account.auth_failures > 0 {
+                cx.jittered(nominal)
+            } else {
+                nominal
+            };
+            self.account.tick = Some(cx.set_timer(delay));
             return true;
         }
         if self.account.debounce == Some(timer) {

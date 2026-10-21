@@ -330,7 +330,8 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
-        state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
+        let delay = cx.jittered(Backoff::new(250.0, 7, 30_000.0).delay(state.failures));
+        state.retry = Some(cx.set_timer(delay));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {
         for (side, rows) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {

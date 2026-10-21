@@ -634,7 +634,13 @@ impl Kraken {
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.heal.is_none() {
-            let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
+            let nominal = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
+            // A heal after a websocket event keeps its fixed debounce; failed reads spread.
+            let delay = if self.account.read_failures > 0 {
+                cx.jittered(nominal)
+            } else {
+                nominal
+            };
             self.account.heal = Some(cx.set_timer(delay));
         }
     }

@@ -560,7 +560,7 @@ impl BinanceFutures {
                 };
                 cx.log(level, message);
                 self.account.resync_orders_on_open = true;
-                let delay = LISTEN_KEY_RETRY.delay(self.account.listen_key_failures);
+                let delay = cx.jittered(LISTEN_KEY_RETRY.delay(self.account.listen_key_failures));
                 self.account.listen_key_failures += 1;
                 self.account.listen_key_timer = Some(cx.set_timer(delay));
             }
