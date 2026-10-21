@@ -83,7 +83,10 @@ if [[ ${1:-} == --families ]]; then
   done
   exit 0
 fi
-build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown "${wasm_profile_args[@]}")
+# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
+# Measure a narrower host-only profile without changing their engine/dependencies.
+build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
+  --config 'profile.release.package.safe-cex-wasm.opt-level="z"')
 if [[ ${1:-} == --venue ]]; then family_args "$2"; fi
 cargo build "${build_args[@]}"
 bind hosts/wasm/pkg/web hosts/wasm/pkg/node

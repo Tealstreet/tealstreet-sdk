@@ -80,3 +80,10 @@ sample is omitted, and the performance policy and strict verifier are unchanged.
 Final integration order: #1655, #1658, then this PR's exclusive source window.
 Refresh source-equivalent baselines after integration and require green final
 CI plus the complete raw proof for both layouts before the separate guard.
+
+The broad combined z candidate subsequently misses Bitget and KuCoin Spot
+public CPU gates (the original combined profiles pass both). Reject this
+configuration; test a narrower combined override of the wasm host alone,
+keeping the engine and dependencies at their existing profiles. This is a
+changed compiler configuration, not a repeat to select around a timing miss.
+The initial 1,230,687-byte saving is therefore not a retained result.
