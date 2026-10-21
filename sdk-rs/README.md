@@ -73,6 +73,23 @@ transport. `rust:private-tape-mexc` generates a synthetic MEXC futures account
 tape; `rust:gate --venue mexc --tape <path> --books ''` compares its private
 state and command results with TypeScript.
 
+For faster private replay iteration, download a recent matching CI engine:
+
+```bash
+gh run download RUN_ID --name ci-wasm-binance --dir /tmp/binance-ci-wasm
+corepack yarn -s rust:gate:record --ci-wasm /tmp/binance-ci-wasm \
+  --venue binance --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 5 --books ''
+```
+
+The `ci-wasm-<suite>` artifacts expire after three days. The gate checks the
+fixed Rust/build-input tree against HEAD, requires clean covered inputs and
+validates the family, pinned tool versions, build flags and all package hashes.
+It refuses missing or mismatched artifacts with no fallback to another wasm
+build. Harness-only clock/declaration edits can reuse the same engine. Reports
+record its provenance. Local replays help iteration; full green CI on the PR
+head is still required before merge. Existing replay reports retain fourteen
+days of history, without a second copy of the wasm binaries.
+
 Socket routing memoizes successful default URL identities per replay, for both
 engines. Caller IDs and custom URL/query rules bypass this cache; socket state,
 subscriptions and reconnect generations are always checked live. HTTP request
