@@ -733,3 +733,15 @@ After a confirmed write, a later rejection cannot claim the whole command was
 rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
+
+Rust regular/TP-SL REST snapshots retain malformed native raw-ID families together
+with cached parent/virtual siblings and routing metadata; valid peers and safely
+absent raw families advance only after complete envelopes. Unknown identity holds
+absence within that endpoint scope, while an admitted raw parent supersedes its
+entire old family, including omitted brackets or changed standalone leg shapes.
+Known bad/valid duplicates quarantine the raw ID, and bounded coverage overflow
+holds conservatively. Only admitted groups advance execution baselines; pending
+execution and optimistic/terminal guards remain. Partial initial halves cannot
+establish readiness, both staged serials/generations must be current, and partial
+command-owned refreshes cannot qualify as trading prerequisites. WS generation
+fences and financial/side defaults remain separate unchanged policies.

@@ -30,3 +30,9 @@ strict prerequisites, and unchanged execution watermark/fill/terminal cases.
 Prove original failures; Bitunix/Binance native +strict checks, independent plan/
 implementation reviews, full CI, actual preceding same-crate/shared integrations
 and separate exact guard. Fresh actual673565c2e61 branch; no unlanded sibling code.
+
+Verification: three original-source row-starvation regressions fail and all 13
+regression families pass. 381 combined Bitunix/Binance native tests plus strict
+Clippy/fmt/bans pass; existing optimistic/terminal/pending-execution/financial and
+write-fence assertions remain unchanged. Independent plan/implementation reviews
+CLEAR, including raw metadata/baseline cohesion and staged initial serial checks.
