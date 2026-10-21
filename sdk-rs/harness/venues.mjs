@@ -1626,6 +1626,7 @@ export const VENUES = {
   hyperliquidspot,
   krakenspot,
   hyperliquid: {
+    virtualPrivateClock: true,
     rust: 'hyperliquid',
     ts: {
       module: `${root}/hyperliquid/hyperliquid.exchange.ts`,

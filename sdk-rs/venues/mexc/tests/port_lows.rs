@@ -424,3 +424,41 @@ fn depth_query_resumes_after_the_reported_cooldown() {
     response(&mut e, &resumed, EMPTY);
     assert_eq!(completed(&mut e, 93)["asks"], serde_json::json!([]));
 }
+
+#[test]
+fn standalone_json_book_query_reaches_unsigned_rest_and_preserves_native_result() {
+    let (mut e, _) = started();
+    e.drain_actions().for_each(drop);
+    let command = safe_cex_engine::command::decode_command(
+        r#"{"op":"fetchOrderBook","command":91,"symbol":"BTCUSDT","limit":1}"#,
+    )
+    .expect("standalone MEXC advertises JSON REST-book queries");
+    e.handle(100.0, Event::Command(command));
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 1);
+    let request = &reads[0];
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    assert!(
+        request
+            .url
+            .ends_with("/api/v1/contract/depth/BTC_USDT?limit=1")
+    );
+    assert!(request.headers.is_empty());
+    assert_eq!(request.body, None);
+    response(
+        &mut e,
+        request,
+        r#"{"success":true,"code":0,"data":{"version":"9007199254740993","bids":[[60000,20,1]],"asks":[[60002,40,1]]}}"#,
+    );
+    let book = completed(&mut e, 91);
+    assert_eq!(book["lastUpdateId"], "9007199254740993");
+    assert_eq!(
+        book["bids"],
+        serde_json::json!([{"price":60000.0,"amount":0.002,"total":0.002}])
+    );
+    assert_eq!(
+        book["asks"],
+        serde_json::json!([{"price":60002.0,"amount":0.004,"total":0.004}])
+    );
+    assert!(e.venue().book("BTCUSDT").is_none());
+}
