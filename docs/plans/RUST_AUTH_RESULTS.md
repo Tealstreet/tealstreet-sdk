@@ -326,3 +326,26 @@ WIP/integration; no completed classifier coverage is claimed by them. Logs:
   start fixes it; not yet done because it shifts every venue policy test's
   expected deadlines.
 
+
+## Envelope evidence consistency follow-up
+
+Plan (overseer decision, 2026-10-21): a valid signed success envelope proves
+credentials regardless of individual row parse/mapping failures, uncatalogued
+markets or held rows. Row diagnostics and financial reducers remain unchanged.
+Malformed envelopes or missing envelope-level required data yield no outcome;
+typed credential rejections still report first.
+
+Add one pure `AuthOutcome::accepted_list` helper using the existing ArraySplitter
+and each request's exact selector to validate the required list and surrounding
+JSON, without decoding row fields. Use it in BingX, MEXC and WEEX after their
+existing typed success/rejection and fence checks, before MergedScopeAuth can
+mutate. Keep non-list Mode/Metadata validation. Remove only row-quality auth
+gates and align Required behavior and Landing follow-ups with this rule.
+
+Regressions: mixed/bad rows still accept credentials while existing financial
+behavior holds; empty lists accept; missing/null/wrong-shaped/truncated required
+data stays inert; malformed success cannot clear a rejected grouped endpoint
+before a sibling succeeds. Record the two existing false-row expectation changes
+explicitly. Run all three venues plus Binance, scoped engine auth tests, strict
+Clippy/fmt, independent reviews, full CI and a separate current-landing guard.
+No new venue classifiers, caller API shapes or explicit network resync.
