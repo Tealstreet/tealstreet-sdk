@@ -183,7 +183,9 @@ it('reports independent identical failures independently and preserves ordinary 
     { op: 'event', code: 'test.diagnostic', level: 'info', message: 'background info' },
   ]);
   expect(r.errors).toHaveBeenCalledTimes(3);
-  expect(r.logs).toHaveBeenCalledWith('[bybit] background info', LogSeverity.Info);
+  expect(r.logs).toHaveBeenCalledWith('[bybit] background info', LogSeverity.Info, {
+    code: 'test.diagnostic', level: 'info', message: 'background info', fields: {},
+  });
 });
 
 it('reports a timeout once while later attributed errors and DoneErr remain diagnostic logs', async () => {
