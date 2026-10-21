@@ -961,17 +961,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
-  ~~Paradex's bounded history-cap ownership omission~~ now carries the actual
-  request command before retained rows complete. Its native regression covers
-  exact Warn ownership/order at Error-only logging; unbounded caps and other
-  stalls still fail.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
@@ -1197,6 +1193,10 @@ Signing and payloads match; no confirmed highs.
   next balance fetch; Rust uses reported PnL until a real price arrives.
 
 ### Paradex
+- ~~Paradex's bounded history-cap ownership omission~~ now carries the actual
+  request command before retained rows complete. Its native regression covers
+  exact Warn ownership/order at Error-only logging; unbounded caps and other
+  stalls still fail.
 StarkNet typed data, JWT, payloads and SBE decoding match.
 - High: ~~one blank ticker field halts the venue including its private side~~
   (#1356, `d65119bea35`: nullable summary/default regressions and independent
