@@ -712,11 +712,11 @@ export class RustEngineExchange extends BaseExchange {
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
+    // Set from the engine's record before startup: venues that take the host clock as-is get the synced one.
+    let hostClock = false;
     const host = new EngineHost(
       engine,
-      ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
-        ? { ...transport, now: virtualClock.getCurrentTimeMs }
-        : transport,
+      { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
@@ -736,7 +736,9 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptEngineCapabilities(host.capabilities());
+      const capabilities = host.capabilities();
+      hostClock = capabilities.hostClock;
+      this.adoptEngineCapabilities(capabilities);
     } catch (error) {
       host.dispose();
       throw error;

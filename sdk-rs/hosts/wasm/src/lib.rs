@@ -819,6 +819,8 @@ mod tests {
                     ],
                     venue,
                 ),
+                host_clock: any(&["backpack", "coinbase", "coinbasespot"], venue)
+                    || any(&ORDERLY, venue),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

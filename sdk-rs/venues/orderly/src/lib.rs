@@ -605,6 +605,7 @@ impl Venue for Orderly {
             cancel_all: safe_cex_engine::CancelAll::Native,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            host_clock: true,
             account_leverage: true,
             ..safe_cex_engine::Capabilities::BASE
         }

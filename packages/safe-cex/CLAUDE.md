@@ -121,7 +121,8 @@ Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
-order-book queries and options. `RustEngineExchange` routes from that record,
+order-book queries, options, and whether signatures take the host clock as-is
+(`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
