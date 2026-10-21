@@ -32,6 +32,8 @@ import type {
   OrderHistoryOptions,
   PositionSide,
   PublicTrade,
+  RemoteSignerRequest,
+  RemoteSignerResponse,
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
@@ -50,6 +52,7 @@ import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
+import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { multiply } from '../../utils/safe-math';
@@ -96,6 +99,7 @@ import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
+import { hostedSigningVenues, isKeylessRemoteSigned } from '../hostedSigningVenues';
 import { paradexSigningTransport } from './paradex.signing';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
@@ -160,33 +164,38 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
 /**
- * A hosted account: no local secret, signed by the browser through `remoteSigner`.
- * Paradex and Polymarket keep their signing key in `key`, and Lighter runs read-only
- * without one, as TS does, so none of them is keyless here.
+ * Only Paradex consumes a payload signer natively; other engine venues would ignore it.
+ * Lighter is excluded: its payload-only accounts start public on the engine by contract.
  */
-export const isKeylessRemoteSigned = (
+const needsTsPayloadSigner = (
   name: ExchangeName,
-  options: Partial<Pick<ExchangeOptions, 'secret' | 'remoteSigner' | 'auth'>>,
+  options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
 ) =>
-  Boolean(options.remoteSigner) &&
-  !options.secret &&
-  !(name === 'asterdex' && options.auth?.privateKey) &&
-  !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
+  Boolean(options.payloadSigner) &&
+  !['paradex', 'lighter', 'lighter-robinhood'].includes(name) &&
+  options.publicDataOnly !== true;
 
 /**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
  * account stays on the TS venue, which merges spot markets into the perp account; the
  * engine's perp venue does not, and refuses the option when constructed directly. A
- * keyless remote-signed account stays on TS too, which signs through the browser.
+ * keyless remote-signed account stays on TS too, which signs through the browser, as
+ * does a payload-signed account outside Paradex.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
-  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+  options: Partial<
+    Pick<
+      ExchangeOptions,
+      'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
+    >
+  >,
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
   !(name === 'hyperliquid' && options.enableSpotMarkets) &&
-  !isKeylessRemoteSigned(name, options);
+  !isKeylessRemoteSigned(name, options) &&
+  !needsTsPayloadSigner(name, options);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -343,6 +352,36 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private hostedSigningVenue?: Promise<BaseExchange>;
+  // The base arrow is assigned by the base constructor, before this field initializes.
+  private readonly localSignWsAuth = (this as BaseExchange).signWsAuth;
+
+  /** The browser signs hosted accounts; names with no other TS venue sign through the kept one. */
+  private hostedSigner = (): Promise<BaseExchange> | undefined => {
+    const load = hostedSigningVenues[this.name];
+    if (!load) return undefined;
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed'));
+    if (!this.hostedSigningVenue) {
+      const venue = load().then((Venue) => new Venue(this.name, this.options, new DefaultStore()));
+      // A failed chunk load must not poison signing for the account's lifetime.
+      venue.catch(() => {
+        if (this.hostedSigningVenue === venue) this.hostedSigningVenue = undefined;
+      });
+      this.hostedSigningVenue = venue;
+    }
+    return this.hostedSigningVenue;
+  };
+
+  override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const signer = this.hostedSigner();
+    if (!signer) return { id: request.id, error: 'Exchange does not have xhr for signing' };
+    return (await signer).signHttpRequest(request);
+  };
+
+  override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const signer = this.hostedSigner();
+    return signer ? (await signer).signWsAuth(request) : this.localSignWsAuth(request);
+  };
   private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
@@ -410,6 +449,9 @@ export class RustEngineExchange extends BaseExchange {
         if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
       },
       (error: unknown) => {
+        // A hosted account's server worker runs a TS venue (hostedSigningVenues) and has no
+        // engine record; keep the forwarders' defaults instead of retrying forever.
+        if (error instanceof Error && error.message.endsWith('does not support fetchEngineCapabilities')) return;
         this.workerCapabilities = undefined;
         this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
         throw error;
@@ -653,6 +695,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
+    }
+    // Factories route these to TS. A private engine account would otherwise ignore the
+    // signer and send unsigned requests, even on venues exempt from the guard below.
+    if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
+      const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (
       ![
@@ -1357,7 +1405,10 @@ export class RustEngineExchange extends BaseExchange {
             started = true;
             loaded();
           },
-          (error) => onError(String(error?.message ?? error)),
+          (error) =>
+            error instanceof ExchangeError && error.kind
+              ? finish({ error: error.message, kind: error.kind as ExchangeErrorKind })
+              : onError(String(error?.message ?? error)),
         );
     });
   };
@@ -1981,6 +2032,11 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    void this.hostedSigningVenue?.then(
+      (venue) => venue.dispose(),
+      () => undefined,
+    );
+    this.hostedSigningVenue = undefined;
     this.stopWorkerCapabilitySync?.();
     this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();

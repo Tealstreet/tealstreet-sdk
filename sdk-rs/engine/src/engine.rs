@@ -1221,6 +1221,10 @@ impl<P> Cx<'_, P> {
         message: impl Into<String>,
         fields: Vec<(&'static str, Value)>,
     ) {
+        // A rejection often also arrives as an auth-kind failure or `deactivate`.
+        if code == log_code::AUTH_REJECTED {
+            count_auth_failure(self.io, None);
+        }
         let io = &mut *self.io;
         push_event(
             &mut io.actions,
@@ -2503,7 +2507,9 @@ fn push_event(
     min_level: Level,
     mut event: LogEvent,
 ) {
-    health.count(event.code);
+    if event.code != log_code::AUTH_REJECTED {
+        health.count(event.code);
+    }
     if event.level < min_level {
         return;
     }
