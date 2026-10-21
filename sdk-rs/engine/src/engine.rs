@@ -1265,12 +1265,17 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        self.fail_with(command, error.into());
+    }
+
+    // Out of line so the hundreds of venue call sites share one body (wasm size budget).
+    #[inline(never)]
+    fn fail_with(&mut self, command: CommandId, error: VenueError) {
         #[cfg(feature = "order-locks")]
         {
             self.io.order_locks.finish(command, true);
             self.io.active_commands.remove(&command);
         }
-        let error = error.into();
         count_auth_failure(self.io, Some(&error));
         self.io
             .actions
