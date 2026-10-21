@@ -1201,16 +1201,10 @@ impl BinanceFutures {
     ) {
         let Response { status, body, .. } = response;
         if status != 200 {
-            cx.done(
-                command,
-                Err(format!("Binance klines HTTP {status}: {body}")),
-            );
+            cx.fail(command, format!("Binance klines HTTP {status}: {body}"));
             return;
         }
-        cx.done(
-            command,
-            Ok(serde_json::to_string(&candles).unwrap_or_default()),
-        );
+        cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
     }
 }
 
@@ -1580,7 +1574,7 @@ impl Venue for BinanceFutures {
             return;
         }
         match pending {
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation
@@ -1707,13 +1701,13 @@ impl Venue for BinanceFutures {
                 to_ms,
             } => {
                 if !self.supports(interval) {
-                    cx.done(command, Err(interval.unsupported("Binance")));
+                    cx.fail(command, interval.unsupported("Binance"));
                     return;
                 }
                 let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
-                        cx.done(command, Err(error.into()));
+                        cx.fail(command, error);
                         return;
                     }
                 };

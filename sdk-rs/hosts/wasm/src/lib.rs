@@ -317,8 +317,8 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
-                result: result.as_ref().ok().map(String::as_str),
-                error: result.as_ref().err().map(|error| error.as_str().into()),
+                result: Some(result.as_str()),
+                error: None,
                 detail: None,
             },
             Action::Notice(Notice::CommandFailed { command, error }) => ActionOut::Done {
@@ -351,8 +351,20 @@ pub fn wasm_memory_bytes() -> f64 {
     }
 }
 
+/// Resolve construction choices without constructing an engine or performing I/O.
+#[wasm_bindgen(js_name = resolveConstruction)]
+pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, JsError> {
+    if !safe_cex_venues::supported(venue) {
+        return Err(JsError::new(&format!("unsupported venue: {venue}")));
+    }
+    let options: safe_cex_venues::EngineOptions =
+        serde_json::from_str(options_json).map_err(|_| JsError::new("Invalid engine options"))?;
+    Ok(serde_json::to_string(&options.construction(venue))?)
+}
+
 #[wasm_bindgen]
 pub struct WasmEngine {
+    construction: String,
     inner: Box<dyn AnyEngine>,
 }
 
@@ -392,9 +404,18 @@ impl WasmEngine {
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| JsError::new("Invalid engine options"))?;
+        let construction = serde_json::to_string(&options.construction(venue))?;
         let inner = safe_cex_venues::build(venue, options, Boxed)
             .map_err(|error| JsError::new(&error.message))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            construction,
+        })
+    }
+
+    /// Resolved account choices; contains no credentials.
+    pub fn construction(&self) -> String {
+        self.construction.clone()
     }
 
     fn flush(&mut self) -> String {
@@ -965,7 +986,7 @@ mod tests {
             }),
             Action::Notice(Notice::CommandDone {
                 command: 19,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ]);
         assert_eq!(
@@ -982,14 +1003,14 @@ mod tests {
                 command: 19,
                 message: "placement rejected".into(),
             }),
-            Action::Notice(Notice::CommandDone {
+            Action::Notice(Notice::CommandFailed {
                 command: 19,
-                result: Err("placement rejected".into()),
+                error: safe_cex_engine::VenueError::new("placement rejected"),
             }),
         ]);
         assert_eq!(
             encoded,
-            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected"}]"#
+            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected","detail":{"message":"placement rejected"}}]"#
         );
     }
 
@@ -1067,6 +1088,7 @@ mod tests {
         let events = Rc::new(RefCell::new(Vec::new()));
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
+            construction: "{}".into(),
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
                 drains: Rc::clone(&drains),
@@ -1161,13 +1183,13 @@ mod tests {
                 command: 1,
                 error: safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1),
             }),
-            Action::Notice(Notice::CommandDone {
+            Action::Notice(Notice::CommandFailed {
                 command: 2,
-                result: Err("plain".into()),
+                error: safe_cex_engine::VenueError::new("plain"),
             }),
             Action::Notice(Notice::CommandDone {
                 command: 3,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ];
         assert_eq!(
@@ -1176,7 +1198,7 @@ mod tests {
                 r#"[{"op":"done","command":1,"#,
                 r#""error":"{\"message\":\"leg 2 rejected\",\"partialOrderIds\":[\"a\"],\"partialOrderCount\":1,\"totalOrderCount\":2,\"failedOrderIndex\":1}","#,
                 r#""detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}},"#,
-                r#"{"op":"done","command":2,"error":"plain"},"#,
+                r#"{"op":"done","command":2,"error":"plain","detail":{"message":"plain"}},"#,
                 r#"{"op":"done","command":3,"result":"[]"}]"#,
             )
         );
@@ -1332,6 +1354,7 @@ mod tests {
         }
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
+                construction: "{}".into(),
                 inner: Box::new(Counted),
             }
             .health(),
@@ -1349,6 +1372,7 @@ mod tests {
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut legacy = engine();
@@ -1372,9 +1396,11 @@ mod tests {
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         // A rejected byte message must neither handle an event nor drain existing actions.

@@ -539,7 +539,7 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     e.handle(NOW + 22_000.0, Event::TimerFired { timer: deadline });
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(e.store().orders(), expected);
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
     let retry = actions
         .iter()
         .find_map(|a| match a {
@@ -812,7 +812,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                     .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
             );
             e.handle(NOW + 32_000.0, Event::TimerFired { timer: extended });
-            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
         } else {
             assert!(e.store().loaded().positions);
             assert!(
@@ -1117,6 +1117,11 @@ fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
         .filter_map(|a| match a {
             Action::Notice(Notice::Log { level: l, message }) if *l == level => {
                 Some(message.clone())
+            }
+            Action::Notice(Notice::Event(event))
+                if event.level == safe_cex_engine::Level::from(level) =>
+            {
+                Some(event.message.clone())
             }
             _ => None,
         })

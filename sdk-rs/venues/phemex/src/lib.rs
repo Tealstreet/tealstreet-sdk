@@ -363,7 +363,7 @@ impl PhemexPerpetuals {
                     self.book_failed(cx, &symbol)
                 }
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Markets(..) => self.discovery.failed(cx, false),
             Pending::Tickers(..) => self.discovery.failed(cx, true),
         }
@@ -695,7 +695,7 @@ impl Venue for PhemexPerpetuals {
                 command, mut rows, ..
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                cx.done(command, serde_json::to_string(&rows).unwrap());
             }
             Pending::Account(p) => self.account_response(cx, p, r),
             Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
@@ -861,14 +861,14 @@ impl Venue for PhemexPerpetuals {
                 to_ms,
             } => {
                 if cx.now < self.paused_until {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Phemex requests are rate limited; candle read was not sent".into()),
+                        "Phemex requests are rate limited; candle read was not sent",
                     );
                     return;
                 }
                 let Some(n) = resolution(interval) else {
-                    cx.done(command, Err(interval.unsupported("Phemex")));
+                    cx.fail(command, interval.unsupported("Phemex"));
                     return;
                 };
                 let to = to_ms.unwrap_or(cx.now);

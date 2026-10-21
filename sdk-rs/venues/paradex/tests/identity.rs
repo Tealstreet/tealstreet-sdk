@@ -67,6 +67,11 @@ fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<Strin
     for action in actions {
         match action {
             Action::Notice(Notice::CommandDone { command, result }) if command == command_id => {
+                let result: Result<String, String> = Ok(result);
+                done.push(result)
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) if command == command_id => {
+                let result: Result<String, String> = Err(error.legacy_text());
                 done.push(result)
             }
             Action::Notice(Notice::CommandError { command, .. }) if command == command_id => {
@@ -240,10 +245,14 @@ fn identity_auth_failure_settles_queued_queries_once_without_identity_http() {
     for action in actions {
         match &action {
             Action::Notice(
-                Notice::CommandDone { command, .. } | Notice::CommandError { command, .. },
+                Notice::CommandDone { command, .. }
+                | Notice::CommandFailed { command, .. }
+                | Notice::CommandError { command, .. },
             ) if *command == 42 => first.push(action),
             Action::Notice(
-                Notice::CommandDone { command, .. } | Notice::CommandError { command, .. },
+                Notice::CommandDone { command, .. }
+                | Notice::CommandFailed { command, .. }
+                | Notice::CommandError { command, .. },
             ) if *command == 43 => second.push(action),
             _ => {}
         }

@@ -164,7 +164,7 @@ impl PlacementAcks {
         for action in actions {
             match action {
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.finished(*command, result.as_deref().ok(), now);
+                    self.finished(*command, Some(result.as_str()), now);
                 }
                 Action::Notice(Notice::CommandFailed { command, .. }) => {
                     self.finished(*command, None, now);

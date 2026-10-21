@@ -203,7 +203,7 @@ fn posted_candle_read_preserves_body_and_streams() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(_), .. })
+        Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
     )));
 }
 #[test]
@@ -261,7 +261,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { .. })
     )));
     e.handle(
         1000.0,
@@ -292,7 +292,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { .. })
     )));
 }
 
@@ -309,7 +309,7 @@ fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() 
     assert_eq!(e.store().markets().len(), 1);
     assert_eq!(e.store().markets()[0].id, "BTC");
     assert_eq!(e.store().tickers()[0].last, 100.);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]

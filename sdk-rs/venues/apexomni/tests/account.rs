@@ -772,7 +772,7 @@ fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
         } | Action::Http(_)
     )));
     assert!(actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.contains("passphrase"))
+        |a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("passphrase"))
     ));
 }
 
@@ -847,7 +847,6 @@ fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
             }) => Some(result),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     assert_eq!(
         result,
@@ -1019,7 +1018,7 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.len(), 1);
     assert!(
-        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: Ok(body) }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
+        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: body }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
     );
     let loaded = engine.store().loaded();
     assert!(

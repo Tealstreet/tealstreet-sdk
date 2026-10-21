@@ -2,14 +2,16 @@
 //! succeed. Private events and acknowledged writes invalidate older snapshots.
 use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
-use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -287,8 +289,9 @@ impl WeexFutures {
         self.account.started = true;
         if self.incomplete_credentials {
             // An empty account would be indistinguishable from a real one.
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "WEEX requires an API key, secret and passphrase; private data is unavailable",
             );
             cx.deactivate();
@@ -304,7 +307,7 @@ impl WeexFutures {
         if self.private_ws_headers {
             self.connect_account(cx);
         } else {
-            cx.log(LogLevel::Warning,"WEEX private WebSocket disabled: transport cannot attach upgrade headers; continuing REST safety loop");
+            cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"WEEX private WebSocket disabled: transport cannot attach upgrade headers; continuing REST safety loop");
         }
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -534,8 +537,9 @@ impl WeexFutures {
                         "symbol configuration"
                     };
                     let count = request.skipped_rows;
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("WEEX skipped {count} malformed {kind} row(s)"),
                     );
                 }
@@ -669,12 +673,8 @@ impl WeexFutures {
                 logged.clear();
             }
             if logged.insert(format!("{prefix}{id}")) {
-                let level = if error {
-                    LogLevel::Error
-                } else {
-                    LogLevel::Warning
-                };
-                cx.log(level, message);
+                let level = if error { Level::Error } else { Level::Warn };
+                cx.notice(level, code::ROW_SKIPPED, message);
             }
         }
     }
@@ -687,8 +687,9 @@ impl WeexFutures {
         if request.cycle != self.account.cycle {
             return;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("WEEX private read: {error}; retaining last-known-good state"),
         );
         if matches!(request.kind, Kind::Normal | Kind::Algo) {
@@ -819,8 +820,9 @@ impl WeexFutures {
             return true;
         }
         if event.result == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 "WEEX private subscription failed; continuing REST safety loop",
             );
             return true;
@@ -960,7 +962,7 @@ impl WeexFutures {
             for (timer, _) in self.account.deferred.drain(..) {
                 cx.clear_timer(timer);
             }
-            cx.log(LogLevel::Warning, "WEEX private reconciliation timed out; retaining last-known-good snapshots and retrying reads");
+            cx.notice(Level::Warn, code::REQUEST_FAILED, "WEEX private reconciliation timed out; retaining last-known-good snapshots and retrying reads");
             self.account.pending = 1;
             self.account_finished(cx, true);
             return true;

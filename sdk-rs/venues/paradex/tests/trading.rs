@@ -256,7 +256,7 @@ fn bracket_entry(h: &mut Harness, command: u32, next: Option<PlaceOrderOpts>) {
 fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
     h.actions.iter().any(|action| {
         matches!(action,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains(expected))
     })
 }
@@ -368,7 +368,7 @@ fn placement_continues_after_a_rejection_and_retains_earlier_and_later_ids() {
     assert_eq!(h.result(70), Ok("[\"one\",\"three\"]"));
     assert!(h.pending.is_empty());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains("second") && message.contains("Not enough collateral"))));
 }
 
@@ -422,7 +422,7 @@ fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients
     h.reply("/orders/batch", r#"{"orders":[{"id":"three","client_id":"third"},{"id":"one","client_id":"first"}],"errors":[{"error":"INVALID_PRICE","message":"outside price bands"}]}"#);
     assert_eq!(h.result(72), Ok("[\"one\",\"three\"]"));
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains("second") && message.contains("outside price bands"))));
 }
 

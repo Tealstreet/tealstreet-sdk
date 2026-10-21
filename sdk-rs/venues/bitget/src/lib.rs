@@ -790,7 +790,7 @@ impl Venue for BitgetFutures {
                 command,
                 rows,
                 invalid: false,
-            } => cx.done(command, Ok(serde_json::to_string(&rows).expect("candles"))),
+            } => cx.done(command, serde_json::to_string(&rows).expect("candles")),
             pending => self.on_request_failed(cx, pending, "invalid Bitget REST record"),
         }
     }
@@ -821,7 +821,7 @@ impl Venue for BitgetFutures {
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Candles { command, .. } => cx.fail(command, error.to_owned()),
             Pending::Account {
                 generation,
                 request,
@@ -938,7 +938,7 @@ impl Venue for BitgetFutures {
                 to_ms,
             } => {
                 let Some(native) = interval(value) else {
-                    cx.done(command, Err(value.unsupported("Bitget")));
+                    cx.fail(command, value.unsupported("Bitget"));
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);

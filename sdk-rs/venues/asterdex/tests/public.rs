@@ -100,7 +100,7 @@ impl Harness {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(value, _)| *value != timer),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.legacy_text())))

@@ -328,13 +328,11 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 50,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 50, .. })))
+    );
 }
 
 #[test]

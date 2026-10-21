@@ -133,6 +133,19 @@ market batch and propagates partial or unknown outcomes without automatic retry.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
 
+## Rust account construction
+
+`exchanges/rust/construction-rules.json` declares signing and private-data
+eligibility for every Rust account. TS reads it synchronously before WASM loads;
+Rust embeds the same table and resolves it before credential validation and
+startup. The optional `publicMode` object carries raw caller intent (including
+remote versus payload signer and index presence) beside `publicDataOnly`.
+Without it, legacy native/harness options keep their original interpretation.
+WASM `construction()` reports credential-free `canSign`, `publicDataOnly`, and
+Aster API-version metadata. `resolveConstruction` exposes the same resolution
+without engine construction or I/O. CI compares both evaluators for every
+registered name. Explicit-private Paradex validation belongs to the registry.
+
 ## Rust engine capabilities
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,

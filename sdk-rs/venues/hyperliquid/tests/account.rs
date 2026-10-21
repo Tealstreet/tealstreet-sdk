@@ -756,7 +756,11 @@ fn resync(
     }
     e.drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
             _ => None,
         })
         .collect()

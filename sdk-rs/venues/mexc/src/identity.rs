@@ -15,10 +15,13 @@ struct Identity {
 fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
     let result =
         result.and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()));
-    if let Err(error) = &result {
-        cx.command_error(command, error);
+    match result {
+        Ok(data) => cx.done(command, data),
+        Err(error) => {
+            cx.command_error(command, &error);
+            cx.fail(command, error);
+        }
     }
-    cx.done(command, result);
 }
 
 fn fingerprint(key: &str) -> String {

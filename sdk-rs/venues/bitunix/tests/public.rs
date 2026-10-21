@@ -185,7 +185,7 @@ fn candle_reads_use_quote_volume_and_seconds() {
         r.id,
         r#"{"code":0,"data":[{"time":1000,"open":"1","high":"3","low":"1","close":"2","quoteVol":"99"}]}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:9,result:Ok(s)}) if s.contains("\"timestamp\":1.0") && s.contains("\"volume\":99.0"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:9,result:s}) if s.contains("\"timestamp\":1.0") && s.contains("\"volume\":99.0"))));
 }
 
 #[test]
@@ -402,10 +402,7 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(safe_cex_engine::Notice::CommandDone {
-                    command: 90,
-                    result: Err(_)
-                })
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 90, .. })
             )),
             "{interval:?}"
         );
@@ -456,5 +453,8 @@ fn candle_interest_without_credentials_reads_no_symbol_settings() {
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("credentials")
+    ) || matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("credentials")
     )));
 }

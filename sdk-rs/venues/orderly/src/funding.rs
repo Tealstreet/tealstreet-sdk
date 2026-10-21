@@ -1,8 +1,10 @@
 //! Orderly limits each public socket to one hundred topics. Keep funding on
 //! dedicated ninety-topic shards so books and candles retain the main socket.
 use crate::{Connection, Orderly, Pending, wire::Envelope};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::socket::{Tick as SocketTick, Timeout};
-use safe_cex_engine::{Cx, LogLevel, PublicFeedPolicy, SocketId, TimerId};
+use safe_cex_engine::{Cx, PublicFeedPolicy, SocketId, TimerId};
 use serde::Serialize;
 
 const TOPICS_PER_SOCKET: usize = 90;
@@ -143,7 +145,12 @@ impl Orderly {
             Ok(())
         })();
         if let Err(error) = result {
-            cx.log(LogLevel::Error, error);
+            let code = if rejected {
+                code::SUBSCRIPTION_REJECTED
+            } else {
+                code::STREAM_MALFORMED
+            };
+            cx.notice(Level::Error, code, error);
             if rejected {
                 self.funding.shards[index].connection.recover = true;
                 cx.close(socket);

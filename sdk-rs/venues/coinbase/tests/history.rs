@@ -84,7 +84,10 @@ impl Driver {
                 Action::Notice(Notice::CommandDone {
                     command: 77,
                     result,
-                }) => self.result = Some(result),
+                }) => self.result = Some(Ok(result)),
+                Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                    self.result = Some(Err(error.legacy_text()))
+                }
                 _ => {}
             }
         }

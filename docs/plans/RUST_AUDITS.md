@@ -902,8 +902,18 @@ Normal inputs send the same requests as TS; the risk is resilience.
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
   accepted, imported TP/SL amend keeps row working types, partial credentials
   deactivate visibly.
-- Low: isolated leverage sets both sides; index triggers rejected; fill without
-  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+- Low: ~~isolated leverage sets both sides~~ (selected isolated rail changes;
+  required opposite payload rail is preserved, including flat symbols; cross
+  leverage is coupled); ~~fetchLeverage returns max~~ (bridge returns cached
+  native buy/sell rails, not market limits).
+  **RISKY — retained:** index-source placement needs a verified native wire
+  contract (TS substitutes mark price for IndexPrice, which changes semantics).
+  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query,
+  while an empty identity string is still skipped. Inventing a fill identity is
+  unsafe; the empty-string handling remains a limitation. Income with neither
+  `asset` nor its `coin` alias rejects the affected page (range walks continue
+  with an explicit incomplete marker); assuming USDT without accounting evidence
+  can mislabel value.
 
 ### Coinbase (already defaults to Rust)
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
@@ -921,8 +931,15 @@ Normal inputs send the same requests as TS; the risk is resilience.
   the snapshot (`account.rs:1246`)~~ (stops and other closes reserve separately;
   spot reduce-only is plain; probe advances unless 408/429/5xx; bad position
   rows skip keeping the store copy, flat side-less rows clear).
-- Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
-  OHLCV honours `from`; ~~placement errors lose Coinbase's message~~.
+- Low: ~~spot `total` source differs~~ (native `total_balance_crypto` includes
+  held funds; TS incorrectly used available-to-trade as total); ~~OHLCV honours
+  `from`~~ (correct: explicit caller lower bounds reach the native start field;
+  TS's defaulted limit made its `from` branch unreachable); ~~placement errors
+  lose Coinbase's message~~.
+  **RISKY — retained:** CFM summary `upnl`/equity aggregation. Native uses the
+  summary unrealized-PnL field while TS returns zero. Changing that value needs
+  verified CFM/spot portfolio accounting and downstream equity-consumer evidence;
+  neither suppressing real PnL nor silently double-counting it is acceptable.
 
 ### Lighter
 
