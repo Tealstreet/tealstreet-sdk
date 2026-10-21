@@ -341,7 +341,7 @@ fn caller_id_lookup_and_invalid_ranges_fail_before_http() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }

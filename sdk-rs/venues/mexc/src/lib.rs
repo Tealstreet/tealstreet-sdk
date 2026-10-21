@@ -529,7 +529,7 @@ impl MexcFutures {
                     self.resync(cx, &symbol);
                 }
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
@@ -885,7 +885,10 @@ impl Venue for MexcFutures {
                         .collect();
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
         }
     }
@@ -1009,11 +1012,11 @@ impl Venue for MexcFutures {
                 to_ms,
             } => {
                 let Some(i) = wire::interval(interval) else {
-                    cx.done(command, Err(interval.unsupported("MEXC")));
+                    cx.fail(command, interval.unsupported("MEXC"));
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Err("Unknown MEXC market".into()));
+                    cx.fail(command, "Unknown MEXC market");
                     return;
                 };
                 let mut path = format!("/api/v1/contract/kline/{}?interval={i}", m.id);

@@ -765,8 +765,8 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
-                result: result.as_ref().ok().map(String::as_str),
-                error: result.as_ref().err().map(|error| error.as_str().into()),
+                result: Some(result.as_str()),
+                error: None,
                 detail: None,
             },
             Action::Notice(Notice::CommandFailed { command, error }) => ActionOut::Done {
@@ -1814,7 +1814,7 @@ mod tests {
             }),
             Action::Notice(Notice::CommandDone {
                 command: 19,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ]);
         assert_eq!(
@@ -2027,7 +2027,7 @@ mod tests {
             }),
             Action::Notice(Notice::CommandDone {
                 command: 3,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ];
         assert_eq!(

@@ -358,9 +358,9 @@ impl Kraken {
         };
         let (read, symbol, order, kind, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     *command,
-                    Err("Kraken does not support caller client order IDs or their lookup".into()),
+                    "Kraken does not support caller client order IDs or their lookup",
                 );
                 return true;
             }
@@ -426,12 +426,9 @@ impl Kraken {
             || to < from
             || to > 253_402_300_799_999.0
         {
-            cx.done(
+            cx.fail(
                 *command,
-                Err(
-                    "Kraken history range must contain valid milliseconds in ascending order"
-                        .into(),
-                ),
+                "Kraken history range must contain valid milliseconds in ascending order",
             );
             return true;
         }
@@ -471,9 +468,9 @@ impl Kraken {
     }
     fn history_request(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         if request.pages >= MAX_PAGES {
-            cx.done(
+            cx.fail(
                 request.command,
-                Err("Kraken history is INCOMPLETE: page budget exhausted".into()),
+                "Kraken history is INCOMPLETE: page budget exhausted",
             );
             return;
         }
@@ -544,7 +541,7 @@ impl Kraken {
             at,
             Pending::History(Box::new(request)),
         ) {
-            cx.done(command, Err(error));
+            cx.fail(command, error);
         }
     }
     pub(crate) fn history_item(
@@ -924,8 +921,8 @@ impl Kraken {
             request.rows.truncate(request.limit);
             let rows: Vec<_> = request.rows.into_iter().map(|row| row.data).collect();
             match serde_json::to_string(&rows) {
-                Ok(rows) => cx.done(request.command, Ok(rows)),
-                Err(error) => cx.done(request.command, Err(error.to_string())),
+                Ok(rows) => cx.done(request.command, rows),
+                Err(error) => cx.fail(request.command, error.to_string()),
             }
         }
     }
@@ -935,10 +932,7 @@ impl Kraken {
         request: Request,
         error: &str,
     ) {
-        cx.done(
-            request.command,
-            Err(format!("Kraken history failed: {error}")),
-        );
+        cx.fail(request.command, format!("Kraken history failed: {error}"));
     }
 }
 

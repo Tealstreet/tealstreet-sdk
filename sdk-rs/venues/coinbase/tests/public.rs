@@ -139,8 +139,8 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
                 .any(|action| matches!(action, Action::Http(_)))
         );
         assert!(actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
-                if error.starts_with("Coinbase does not support"))));
+            Action::Notice(Notice::CommandFailed { command: 42, error })
+                if error.legacy_text().starts_with("Coinbase does not support"))));
     }
 }
 #[test]

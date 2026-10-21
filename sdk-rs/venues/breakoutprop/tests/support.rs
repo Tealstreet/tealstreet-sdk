@@ -69,10 +69,7 @@ impl Rig {
                 }
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.notices.push(Notice::CommandDone {
-                        command,
-                        result: Err(error.legacy_text()),
-                    });
+                    self.notices.push(Notice::CommandFailed { command, error: error.clone() });
                     self.failures.push(error);
                 }
                 Action::Notice(notice) => self.notices.push(notice),

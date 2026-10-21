@@ -192,7 +192,7 @@ fn candle_seconds_and_empty_stream_candles() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(_), .. })
+        Action::Notice(safe_cex_engine::Notice::CommandDone { result: _, .. })
     )));
     e.handle(
         0.0,

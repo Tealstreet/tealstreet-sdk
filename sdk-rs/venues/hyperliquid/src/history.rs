@@ -157,19 +157,18 @@ impl Hyperliquid {
                 }
                 cx.done(
                     command,
-                    Ok(serde_json::to_string(&Found { found: true, order }).unwrap()),
+                    serde_json::to_string(&Found { found: true, order }).unwrap(),
                 );
                 return;
             }
             if !crate::account::valid_cloid(client_order_id) || self.user().is_none() {
-                cx.done(command, Ok("{\"found\":false,\"definitive\":false}".into()));
+                cx.done(command, "{\"found\":false,\"definitive\":false}".into());
                 return;
             }
         }
         if self.spot {
-            cx.done(
-                command,
-                match query {
+            {
+                let result: Result<String, String> = match query {
                     Query::OrderByClientId { .. } => {
                         Ok("{\"found\":false,\"definitive\":false}".into())
                     }
@@ -177,8 +176,12 @@ impl Hyperliquid {
                         Err("Hyperliquid spot public trades query is not supported".into())
                     }
                     _ => Ok("[]".into()),
-                },
-            );
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            };
             return;
         }
         let (kind, from, to) = match &query {
@@ -202,10 +205,7 @@ impl Hyperliquid {
             Query::PublicTrades { .. } => (Kind::Trades, None, None),
         };
         if kind != Kind::Trades && (self.options.public_data_only || self.user().is_none()) {
-            cx.done(
-                command,
-                Err("Hyperliquid account identity is missing".into()),
-            );
+            cx.fail(command, "Hyperliquid account identity is missing");
             return;
         }
         let to = to.unwrap_or(cx.now).floor();
@@ -222,7 +222,7 @@ impl Hyperliquid {
             || to > 9_007_199_254_740_991.0
             || from > to
         {
-            cx.done(command, Err("Invalid history time range".into()));
+            cx.fail(command, "Invalid history time range");
             return;
         }
         let request = Request {
@@ -276,7 +276,7 @@ impl Hyperliquid {
             None
         };
         if request.kind == Kind::Trades && coin.is_none() {
-            cx.done(request.command, Err("Market not found".into()));
+            cx.fail(request.command, "Market not found");
             return;
         }
         let ranged = matches!(
@@ -528,12 +528,12 @@ impl Hyperliquid {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) || !request.valid {
-            cx.done(
+            cx.fail(
                 request.command,
-                Err(format!(
+                format!(
                     "Invalid Hyperliquid history response (HTTP {})",
                     response.status
-                )),
+                ),
             );
             return;
         }
@@ -576,7 +576,10 @@ impl Hyperliquid {
                         Ok("{\"found\":false,\"definitive\":false}".into())
                     }
                 });
-            cx.done(request.command, result);
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            };
             return;
         }
         let cap = if request.kind == Kind::IncomeFunding {
@@ -590,7 +593,7 @@ impl Hyperliquid {
         ) && request.added == 0
             && request.raw_count >= cap
         {
-            cx.done(request.command,Err("Hyperliquid history stalled on a full inclusive page; requested range may be incomplete".into()));
+            cx.fail(request.command, "Hyperliquid history stalled on a full inclusive page; requested range may be incomplete");
             return;
         }
         if matches!(
@@ -600,7 +603,10 @@ impl Hyperliquid {
         {
             request.pages += 1;
             if request.pages >= 200 {
-                cx.done(request.command,Err("Hyperliquid history reached the page cap; requested range may be incomplete".into()));
+                cx.fail(
+                    request.command,
+                    "Hyperliquid history reached the page cap; requested range may be incomplete",
+                );
                 return;
             }
             request.cursor = request.newest;
@@ -687,10 +693,13 @@ impl Hyperliquid {
                 serde_json::to_string(&request.trades)
             }
         };
-        cx.done(request.command, result.map_err(|e| e.to_string()));
+        match result.map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(request.command, data),
+            Err(error) => cx.fail(request.command, error),
+        };
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
 }
 fn symbol_matches(query: &Query, symbol: &str) -> bool {

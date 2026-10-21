@@ -181,7 +181,7 @@ fn failed_or_malformed_history_never_resolves_as_empty_success() {
         reply(&mut e, &r, status, body);
         assert!(e.drain_actions().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -292,7 +292,7 @@ fn full_overlap_page_is_incomplete_instead_of_an_empty_success() {
     reply(&mut e, &r, 200, &repeated);
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(Notice::CommandFailed { .. })
     )));
 }
 #[test]

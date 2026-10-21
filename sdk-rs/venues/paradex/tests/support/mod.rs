@@ -79,10 +79,7 @@ impl Harness {
                 Action::Http(r) => self.pending.push(r),
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.actions.push(Action::Notice(Notice::CommandDone {
-                        command,
-                        result: Err(error.legacy_text()),
-                    }));
+                    self.actions.push(Action::Notice(Notice::CommandFailed { command, error: error.clone() }));
                     self.failures.push(error);
                 }
                 a => self.actions.push(a),

@@ -5,7 +5,7 @@ fn ask(e: &mut Driver, query: Query) {
     e.handle(2000.0, Event::Command(Command::Query { command: 1, query }));
 }
 fn result(e: &mut Driver) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result)
@@ -13,7 +13,7 @@ fn result(e: &mut Driver) -> Result<String, String> {
                 None
             }
         })
-        .unwrap()
+        .unwrap())
 }
 #[test]
 fn fills_stream_into_execution_shape_with_millisecond_filters_and_seconds_output() {

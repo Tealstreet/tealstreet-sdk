@@ -108,7 +108,7 @@ fn candles_on_business_and_all_sockets_watch_silence() {
         &envelope(r#"["1700000000000","1","3","0.5","2","9","10","20","1"]"#),
         5.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s.contains("\"volume\":20.0"))));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s.contains("\"volume\":20.0"))));
 }
 
 type Timers = Vec<(safe_cex_engine::TimerId, f64)>;
@@ -362,7 +362,7 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
         matches!(&fallback, Action::Http(r) if r.url.contains("/history-candles?") && r.url.contains("&limit=100&"))
     );
     reply(&mut e, &fallback, &envelope(""), 1_800_000_000_002.0);
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s == "[]")));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s == "[]")));
 }
 
 #[test]

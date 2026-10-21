@@ -109,41 +109,38 @@ impl Kucoin {
             limit,
         } = query
         else {
-            cx.done(command, Err("Unsupported KuCoin funding query".into()));
+            cx.fail(command, "Unsupported KuCoin funding query");
             return;
         };
         if kind.as_deref() != Some("FUNDING_FEE") {
-            cx.done(command, Err("Unsupported KuCoin funding query".into()));
+            cx.fail(command, "Unsupported KuCoin funding query");
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, Err("KuCoin credentials required".into()));
+            cx.fail(command, "KuCoin credentials required");
             return;
         }
         let Some(symbol) = symbol.filter(|s| !s.is_empty()) else {
-            cx.done(
-                command,
-                Err("KuCoin funding history requires a symbol".into()),
-            );
+            cx.fail(command, "KuCoin funding history requires a symbol");
             return;
         };
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, Err(format!("Unknown KuCoin market {symbol}")));
+            cx.fail(command, format!("Unknown KuCoin market {symbol}"));
             return;
         };
         let end = to_ms.unwrap_or_else(|| cx.now.floor());
         let start = from_ms.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(from), Some(end)) = (millis(start), millis(end)) else {
-            cx.done(command, Err("Invalid KuCoin funding time range".into()));
+            cx.fail(command, "Invalid KuCoin funding time range");
             return;
         };
         if from > end {
-            cx.done(command, Err("Invalid KuCoin funding time range".into()));
+            cx.fail(command, "Invalid KuCoin funding time range");
             return;
         }
         let limit = limit.unwrap_or(1000) as usize;
         if limit == 0 {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         self.funding_schedule(
@@ -183,10 +180,7 @@ impl Kucoin {
     fn funding_send(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         request.requests += 1;
         if request.requests > MAX_REQUESTS {
-            cx.done(
-                request.command,
-                Err("KuCoin funding exceeded page safety bound".into()),
-            );
+            cx.fail(request.command, "KuCoin funding exceeded page safety bound");
             return;
         }
         request.page.clear();
@@ -276,12 +270,12 @@ impl Kucoin {
                 let delay = 1000.0 * request.retries as f64;
                 self.funding_schedule(cx, request, delay);
             } else {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err(envelope.map_or_else(
+                    envelope.map_or_else(
                         |_| "Malformed KuCoin funding response".into(),
                         |e| format!("KuCoin funding {}: {}", e.code, e.msg),
-                    )),
+                    ),
                 );
             }
             return;
@@ -290,16 +284,16 @@ impl Kucoin {
         let page = match serde_json::from_str::<Page>(envelope.data.unwrap().get()) {
             Ok(page) => page,
             Err(_) => {
-                cx.done(request.command, Err("Malformed KuCoin funding page".into()));
+                cx.fail(request.command, "Malformed KuCoin funding page");
                 return;
             }
         };
         // Never subtract one from an incomplete timestamp boundary: it may hide
         // additional settlements at exactly the same millisecond.
         if page.has_more && request.page_minimum.is_none_or(|time| time >= request.end) {
-            cx.done(
+            cx.fail(
                 request.command,
-                Err("KuCoin funding cursor cannot prove complete same-timestamp coverage".into()),
+                "KuCoin funding cursor cannot prove complete same-timestamp coverage",
             );
             return;
         }
@@ -336,10 +330,14 @@ impl Kucoin {
         if !request.explicit_range {
             request.rows.truncate(request.limit);
         }
-        cx.done(
-            request.command,
-            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            }
+        };
     }
     pub(crate) fn funding_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(request) = self.funding.waiting.remove(&timer) {

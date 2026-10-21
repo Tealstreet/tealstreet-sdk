@@ -320,7 +320,7 @@ impl BybitLinear {
             }
         };
         if symbol.is_some_and(|symbol| !self.category_enabled(self.category_for(symbol))) {
-            cx.done(command, Err("Bybit product is not enabled".into()));
+            cx.fail(command, "Bybit product is not enabled");
             return;
         }
         let categories = if symbol.is_none() {
@@ -334,22 +334,22 @@ impl BybitLinear {
                 Read::PublicTrades { .. } | Read::OrderByClientId { .. }
             )
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         if matches!(read, Read::Income { .. }) && (self.variant.is_spot() || self.variant.is_hyro())
         {
-            cx.done(
+            cx.fail(
                 command,
-                Err("This Bybit variant does not support income history".into()),
+                "This Bybit variant does not support income history",
             );
             return;
         }
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("Bybit client order lookup is not supported by the Rust engine".into()),
+                    "Bybit client order lookup is not supported by the Rust engine",
                 );
                 return;
             }
@@ -514,7 +514,7 @@ impl BybitLinear {
                     return;
                 }
                 let mut walk = self.history.reads.remove(&command).expect("present");
-                cx.done(command, Ok(walk.rows.json(walk.cap)));
+                cx.done(command, walk.rows.json(walk.cap));
             }
         }
     }
@@ -559,7 +559,7 @@ impl BybitLinear {
             Err(message) => {
                 cx.command_error(command, format!("Bybit history ({}): {message}", walk.path));
                 self.history.reads.remove(&command);
-                cx.done(command, Err(message));
+                cx.fail(command, message);
                 return;
             }
         };
@@ -593,9 +593,9 @@ impl BybitLinear {
             })
         {
             self.history.reads.remove(&command);
-            cx.done(
+            cx.fail(
                 command,
-                Err("Bybit history pagination is incomplete or did not advance".into()),
+                "Bybit history pagination is incomplete or did not advance",
             );
             return;
         }

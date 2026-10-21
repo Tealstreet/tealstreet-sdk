@@ -1219,7 +1219,7 @@ impl WeexFutures {
                 if let Some(hedged) = job.hedged {
                     cx.store.set_hedged(hedged);
                 }
-                cx.done(command, Ok(json(&job.ids)));
+                cx.done(command, json(&job.ids));
             }
         }
     }

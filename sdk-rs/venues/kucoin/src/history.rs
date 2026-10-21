@@ -254,10 +254,7 @@ impl Kucoin {
         }
         let (kind, symbol, order, filter, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Client ID query is not supported by this venue".into()),
-                );
+                cx.fail(command, "Client ID query is not supported by this venue");
                 return;
             }
             Query::Fills {
@@ -291,27 +288,27 @@ impl Kucoin {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
         }) {
-            cx.done(command, Err("Invalid KuCoin order ID".into()));
+            cx.fail(command, "Invalid KuCoin order ID");
             return;
         }
         if kind != Kind::Trades && self.credentials.is_none() {
-            cx.done(command, Err("KuCoin credentials required".into()));
+            cx.fail(command, "KuCoin credentials required");
             return;
         }
         if let Some(s) = &symbol
             && cx.store.market(s).is_none()
         {
-            cx.done(command, Err(format!("Unknown KuCoin market {s}")));
+            cx.fail(command, format!("Unknown KuCoin market {s}"));
             return;
         }
         let end = to.unwrap_or_else(|| cx.now.floor());
         let start = from.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(start), Some(end)) = (millis(start), millis(end)) else {
-            cx.done(command, Err("Invalid KuCoin query time range".into()));
+            cx.fail(command, "Invalid KuCoin query time range");
             return;
         };
         if start > end {
-            cx.done(command, Err("Invalid KuCoin query time range".into()));
+            cx.fail(command, "Invalid KuCoin query time range");
             return;
         }
         let explicit_range = from.is_some() && to.is_some();
@@ -333,7 +330,7 @@ impl Kucoin {
             WindowOrder::NewestFirst,
             MAX_REQUESTS as usize,
         ) else {
-            cx.done(command, Err("Invalid KuCoin query time range".into()));
+            cx.fail(command, "Invalid KuCoin query time range");
             return;
         };
         let mut windows: VecDeque<(u64, u64)> = tiles
@@ -368,7 +365,7 @@ impl Kucoin {
             window_count: 0,
         };
         if request.limit == 0 {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         self.history_schedule(cx, request);
@@ -393,10 +390,7 @@ impl Kucoin {
         r.invalid = false;
         r.requests += 1;
         if r.requests > MAX_REQUESTS {
-            cx.done(
-                r.command,
-                Err("KuCoin query exceeded page safety bound".into()),
-            );
+            cx.fail(r.command, "KuCoin query exceeded page safety bound");
             return;
         }
         let path = match r.kind {
@@ -623,7 +617,7 @@ impl Kucoin {
                 |_| "Malformed KuCoin query response".into(),
                 |e| format!("KuCoin {}: {}", e.code, e.msg),
             );
-            cx.done(r.command, Err(message));
+            cx.fail(r.command, message);
             return;
         }
         let data = envelope.unwrap().data.unwrap();
@@ -651,7 +645,7 @@ impl Kucoin {
         let more = match more {
             Ok(m) => m,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.fail(r.command, e);
                 return;
             }
         };
@@ -668,10 +662,7 @@ impl Kucoin {
                     .minimum_offset
                     .filter(|n| r.offset.is_none_or(|old| *n < old))
                 else {
-                    cx.done(
-                        r.command,
-                        Err("KuCoin ledger cursor did not advance".into()),
-                    );
+                    cx.fail(r.command, "KuCoin ledger cursor did not advance");
                     return;
                 };
                 r.offset = Some(offset);
@@ -693,7 +684,7 @@ impl Kucoin {
             return;
         }
         if !capped && r.clipped {
-            cx.done(r.command, Err("KuCoin history range is too large".into()));
+            cx.fail(r.command, "KuCoin history range is too large");
             return;
         }
         r.rows.sort_by(|a, b| {
@@ -704,10 +695,14 @@ impl Kucoin {
         if !(r.kind == Kind::Income && r.explicit_range) {
             r.rows.truncate(r.limit);
         }
-        cx.done(
-            r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&r.rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(r.command, data),
+                Err(error) => cx.fail(r.command, error),
+            }
+        };
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(r) = self.history.waiting.remove(&timer) {
@@ -798,7 +793,7 @@ mod tests {
         actions
             .iter()
             .find_map(|a| {
-                if let Action::Notice(Notice::CommandDone { result: Ok(s), .. }) = a {
+                if let Action::Notice(Notice::CommandDone { result: s, .. }) = a {
                     Some(s.as_str())
                 } else {
                     None
@@ -823,8 +818,8 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
-            Action::Notice(Notice::CommandDone { command: 77, result: Err(error) })
-                if error == "Client ID query is not supported by this venue"
+            Action::Notice(Notice::CommandFailed { command: 77, error })
+                if error.legacy_text() == "Client ID query is not supported by this venue"
         ));
     }
     #[test]
@@ -1137,7 +1132,7 @@ mod tests {
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+                Action::Notice(Notice::CommandFailed { .. })
             )));
         }
     }
@@ -1209,7 +1204,7 @@ mod tests {
         );
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
     #[test]
@@ -1266,7 +1261,7 @@ mod tests {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
     #[test]

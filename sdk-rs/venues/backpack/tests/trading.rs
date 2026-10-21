@@ -13,13 +13,13 @@ fn place(e: &mut Driver, id: u32, orders: &str) {
     );
 }
 fn done(e: &mut Driver) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .expect("command completed")
+        .expect("command completed"))
 }
 
 #[test]
@@ -636,10 +636,7 @@ fn concurrent_cancel_is_rejected_until_the_first_command_completes() {
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(out.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 2, .. })
         )));
         reply(&mut e, &one, status, "{}");
         assert_eq!(
@@ -791,7 +788,7 @@ fn amend_replaces_only_the_unfilled_total_including_fills_during_cancel() {
                 writes.is_empty(),
                 "a fully executed order must not be replaced"
             );
-            assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(value), .. }) if value == "[]")));
+            assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: value, .. }) if value == "[]")));
         }
     }
 }

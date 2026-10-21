@@ -1142,14 +1142,17 @@ impl Venue for Hyperliquid {
                 command,
                 candles,
                 valid,
-            } => cx.done(
-                command,
-                if valid {
+            } => {
+                let result: Result<String, String> = if valid {
                     Ok(serde_json::to_string(&candles).unwrap())
                 } else {
                     Err("Malformed Hyperliquid candles".into())
-                },
-            ),
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
         }
     }
     fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -1253,7 +1256,7 @@ impl Venue for Hyperliquid {
             }
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta { dex, offset, .. } => {
                 let optional = !dex.is_empty();
@@ -1343,11 +1346,11 @@ impl Venue for Hyperliquid {
                 to_ms,
             } => {
                 if !supported(interval) {
-                    cx.done(command, Err(interval.unsupported("Hyperliquid")));
+                    cx.fail(command, interval.unsupported("Hyperliquid"));
                     return;
                 }
                 let Some(coin) = self.coin(cx, &symbol) else {
-                    cx.done(command, Err("Market not found".into()));
+                    cx.fail(command, "Market not found");
                     return;
                 };
                 #[derive(Serialize)]
@@ -1375,7 +1378,7 @@ impl Venue for Hyperliquid {
                     || end < 0.0
                     || from_ms.is_some_and(|t| t < 0.0)
                 {
-                    cx.done(command, Err("Invalid candle time range".into()));
+                    cx.fail(command, "Invalid candle time range");
                     return;
                 }
                 let body = serde_json::to_string(&Read {

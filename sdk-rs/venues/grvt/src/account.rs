@@ -1057,14 +1057,11 @@ impl Grvt {
         symbol: String,
     ) {
         if cx.store.market(&symbol).is_none() {
-            cx.done(command, Err("Unknown GRVT leverage market".into()));
+            cx.fail(command, "Unknown GRVT leverage market");
             return;
         }
         let Some(account) = self.account.trading_account_id.as_deref() else {
-            cx.done(
-                command,
-                Err("GRVT private account is not authenticated".into()),
-            );
+            cx.fail(command, "GRVT private account is not authenticated");
             return;
         };
         let body =
@@ -1596,7 +1593,7 @@ impl Grvt {
                         buy_leverage: f64,
                         sell_leverage: f64,
                     }
-                    let result = if failed {
+                    let result: Result<String, String> = if failed {
                         Err("Malformed GRVT leverage response".into())
                     } else if revision != self.account.settings_revision {
                         Err("GRVT leverage settings changed during read; retry query".into())
@@ -1613,7 +1610,10 @@ impl Grvt {
                                 .expect("serialize leverage")
                             })
                     };
-                    cx.done(command, result);
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 }
                 if !failed && revision != self.account.settings_revision {
                     self.refresh_leverage(cx);
@@ -1780,7 +1780,7 @@ impl Grvt {
                         command,
                         "GRVT private request failed; retaining previous account state",
                     );
-                    cx.done(command, Err("GRVT leverage request failed".into()));
+                    cx.fail(command, "GRVT leverage request failed");
                     return;
                 } else {
                     self.account.leverage_pending = false;

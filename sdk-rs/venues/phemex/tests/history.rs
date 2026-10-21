@@ -67,7 +67,7 @@ fn fills() -> Query {
     }
 }
 fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
-    actions(e)
+    Ok(actions(e)
         .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
@@ -76,7 +76,7 @@ fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
             }) => Some(result),
             _ => None,
         })
-        .expect("completion")
+        .expect("completion"))
 }
 fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, streamed: bool) {
     let Action::Http(r) = request else {
@@ -326,7 +326,7 @@ fn unsupported_or_invalid_queries_never_issue_io() {
         assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
         assert!(output.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -402,7 +402,7 @@ fn public_only_mode_refuses_private_history_even_with_credentials() {
     assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
     assert!(output.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(Notice::CommandFailed { .. })
     )));
 }
 
@@ -595,7 +595,7 @@ fn finish_empty_probes(e: &mut Engine<PhemexPerpetuals>) -> Result<String, Strin
         let output = actions(e);
         for action in &output {
             if let Action::Notice(Notice::CommandDone { result, .. }) = action {
-                return result.clone();
+                return Ok(result.clone());
             }
         }
         let a = output
@@ -738,7 +738,7 @@ fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
         assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
         assert!(output.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -816,7 +816,7 @@ fn unknown_lookup_market_is_nondefinitive_without_io_even_without_credentials() 
         );
         let output = actions(&mut e);
         assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
-        assert!(output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(body), .. }) if body == r#"{"found":false,"definitive":false}"#)));
+        assert!(output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: body, .. }) if body == r#"{"found":false,"definitive":false}"#)));
     }
 }
 

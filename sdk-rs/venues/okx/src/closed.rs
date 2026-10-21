@@ -43,14 +43,14 @@ impl Okx {
         to_ms: Option<f64>,
     ) {
         if self.credentials.is_none() {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let instrument = match symbol {
             Some(symbol) => match cx.store.market(&symbol) {
                 Some(market) => Some(market.id.clone()),
                 None => {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 }
             },
@@ -127,14 +127,11 @@ impl Okx {
     }
 
     pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(
-            request.command,
-            Err(format!("OKX closed positions: {error}")),
-        );
+        cx.fail(request.command, format!("OKX closed positions: {error}"));
     }
 
     fn finish_closed(cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.done(request.command, Ok(format!("[{}]", request.rows.join(","))));
+        cx.done(request.command, format!("[{}]", request.rows.join(",")));
     }
 
     pub(crate) fn closed_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

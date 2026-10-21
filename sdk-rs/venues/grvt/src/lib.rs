@@ -297,7 +297,7 @@ impl Grvt {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
                 self.startup_retry.failed(cx, ());
             }
-            Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
+            Job::Candles { command, .. } => cx.fail(command, "GRVT candle read failed"),
         }
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -974,13 +974,13 @@ impl Venue for Grvt {
                 ..
             } => {
                 if failed {
-                    cx.done(command, Err("Invalid GRVT candles".into()));
+                    cx.fail(command, "Invalid GRVT candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                    );
+                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 }
             }
         }
@@ -1118,10 +1118,7 @@ impl Venue for Grvt {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1201,11 +1198,11 @@ impl Venue for Grvt {
                 to_ms,
             } => {
                 let Some(i) = interval(timeframe) else {
-                    cx.done(command, Err(timeframe.unsupported("GRVT")));
+                    cx.fail(command, timeframe.unsupported("GRVT"));
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Err("Unknown GRVT market".into()));
+                    cx.fail(command, "Unknown GRVT market");
                     return;
                 };
                 #[derive(Serialize)]
@@ -1225,7 +1222,7 @@ impl Venue for Grvt {
                     .chain(to_ms)
                     .any(|v| !v.is_finite() || v < 0.)
                 {
-                    cx.done(command, Err("Invalid GRVT candle bounds".into()));
+                    cx.fail(command, "Invalid GRVT candle bounds");
                     return;
                 }
                 let body = serde_json::to_string(&Body {
@@ -1256,9 +1253,7 @@ impl Venue for Grvt {
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. }
             | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => {
-                cx.done(command, Err("GRVT private phase pending".into()))
-            }
+            | Command::Query { command, .. } => cx.fail(command, "GRVT private phase pending"),
             Command::CancelOrdersWithSymbols { command, .. }
             | Command::FetchMaxLeverage { command, .. }
             | Command::AmendOrderWithSymbol { command, .. }
@@ -1266,7 +1261,7 @@ impl Venue for Grvt {
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. } => {
-                cx.done(command, Err("Unsupported GRVT command".into()))
+                cx.fail(command, "Unsupported GRVT command")
             }
         }
     }

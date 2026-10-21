@@ -51,7 +51,7 @@ impl BybitLinear {
         to_ms: Option<f64>,
     ) {
         if self.variant.is_spot() {
-            cx.done(command, Err("Bybit spot has no closed positions".into()));
+            cx.fail(command, "Bybit spot has no closed positions");
             return;
         }
         let category = if self.variant.is_inverse() {
@@ -63,14 +63,14 @@ impl BybitLinear {
         };
         if category == Category::Option {
             let symbol = symbol.unwrap_or_default();
-            cx.done(
+            cx.fail(
                 command,
-                Err(format!("Bybit has no closed PnL for options ({symbol})")),
+                format!("Bybit has no closed PnL for options ({symbol})"),
             );
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let to = to_ms.unwrap_or(cx.now);
@@ -121,9 +121,9 @@ impl BybitLinear {
         let page = match page {
             Ok(page) => page,
             Err(message) => {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err(format!("bybit closed-PnL fetch failed: {message}")),
+                    format!("bybit closed-PnL fetch failed: {message}"),
                 );
                 return;
             }
@@ -166,7 +166,7 @@ impl BybitLinear {
                         request.pages = 0;
                         self.request_closed_page(cx, request);
                     }
-                    None => cx.done(request.command, Ok(format!("[{}]", request.rows.join(",")))),
+                    None => cx.done(request.command, format!("[{}]", request.rows.join(","))),
                 }
             }
         }

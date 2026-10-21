@@ -197,10 +197,7 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
     );
     assert!(e.drain_plain().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 10,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 10, .. })
     )));
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 11 }));
     let request = requests(&mut e).pop().unwrap();
@@ -278,10 +275,7 @@ fn posted_read_network_retry_stops_after_three_resends() {
             );
             assert!(actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone {
-                    command: 22,
-                    result: Err(_)
-                })
+                Action::Notice(Notice::CommandFailed { command: 22, .. })
             )));
         }
     }
@@ -332,10 +326,7 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 50,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 50, .. })
     )));
 }
 
@@ -453,10 +444,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 901,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 901, .. })
     )));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }

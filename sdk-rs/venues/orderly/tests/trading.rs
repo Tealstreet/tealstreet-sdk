@@ -11,7 +11,7 @@ fn place(e: &mut Driver, command: u32, json: &str) {
 }
 
 fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
-    out.into_iter()
+    Ok(out.into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
                 (command == id).then_some(result)
@@ -21,7 +21,7 @@ fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
             }
             _ => None,
         })
-        .expect("command completion")
+        .expect("command completion"))
 }
 
 fn body(r: &safe_cex_engine::HttpRequest) -> serde_json::Value {
@@ -512,7 +512,7 @@ fn queued_second_stop_waits_for_first_pair_then_cancels_it_before_replacement() 
         a,
         Action::Notice(Notice::CommandDone {
             command: 1,
-            result: Ok(_)
+            result: _
         })
     )));
     let writes: Vec<_> = out

@@ -137,10 +137,7 @@ impl Backpack {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Backpack client-order-ID lookup is unsupported".into()),
-                );
+                cx.fail(command, "Backpack client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -180,9 +177,9 @@ impl Backpack {
                 if kind.as_ref().is_some_and(|k| {
                     !matches!(k.to_ascii_uppercase().as_str(), "FUNDING_FEE" | "FUNDING")
                 }) {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Backpack income query supports funding payments only".into()),
+                        "Backpack income query supports funding payments only",
                     );
                     return;
                 }
@@ -210,14 +207,14 @@ impl Backpack {
             .any(|t| !t.is_finite() || t < 0.0)
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.done(command, Err("Backpack invalid history time range".into()));
+            cx.fail(command, "Backpack invalid history time range");
             return;
         }
         if symbol
             .as_ref()
             .is_some_and(|s| cx.store.market(s).is_none())
         {
-            cx.done(command, Err("Backpack history market not found".into()));
+            cx.fail(command, "Backpack history market not found");
             return;
         }
         let limit = limit.clamp(1, 1000) as usize;
@@ -290,7 +287,7 @@ impl Backpack {
                 Pending::History(Box::new(request)),
                 true,
             ) {
-                cx.done(command, Err(e));
+                cx.fail(command, e);
             }
         }
     }
@@ -451,12 +448,9 @@ impl Backpack {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) || r.invalid {
-            cx.done(
+            cx.fail(
                 r.command,
-                Err(format!(
-                    "Backpack history read failed: HTTP {}",
-                    response.status
-                )),
+                format!("Backpack history read failed: HTTP {}", response.status),
             );
             return;
         }
@@ -469,9 +463,9 @@ impl Backpack {
         let step = r.walk.advance(r.page_count, r.page_count, more);
         if more {
             if !progressed || !matches!(step, OffsetStep::More(_)) {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("Backpack history is incomplete: paging made no progress".into()),
+                    "Backpack history is incomplete: paging made no progress",
                 );
                 return;
             }
@@ -491,7 +485,7 @@ impl Backpack {
                     ),
                 );
             }
-            cx.done(r.command, Ok(serde_json::to_string(&r.rows).unwrap()));
+            cx.done(r.command, serde_json::to_string(&r.rows).unwrap());
         }
     }
 }

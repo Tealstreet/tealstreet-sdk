@@ -163,7 +163,7 @@ impl Harness {
             })
             .expect("command completion");
         match self.actions.remove(index) {
-            Action::Notice(Notice::CommandDone { result, .. }) => result,
+            Action::Notice(Notice::CommandDone { result, .. }) => Ok(result),
             Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
             _ => unreachable!(),
         }

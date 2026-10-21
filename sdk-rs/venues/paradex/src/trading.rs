@@ -645,7 +645,7 @@ impl Trading {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
                 return true;
             }
@@ -660,7 +660,7 @@ impl Trading {
                         not_sent("Paradex supports one-way mode only").kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
                 return true;
             }
@@ -788,7 +788,10 @@ impl Trading {
                 } else {
                     Ok("[]".into())
                 };
-                cx.done(state.command, result);
+                match result {
+                    Ok(data) => cx.done(state.command, data),
+                    Err(error) => cx.fail(state.command, error),
+                };
             } else {
                 let command = state.command;
                 cx.fail(command, state.failure());
@@ -924,14 +927,15 @@ impl Trading {
                     sell_leverage: f64,
                 }
                 let leverage = cx.store.setting(&symbol).map_or(10., |s| s.leverage);
-                cx.done(
-                    job.command,
-                    serde_json::to_string(&Rails {
-                        buy_leverage: leverage,
-                        sell_leverage: leverage,
-                    })
-                    .map_err(|e| e.to_string()),
-                );
+                match serde_json::to_string(&Rails {
+                    buy_leverage: leverage,
+                    sell_leverage: leverage,
+                })
+                .map_err(|e| e.to_string())
+                {
+                    Ok(data) => cx.done(job.command, data),
+                    Err(error) => cx.fail(job.command, error),
+                };
             }
         } else {
             let rejected = ((400..500).contains(&response.status)

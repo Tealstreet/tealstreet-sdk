@@ -140,14 +140,14 @@ fn raw_response(e: &mut Engine<WeexFutures>, r: &HttpRequest, text: &str) -> Vec
     e.drain_actions().collect()
 }
 fn done(actions: &[Action]) -> Result<String, String> {
-    actions
+    Ok(actions
         .iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .expect("completed command")
+        .expect("completed command"))
 }
 fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
     actions
@@ -965,8 +965,8 @@ fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     );
     assert!(writes(&actions).is_empty());
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
-        if error == "Order amendment or cancellation is already in flight")));
+        Action::Notice(Notice::CommandFailed { command: 2, error })
+        if error.legacy_text() == "Order amendment or cancellation is already in flight")));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     e.handle(
         1002.0,

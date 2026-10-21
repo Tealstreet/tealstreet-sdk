@@ -1016,7 +1016,7 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.len(), 1);
     assert!(
-        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: Ok(body) }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
+        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: body }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
     );
     let loaded = engine.store().loaded();
     assert!(

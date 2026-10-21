@@ -547,14 +547,14 @@ impl Woo {
         };
         let symbol = symbol.as_str();
         let Some(m) = cx.store.market(symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if from.is_some_and(|v| !v.is_finite())
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.done(command, Err("Invalid WOO candle range or interval".into()));
+            cx.fail(command, "Invalid WOO candle range or interval");
             return;
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
@@ -1025,14 +1025,17 @@ impl Venue for Woo {
                 bad,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    if bad {
+                {
+                    let result: Result<String, String> = if bad {
                         Err("Invalid WOO candle page".into())
                     } else {
                         Ok(serde_json::to_string(&rows).unwrap())
-                    },
-                );
+                    };
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
             Pending::Depth { symbol, generation } => {
                 let Some(state) = self
@@ -1109,7 +1112,7 @@ impl Venue for Woo {
                     self.book_retry(cx, &symbol);
                 }
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Funding { .. } => cx.log(LogLevel::Warning, error),
         }
     }

@@ -211,10 +211,7 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, .. })
     )));
 }
 #[test]

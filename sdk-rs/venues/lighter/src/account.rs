@@ -2027,11 +2027,9 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
-            Request::ChangeTier { command } => cx.done(
+            Request::ChangeTier { command } => cx.fail(
                 command,
-                Err(format!(
-                    "Lighter account tier change outcome is unknown: {error}"
-                )),
+                format!("Lighter account tier change outcome is unknown: {error}"),
             ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {

@@ -4,13 +4,13 @@ use safe_cex_venue_orderly::{Options, Orderly};
 fn fetch_account(options: Options) -> Result<String, String> {
     let mut engine = Engine::new(Orderly::new(options));
     engine.handle(0.0, Event::Command(Command::FetchAccount { command: 4 }));
-    engine
+    Ok(engine
         .drain_actions()
         .find_map(|action| match action {
             Action::Notice(Notice::CommandDone { command: 4, result }) => Some(result),
             _ => None,
         })
-        .expect("FetchAccount completes")
+        .expect("FetchAccount completes"))
 }
 
 #[test]

@@ -348,7 +348,7 @@ fn full_recent_fills_page_does_not_trigger_archive_and_limit_is_clamped() {
     reply(&mut e, &a, &envelope(FILL), 10.0);
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s.contains("\"qty\":0.02"))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s.contains("\"qty\":0.02"))));
 }
 
 #[test]
@@ -369,7 +369,7 @@ fn unknown_market_does_not_issue_a_history_request() {
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(out.iter().any(
-        |a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[]")
+        |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[]")
     ));
 }
 
@@ -389,7 +389,7 @@ fn repeating_cursor_stops_with_warning_without_refetching_forever() {
         !out.iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if serde_json::from_str::<Vec<HistoricalOrder>>(s).unwrap().len() == 100)));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if serde_json::from_str::<Vec<HistoricalOrder>>(s).unwrap().len() == 100)));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("cursor did not advance"))));
 }
 

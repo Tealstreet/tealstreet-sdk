@@ -40,7 +40,7 @@ fn completions(actions: &[Action]) -> Vec<(u32, Result<String, String>)> {
             }
             _ => None,
         })
-        .collect()
+        .Ok(collect)()
 }
 fn boot() -> (Engine<Bitrue>, SocketId) {
     let mut e = Engine::new(Bitrue::new(Options {

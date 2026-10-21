@@ -31,7 +31,7 @@ fn query(e: &mut TestEngine, q: Query) -> safe_cex_engine::HttpRequest {
     requests(e).remove(0)
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone {
                 command: 99,
@@ -43,7 +43,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
                 None
             }
         })
-        .unwrap()
+        .unwrap())
 }
 fn fills(limit: Option<u32>) -> Query {
     Query::Fills {
@@ -528,7 +528,7 @@ fn invalid_history_inputs_finish_without_http() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }

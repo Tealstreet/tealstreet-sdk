@@ -131,7 +131,7 @@ impl Harness {
                 }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.command_notices.push((command, "done"));
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {

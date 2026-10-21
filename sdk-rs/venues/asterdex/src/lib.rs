@@ -796,7 +796,10 @@ impl Venue for AsterDex {
                         .map_err(|e| e.to_string())
                     })
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Pending::MarketBrackets { rows } => {
                 if account::venue_error(&response).is_none() {
@@ -874,7 +877,10 @@ impl Venue for AsterDex {
                         response.status
                     )),
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
         }
     }
@@ -983,7 +989,7 @@ impl Venue for AsterDex {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::DepthRead { command } => cx.done(command, Err(error.into())),
+            Pending::DepthRead { command } => cx.fail(command, error),
             Pending::MarketBrackets { .. } => self.seed_daily(cx),
             Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
@@ -993,7 +999,7 @@ impl Venue for AsterDex {
             Pending::OpenInterest {
                 initial, single, ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, None),
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
             Pending::ExchangeInfo { .. } => self.startup.failed(cx, true),
             Pending::Daily { .. } => self.startup.failed(cx, false),
         }
@@ -1100,7 +1106,7 @@ impl Venue for AsterDex {
                 to_ms,
             } => {
                 if !supported(interval) {
-                    cx.done(command, Err(interval.unsupported("AsterDEX")));
+                    cx.fail(command, interval.unsupported("AsterDEX"));
                     return;
                 }
                 let mut path = format!(
@@ -1154,7 +1160,10 @@ impl Venue for AsterDex {
                         )
                     })
                     .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             command => self.on_trade_command(cx, command),

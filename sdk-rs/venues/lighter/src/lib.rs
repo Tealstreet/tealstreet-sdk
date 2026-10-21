@@ -394,7 +394,7 @@ impl Lighter {
             }
             Err(error) => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error))
+                    cx.fail(c, error)
                 }
             }
         }
@@ -633,7 +633,7 @@ impl Lighter {
                 ..
             } => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()));
+                    cx.fail(c, error);
                 } else if let Some(s) = self
                     .candles
                     .get_mut(&(symbol, interval))
@@ -1192,7 +1192,14 @@ impl Venue for Lighter {
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else {
                     if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                         s.in_flight = false;
@@ -1417,7 +1424,10 @@ impl Venue for Lighter {
                         })
                         .map_err(|e| e.to_string())
                     });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Command::Query { command, query } => self.history_query(cx, command, query),
             other => self.trade_command(cx, other),

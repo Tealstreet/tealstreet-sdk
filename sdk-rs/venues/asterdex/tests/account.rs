@@ -67,7 +67,7 @@ impl H {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.legacy_text())))

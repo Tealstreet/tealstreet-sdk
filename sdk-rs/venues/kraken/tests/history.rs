@@ -455,7 +455,7 @@ fn concurrent_history_queries_keep_their_own_range_and_completion() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 92,
-            result: Ok(_)
+            result: _
         })
     )));
     answer(&mut e, &r, "fills", vec![fill("1", "2023-11-14T22:13:20Z")]);

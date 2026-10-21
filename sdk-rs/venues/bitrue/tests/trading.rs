@@ -68,10 +68,7 @@ impl Harness {
                 Action::Http(r) => self.requests.push(r),
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.notices.push(Notice::CommandDone {
-                        command,
-                        result: Err(error.legacy_text()),
-                    });
+                    self.notices.push(Notice::CommandFailed { command, error: error.clone() });
                     self.failures.push(error);
                 }
                 Action::Notice(n) => self.notices.push(n),
@@ -115,10 +112,7 @@ impl Harness {
         self.notices.iter().any(|n| {
             matches!(
                 n,
-                Notice::CommandDone {
-                    command: 7,
-                    result: Err(_)
-                }
+                Notice::CommandFailed { command: 7, .. }
             )
         })
     }
@@ -126,7 +120,7 @@ impl Harness {
         self.notices.iter().find_map(|n| match n {
             Notice::CommandDone {
                 command: 7,
-                result: Ok(v),
+                result: v,
             } => Some(v.as_str()),
             _ => None,
         })
@@ -494,7 +488,7 @@ fn cancel_symbol_includes_ack_before_rest_or_private_new() {
         n,
         Notice::CommandDone {
             command: 8,
-            result: Ok(_)
+            result: _
         }
     )));
 }
@@ -574,7 +568,7 @@ fn conditional_cancel_all_waits_for_real_native_identity_in_a_post_write_census(
         n,
         Notice::CommandDone {
             command: 8,
-            result: Ok(_)
+            result: _
         }
     )));
     assert_eq!(h.writes(), 0);
@@ -724,7 +718,7 @@ fn complete_post_write_empty_census_proves_no_open_protection_and_releases_cance
         n,
         Notice::CommandDone {
             command: 8,
-            result: Ok(_)
+            result: _
         }
     )));
 }
@@ -784,7 +778,7 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
         n,
         Notice::CommandDone {
             command: 13,
-            result: Ok(_)
+            result: _
         }
     )));
     assert_eq!(h.writes(), 0);
@@ -859,10 +853,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
         }
         assert!(h.notices.iter().any(|n| matches!(
             n,
-            Notice::CommandDone {
-                command: 11,
-                result: Err(_)
-            }
+            Notice::CommandFailed { command: 11, .. }
         )));
         let census = h.take(Method::Get, "/fapi/v2/openOrders");
         for command in [12, 13] {
@@ -890,7 +881,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
             n,
             Notice::CommandDone {
                 command: 14,
-                result: Ok(_)
+                result: _
             }
         )));
     }
@@ -905,10 +896,7 @@ fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
     );
     assert!(h.notices.iter().any(|n| matches!(
         n,
-        Notice::CommandDone {
-            command: 11,
-            result: Err(_)
-        }
+        Notice::CommandFailed { command: 11, .. }
     )));
     let _held = h.take(Method::Get, "/fapi/v2/openOrders");
     h.command(Command::CancelSymbolOrders {
@@ -919,7 +907,7 @@ fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
         n,
         Notice::CommandDone {
             command: 12,
-            result: Ok(_)
+            result: _
         }
     )));
     assert_eq!(h.writes(), 0);
@@ -938,10 +926,7 @@ fn protective_amend_preflight_failure_keeps_existing_protection_cancelable() {
     });
     assert!(h.notices.iter().any(|n| matches!(
         n,
-        Notice::CommandDone {
-            command: 11,
-            result: Err(_)
-        }
+        Notice::CommandFailed { command: 11, .. }
     )));
     assert_eq!(h.writes(), 0);
     h.command(Command::CancelSymbolOrders {
@@ -992,10 +977,7 @@ fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
     );
     assert!(h.notices.iter().any(|n| matches!(
         n,
-        Notice::CommandDone {
-            command: 15,
-            result: Err(_)
-        }
+        Notice::CommandFailed { command: 15, .. }
     )));
     // This read predates the second write and cannot resolve the older unknown order.
     h.reply(held, r#"{"code":"0","data":[]}"#);
@@ -1467,7 +1449,7 @@ fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_r
                     notice,
                     Notice::CommandDone {
                         command: 992,
-                        result: Ok(_)
+                        result: _
                     }
                 )));
             } else {
@@ -1560,10 +1542,7 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
     let done = h.notices.iter().position(|n| {
         matches!(
             n,
-            Notice::CommandDone {
-                command: 7,
-                result: Err(_)
-            }
+            Notice::CommandFailed { command: 7, .. }
         )
     });
     assert!(error.is_some() && error < done, "{:?}", h.notices);

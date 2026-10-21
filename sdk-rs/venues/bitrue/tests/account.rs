@@ -841,7 +841,7 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
             expected
         );
         assert!(h.e.store().setting("E-BTC-USDT").is_none());
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: Ok(v) }) if v.parse::<f64>().ok() == Some(expected))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: v }) if v.parse::<f64>().ok() == Some(expected))));
     }
     for malformed in [
         r#"{"code":"0","data":{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":125}]}}"#,
@@ -873,10 +873,7 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
         );
         assert!(h.actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 52,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 52, .. })
         )));
     }
     h.e.handle(
@@ -925,10 +922,7 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
     );
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 61,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 61, .. })
     )));
 }
 

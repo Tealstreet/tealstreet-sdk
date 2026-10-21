@@ -44,13 +44,13 @@ fn response(e: &mut Engine<WeexFutures>, now: f64, id: RequestId, body: &str) ->
     e.drain_actions().collect()
 }
 fn result(actions: &[Action]) -> Result<String, String> {
-    actions
+    Ok(actions
         .iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: 7, result }) => Some(result.clone()),
             _ => None,
         })
-        .expect("query completion")
+        .expect("query completion"))
 }
 fn no_completion(actions: &[Action]) {
     assert!(

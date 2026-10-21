@@ -229,10 +229,7 @@ fn failed_candle_reads_complete_with_error() {
     );
     assert!(engine.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 9,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 9, .. })
     )));
 }
 

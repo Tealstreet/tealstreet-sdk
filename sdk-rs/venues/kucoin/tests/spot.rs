@@ -1430,13 +1430,13 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         error: "failed write transport",
     });
     let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed write transport")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed write transport")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed write transport")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
     );
     assert!(!h.actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed write transport")
+        |a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.legacy_text()=="failed write transport")
     ));
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }

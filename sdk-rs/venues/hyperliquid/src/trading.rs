@@ -146,7 +146,7 @@ impl Hyperliquid {
                     command, leverage, ..
                 } => {
                     if *leverage == 1.0 {
-                        cx.done(*command, Ok("[]".into()));
+                        cx.done(*command, "[]".into());
                     } else {
                         let error = not_sent("Hyperliquid spot supports 1x leverage only");
                         cx.fail(*command, error.kind(ErrorKind::Unsupported));
@@ -157,7 +157,7 @@ impl Hyperliquid {
                     command, isolated, ..
                 } => {
                     if !isolated {
-                        cx.done(*command, Ok("[]".into()));
+                        cx.done(*command, "[]".into());
                     } else {
                         let error = not_sent("Hyperliquid spot supports cross margin only");
                         cx.fail(*command, error.kind(ErrorKind::Unsupported));
@@ -336,7 +336,7 @@ impl Hyperliquid {
                     );
                 } else {
                     cx.store.set_hedged(false);
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
                 return;
             }
@@ -1096,39 +1096,32 @@ impl Hyperliquid {
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
         self.trading.inflight = false;
         if let Some(job) = self.trading.active.take() {
-            let result = match result {
-                Ok(()) => Ok(()),
-                Err(mut error) => {
-                    if (job.effective || !job.ids.is_empty())
-                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                    {
-                        error.outcome = None;
-                    }
-                    cx.fail(job.command, error);
-                    self.pump_trades(cx);
-                    return;
+            if let Err(mut error) = result {
+                if (job.effective || !job.ids.is_empty())
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
+                    error.outcome = None;
                 }
+                cx.fail(job.command, error);
+                self.pump_trades(cx);
+                return;
+            }
+            let data = if let Some(client_order_id) = job.replacement {
+                #[derive(Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Replacement {
+                    order_ids: Vec<String>,
+                    client_order_id: String,
+                }
+                serde_json::to_string(&Replacement {
+                    order_ids: job.ids,
+                    client_order_id,
+                })
+                .unwrap()
+            } else {
+                serde_json::to_string(&job.ids).unwrap()
             };
-            cx.done(
-                job.command,
-                result.map(|_| {
-                    if let Some(client_order_id) = job.replacement {
-                        #[derive(Serialize)]
-                        #[serde(rename_all = "camelCase")]
-                        struct Replacement {
-                            order_ids: Vec<String>,
-                            client_order_id: String,
-                        }
-                        serde_json::to_string(&Replacement {
-                            order_ids: job.ids,
-                            client_order_id,
-                        })
-                        .unwrap()
-                    } else {
-                        serde_json::to_string(&job.ids).unwrap()
-                    }
-                }),
-            );
+            cx.done(job.command, data);
         }
         self.pump_trades(cx);
     }

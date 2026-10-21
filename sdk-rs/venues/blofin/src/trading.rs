@@ -1273,7 +1273,7 @@ impl Blofin {
                     cx.store.set_hedged(*hedged);
                 }
             }
-            cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap()));
+            cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
             self.trading.busy = false;
             self.trade_next(cx);
             return;

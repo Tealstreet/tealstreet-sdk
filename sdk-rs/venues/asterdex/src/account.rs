@@ -646,7 +646,10 @@ impl AsterDex {
                             .map_err(|e| e.to_string())
                         })
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Request::ListenKey { epoch } => {
                 if epoch != self.account.key_epoch {

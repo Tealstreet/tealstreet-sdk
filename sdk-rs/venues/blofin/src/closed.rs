@@ -65,14 +65,14 @@ impl Blofin {
         to_ms: Option<f64>,
     ) {
         if !self.signed() {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let instrument = match symbol {
             Some(symbol) => match cx.store.market(&symbol) {
                 Some(market) => Some(market.id.clone()),
                 None => {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 }
             },
@@ -127,7 +127,7 @@ impl Blofin {
                     Pending::Closed(request),
                 );
             }
-            Err(error) => cx.done(request.command, Err(error)),
+            Err(error) => cx.fail(request.command, error),
         }
     }
 
@@ -192,13 +192,10 @@ impl Blofin {
     }
 
     pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(
-            request.command,
-            Err(format!("BloFin closed positions: {error}")),
-        );
+        cx.fail(request.command, format!("BloFin closed positions: {error}"));
     }
 
     fn finish_closed(cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.done(request.command, Ok(format!("[{}]", request.rows.join(","))));
+        cx.done(request.command, format!("[{}]", request.rows.join(",")));
     }
 }

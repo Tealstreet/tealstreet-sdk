@@ -470,10 +470,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
         reply(&mut e, &r, body);
         assert!(actions(&mut e).iter().any(|a| matches!(
             a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone {
-                command: 42,
-                result: Err(_)
-            })
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, .. })
         )));
     }
 }

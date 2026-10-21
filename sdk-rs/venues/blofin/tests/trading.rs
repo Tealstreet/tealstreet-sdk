@@ -14,10 +14,7 @@ fn done(h: &Harness) -> bool {
     h.actions.iter().any(|a| {
         matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 7,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 7, .. })
         )
     })
 }
@@ -45,10 +42,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
         assert!(h.e.store().orders().is_empty());
         assert!(h.actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 7,
-                result: Err(error)
-            }) if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { command: 7, error }) if error.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -911,7 +905,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
         );
     }
     assert!(h.actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::CommandDone { command:7, result:Ok(result) })
+        Action::Notice(Notice::CommandDone { command:7, result:result })
             if result == r#"["1","2","3","4"]"#)));
 }
 
@@ -1023,7 +1017,7 @@ fn cancel_symbol_includes_ack_before_private_or_rest_order_arrives() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 8,
-            result: Ok(_)
+            result: _
         })
     )));
 }
@@ -1079,10 +1073,7 @@ fn retained_protective_and_trigger_orders_keep_their_cancel_family() {
             h.respond(cancel, bad_ack);
             assert!(h.actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone {
-                    command: 8,
-                    result: Err(_)
-                })
+                Action::Notice(Notice::CommandFailed { command: 8, .. })
             )));
             h.e.handle(
                 3.,
@@ -1101,7 +1092,7 @@ fn retained_protective_and_trigger_orders_keep_their_cancel_family() {
                 a,
                 Action::Notice(Notice::CommandDone {
                     command: 9,
-                    result: Ok(_)
+                    result: _
                 })
             )));
         }
@@ -1129,10 +1120,7 @@ fn ambiguous_placement_ack_cannot_authorize_empty_cancel_all_success() {
     assert!(
         h.actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 8,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 8, .. })
         )),
         "successful empty ACK does not prove placement absence"
     );
@@ -1266,8 +1254,8 @@ fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
         );
         assert!(h.actions.iter().any(|action| matches!(
             action,
-            Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                if error.contains("missing") && error.contains("not found")
+            Action::Notice(Notice::CommandFailed { command: 991, error })
+                if error.legacy_text().contains("missing") && error.legacy_text().contains("not found")
         )));
         h.e.handle(
             3.,
@@ -1290,7 +1278,7 @@ fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
             action,
             Action::Notice(Notice::CommandDone {
                 command: 992,
-                result: Ok(_)
+                result: _
             })
         )));
     }
@@ -1323,7 +1311,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         h.collect();
         assert!(h.pending.is_empty());
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
 }
 

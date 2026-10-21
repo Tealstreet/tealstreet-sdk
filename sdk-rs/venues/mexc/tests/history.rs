@@ -20,7 +20,7 @@ fn query(e: &mut TestEngine, q: Query) -> safe_cex_engine::HttpRequest {
     requests(e).remove(0)
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone {
                 command: 99,
@@ -32,7 +32,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
                 None
             }
         })
-        .unwrap()
+        .unwrap())
 }
 fn fills(limit: Option<u32>) -> Query {
     Query::Fills {
@@ -237,8 +237,8 @@ fn general_income_cannot_silently_return_a_funding_only_ledger() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error == "MEXC income supports only kind FUNDING_FEE"
+            Action::Notice(Notice::CommandFailed { error, .. })
+            if error.legacy_text() == "MEXC income supports only kind FUNDING_FEE"
         )));
     }
 }

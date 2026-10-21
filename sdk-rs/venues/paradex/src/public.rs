@@ -887,7 +887,7 @@ impl Paradex {
                 ..
             } => {
                 if let CandleTarget::Command(command) = target {
-                    cx.done(command, Err(error.into()));
+                    cx.fail(command, error);
                 } else {
                     cx.log(LogLevel::Warning, error);
                     self.finish_candles(cx, target, &symbol, interval, vec![]);
@@ -970,7 +970,7 @@ impl Paradex {
     ) {
         match target {
             CandleTarget::Command(command) => {
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()))
+                cx.done(command, serde_json::to_string(&rows).unwrap())
             }
             CandleTarget::Poll {
                 generation,
@@ -1193,9 +1193,9 @@ impl Paradex {
                 ..
             } => {
                 if interval_ms(interval).is_none() {
-                    cx.done(command, Err(interval.unsupported("Paradex")));
+                    cx.fail(command, interval.unsupported("Paradex"));
                 } else if cx.store.market(&symbol).is_none() {
-                    cx.done(command, Err("Unknown Paradex candle market".into()));
+                    cx.fail(command, "Unknown Paradex candle market");
                 } else {
                     self.fetch_candles(
                         cx,

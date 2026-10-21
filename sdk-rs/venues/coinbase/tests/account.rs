@@ -191,14 +191,14 @@ fn fetch_account(session: &mut Session) -> Result<String, String> {
         session.now,
         Event::Command(Command::FetchAccount { command: 9 }),
     );
-    session
+    Ok(session
         .e
         .drain_actions()
         .find_map(|action| match action {
             Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
             _ => None,
         })
-        .expect("FetchAccount completes")
+        .expect("FetchAccount completes"))
 }
 
 #[test]

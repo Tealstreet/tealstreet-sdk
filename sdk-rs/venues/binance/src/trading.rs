@@ -464,10 +464,7 @@ impl BinanceFutures {
                 // Its requests (splits, brackets) do not map back to the caller's orders.
                 Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
                 Some(error) => cx.fail(command, error),
-                None => cx.done(
-                    command,
-                    Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                ),
+                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
             return;
         };

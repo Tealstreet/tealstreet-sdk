@@ -193,7 +193,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
             },
         },
     );
-    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result: Ok(result) }) if result == "[]")));
+    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result: result }) if result == "[]")));
     let queries = [
         Query::Fills {
             symbol: Some(symbol.clone()),
@@ -224,7 +224,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone { command: done, result: Err(error) })] if *done == command && error.contains("credentials"))
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: done, error })] if *done == command && error.legacy_text().contains("credentials"))
         );
     }
 }

@@ -56,7 +56,7 @@ fn query(
     );
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { command: 7, result }) = a {
                 Some(result)
@@ -64,7 +64,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
                 None
             }
         })
-        .expect("query completed")
+        .expect("query completed"))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

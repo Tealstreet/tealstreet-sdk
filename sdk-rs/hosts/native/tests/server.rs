@@ -108,7 +108,7 @@ impl Venue for TestVenue {
         self.received.borrow_mut().push(text.into());
         if text == "complete" {
             for id in self.pending.drain(..) {
-                cx.done(id, Ok(format!("\"{}\"", self.label)));
+                cx.done(id, format!("\"{}\"", self.label));
             }
         } else {
             let amount: f64 = text.parse().unwrap();
@@ -124,9 +124,7 @@ impl Venue for TestVenue {
         self.observed.borrow_mut().push(command.clone());
         match command {
             Command::SubscribeOrderBook { .. } => cx.book_changed("BTCUSDT"),
-            Command::FetchAccount { command } => {
-                cx.done(command, Ok(format!("\"{}\"", self.label)))
-            }
+            Command::FetchAccount { command } => cx.done(command, format!("\"{}\"", self.label)),
             Command::FetchLeverage { command, symbol } => {
                 self.pending.push(command);
                 if symbol == "queued" {

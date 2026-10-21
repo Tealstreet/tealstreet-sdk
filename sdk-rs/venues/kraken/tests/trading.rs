@@ -55,12 +55,12 @@ fn ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str, status: &str) {
     );
 }
 fn done(e: &mut Engine<Kraken>) -> Result<String, String> {
-    e.drain_plain()
+    Ok(e.drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
         })
-        .expect("command completion")
+        .expect("command completion"))
 }
 fn inject(e: &mut Engine<Kraken>, id: &str, kind: OrderType, trigger: Option<StopTriggerType>) {
     e.store_mut().upsert_order(Order {
@@ -150,7 +150,7 @@ fn batch_prevalidates_every_caller_id_before_writes() {
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -206,7 +206,7 @@ fn missing_or_rejected_semantic_ack_never_sends_bracket() {
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -393,10 +393,7 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
     let all = e.drain_plain().collect::<Vec<_>>();
     assert!(all.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 7, .. })
     )));
     assert_eq!(
         all.iter().filter(|a| matches!(a, Action::Http(_))).count(),
@@ -633,7 +630,7 @@ fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }
@@ -678,10 +675,7 @@ fn queued_protective_amend_rejects_changed_order_before_cancelling() {
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 8, .. })
     )));
 }
 #[test]
@@ -918,8 +912,8 @@ fn batch_rejects_bybit_controls_before_any_write() {
         let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error.contains("Bybit execution controls")
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.legacy_text().contains("Bybit execution controls")
         )));
     }
 }
@@ -933,8 +927,8 @@ fn batch_rejects_foreign_stp_controls_before_writes() {
     let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(a,
-        Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error.contains("self-trade prevention")
+        Action::Notice(Notice::CommandFailed { error, .. })
+            if error.legacy_text().contains("self-trade prevention")
     )));
 }
 
@@ -963,7 +957,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = e.drain_plain().collect::<Vec<_>>();
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
 }
 #[test]
@@ -981,7 +975,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error: m }) if m.legacy_text().contains("take-profit/stop-loss legs on a market entry"))));
 }
 #[test]
 fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
@@ -1017,7 +1011,7 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(Notice::CommandFailed { .. })
     )));
 }
 #[test]
@@ -1046,7 +1040,7 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
         assert!(
             !actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+                Action::Notice(Notice::CommandFailed { .. })
             )),
             "{kind}"
         );

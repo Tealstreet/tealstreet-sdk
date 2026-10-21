@@ -1120,11 +1120,11 @@ impl Orderly {
             } else {
                 cx.done(
                     job.command,
-                    Ok(if job.collect {
+                    if job.collect {
                         json(&job.ids)
                     } else {
                         "[]".into()
-                    }),
+                    },
                 );
             }
             self.trade_queued(cx);
@@ -1488,10 +1488,10 @@ impl Orderly {
                     let job = self.trading.active.take().unwrap();
                     cx.done(
                         job.command,
-                        Ok(json(&Rails {
+                        json(&Rails {
                             buy_leverage: value,
                             sell_leverage: value,
-                        })),
+                        }),
                     );
                     self.trade_queued(cx);
                     return Ok(());

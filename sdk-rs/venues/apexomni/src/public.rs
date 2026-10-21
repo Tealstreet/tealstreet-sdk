@@ -359,7 +359,7 @@ impl ApexOmni {
             }
             Request::Candles { command, symbol } => {
                 if !success {
-                    cx.done(command, Err("ApeX candle request failed".into()));
+                    cx.fail(command, "ApeX candle request failed");
                     return;
                 }
                 let rows = envelope
@@ -369,7 +369,7 @@ impl ApexOmni {
                     })
                     .and_then(|mut rows| rows.remove(&symbol));
                 let Some(rows) = rows else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 let mut rows: Vec<_> = rows
@@ -384,14 +384,18 @@ impl ApexOmni {
                     })
                     .collect();
                 if !rows.iter().all(valid_candle) {
-                    cx.done(command, Err("invalid ApeX candles".into()));
+                    cx.fail(command, "invalid ApeX candles");
                     return;
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                );
+                {
+                    let result: Result<String, String> =
+                        serde_json::to_string(&rows).map_err(|e| e.to_string());
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
         }
     }
@@ -406,7 +410,7 @@ impl ApexOmni {
                 cx.log(LogLevel::Warning, format!("ApeX markets: {error}"));
                 self.public.seed_retry.failed(cx, ());
             }
-            Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
+            Request::Candles { command, .. } => cx.fail(command, error.to_owned()),
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -816,7 +820,7 @@ impl ApexOmni {
                 to_ms,
             } => {
                 let Some((native, seconds)) = interval(i) else {
-                    cx.done(command, Err(i.unsupported("ApeX")));
+                    cx.fail(command, i.unsupported("ApeX"));
                     return Ok(());
                 };
                 let limit = limit.filter(|n| *n > 0);
@@ -844,7 +848,7 @@ impl ApexOmni {
                     Pending::Public(Request::Candles { command, symbol }),
                     None,
                 ) {
-                    cx.done(command, Err(error));
+                    cx.fail(command, error);
                 }
             }
             other => return Err(other),

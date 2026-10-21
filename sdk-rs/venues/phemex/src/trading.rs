@@ -1033,7 +1033,7 @@ impl PhemexPerpetuals {
         };
         let Some(step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&id).unwrap();
-            cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap()));
+            cx.done(id, serde_json::to_string(&job.ids).unwrap());
             self.orders_reconcile(cx);
             return;
         };

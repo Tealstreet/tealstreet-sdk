@@ -555,11 +555,11 @@ impl Backpack {
             }
             cx.done(
                 command as CommandId,
-                Ok(if job.collect_ids {
+                if job.collect_ids {
                     serde_json::to_string(&job.ids).unwrap()
                 } else {
                     "[]".into()
-                }),
+                },
             );
             return;
         };

@@ -143,10 +143,10 @@ pub enum Notice {
         command: CommandId,
         message: String,
     },
-    /// `Ok` carries the command's JSON result.
+    /// The command succeeded; `result` is its JSON. Failures arrive as `CommandFailed`.
     CommandDone {
         command: CommandId,
-        result: Result<String, String>,
+        result: String,
     },
     /// Actual native write identities, emitted before their corresponding I/O.
     CommandProgress {
@@ -251,10 +251,7 @@ pub enum VenueAction {
 
 /// The shared rejection for a venue action the venue does not implement.
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.done(
-        command,
-        Err("This action is not supported on this venue".into()),
-    );
+    cx.fail(command, "This action is not supported on this venue");
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -944,10 +941,11 @@ impl<P> Cx<'_, P> {
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
-    pub fn done(&mut self, command: CommandId, result: Result<String, String>) {
+    /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
+    pub fn done(&mut self, command: CommandId, result: String) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_locks.finish(command, result.is_err());
+            self.io.order_locks.finish(command, false);
             self.io.active_commands.remove(&command);
         }
         self.io
@@ -1571,9 +1569,9 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("symbol-aware amendment is unsupported by this venue".into()),
+                    "symbol-aware amendment is unsupported by this venue",
                 );
             }
             Event::Command(command) => {
@@ -1612,7 +1610,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.done(id, Err(error.into()));
+                        cx.fail(id, error);
                         return;
                     }
                 }
@@ -1631,10 +1629,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.done(
-                            command,
-                            Err("Options are not enabled on this account".into()),
-                        );
+                        cx.fail(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -1652,9 +1647,9 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.done(
+                cx.fail(
                     command,
-                    Err("Placement outcome is uncertain; reconcile before cancel-all".into()),
+                    "Placement outcome is uncertain; reconcile before cancel-all",
                 );
             } else {
                 if let Some(id) = command.completion_id() {
@@ -2080,14 +2075,14 @@ mod streaming_tests {
             };
             cx.command_error(0, "background error");
             cx.command_error(7, "command error");
-            cx.done(7, Err("command error".into()));
+            cx.fail(7, "command error");
         }
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(matches!(actions.as_slice(), [
             Action::Notice(Notice::Log { level: LogLevel::Error, message: background }),
             Action::Notice(Notice::CommandError { command: 7, message }),
-            Action::Notice(Notice::CommandDone { command: 7, result: Err(result) }),
-        ] if background == "background error" && message == "command error" && result == message));
+            Action::Notice(Notice::CommandFailed { command: 7, error: result }),
+        ] if background == "background error" && message == "command error" && result.legacy_text() == *message));
         assert_eq!(before, engine.snapshot_frame(0.));
     }
 
@@ -2163,14 +2158,12 @@ mod streaming_tests {
             #[cfg(feature = "order-locks")]
             if let Some(completion) = text.strip_prefix("complete:") {
                 let (id, status) = completion.split_once(':').unwrap();
-                cx.done(
-                    id.parse().unwrap(),
-                    if status == "ok" {
-                        Ok("[]".into())
-                    } else {
-                        Err("Lost write reply".into())
-                    },
-                );
+                let id = id.parse().unwrap();
+                if status == "ok" {
+                    cx.done(id, "[]".into());
+                } else {
+                    cx.fail(id, "Lost write reply");
+                }
                 return;
             }
             #[cfg(feature = "order-locks")]
@@ -2309,10 +2302,7 @@ mod streaming_tests {
         );
         assert!(engine.drain_actions().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 2, .. })
         )));
         // Duplicate IDs cannot release the first operation's lock.
         engine.handle(
@@ -2344,7 +2334,7 @@ mod streaming_tests {
             store: &mut engine.store,
             io: &mut engine.io,
         };
-        cx.done(5, Err("lost response".into()));
+        cx.fail(5, "lost response");
         engine.handle(
             0.,
             Event::Command(Command::CancelOrders {
@@ -2505,7 +2495,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, result: Err(error) }) if *id == command && error == "Placement outcome is uncertain; reconcile before cancel-all")));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all")));
         }
         engine
             .io
@@ -2575,7 +2565,7 @@ mod streaming_tests {
             "later cancel-all is dispatched"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("uncertain"))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("uncertain"))));
     }
 
     #[cfg(feature = "order-locks")]
@@ -2864,13 +2854,13 @@ mod streaming_tests {
                 action: VenueAction::FetchAccountTier,
             }),
         );
-        let result = engine.drain_actions().find_map(|action| match action {
-            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+        let error = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 9, error }) => Some(error.message),
             _ => None,
         });
         assert_eq!(
-            result,
-            Some(Err("This action is not supported on this venue".into()))
+            error.as_deref(),
+            Some("This action is not supported on this venue")
         );
     }
 
@@ -2971,9 +2961,7 @@ mod streaming_tests {
         assert!(engine.venue.commands.is_empty());
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone {
-            command: 31, result: Err(error),
-        })] if error.contains("unsupported"))
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: 31, error })] if error.legacy_text().contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(1.), before);
         let legacy = Command::SetTickerSymbols {
@@ -3021,8 +3009,8 @@ mod streaming_tests {
         assert!(engine.venue.commands.is_empty());
         for (index, action) in actions.iter().enumerate() {
             assert!(
-                matches!(action, Action::Notice(Notice::CommandDone { command, result: Err(error) })
-                if *command == index as u32 + 1 && error.contains("Options are not enabled"))
+                matches!(action, Action::Notice(Notice::CommandFailed { command, error })
+                if *command == index as u32 + 1 && error.message.contains("Options are not enabled"))
             );
         }
     }
@@ -3821,10 +3809,7 @@ mod signing_tests {
         );
         assert!(engine.drain_actions().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 2, .. })
         )));
         assert!(engine.io.order_locks.contains(1));
         engine.handle(

@@ -15,7 +15,7 @@ fn ask_with_id(e: &mut Driver, command: u32, query: Query) {
     e.handle(2000.0, Event::Command(Command::Query { command, query }));
 }
 fn result(e: &mut Driver) -> Result<String, String> {
-    e.drain_actions()
+    Ok(e.drain_actions()
         .find_map(|action| match action {
             Action::Notice(Notice::CommandDone {
                 command: 77,
@@ -23,7 +23,7 @@ fn result(e: &mut Driver) -> Result<String, String> {
             }) => Some(result),
             _ => None,
         })
-        .expect("query completed")
+        .expect("query completed"))
 }
 fn request(e: &mut Driver) -> HttpRequest {
     requests(e).pop().expect("history request")
@@ -480,7 +480,7 @@ fn query_preflight_rejects_unsupported_ledgers_ranges_and_noncanonical_ids() {
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(out.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            Action::Notice(Notice::CommandFailed { .. })
         )));
     }
 }

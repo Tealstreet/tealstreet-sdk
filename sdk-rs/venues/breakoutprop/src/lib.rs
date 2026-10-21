@@ -760,7 +760,7 @@ impl BreakoutProp {
                 cx.log(LogLevel::Error, error);
                 self.arm_poll(cx);
             }
-            Operation::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Operation::Candles { command, .. } => cx.fail(command, error),
         }
     }
 }
@@ -939,12 +939,16 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if invalid {
-                    cx.done(command, Err("Invalid DXtrade candles response".into()));
+                    cx.fail(command, "Invalid DXtrade candles response");
                 } else {
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|_| "Invalid DXtrade candles".into()),
-                    );
+                    {
+                        let result: Result<String, String> = serde_json::to_string(&rows)
+                            .map_err(|_| "Invalid DXtrade candles".into());
+                        match result {
+                            Ok(data) => cx.done(command, data),
+                            Err(error) => cx.fail(command, error),
+                        }
+                    };
                 }
             }
         }
@@ -1133,10 +1137,7 @@ impl Venue for BreakoutProp {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1179,11 +1180,11 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if wire::interval(interval).is_none() {
-                    cx.done(command, Err(interval.unsupported("DXtrade")));
+                    cx.fail(command, interval.unsupported("DXtrade"));
                 } else if from_ms.is_some_and(|value| wire::iso_time(value).is_err())
                     || to_ms.is_some_and(|value| wire::iso_time(value).is_err())
                 {
-                    cx.done(command, Err("Invalid DXtrade candle request".into()));
+                    cx.fail(command, "Invalid DXtrade candle request");
                 } else {
                     self.schedule(
                         cx,
@@ -1210,17 +1211,17 @@ impl Venue for BreakoutProp {
                 self.on_trade_command(cx, command);
             }
             Command::Query { command, query } => history::query(cx, command, query),
-            Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
-            Command::FetchMaxLeverage { command, .. } => cx.done(
+            Command::FetchLeverage { command, .. } => cx.done(command, "null".into()),
+            Command::FetchMaxLeverage { command, .. } => cx.fail(
                 command,
-                Err("Maximum leverage queries are unavailable for DXtrade".into()),
+                "Maximum leverage queries are unavailable for DXtrade",
             ),
             Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. } => {
-                cx.done(command, Err("Unsupported BreakoutProp command".into()));
+                cx.fail(command, "Unsupported BreakoutProp command");
             }
         }
     }

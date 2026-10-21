@@ -619,11 +619,11 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if !supported(interval) {
-            cx.done(command, Err(interval.unsupported("TxFlow")));
+            cx.fail(command, interval.unsupported("TxFlow"));
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -637,7 +637,7 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.done(command, Err("Invalid candle time range".into()));
+            cx.fail(command, "Invalid candle time range");
             return;
         }
         #[derive(Serialize)]
@@ -1027,14 +1027,17 @@ impl Venue for TxFlow {
                 command,
                 rows,
                 valid,
-            } => cx.done(
-                command,
-                if valid && Header::valid(response.body) {
+            } => {
+                let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
-                },
-            ),
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.history_response(cx, *request, response),
@@ -1066,7 +1069,7 @@ impl Venue for TxFlow {
                 self.discovery.failed(cx, Some(asset));
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),

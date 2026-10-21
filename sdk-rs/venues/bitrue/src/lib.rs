@@ -449,10 +449,7 @@ impl Bitrue {
     fn public_read(&mut self, cx: &mut Cx<'_, Pending>, channel: String, request: SocketRead) {
         if self.reads.values().map(Vec::len).sum::<usize>() >= 32 {
             cx.clear_timer(request.timer);
-            cx.done(
-                request.command,
-                Err("Too many Bitrue public requests".into()),
-            );
+            cx.fail(request.command, "Too many Bitrue public requests");
             return;
         }
         let queue = self.reads.entry(channel.clone()).or_default();
@@ -469,11 +466,11 @@ impl Bitrue {
         limit: Option<u32>,
     ) {
         let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-            cx.done(command, Err("Unknown Bitrue market".into()));
+            cx.fail(command, "Unknown Bitrue market");
             return;
         };
         if !self.public.open {
-            cx.done(command, Err("Bitrue public socket not connected".into()));
+            cx.fail(command, "Bitrue public socket not connected");
             return;
         }
         let limit = limit.unwrap_or(100).clamp(1, 300);
@@ -545,7 +542,10 @@ impl Bitrue {
                     }
                 }
             };
-            cx.done(request.command, result);
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            };
         }
         self.reads.retain(|_, v| !v.is_empty());
         self.send_socket_read(cx, &message.channel);
@@ -728,10 +728,7 @@ impl Venue for Bitrue {
         for reads in self.reads.drain().map(|(_, v)| v) {
             for read in reads {
                 cx.clear_timer(read.timer);
-                cx.done(
-                    read.command,
-                    Err("Bitrue public socket disconnected".into()),
-                );
+                cx.fail(read.command, "Bitrue public socket disconnected");
             }
         }
         for (symbol, state) in &mut self.books {
@@ -1080,22 +1077,22 @@ impl Venue for Bitrue {
                 to_ms,
             } => {
                 let Some(mapped) = interval(i) else {
-                    cx.done(command, Err(i.unsupported("Bitrue")));
+                    cx.fail(command, i.unsupported("Bitrue"));
                     return;
                 };
                 let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-                    cx.done(command, Err("Unknown Bitrue market".into()));
+                    cx.fail(command, "Unknown Bitrue market");
                     return;
                 };
                 if !self.public.open {
-                    cx.done(command, Err("Bitrue public socket not connected".into()));
+                    cx.fail(command, "Bitrue public socket not connected");
                     return;
                 }
                 if from_ms.is_some_and(|v| !v.is_finite())
                     || to_ms.is_some_and(|v| !v.is_finite())
                     || matches!((from_ms,to_ms),(Some(f),Some(t))if f>t)
                 {
-                    cx.done(command, Err("Invalid candle range".into()));
+                    cx.fail(command, "Invalid candle range");
                     return;
                 }
                 let timer = cx.set_timer(5000.0);

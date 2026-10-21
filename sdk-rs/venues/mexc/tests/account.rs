@@ -264,7 +264,7 @@ fn flat_symbol_metadata_fetches_both_rails_and_authenticated_cap() {
         e.store().market("BTCUSDT").unwrap().limits.leverage.max,
         100.0
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:41,result:Ok(s)}) if s.contains("\"sellLeverage\":15.0")&&s.contains("\"buyLeverage\":10.0"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:41,result:s}) if s.contains("\"sellLeverage\":15.0")&&s.contains("\"buyLeverage\":10.0"))));
 }
 
 #[test]
@@ -846,9 +846,9 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     );
     let out: Vec<_> = e.drain_actions().collect();
     let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
-    let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed leverage transport")).unwrap();
+    let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed leverage transport")).unwrap();
     assert!(error < done);
-    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed leverage transport")));
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.legacy_text()=="failed leverage transport")));
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }

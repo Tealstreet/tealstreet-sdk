@@ -764,7 +764,7 @@ impl Venue for Blofin {
                 failed: false,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                cx.done(command, serde_json::to_string(&rows).unwrap());
             }
             other => self.on_request_failed(cx, other, "Malformed BloFin response"),
         }
@@ -791,7 +791,7 @@ impl Venue for Blofin {
             return;
         }
         if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.to_string()));
+            cx.fail(command, error.to_string());
         } else {
             self.startup
                 .failed(cx, matches!(pending, Pending::Markets { .. }));
@@ -920,7 +920,7 @@ impl Venue for Blofin {
             } => {
                 if let Some(m) = cx.store.market(&symbol) {
                     let Some(bar) = interval(i) else {
-                        cx.done(command, Err(i.unsupported("BloFin")));
+                        cx.fail(command, i.unsupported("BloFin"));
                         return;
                     };
                     let step = i.ms();
@@ -948,7 +948,7 @@ impl Venue for Blofin {
                         },
                     );
                 } else {
-                    cx.done(command, Err(format!("Unknown market {symbol}")));
+                    cx.fail(command, format!("Unknown market {symbol}"));
                 }
             }
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),

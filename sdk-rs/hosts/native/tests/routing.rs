@@ -1704,7 +1704,7 @@ async fn routed_signed_network_notices(
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
             startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Public discovery read failed; retry scheduled");
-            command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) } | Notice::CommandFailed { command: 411, .. });
+            command_failed |= matches!(&notice, Notice::CommandFailed { command: 411, .. } | Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }
     }).await.expect("real network failures reached startup log and command completion");

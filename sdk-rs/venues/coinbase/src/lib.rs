@@ -177,7 +177,13 @@ impl Venue for Coinbase {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchAccount { command } = command {
-            cx.done(command, self.account_identity());
+            {
+                let result: Result<String, String> = self.account_identity();
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            };
             return;
         }
         if let Some(Command::Query { command, query }) = self

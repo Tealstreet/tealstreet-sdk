@@ -118,7 +118,7 @@ fn tick(e: &mut TestEngine, actions: &[Action]) -> Vec<Action> {
     e.drain_actions().collect()
 }
 fn result(actions: &[Action]) -> Result<String, String> {
-    actions
+    Ok(actions
         .iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.clone()),
@@ -128,7 +128,7 @@ fn result(actions: &[Action]) -> Result<String, String> {
             }
             _ => None,
         })
-        .unwrap()
+        .unwrap())
 }
 fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
     actions

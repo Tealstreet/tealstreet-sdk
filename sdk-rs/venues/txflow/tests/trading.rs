@@ -237,10 +237,7 @@ fn complete_batch_preflight_rejects_invalid_last_shape_without_writes() {
     );
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 7, .. })
     )));
 }
 #[test]
@@ -297,7 +294,7 @@ fn authoritative_read_resolves_native_ids_in_requested_order() {
     let order = |oid: u64, cloid: &str| json!({"asset":1,"oid":oid,"side":"B","orderType":"Limit","limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":cloid,"state":"Open","tif":"GTC","children":null});
     let body = json!({"success":true,"code":0,"data":[order(22,"second"),order(11,"first")],"hasMore":false}).to_string();
     ack(&mut e, &read, 200, &body);
-    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Ok(ids)}) if ids == r#"["11","22"]"#)));
+    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:ids}) if ids == r#"["11","22"]"#)));
 }
 #[test]
 fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
@@ -385,7 +382,7 @@ fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
     place(&mut e, 7, vec![limit("same-id")]);
     let _r = write(&mut e);
     place(&mut e, 8, vec![limit("same-id")]);
-    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("Duplicate"))));
+    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 8, error: e }) if e.legacy_text().contains("Duplicate"))));
 }
 #[test]
 fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protection() {
@@ -451,7 +448,7 @@ fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protect
             .iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("TP/SL"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { command: 8, error: e }) if e.legacy_text().contains("TP/SL"))));
 }
 #[test]
 fn reserved_prefix_and_utf8_limit_fail_before_write() {
@@ -501,7 +498,7 @@ fn unimplemented_request_commands_complete_with_errors_instead_of_hanging() {
     ] {
         e.handle(NOW, Event::Command(command));
         let actions = e.drain_plain().collect::<Vec<_>>();
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if !error.is_empty())).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 91, error }) if !error.legacy_text().is_empty())).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
@@ -568,7 +565,7 @@ fn caller_id_preflight_preserves_shared_shape_duplicate_and_split_errors() {
         place(&mut e, 7, orders);
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error == expected)), "{actions:?}");
+        assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 7, error }) if error.legacy_text() == expected)), "{actions:?}");
     }
 }
 
