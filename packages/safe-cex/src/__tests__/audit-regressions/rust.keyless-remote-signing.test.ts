@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeRegistry } from '../../exchanges/registry';
 import {
-  isKeylessRemoteSigned,
   runsOnRustEngine,
   RUST_VENUES,
   RustEngineExchange,
 } from '../../exchanges/rust/rust.exchange';
+import { hostedSigningVenues, isKeylessRemoteSigned } from '../../exchanges/hostedSigningVenues';
 import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
@@ -101,14 +101,14 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
     }
   });
 
-  it('default-Rust names (Orderly brokers, Coinbase, TxFlow) still have no TS venue to route to', async () => {
-    // Names whose registry entry is the engine itself. Restoring a TS loader for them
-    // (RUST_REMOTE_SIGNING.md) flips this test.
+  it('every default-Rust name has a kept TS venue for hosted accounts except TxFlow', async () => {
+    // Names whose registry entry is the engine itself. TxFlow had no hosted users on master.
     const engineOnly: ExchangeName[] = [];
     for (const name of RUST_VENUES) if ((await exchangeRegistry[name]()) === RustEngineExchange) engineOnly.push(name);
     expect(engineOnly.sort()).toEqual(
       ['coinbase', 'coinbasespot', 'kodiakfi', 'mode', 'salsadex', 'tealstreet-dex', 'txflow', 'what', 'woofi'].sort(),
     );
     for (const name of engineOnly) expect(isKeylessRemoteSigned(name, hosted()), name).toBe(true);
+    expect(engineOnly.filter((name) => !hostedSigningVenues[name])).toEqual(['txflow']);
   }, 60_000);
 });
