@@ -11,6 +11,7 @@ function importFamily(family) {
     case 'bingx': return import('../pkg/web/bingx/safe_cex_wasm.js');
     case 'bitget': return import('../pkg/web/bitget/safe_cex_wasm.js');
     case 'bitrue': return import('../pkg/web/bitrue/safe_cex_wasm.js');
+    case 'bitunix': return import('../pkg/web/bitunix/safe_cex_wasm.js');
     case 'blofin': return import('../pkg/web/blofin/safe_cex_wasm.js');
     case 'breakoutprop': return import('../pkg/web/breakoutprop/safe_cex_wasm.js');
     case 'bybit': return import('../pkg/web/bybit/safe_cex_wasm.js');

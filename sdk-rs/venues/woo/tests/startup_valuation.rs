@@ -1,8 +1,10 @@
 //! Scripted staging account; markPrice schema:
 //! https://docs.woox.io/#get-all-position-info-new. No network transport is used.
+mod support;
 use safe_cex_engine::model::Ticker;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response, TimerId};
 use safe_cex_venue_woo::{Options, Woo};
+use support::jittered;
 const CATALOGUE: &str = r#"{"success":true,"rows":[{"symbol":"PERP_JTO_USDT","base_tick":0.1,"quote_tick":0.0001,"base_min":0.1,"base_max":1000,"base_imr":0.1},{"symbol":"PERP_W_USDT","base_tick":0.1,"quote_tick":0.0001,"base_min":0.1,"base_max":1000,"base_imr":0.1}]}"#;
 const INFO: &str = r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY","freeCollateral":900,"totalCollateral":1000,"totalAccountValue":1000}}"#;
 const NATIVE: &str = r#"{"success":true,"data":{"positions":[{"symbol":"PERP_JTO_USDT","holding":20,"averageOpenPrice":2.0771,"markPrice":2.07460399,"pnl24H":0,"estLiqPrice":1.92748111,"leverage":10,"marginMode":"ISOLATED"},{"symbol":"PERP_W_USDT","holding":-50,"averageOpenPrice":0.1906,"markPrice":0.2103828568089886,"pnl24H":0,"estLiqPrice":4.542491646808989,"leverage":20,"marginMode":"CROSS"}]}}"#;
@@ -70,22 +72,25 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Warning,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Warn,
+            ..
+        }))
     )));
     assert!(!failed.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     let retry = failed
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .unwrap();
@@ -129,7 +134,7 @@ fn unpriced_native_holding_is_an_error_and_never_an_empty_success() {
     let (mut e, positions, _, _) = pending();
     reply(&mut e, &positions, 0.0, UNPRICED);
     assert!(!e.store().loaded().positions);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("position mark unavailable"))));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("position mark unavailable"))));
 }
 #[test]
 fn an_unpriced_refresh_preserves_previous_positions_and_account_valuation() {
@@ -188,6 +193,6 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
         assert_eq!(*e.store().balance(), balance);
         assert_eq!(e.store().loaded().positions, previous);
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+            Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
     }
 }

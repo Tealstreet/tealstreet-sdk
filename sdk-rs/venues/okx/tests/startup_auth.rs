@@ -154,9 +154,11 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
         sent = at;
         config = next;
     }
-    assert_eq!(
-        delays,
-        [1_000., 2_000., 4_000., 8_000., 16_000., 30_000., 30_000.]
+    let nominal = [1_000., 2_000., 4_000., 8_000., 16_000., 30_000., 30_000.];
+    assert_eq!(delays.len(), nominal.len());
+    assert!(
+        delays.iter().zip(nominal).all(|(d, n)| jittered(*d, n)),
+        "{delays:?} not jittered from {nominal:?}"
     );
     respond(
         &mut engine,

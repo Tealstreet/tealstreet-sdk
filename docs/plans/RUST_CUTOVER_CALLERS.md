@@ -58,10 +58,10 @@ of saved accounts.
 | `polymarket` | Yes | TS default, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage; generic algorithm fixtures do not enable venue features. Prediction CLOB V2 outcome shares with typed prediction/holding metadata; native local-wallet signature types 0/1/2/3 and supplied/derived L2 credentials. Limit/GTC only; no client IDs, market/conditional/bracket/reduce-only orders, or generic fills/order-history/income/public-trades query claims. Preserve authoritative final-fill-safe cancel-replace and bounded sampled price history. Read [venue-ports/POLYMARKET.md](venue-ports/POLYMARKET.md) for exact auth/product/query scope; private tests use documented fixtures, not live-key proof. |
 | `grvt` | Yes | TS default; perpetual-only Rust catalog, with local EIP-712 signing (chains 325/326), API-key/session login, routed/direct private auth, subaccount discovery and mandatory builder authorization. Canonical caller IDs are decimal 1..2^63-1; limit/market/protective/bracket commands and final-fill-safe cancel-replace, one-way positions, real leverage reads/updates; margin-mode mutation unsupported. Bounded fills/history/funding/public-trade queries and definitive client-ID lookup, including the chaser fill-verification hook. Preserve public browser builder-authorization exports and signing/session routing. [Explicit retirement decision](GRVT_PRODUCTS_DECISION.md) resolves unexposed mapper-only Future/Call/Put paths; no future/options claim or TS deletion. Exact scope/evidence: [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
-| `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
+| `bitunix` | Yes | TS default; opt-in USDT futures. Closed-PnL rows stay TS only (no `closedPositions` capability). Scope and gate evidence: [RUST_BITUNIX.md](RUST_BITUNIX.md). |
 
-The sole name absent from `RUST_VENUES` is `bitunix`.
-Do not silently route it through another family's adapter.
+Every `ExchangeName` is in `RUST_VENUES`.
+Do not silently route a venue through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
 BreakoutProp starts the actual Rust engine with documented DXtrade session/
@@ -78,13 +78,13 @@ cutover, so each item below must be handled in the same change set (or before).
 
 **Inputs.** tealstreet-next `origin/master` `41e538d78d` (2026-10-20), read with
 `git grep`/`git show` only; Tealstreet/tealstreet-mobile `master` through the
-GitHub API. SDK `origin/feat/rust-rewrite` `5cd8cf2f9d` (2026-10-21), which has
+GitHub API. SDK `origin/feat/rust-rewrite` `1fa06c93b5` (2026-10-21), which has
 the merged contract PRs #1375, #1377, #1383, #1386, #1394, #1400, #1411, #1424,
 #1401, #1439, #1441, #1443, #1445, #1447, #1451, #1453, #1462, #1467 and #1469 (venue construction and the Polymarket, Orderly, BreakoutProp and AsterDEX construction rules moved into the shared `safe-cex-venues` crate; messages and the `start()` rejection point unchanged) and the per-venue classified-error PRs (#1403, #1404,
 #1417, #1425, #1429, #1432, #1434, #1436, #1437, #1438, #1442, #1444, #1446,
 #1452, #1455, #1457, #1458, #1460, #1463, #1468, #1470, #1471, #1473, #1478,
 #1479, #1475, and the B9 SDK PRs #1482, #1483, #1484), plus #1388 (engine log
-events, `getHealth`), #1450 (B5) and #1510 (payload-signer routing). No contract PR is open. Line numbers are tealstreet-next
+events, `getHealth`), #1450 (B5), #1510 and #1531 (payload-signer routing, narrowed to Bybit/Binance). No contract PR is open. Line numbers are tealstreet-next
 `origin/master` unless an SDK path is named.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
@@ -135,8 +135,8 @@ Not blockers but required edits are listed per area below.
 | Set | Names | Selection |
 | --- | --- | --- |
 | Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
-| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
-| TS only | `bitunix`, `binanceoptions` (master-only, survives the merge) | |
+| Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
+| TS only | `binanceoptions` (master-only, survives the merge) | |
 
 `ExchangeName` keeps every name, so the exhaustive maps in
 `apps/web/src/components/chart/web/hostedMarketProduct.ts:23` and
@@ -161,7 +161,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `validateAccount()` starts the engine; error text from engine startup | web `components/newApiFlow/useAccountForm.ts:210-275` (matches `'passphrase'`, `'api key'`, `'secret'`, `'whitelist'`, `'permission'`, `'secondary'`) | TS venue messages | engine messages (e.g. `<name> credentials were rejected`, `Orderly requires base58-encoded 32-byte key and secret`) | RT |
 | `externalPublicData` websocket gateway rejected; in-process source accepted (B6); `privateOnly`+`publicFeed: direct` rejected | exchange-server `server.ts:1015-1034` | none for in-process | `publicFeed: { mode: 'shared', port }` + `RustPublicFeedProvider` for gateways | RT, B6 |
 | `remoteSigner` refused (most venues) | exchange-server `server.ts:1015`; web hosted signing | browser-signed | none | RT, B2 |
-| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510: `runsOnRustEngine` keeps a non-Paradex, non-Lighter `payloadSigner` account (not `publicDataOnly`) on the TS venue, and a directly built `RustEngineExchange` refuses it with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'` | none (MCP `EXCHANGE_ENGINE=rust` signer mode runs TS) |
+| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510/#1531: `runsOnRustEngine` keeps Bybit/Binance-family `payloadSigner` accounts (not `publicDataOnly`) on TS, whose signers honour it; every other private Rust account with one, including default-Rust Coinbase/Orderly (their kept TS classes ignore it), is refused at startup with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'` | RT (MCP `EXCHANGE_ENGINE=rust` signer mode: Bybit/Binance run TS; other venues fail loudly) |
 | `extra.tickInterval` honored only by Orderly/BreakoutProp | MCP `config.ts:59-72` (`Infinity` disables polling); web `createExchangeFromAccount.ts:91-92` (`secondaryApiKeyTickInterval`) | all TS polling venues | other Rust venues poll a fixed engine interval | RT |
 | `instanceof BlofinExchange` | web `components/reactiveStateHelper/exchangeReactiveStateHelper/BlofinExchangeReactiveStateHelper.tsx:6,20` | true for blofin | false when blofin runs Rust | RT (on blofin switch) |
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
@@ -179,7 +179,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
 | --- | --- | --- | --- | --- |
-| `fetchClosedPnl` | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | engines with the `closedPositions` capability (bybit, bybitdemo, hyrotrader, bybitinverse, okx names, blofin) serve `fetchClosedPositions` rows, mapped by the TS mappers; others report `capabilities.closedPnl` false, as TS (bitunix stays TS only) | none (handled) |
+| `fetchClosedPnl` | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | engines with the `closedPositions` capability (bybit, bybitdemo, hyrotrader, bybitinverse, okx names, blofin) serve `fetchClosedPositions` rows, mapped by the TS mappers; others report `capabilities.closedPnl` false, as TS (Rust bitunix reports it false; its closed PnL stays on the TS venue) | none (handled) |
 | `fetchHistoricalPositions` | web `collectAccountAxes.ts:229` (`!` asserted) | TS bitget/blofin/bybit/hyperliquid/okx/paradex | as TS: bybit/bybitdemo/hyrotrader fold reported rows with the order-axis leg join, okx (linear) and blofin map reported rows, bitget* fold account-wide fills, hyperliquid/paradex fold per-symbol fills; venues TS leaves undeclared (e.g. bybitinverse) keep the base refusal | none (handled) |
 | `updateSymbolMetadata` no-op on weex | web via `callMethodInWorker` `hooks/margin/usePositionMode.ts:62`, `useMarginType.ts:62`, `useLeverageSlider.ts:235`, `hooks/market/useSymbolMetadataUpdate.ts:14` | TS weex | silent no-op | RT |
 | `recoverAfterOffline` closes open engine sockets for the venue to reconnect; `false` only after disposal or engine death | web `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82` (reload on `false`) | per-socket recovery | per-channel recovery; dead engines reload | none (B5 fixed) |

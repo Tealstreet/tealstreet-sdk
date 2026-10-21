@@ -153,7 +153,7 @@ fn failed_or_malformed_market_lists_do_not_load_and_retry() {
                 .iter()
                 .any(|a| matches!(a, Action::SetTimer { .. }))
         );
-        h.timer(h.now + 1000.);
+        h.retry(1000.);
         assert_eq!(h.pending.len(), 1);
     }
 }

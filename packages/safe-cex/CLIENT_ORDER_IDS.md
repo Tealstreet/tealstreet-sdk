@@ -33,7 +33,7 @@ caller IDs before any engine command.
 | WEEX                         | `[.A-Z:/a-z0-9_-]{1,36}` | `ts…`               | none                 | `info.clientOrderId` †                                    |
 | Coinbase (+spot)             | `\S+`                    | `tealstreet-…`      | none                 | `parentId`, `info.client_order_id`                        |
 | ApeX Omni                    | `\S+`                    | `ts…`               | body `brokerId`      | `info.clientOrderId` / `info.clientId`                    |
-| Bitunix                      | `\S+`                    | `ts…`               | none                 | `info.clientId`                                           |
+| Bitunix                      | `\S+`                    | `ts…`               | none                 | **`Order.clientOrderId`**, `info.clientId`                |
 | Paradex                      | `.{1,64}`, not `close`   | `ts_…`              | header               | `info.client_id`                                          |
 | Orderly family               | `(?!-).{1,36}`           | `ts…`               | body `broker_id`     | `info.client_order_id` / `info.clientOrderId` †           |
 | WOO                          | positive safe integer    | 15-digit number     | body `broker_id`     | `info.client_order_id` (v1) / `info.clientOrderId` (v3) † |
