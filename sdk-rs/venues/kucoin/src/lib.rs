@@ -19,7 +19,7 @@ use safe_cex_engine::{
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 const REST: &str = "https://api-futures.kucoin.com";
@@ -57,7 +57,7 @@ pub enum Pending {
     Funding(funding::Request),
     Markets {
         rows: Vec<Market>,
-        invalid: bool,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -152,6 +152,9 @@ pub struct Kucoin {
     discovery: safe_cex_engine::startup::Backoff<bool>,
     /// Discovery retries wait out a rate-limit window the venue announced.
     discovery_paused_until: f64,
+    // Unified symbols of contracts rejected as malformed; owned exposure there holds.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
 }
 
 pub(crate) fn internal_symbol(id: &str) -> String {
@@ -243,6 +246,8 @@ impl Kucoin {
             book_generation: 0,
             discovery: Default::default(),
             discovery_paused_until: 0.0,
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
         }
     }
     pub(crate) fn signed(
@@ -382,7 +387,7 @@ impl Kucoin {
             } else {
                 Pending::Markets {
                     rows: vec![],
-                    invalid: false,
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -918,15 +923,24 @@ impl Venue for Kucoin {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Funding(request) => self.funding_item(cx, request, item),
             Pending::Trade(request) => self.trading_item(cx, request, item),
-            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
-            {
-                Ok(row) => {
-                    if let Some(m) = row.market() {
-                        rows.push(m);
+            Pending::Markets { rows, malformed } => {
+                match serde_json::from_str::<Instrument>(item) {
+                    Ok(row) => {
+                        if let Some(m) = row.market() {
+                            rows.push(m);
+                        }
+                    }
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(key) = serde_json::from_str::<InstrumentKey>(item)
+                            && !key.symbol.is_empty()
+                            && key.in_scope()
+                        {
+                            malformed.insert(internal_symbol(&key.symbol));
+                        }
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            }
             Pending::Tickers { rows, invalid: _ } => {
                 match serde_json::from_str::<TickerRow>(item) {
                     Ok(row) => {
@@ -1032,15 +1046,34 @@ impl Venue for Kucoin {
                     }
                 }
             }
-            Pending::Markets { rows, invalid } => {
-                if success(status, body).is_err() || invalid || rows.is_empty() {
+            Pending::Markets { rows, malformed } => {
+                if success(status, body).is_err() || rows.is_empty() {
                     let pause = self.discovery_paused_until - cx.now;
                     self.discovery.failed_after(cx, false, pause);
                 } else {
-                    self.discovery.succeeded(cx, &false);
+                    let refresh = cx.store.loaded().markets;
+                    let rows = if refresh {
+                        keep_listed(cx.store.markets(), rows)
+                    } else {
+                        rows
+                    };
                     cx.store.set_markets(rows);
                     self.books
                         .retain(|symbol, _| cx.store.market(symbol).is_some());
+                    let before = self.malformed_markets.len();
+                    self.malformed_markets.extend(malformed);
+                    self.malformed_markets
+                        .retain(|symbol| cx.store.market(symbol).is_none());
+                    let after = self.malformed_markets.len();
+                    // A partial catalogue commits so private reads start, then re-reads.
+                    if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                        self.discovery.failed(cx, false);
+                    } else {
+                        self.discovery.succeeded(cx, &false);
+                    }
+                    if refresh {
+                        return;
+                    }
                     self.discovery_read(cx, true);
                     if self.credentials.is_some() {
                         self.account_start(cx);
@@ -1289,6 +1322,58 @@ impl Venue for Kucoin {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("KuCoin stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]
