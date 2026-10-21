@@ -1091,7 +1091,7 @@ fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
             format!("Skipping KuCoin position on uncatalogued market {symbol}")
         };
         assert!(h.actions.iter().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(&needle))), "{symbol}");
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(&needle))), "{symbol}");
     }
 }
 
@@ -1127,7 +1127,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     assert_eq!(store.orders().len(), 1);
     assert_eq!(store.orders()[0].id, "5cdfc138b21023a909e5ad55");
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
 }
 
 #[test]
@@ -1207,7 +1207,7 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
     assert_eq!(h.engine.store().orders(), before);
     assert!(h.fill_rows().is_empty());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("market unavailable"))));
 }
 
 #[test]
@@ -1326,6 +1326,72 @@ fn unmappable_position_row_keeps_the_stored_position() {
         &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
     );
     assert_eq!(h.engine.store().positions(), before.as_slice());
+}
+
+#[test]
+fn position_row_without_a_symbol_no_longer_discards_the_position_snapshot() {
+    let mut h = Harness::new();
+    h.ready();
+    let before = h.engine.store().positions()[0].contracts;
+    h.poll();
+    let grown = POSITION
+        .replace("\"currentQty\":10", "\"currentQty\":20")
+        .replace("1610000000000", "1610000001000");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{{"currentQty":"lots"}},{grown}]}}"#),
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, before * 2.0);
+}
+
+#[test]
+fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
+    use safe_cex_engine::Level;
+    let mut h = Harness::new();
+    h.ready();
+    let poll = |h: &mut Harness, rows: &str| {
+        h.poll();
+        let read = h.http("/positions");
+        let start = h.actions.len();
+        h.respond(
+            &read,
+            200,
+            &format!(r#"{{"code":"200000","data":[{rows}]}}"#),
+        );
+        let levels: Vec<_> = h.actions[start..]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.message.contains("KuCoin skipped") =>
+                {
+                    Some(event.level)
+                }
+                _ => None,
+            })
+            .collect();
+        h.reply("/orders?", &Harness::page(ORDER, 1));
+        h.reply("/stopOrders?", EMPTY);
+        if h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/account-overview")))
+        {
+            h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+        }
+        levels
+    };
+    let unnamed = r#"{"currentQty":"lots"}"#;
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    assert_eq!(
+        poll(&mut h, &format!("{unnamed},{POSITION}")),
+        [Level::Warn]
+    );
+    assert_eq!(poll(&mut h, ""), []);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(poll(&mut h, unnamed), [Level::Error]);
+    assert_eq!(poll(&mut h, &bad), [Level::Error]);
+    assert_eq!(poll(&mut h, &bad), []);
 }
 
 #[test]

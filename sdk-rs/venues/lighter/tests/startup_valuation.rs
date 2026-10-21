@@ -1,6 +1,6 @@
 //! Scripted native account valuation before public quotes; never contacts accounts.
 mod support;
-use safe_cex_engine::{Action, Engine, Event, Notice, SocketChannel, SocketId};
+use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId};
 use safe_cex_venue_lighter::Lighter;
 use support::{ACCOUNT, META, NOW, OPEN, options, reply, reply_at, requests};
 
@@ -59,8 +59,7 @@ fn before_quotes(
                     channel: Some(SocketChannel::Public),
                     ..
                 } => public = Some(socket),
-                Action::Notice(Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => logs.push(message),
@@ -80,8 +79,7 @@ fn refresh(engine: &mut Engine<Lighter>, socket: SocketId, body: &str) -> Vec<St
     engine
         .drain_actions()
         .filter_map(|action| match action {
-            Action::Notice(Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),

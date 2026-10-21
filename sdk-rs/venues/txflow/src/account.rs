@@ -990,6 +990,7 @@ impl TxFlow {
                     }
                     if let Some(symbol) = self.symbol(f.instrument_id) {
                         cx.fill(Fill {
+                            id: None,
                             order_id: f.oid.to_string(),
                             symbol: symbol.into(),
                             side: if f.side == "B" {

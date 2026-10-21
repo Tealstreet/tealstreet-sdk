@@ -8,6 +8,7 @@ use safe_cex_engine::{Cx, Fill, Method, Store, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone)]
 pub(crate) enum Read {
@@ -27,6 +28,8 @@ pub struct Request {
     /// Rows that failed to map; the store keeps its copy of these IDs/symbols.
     skipped_orders: HashSet<String>,
     skipped_symbols: HashSet<String>,
+    /// A position row without a symbol: absence removes no stored position.
+    unidentified: bool,
     page: u32,
     retries: u8,
     invalid: bool,
@@ -41,6 +44,7 @@ impl Request {
             native_ids: HashSet::new(),
             skipped_orders: HashSet::new(),
             skipped_symbols: HashSet::new(),
+            unidentified: false,
             page: 1,
             retries: 0,
             invalid: false,
@@ -90,6 +94,8 @@ pub(crate) struct Account {
     closures: HashMap<String, f64>,
     executions: HashSet<String>,
     execution_queue: VecDeque<String>,
+    /// Unified symbols (empty when unreadable) of rejected position rows already logged.
+    position_skips: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -678,19 +684,21 @@ impl Kucoin {
                         );
                     }
                 }
-                Err(error) => match row_identity(item, "symbol") {
+                Err(_) => match row_identity(item, "symbol") {
                     Some(symbol) => {
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!("KuCoin skipped unmappable position {symbol}: {error}"),
-                        );
                         // Stored positions carry the unified symbol, not the contract id.
-                        request
-                            .skipped_symbols
-                            .insert(self::symbol(cx.store, &symbol));
+                        let unified = self::symbol(cx.store, &symbol);
+                        let stored = cx.store.positions().iter().any(|p| p.symbol == unified);
+                        let message = format!("KuCoin skipped unmappable position {symbol}");
+                        self.log_position_skip(cx, unified.clone(), stored, message);
+                        request.skipped_symbols.insert(unified);
                     }
-                    None => request.invalid = true,
+                    None => {
+                        let stored = !cx.store.positions().is_empty();
+                        let message = "KuCoin skipped position row without a symbol";
+                        self.log_position_skip(cx, String::new(), stored, message);
+                        request.unidentified = true;
+                    }
                 },
             },
             Read::Orders(_) => match serde_json::from_str::<&RawValue>(item)
@@ -743,6 +751,24 @@ impl Kucoin {
             _ => request.invalid = true,
         }
     }
+    /// Logs a rejected position row once per symbol until it maps again; at Error when no
+    /// stored copy is kept, as the row then commits as flat.
+    fn log_position_skip(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: String,
+        stored: bool,
+        message: impl Into<String>,
+    ) {
+        let skips = &mut self.account.position_skips;
+        if skips.len() >= SKIP_LOG_LIMIT {
+            skips.clear();
+        }
+        if skips.insert(symbol) {
+            let level = if stored { Level::Warn } else { Level::Error };
+            cx.notice(level, code::ROW_SKIPPED, message);
+        }
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -762,6 +788,7 @@ impl Kucoin {
                 // A failed page cannot leave rows staged from that page.
                 request.skipped_orders.clear();
                 request.skipped_symbols.clear();
+                request.unidentified = false;
                 if matches!(request.read, Read::Positions) {
                     request.positions.clear();
                 } else if matches!(request.read, Read::Orders(_)) {
@@ -852,6 +879,7 @@ impl Kucoin {
                         .copied()
                         .unwrap_or(0)
                         > request.revision
+                        || request.unidentified
                         || request.skipped_symbols.contains(&old.symbol)
                     {
                         if !positions.iter().any(|p| p.id == old.id) {
@@ -863,6 +891,14 @@ impl Kucoin {
                             .insert(old.id.clone(), old.last_update.unwrap_or(cx.now));
                     }
                 }
+                // A skip log re-arms once its row stops failing.
+                self.account.position_skips.retain(|symbol| {
+                    if symbol.is_empty() {
+                        request.unidentified
+                    } else {
+                        request.skipped_symbols.contains(symbol)
+                    }
+                });
                 cx.store.set_positions(positions);
             }
             Read::Orders(stop) => {
@@ -1192,6 +1228,7 @@ impl Kucoin {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
+                        id: None,
                         order_id: orders[0].id.clone(),
                         symbol: orders[0].symbol.clone(),
                         side: orders[0].side,

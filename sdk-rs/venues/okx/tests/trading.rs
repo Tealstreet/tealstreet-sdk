@@ -1551,6 +1551,99 @@ fn a_partially_accepted_batch_is_not_reported_as_rejected() {
 }
 
 #[test]
+fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
+    use safe_cex_engine::Response;
+    for malformed in [true, false] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#,
+            )],
+        );
+        let Action::Http(write) = http(&out).clone() else {
+            unreachable!()
+        };
+        e.handle(
+            6.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status: 504,
+                    headers: "",
+                    body: "gateway timeout",
+                },
+            },
+        );
+        // The write's own reconciliation predates its failure; fail it so the retry reads after.
+        let read = actions(&mut e)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+            .expect("an uncertain placement must reconcile");
+        let Action::Http(read) = read else {
+            unreachable!()
+        };
+        e.handle(
+            7.0,
+            Event::HttpResponse {
+                request: read.id,
+                response: Response {
+                    status: 500,
+                    headers: "",
+                    body: "internal error",
+                },
+            },
+        );
+        let retry = actions(&mut e)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 5_007.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .expect("retry timer");
+        e.handle(5_007.0, Event::TimerFired { timer: retry });
+        let mut reads: Vec<_> = actions(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+            .collect();
+        assert!(!reads.is_empty(), "the retry reads orders again");
+        let mut first = malformed;
+        while let Some(read) = reads.pop() {
+            let body = if std::mem::take(&mut first) {
+                envelope(r#"{"instId":"BTC-USDT-SWAP","ordId":"maybe","sz":4}"#)
+            } else {
+                envelope("")
+            };
+            reply(&mut e, &read, &body, 5_008.0);
+            reads.extend(
+                actions(&mut e)
+                    .into_iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders"))),
+            );
+        }
+        e.handle(
+            5_009.0,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let refused = actions(&mut e).iter().any(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 2, error })
+                    if error.legacy_text().contains("uncertain")
+            )
+        });
+        assert_eq!(refused, malformed);
+        assert!(e.store().loaded().orders);
+    }
+}
+
+#[test]
 fn conditional_zero_price_executes_at_market_once_triggered() {
     let mut e = trading_engine();
     let out = place(

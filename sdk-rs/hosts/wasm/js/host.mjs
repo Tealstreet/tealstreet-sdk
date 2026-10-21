@@ -733,9 +733,6 @@ export class EngineHost {
       case 'startupFailed':
         this.handlers.onStartupFailed?.(action.detail);
         break;
-      case 'log':
-        this.handlers.onLog?.(action.level, action.message);
-        break;
       case 'event': {
         const { level, code, message, fields = {} } = action;
         // A history read that could not be walked completely names its command.

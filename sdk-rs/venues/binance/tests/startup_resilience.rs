@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
     assert!(engine.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+        Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -336,6 +336,6 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert!(engine.store().market("BTCUSDT").is_some());
         assert!(engine.store().market("ETHUSDT").is_none(), "{bad}");
         assert!(engine.drain_actions().any(|action| matches!(action,
-            Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+            Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
     }
 }

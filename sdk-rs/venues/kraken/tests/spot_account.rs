@@ -122,13 +122,13 @@ fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
     reply(
         &mut e,
         &balance,
-        r#"{"error":[],"result":{"ZUSD":"invalid"}}"#,
+        r#"{"error":[],"result":{"ZUSD":"invalid","XXBT":"2","XETH":"3","USDT":"5"}}"#,
     );
     assert_eq!(e.store().balance().total, 1355.);
     message(
         &mut e,
         s,
-        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"bad","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"invalid"}]}"#,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"invalid"}]}"#,
     );
     assert!(e.store().order("O-100").is_some());
     message(
@@ -143,6 +143,96 @@ fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
         r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"new","cum_qty":0.5,"order_qty":2,"timestamp":"2023-11-14T22:13:20Z"}]}"#,
     );
     assert_eq!(e.store().order("O-100").unwrap().filled, 1.5);
+}
+#[test]
+fn bad_balance_row_keeps_its_stored_asset_while_peers_update() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
+    let balance = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &balance,
+        r#"{"error":[],"result":{"ZUSD":"invalid","XXBT":"3","XETH":"3","USDT":"5"}}"#,
+    );
+    assert_eq!(e.store().balance().total, 1455.);
+}
+#[test]
+fn bad_open_order_row_keeps_its_stored_copy_while_peers_commit() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"new","cum_qty":0.5,"order_qty":2,"timestamp":"2023-11-14T22:13:20Z"}]}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .unwrap();
+    e.handle(NOW + 5_000., Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    reply(
+        &mut e,
+        &read,
+        r#"{"error":[],"result":{"open":{"O-100":{"descr":{"pair":"XBTUSD","type":"buy","ordertype":"limit","price":"99"},"vol":"x","vol_exec":"0.5"},"O-200":{"descr":{"pair":"ETHUSD","type":"sell","ordertype":"limit","price":"60"},"vol":"1","vol_exec":"0","opentm":1700000001}}}}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().amount, 2.);
+    assert!(e.store().order("O-200").is_some());
+}
+#[test]
+fn bad_snapshot_execution_row_keeps_its_stored_copy_while_peers_commit() {
+    let peer = r#"{"order_id":"O-200","symbol":"ETH/USD","order_type":"limit","side":"sell","order_qty":1,"cum_qty":0,"limit_price":60}"#;
+    for (bad, kept) in [
+        (
+            r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"x"}"#,
+            &["O-100", "O-200"][..],
+        ),
+        (
+            r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":3,"cum_qty":5}"#,
+            &["O-100", "O-200"],
+        ),
+        (
+            r#"{"order_id":"GONE","symbol":"BTC/USD","order_type":"limit","side":"up","order_qty":1}"#,
+            &["O-200"],
+        ),
+        (r#"{"order_qty":"x"}"#, &["O-100", "O-200"]),
+    ] {
+        let (mut e, _, private) = ready(false);
+        let frame =
+            format!(r#"{{"channel":"executions","type":"snapshot","data":[{bad},{peer}]}}"#);
+        message(&mut e, private.unwrap(), &frame);
+        let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, kept, "{bad}");
+        if let Some(o) = e.store().order("O-100") {
+            assert_eq!(o.amount, 2., "{bad}");
+        }
+    }
+}
+#[test]
+fn bad_update_execution_row_is_skipped_alone_and_emits_no_fill() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    let bad = r#"{"order_id":"O-100","symbol":"BTC/USD","exec_type":"trade","order_qty":"x","cum_qty":2,"last_qty":1.5,"last_price":100,"exec_id":"T-bad","timestamp":"2023-11-14T22:13:21Z"}"#;
+    let peer = r#"{"order_id":"O-200","symbol":"ETH/USD","side":"sell","order_type":"limit","exec_type":"trade","order_qty":1,"cum_qty":0.5,"last_qty":0.5,"last_price":60,"exec_id":"T-good","timestamp":"2023-11-14T22:13:21Z"}"#;
+    message(
+        &mut e,
+        private.unwrap(),
+        &format!(r#"{{"channel":"executions","type":"update","data":[{bad},{peer}]}}"#),
+    );
+    assert_eq!(e.store().order("O-100").unwrap().filled, 0.5);
+    assert_eq!(e.store().order("O-200").unwrap().filled, 0.5);
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 1);
 }
 #[test]
 fn snapshot_history_never_emits_and_live_execution_reconnect_duplicates_dedupe() {
@@ -450,7 +540,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]
@@ -465,7 +555,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
     assert!(
         !actions
             .iter()

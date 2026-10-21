@@ -1623,6 +1623,7 @@ impl BitgetFutures {
                         };
                         if self.remember_execution(format!("{}:{execution}", row.symbol)) {
                             cx.fill(Fill {
+                                id: None,
                                 order_id: order.into_owned(),
                                 symbol: row.symbol.into_owned(),
                                 side,
@@ -1746,6 +1747,7 @@ impl BitgetFutures {
         ])
         .unwrap_or(order.price);
         cx.fill(Fill {
+            id: None,
             order_id: order.id.clone(),
             symbol: order.symbol.clone(),
             side: order.side,

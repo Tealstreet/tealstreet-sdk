@@ -144,8 +144,7 @@ fn ready_full(
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => logs.push(message),

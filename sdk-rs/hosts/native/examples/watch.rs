@@ -49,8 +49,8 @@ async fn main() {
             );
         },
         |notice| {
-            if let Notice::Log { level, message } = notice {
-                eprintln!("[{level:?}] {message}");
+            if let Notice::Event(event) = notice {
+                eprintln!("[{:?}] {}: {}", event.level, event.code, event.message);
             }
         },
     );
