@@ -25,5 +25,7 @@ landing-to-head diff before merging. Report every merge to the overseer.
 
 ## OKX verification
 
-Pending current-head CI evidence. The parked declarations are provisional
-until all four family tapes reproduce their exact diagnostics five times.
+The PR body records current-head CI run IDs, tape identities and all raw
+artifact hashes. Each of the four family tapes must reproduce its complete
+nonmetric output five times per implementation, with no unexpected or
+unobserved private declarations, before merge.
