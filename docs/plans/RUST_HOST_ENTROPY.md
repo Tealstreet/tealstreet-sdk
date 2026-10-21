@@ -80,3 +80,9 @@ Integrated landing 4592d985e8a (including Bybit account row-isolation changes)
 cleanly in d8be4c45e11. The exact 315-path entropy delta and all own patch lines
 are unchanged relative to that landing. 314 integrated Bybit tests, strict
 Bybit Clippy and all 994 harness tests pass. Full CI and final guard remain.
+
+Final source window: #1617 and #1621 integrated once at landing7adb43c4beb,
+without conflicts. All315 own patch paths/lines are retained exactly, including
+the incoming BingX partial-error and Bybit leverage-fence tests/assertions.
+Final CI, budgets, fresh separate guard and actual merge provenance are recorded
+in PR #1624; deployment and caller changes remain outside this scope.
