@@ -4,7 +4,7 @@ use safe_cex_venue_lighter::{Lighter, Options};
 
 const NOW: f64 = 1_700_000_000_000.;
 fn engine(options: Options) -> Engine<Lighter> {
-    let mut e = Engine::new(Lighter::new(options));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,

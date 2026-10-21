@@ -41,7 +41,7 @@ impl Harness {
     }
     fn with_markets(markets: &str) -> Self {
         let mut h = Self {
-            engine: Engine::new(Kucoin::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 passphrase: Some("passphrase".into()),
@@ -1213,7 +1213,7 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
 #[test]
 fn account_reconciliation_starts_without_the_private_socket() {
     let mut h = Harness {
-        engine: Engine::new(Kucoin::new(Options {
+        engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("passphrase".into()),

@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
+    Action, Command, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ fn ready() -> TestEngine {
     ready_with_socket().0
 }
 fn ready_with_socket() -> (TestEngine, SocketId) {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
         passphrase: Some("pass".into()),

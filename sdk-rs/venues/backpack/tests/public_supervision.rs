@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Action, Command, Event, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use safe_cex_venue_backpack::{Backpack, Options};
 use support::Driver;
@@ -29,7 +29,7 @@ impl Harness {
         Self::public_with(PublicFeedPolicy::Direct)
     }
     fn public_with(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(Backpack::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
             public_data_only: true,
             ..Default::default()
         }));

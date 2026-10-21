@@ -10,7 +10,12 @@ impl Visit for Accept {
 
 fn construct(venue: &str, options: &str) -> Result<(), VenueError> {
     let options: EngineOptions = serde_json::from_str(options).expect("options decode");
-    build(venue, options, Accept)
+    build(
+        venue,
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Accept,
+    )
 }
 
 fn rejected(venue: &str, options: &str) -> String {
@@ -636,7 +641,13 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
     ] {
         let raw = serde_json::json!({"key":"key","secret":"secret","bybitSiteId":site,"remoteSigning":remote});
         let options: EngineOptions = serde_json::from_value(raw).unwrap();
-        let actions = build("bybit", options, RejectFee).unwrap();
+        let actions = build(
+            "bybit",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            RejectFee,
+        )
+        .unwrap();
         assert_eq!(actions.iter().any(|action| matches!(action, safe_cex_engine::Action::Http(request) if request.url == "https://api-demo.bybit.com/v5/user/query-api")), expected_probe);
     }
 }

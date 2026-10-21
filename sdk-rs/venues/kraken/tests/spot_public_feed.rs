@@ -17,7 +17,7 @@ struct Rig {
 }
 impl Rig {
     fn new(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(KrakenSpot::new(options()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(options()));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut rig = Self {

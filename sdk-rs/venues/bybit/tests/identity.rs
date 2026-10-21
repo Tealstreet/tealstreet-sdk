@@ -5,7 +5,7 @@ use safe_cex_venue_bybit::{BybitLinear, Options, Variant};
 const NOW: f64 = 1000.;
 type TestEngine = Engine<BybitLinear>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = Engine::new(BybitLinear::new(options));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(options));
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {

@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Venue};
+use safe_cex_engine::{Action, Command, Event, Notice, Venue};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 use support::*;
 const SYMBOL: &str = "BTC-PERP-INTX";
@@ -234,7 +234,7 @@ fn failed_poll_preserves_last_known_good_tickers() {
 }
 #[test]
 fn intx_error_status_with_valid_instruments_is_usable() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()
@@ -347,7 +347,7 @@ fn socket_sequence_advances_across_every_channel_and_product() {
 }
 #[test]
 fn watchdog_covers_socket_that_never_opens() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()
@@ -510,7 +510,7 @@ fn daily_candles_backfill_reconnect_gaps_and_reject_old_seed_generations() {
 #[test]
 fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
     for reconnect in [false, true] {
-        let mut e = Engine::new(
+        let mut e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 public_data_only: true,
                 ..Options::default()
@@ -673,7 +673,7 @@ fn late_usdc_alias_inherits_live_usd_book_and_refcount() {
 }
 #[test]
 fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()
@@ -736,7 +736,7 @@ fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
 
 #[test]
 fn spot_only_public_profile_has_keyless_real_spot_products() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -761,7 +761,7 @@ fn spot_only_public_profile_has_keyless_real_spot_products() {
 }
 #[test]
 fn spot_product_pages_commit_only_after_the_last_page() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -802,7 +802,7 @@ fn spot_product_pages_commit_only_after_the_last_page() {
 }
 #[test]
 fn repeated_product_cursor_cannot_commit_a_partial_market_list() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -843,7 +843,7 @@ fn repeated_product_cursor_cannot_commit_a_partial_market_list() {
 }
 #[test]
 fn unknown_envelopes_cannot_keep_stale_socket_alive() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()
@@ -885,7 +885,7 @@ fn unknown_envelopes_cannot_keep_stale_socket_alive() {
 
 #[test]
 fn future_product_without_native_details_cannot_become_spot() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -907,7 +907,7 @@ fn future_product_without_native_details_cannot_become_spot() {
 
 #[test]
 fn book_subscriptions_before_discovery_are_replayed_for_both_products() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -971,7 +971,7 @@ fn book_subscriptions_before_discovery_are_replayed_for_both_products() {
 }
 #[test]
 fn unsubscribe_before_discovery_does_not_leave_a_pending_book() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()
@@ -1012,7 +1012,7 @@ fn unsubscribe_before_discovery_does_not_leave_a_pending_book() {
 
 #[test]
 fn product_online_status_respects_disabled_flags_and_unknown_statuses() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -1050,7 +1050,7 @@ fn product_online_status_respects_disabled_flags_and_unknown_statuses() {
 
 #[test]
 fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -1077,7 +1077,7 @@ fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
 
 #[test]
 fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             spot_only: true,
@@ -1120,7 +1120,7 @@ fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
 #[test]
 fn valid_catalogue_with_rejected_quotes_starts_markets_and_retries_without_clearing_prices() {
     for prior_quote in [false, true] {
-        let mut e = Engine::new(
+        let mut e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 public_data_only: true,
                 ..Options::default()
@@ -1171,7 +1171,7 @@ fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()

@@ -151,7 +151,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             server.add_account(
                 "fixture",
                 "offline-test-token",
-                Host::new(Engine::new(FixtureVenue::default()), Offline),
+                Host::new(
+                    Engine::new(
+                        FixtureVenue::default(),
+                        Some(safe_cex_native::production_entropy()),
+                    )
+                    .expect("production entropy configured"),
+                    Offline,
+                ),
             )?;
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
             println!(

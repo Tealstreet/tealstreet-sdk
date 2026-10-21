@@ -19,7 +19,7 @@ impl Wallet {
         Self::with_meta(META)
     }
     fn with_meta(meta: &str) -> Self {
-        let mut engine = Engine::new(KrakenSpot::new(options()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(options()));
         engine.start(NOW);
         let metadata = requests(&mut engine).pop().unwrap();
         reply(&mut engine, &metadata, meta);
@@ -238,7 +238,7 @@ fn valid_rest_conversion_values_the_early_native_wallet_without_waiting_for_priv
 
 #[test]
 fn shared_feed_quote_completes_pending_native_wallet_without_private_poll() {
-    let mut engine = Engine::new(KrakenSpot::new(options()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(options()));
     engine
         .set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
         .unwrap();

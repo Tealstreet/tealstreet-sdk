@@ -15,12 +15,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if api_key.is_empty() != api_secret.is_empty() {
         return Err("both Binance credentials are required".into());
     }
-    let engine = Engine::new(BinanceFutures::new(Options {
-        key: (!public_data_only).then_some(api_key),
-        secret: (!public_data_only).then_some(api_secret),
-        public_data_only,
-        ..Options::default()
-    }));
+    let engine = Engine::new(
+        BinanceFutures::new(Options {
+            key: (!public_data_only).then_some(api_key),
+            secret: (!public_data_only).then_some(api_secret),
+            public_data_only,
+            ..Options::default()
+        }),
+        Some(safe_cex_native::production_entropy()),
+    )
+    .expect("production entropy configured");
     tokio::task::LocalSet::new()
         .run_until(async move {
             let mut server = FrameServer::new(ServerConfig::default())?;

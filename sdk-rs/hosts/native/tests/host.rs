@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use safe_cex_engine::wire::{book_top, section, sections};
-use safe_cex_engine::{Command, Engine, HttpRequest, SocketId};
+use safe_cex_engine::{Command, HttpRequest, SocketId};
 use safe_cex_native::{Events, Host, HostEvent, Transport};
 use safe_cex_venue_binance::{BinanceFutures, Options};
 use std::collections::HashMap;
@@ -65,7 +65,7 @@ impl Transport for Tape {
 #[tokio::test]
 async fn the_native_loop_streams_startup_and_publishes_books() {
     let tape = Tape::default();
-    let engine = Engine::new(BinanceFutures::new(Options {
+    let engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
