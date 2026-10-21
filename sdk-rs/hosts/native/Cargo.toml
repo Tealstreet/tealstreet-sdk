@@ -5,7 +5,13 @@ edition.workspace = true
 publish.workspace = true
 description = "Native (tokio) host for the sans-I/O exchange engine"
 
+[features]
+default = ["venues"]
+# Construct any registered venue by name (`FrameServer::add_venue`).
+venues = ["dep:safe-cex-venues", "safe-cex-venues/default"]
+
 [dependencies]
+safe-cex-venues = { workspace = true, optional = true }
 safe-cex-engine = { workspace = true, features = ["polling-control", "command-asterdex", "command-apexomni", "command-polymarket", "command-kucoinspot", "command-options"] }
 safe-cex-venue-binance.workspace = true
 

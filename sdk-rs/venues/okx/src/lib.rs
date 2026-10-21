@@ -150,6 +150,8 @@ pub struct Okx {
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    /// Discovery retries wait out a rate-limit window the venue announced.
+    discovery_paused_until: f64,
     catalogue_incomplete: bool,
     ticker_reading: bool,
     ticker_refresh_pending: bool,
@@ -195,6 +197,7 @@ impl Okx {
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
             startup: Default::default(),
+            discovery_paused_until: 0.0,
             catalogue_incomplete: false,
             ticker_reading: false,
             ticker_refresh_pending: false,
@@ -408,6 +411,9 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if channel != PUBLIC && self.account.startup_rejected {
+            return;
+        }
         // Suppressed public feeds get a placeholder socket that never opens.
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
@@ -717,6 +723,29 @@ impl Okx {
         });
         self.account_prices(cx);
     }
+
+    fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Account(request) = pending {
+            self.account_failed(cx, request, error);
+        } else if let Pending::Trade(request) = pending {
+            self.trade_lost(cx, request, error);
+        } else if let Pending::History(request) = pending {
+            self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
+        } else if let Pending::Candles { command, .. } = pending {
+            cx.command_error(command, error);
+            cx.done(command, "[]".into());
+        } else {
+            let markets = matches!(pending, Pending::Markets { .. });
+            if !markets {
+                self.ticker_reading = false;
+                self.ticker_refresh_pending = false;
+            }
+            let pause = self.discovery_paused_until - cx.now;
+            self.startup.failed_after(cx, markets, pause);
+        }
+    }
 }
 
 impl Venue for Okx {
@@ -750,6 +779,11 @@ impl Venue for Okx {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         self.load_catalogue(cx);
@@ -782,6 +816,9 @@ impl Venue for Okx {
             return;
         };
         if message.event == "error" {
+            if channel != PUBLIC && self.login_rejected(cx, channel, message.code, message.msg) {
+                return;
+            }
             if channel != PUBLIC && !self.connections[channel].authenticated {
                 cx.close(socket);
                 self.on_close(cx, socket, 1008);
@@ -1073,6 +1110,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(account::Request::Config { .. }) = &pending
+            && self.config_rejected(cx, response.body)
+        {
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
@@ -1084,13 +1126,17 @@ impl Venue for Okx {
             }
             other => other,
         };
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())
         } else {
             Err(format!("OKX HTTP {}: {}", response.status, response.body))
         };
         if let Err(error) = result {
-            self.on_request_failed(cx, pending, &error);
+            self.request_failed(cx, pending, &error);
             return;
         }
         match pending {
@@ -1114,7 +1160,8 @@ impl Venue for Okx {
                 self.catalogue_incomplete = incomplete;
                 // A partial catalogue commits so private reads start, and is re-read.
                 if incomplete || self.catalogue_partial {
-                    self.startup.failed(cx, true);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, true, pause);
                 } else {
                     self.startup.succeeded(cx, &true);
                 }
@@ -1183,7 +1230,8 @@ impl Venue for Okx {
                 self.ticker_reading = false;
                 let refresh = std::mem::take(&mut self.ticker_refresh_pending);
                 if incomplete {
-                    self.startup.failed(cx, false);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, false, pause);
                 } else {
                     self.startup.succeeded(cx, &false);
                 }
@@ -1254,25 +1302,10 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Account(request) = pending {
-            self.account_failed(cx, request, error);
-        } else if let Pending::Trade(request) = pending {
-            self.trade_lost(cx, request, error);
-        } else if let Pending::History(request) = pending {
-            self.history_failed(cx, request, error);
-        } else if let Pending::Closed(request) = pending {
-            Self::closed_failed(cx, request, error);
-        } else if let Pending::Candles { command, .. } = pending {
-            cx.command_error(command, error);
-            cx.done(command, "[]".into());
-        } else {
-            let markets = matches!(pending, Pending::Markets { .. });
-            if !markets {
-                self.ticker_reading = false;
-                self.ticker_refresh_pending = false;
-            }
-            self.startup.failed(cx, markets);
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.config_unanswered();
         }
+        self.request_failed(cx, pending, error);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

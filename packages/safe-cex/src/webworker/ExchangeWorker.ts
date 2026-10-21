@@ -8,6 +8,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
+import { classifiedError, exchangeErrorTags } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
@@ -243,6 +244,7 @@ export class ExchangeWorker {
           {
             sendToSentry: effectiveSendToSentry,
             suppressConsoleLog,
+            classified: classifiedError(error),
             sentryData: {
               error: serializableError,
               tags: {
@@ -250,6 +252,8 @@ export class ExchangeWorker {
                 module: 'ExchangeWorker',
                 exchange: this._exchangeName,
                 account: this._accountName,
+                // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
+                ...exchangeErrorTags(error),
                 ...splitExtra.sentryTags,
                 ...workerSentryControl.tags,
               },

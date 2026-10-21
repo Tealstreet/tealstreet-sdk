@@ -263,6 +263,8 @@ pub struct BybitLinear {
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
     clock_offset_ms: f64,
+    /// Discovery retries wait out a rate-limit or IP ban across all products.
+    discovery_paused_until: f64,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -444,6 +446,7 @@ impl BybitLinear {
                 ..Startup::default()
             },
             clock_offset_ms: 0.0,
+            discovery_paused_until: 0.0,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
@@ -854,7 +857,8 @@ impl BybitLinear {
             // Seeds already loaded elsewhere skip try_load_tickers; publish them too.
             self.try_publish_tickers(cx);
         }
-        self.startup.backoff.failed(cx, ());
+        let pause = self.discovery_paused_until - cx.now;
+        self.startup.backoff.failed_after(cx, (), pause);
     }
 
     fn on_markets(
@@ -1153,6 +1157,7 @@ impl BybitLinear {
         }
         cx.store.set_tickers(tickers);
         self.tickers_ready = true;
+        self.reclassify_unpriced_tpsl(cx);
         let category = self.category;
         for other in self.categories() {
             // A category without seeded data waits; a connected one is already live.
@@ -1571,6 +1576,21 @@ impl BybitLinear {
             Ok(response) => venue_error(response).map(|(_, message)| message),
             Err(error) => Some((*error).to_owned()),
         };
+        if let Ok(response) = &response
+            && matches!(
+                then,
+                Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
+            )
+        {
+            // Bybit answers 403 when an IP exceeds the public limit and bans it for 10 minutes:
+            // https://bybit-exchange.github.io/docs/v5/rate-limit
+            let pause = if response.status == 403 {
+                600_000.0
+            } else {
+                safe_cex_engine::startup::rate_limit_pause_ms(response, 10_000.0)
+            };
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         match then {
             Then::Markets {
                 prelaunch,

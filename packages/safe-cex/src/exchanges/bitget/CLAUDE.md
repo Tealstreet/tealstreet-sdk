@@ -897,5 +897,24 @@ tickers load is not sized at entry.
 Malformed envelopes and failed reads never clear good state. Busy
 Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
 invalid bounds fail visibly before writes. UTA one-way fills retain their
-execution-derived position leg. Startup retry and Confirm audit items remain
-outside this change.
+execution-derived position leg. The Confirm audit item remains outside this
+change.
+
+Rust private startup is gated on the `/api/v3/account/settings` probe, at
+startup and after a late `40085` promotion. 40084 detects Classic; a 200 with
+valid settings detects UTA. A first-probe transport or HTML 5xx failure keeps
+the TS fallback to Classic (a later 40085 promotes). Every other failure (429/418,
+5xx or system-code envelopes, non-JSON, malformed settings, unknown codes, and
+transport failures once UTA is confirmed) retries through `startup::Backoff`
+(1 s doubling to 30 s, forever), so polling never stalls undetected. Before the
+account loads, only documented key refusals end startup with one
+`StartupFailed`: 40001/40006/40011/40012/40037 or an "environment is incorrect"
+message (`AuthInvalid`), 40014/40018 (`AuthPermission`), and 40009 after one
+re-signed resend; timestamp codes stay transient. A UTA account on inverse or
+testnet fails startup as `Unsupported`, a missing passphrase or invalid
+read-only credentials as `InvalidInput`. Before the account loads, a socket login
+refused with 30011/30012 (`event: "error"` or `login`) fails startup; other login
+errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
+account timers and retires the private socket; a refused trading key also emits
+`Deactivate`. The probe backoff does not yet honour the 30 s `rest_paused_until`
+window after a 429/418.

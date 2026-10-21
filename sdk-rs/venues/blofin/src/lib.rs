@@ -10,8 +10,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, PublicFeedPolicy, Response, SocketId,
+    TimerId, Venue, VenueError, num,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -459,6 +459,8 @@ impl Venue for Blofin {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));
             return;
         }
         self.read(

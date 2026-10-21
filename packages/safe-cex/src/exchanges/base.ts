@@ -14,7 +14,7 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { deserializeCommandError } from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
@@ -1972,6 +1972,9 @@ export class BaseExchange implements Exchange {
       this._lastHttpFailure = undefined;
     }
 
+    // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
+    const typedTags = exchangeErrorTags(err);
+
     // Detect if we're in a web worker
     const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
 
@@ -1987,6 +1990,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...typedTags,
             ...sentryTags,
             ...correlationTags,
           },
@@ -2002,6 +2006,7 @@ export class BaseExchange implements Exchange {
         },
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     } else {
@@ -2013,6 +2018,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...typedTags,
             ...sentryTags,
             ...correlationTags,
           },
@@ -2032,6 +2038,8 @@ export class BaseExchange implements Exchange {
       const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
       this.emitter.emit('error', formattedMsg, {
         enhancedContext: enhancedError?.context,
+        // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     }

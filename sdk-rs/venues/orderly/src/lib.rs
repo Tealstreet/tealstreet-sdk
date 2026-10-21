@@ -55,6 +55,11 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
     }
 }
 
+/// Whether `key` and `secret` are base58 Ed25519 keys this venue can sign with.
+pub fn signing_keys_valid(key: &str, secret: &str) -> bool {
+    sign::Credentials::new(key, secret, "account").is_ok()
+}
+
 pub enum Pending {
     History(history::Request),
     Trade(trading::Request),
