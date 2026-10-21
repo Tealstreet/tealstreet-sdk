@@ -301,7 +301,7 @@ impl History {
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
             )
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let mut read = Read {
@@ -319,9 +319,9 @@ impl History {
         };
         match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("BingX client order lookup is not supported by the Rust engine".into()),
+                    "BingX client order lookup is not supported by the Rust engine",
                 );
                 return;
             }
@@ -333,7 +333,7 @@ impl History {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 read.kind = Kind::Fills;
@@ -385,7 +385,7 @@ impl History {
         }
         if let (Some(from), Some(to)) = (read.from, read.to) {
             if !from.is_finite() || !to.is_finite() || from > to {
-                cx.done(command, Err("invalid history time range".into()));
+                cx.fail(command, "invalid history time range");
                 return;
             }
             if matches!(read.kind, Kind::Fills) {
@@ -662,9 +662,9 @@ impl History {
             return;
         };
         if truncated {
-            cx.done(
+            cx.fail(
                 command,
-                Err("history is incomplete: time window could not be fully paged".into()),
+                "history is incomplete: time window could not be fully paged",
             );
             return;
         }
@@ -672,10 +672,10 @@ impl History {
             read.rows
                 .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
         }
-        cx.done(
-            command,
-            serde_json::to_string(&read.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&read.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error),
+        };
     }
 
     pub fn on_timer(
@@ -699,7 +699,7 @@ impl History {
 
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         self.reads.remove(&request.command);
-        cx.done(request.command, Err(error.to_owned()));
+        cx.fail(request.command, error.to_owned());
     }
 }
 

@@ -326,7 +326,7 @@ impl Polymarket {
                 self.trading.scopes.remove(&scope);
             }
             match result {
-                Ok(result) => cx.done(command, Ok(result)),
+                Ok(result) => cx.done(command, result),
                 Err(mut error) => {
                     // A later refusal after a step took effect cannot mean nothing happened.
                     if (job.effective || !job.ids.is_empty())
@@ -427,25 +427,19 @@ impl Polymarket {
         if let Command::PlaceOrders { orders, .. } = &command
             && orders.iter().any(|order| order.client_order_id.is_some())
         {
-            cx.done(
-                command_id,
-                Err("Polymarket does not support clientOrderId".into()),
-            );
+            cx.fail(command_id, "Polymarket does not support clientOrderId");
             return;
         }
         if self.trading.jobs.contains_key(&command_id) {
-            cx.done(
-                command_id,
-                Err("Polymarket command is already pending".into()),
-            );
+            cx.fail(command_id, "Polymarket command is already pending");
             return;
         }
         if matches!(&command, Command::PlaceOrders { orders, .. } if orders.is_empty()) {
-            cx.done(command_id, Ok("[]".into()));
+            cx.done(command_id, "[]".into());
             return;
         }
         if matches!(&command, Command::CancelOrders { ids, .. } if ids.is_empty()) {
-            cx.done(command_id, Ok("[]".into()));
+            cx.done(command_id, "[]".into());
             return;
         }
         let result = (|| -> Result<(), String> {

@@ -14,9 +14,8 @@ struct Harness {
 fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Action {
     match action {
         Action::Notice(Notice::CommandFailed { command, error }) => {
-            let result = Err(error.legacy_text());
-            failures.push(error);
-            Action::Notice(Notice::CommandDone { command, result })
+            failures.push(error.clone());
+            Action::Notice(Notice::CommandFailed { command, error })
         }
         action => action,
     }
@@ -173,14 +172,17 @@ impl Harness {
         }
         self.pace();
     }
-    fn done(&self, command: u32) -> &Result<String, String> {
+    fn done(&self, command: u32) -> Result<String, String> {
         self.actions
             .iter()
             .find_map(|a| match a {
                 Action::Notice(Notice::CommandDone {
                     command: id,
                     result,
-                }) if *id == command => Some(result),
+                }) if *id == command => Some(Ok(result.clone())),
+                Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                    Some(Err(error.legacy_text()))
+                }
                 _ => None,
             })
             .unwrap_or_else(|| panic!("no result for {command}: {:?}", self.actions))
@@ -252,7 +254,7 @@ fn caller_id_native_lots_and_headless_metadata_are_preserved() {
         r#"{"code":"200000","data":{"orderId":"9007199254740993"}}"#,
     );
     h.pace();
-    assert_eq!(h.done(1), &Ok(r#"["9007199254740993"]"#.into()));
+    assert_eq!(h.done(1), Ok(r#"["9007199254740993"]"#.into()));
 }
 #[test]
 fn futures_native_alias_and_caller_or_generated_oid_have_exact_receipt_ownership() {
@@ -557,7 +559,7 @@ fn virtual_cancel_deduplicates_parent_and_falls_back_only_on_404() {
         r#"{"code":"200000","data":{"cancelledOrderIds":["parent"]}}"#,
     );
     h.pace();
-    assert_eq!(h.done(1), &Ok("[]".into()));
+    assert_eq!(h.done(1), Ok("[]".into()));
     assert!(!h.has("/orders/parent"));
 }
 #[test]
@@ -572,7 +574,7 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
     assert!(!h.has("/api/v1/stopOrders"));
-    assert_eq!(h.done(1), &Ok("[]".into()));
+    assert_eq!(h.done(1), Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
         symbol: "".into(),
@@ -581,7 +583,7 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     h.pace();
     h.reply("/api/v1/stopOrders", r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert_eq!(h.done(2), &Ok("[]".into()));
+    assert_eq!(h.done(2), Ok("[]".into()));
 }
 
 #[test]
@@ -693,7 +695,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
     h.response(&request, 200, r#"{"code":"200000","data":true}"#);
     h.pace();
     assert!(h.engine.store().hedged());
-    assert_eq!(h.done(1), &Ok("[]".into()));
+    assert_eq!(h.done(1), Ok("[]".into()));
 }
 #[test]
 fn malformed_success_without_order_id_is_a_failure() {
@@ -869,7 +871,7 @@ fn fully_filled_order_during_cancel_is_not_replaced_by_price_only_amend() {
     h.pace();
     h.confirm_cancel("old", 10.0, 10.0);
     assert!(!h.has("/api/v1/orders"));
-    assert_eq!(h.done(1), &Ok("[]".into()));
+    assert_eq!(h.done(1), Ok("[]".into()));
 }
 
 #[test]

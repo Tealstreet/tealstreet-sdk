@@ -251,7 +251,7 @@ fn fetch_candles_uses_seconds_bounds_daily_omission_and_sorted_results() {
         .drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result.unwrap())
+                Some(result)
             } else {
                 None
             }

@@ -1,11 +1,13 @@
 //! Unsigned main-wallet reads. Reads commit only after complete, successful,
 //! generation/revision-matched responses. Order events never invent executions.
 use crate::{Pending, TxFlow};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Response, TimerId, json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -45,26 +47,22 @@ enum Skipped {
     Unlisted { asset: u32, owned: bool },
     Legs { keys: Vec<String>, owned: bool },
 }
-fn skip_level(harmless: bool) -> LogLevel {
-    if harmless {
-        LogLevel::Warning
-    } else {
-        LogLevel::Error
-    }
+fn skip_level(harmless: bool) -> Level {
+    if harmless { Level::Warn } else { Level::Error }
 }
 /// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: String,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 #[derive(Clone, Copy)]
@@ -689,8 +687,7 @@ impl TxFlow {
                 // A skipped row with nothing stored to keep commits as flat: an error.
                 Err(_) => match self.skipped_position(item) {
                     Skipped::Unlisted { owned: true, .. } if !self.discovery_settled() => {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                             "TxFlow owned position asset unavailable; preserving previous account state",
                         );
                         *hold = true;
@@ -762,15 +759,17 @@ impl TxFlow {
                                 if !ids.insert(oid.to_string()) {
                                     *valid = false;
                                 }
-                                cx.log(
-                                    LogLevel::Warning,
+                                cx.notice(
+                                    Level::Warn,
+                                    code::ROW_SKIPPED,
                                     format!("TxFlow skipped malformed order {oid}"),
                                 );
                                 orders.reject(Some(oid.to_string()));
                             }
                             Err(_) => {
-                                cx.log(
-                                    LogLevel::Warning,
+                                cx.notice(
+                                    Level::Warn,
+                                    code::ROW_SKIPPED,
                                     "TxFlow skipped malformed order without an id",
                                 );
                                 orders.reject(None);
@@ -822,8 +821,9 @@ impl TxFlow {
                     .map_err(|_| "Malformed TxFlow account state")
                     .and_then(Envelope::data)
                 else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Malformed or failed TxFlow account state",
                     );
                     return;
@@ -863,7 +863,11 @@ impl TxFlow {
                         .is_none()
                 {
                     self.account.inflight.remove("orders");
-                    cx.log(LogLevel::Warning, "Malformed or failed TxFlow open orders");
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
+                        "Malformed or failed TxFlow open orders",
+                    );
                     return;
                 }
                 if fence.revision != self.account.orders_revision {
@@ -873,7 +877,11 @@ impl TxFlow {
                 if page_rows == PAGE {
                     if offset >= 200_000 {
                         self.account.inflight.remove("orders");
-                        cx.log(LogLevel::Error, "TxFlow open-order coverage exhausted");
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
+                            "TxFlow open-order coverage exhausted",
+                        );
                         return;
                     }
                     let next = offset + PAGE;
@@ -921,23 +929,29 @@ impl TxFlow {
                     .and_then(Envelope::data);
                 let Ok(page) = page else {
                     self.account.inflight.remove("fills");
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
                         "Malformed or failed TxFlow execution reconciliation",
                     );
                     return;
                 };
                 if !valid {
                     self.account.inflight.remove("fills");
-                    cx.log(LogLevel::Warning, "Malformed TxFlow execution");
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        "Malformed TxFlow execution",
+                    );
                     return;
                 }
                 if page.has_more {
                     if offset >= 200_000 || fills.len() > FILL_CAP {
                         self.account.inflight.remove("fills");
                         self.account.fills_exhausted = true;
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::HISTORY_INCOMPLETE,
                             "TxFlow execution coverage exhausted; restart account reconciliation",
                         );
                         return;
@@ -966,7 +980,7 @@ impl TxFlow {
                     > FILL_CAP
                 {
                     self.account.fills_exhausted = true;
-                    cx.log(LogLevel::Error,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
+                    cx.notice(Level::Error, code::HISTORY_INCOMPLETE,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
                     return;
                 }
                 for f in fills.into_iter().rev() {
@@ -1012,7 +1026,7 @@ impl TxFlow {
                         self.account.settings.insert(symbol.clone(), setting);
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
-                    Err(e) => cx.log(LogLevel::Warning, e),
+                    Err(e) => cx.notice(Level::Warn, code::STREAM_MALFORMED, e),
                 }
             }
         }
@@ -1248,6 +1262,6 @@ impl TxFlow {
         if key == "setting" {
             self.account.setting_timer = Some(cx.set_timer(100.0));
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }

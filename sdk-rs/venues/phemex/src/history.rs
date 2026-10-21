@@ -188,11 +188,11 @@ impl PhemexPerpetuals {
                 client_order_id,
             } => {
                 if !crate::trading::valid_client(&client_order_id) {
-                    cx.done(command, Err("Invalid Phemex client order ID".into()));
+                    cx.fail(command, "Invalid Phemex client order ID");
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
-                    cx.done(command, Ok(r#"{"found":false,"definitive":false}"#.into()));
+                    cx.done(command, r#"{"found":false,"definitive":false}"#.into());
                     return;
                 }
                 client_id = Some(client_order_id);
@@ -245,28 +245,19 @@ impl PhemexPerpetuals {
         if (self.options.public_data_only || self.credentials.is_none())
             && !matches!(rows, Rows::Trades(_))
         {
-            cx.done(
-                command,
-                Err("Phemex private history requires credentials".into()),
-            );
+            cx.fail(command, "Phemex private history requires credentials");
             return;
         }
         let Some(symbol) = symbol.filter(|s| cx.store.market(s).is_some()) else {
-            cx.done(
-                command,
-                Err("Phemex history requires a known symbol".into()),
-            );
+            cx.fail(command, "Phemex history requires a known symbol");
             return;
         };
         if !bounds(from, to) {
-            cx.done(command, Err("Invalid Phemex history time range".into()));
+            cx.fail(command, "Invalid Phemex history time range");
             return;
         }
         if self.history.active.len() >= 16 || !self.history.active.insert(command) {
-            cx.done(
-                command,
-                Err("Too many active Phemex history queries".into()),
-            );
+            cx.fail(command, "Too many active Phemex history queries");
             return;
         }
         let native_symbol = self.native_symbol(&symbol).to_owned();
@@ -274,10 +265,7 @@ impl PhemexPerpetuals {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
         {
-            cx.done(
-                command,
-                Err("Unsupported Phemex native history symbol".into()),
-            );
+            cx.fail(command, "Unsupported Phemex native history symbol");
             self.history.active.remove(&command);
             return;
         }
@@ -410,9 +398,9 @@ impl PhemexPerpetuals {
         };
         self.history.active.remove(&request.command);
         if !parsed || request.invalid {
-            cx.done(
+            cx.fail(
                 request.command,
-                Err("Malformed or oversized Phemex history response".into()),
+                "Malformed or oversized Phemex history response",
             );
             return;
         }
@@ -448,7 +436,10 @@ impl PhemexPerpetuals {
                 serde_json::to_string(rows)
             }
         };
-        cx.done(request.command, result.map_err(|error| error.to_string()));
+        match result.map_err(|error| error.to_string()) {
+            Ok(data) => cx.done(request.command, data),
+            Err(error) => cx.fail(request.command, error),
+        };
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -457,7 +448,7 @@ impl PhemexPerpetuals {
         error: &str,
     ) {
         self.history.active.remove(&request.command);
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         let Some(index) = self

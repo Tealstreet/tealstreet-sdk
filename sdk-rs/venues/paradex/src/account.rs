@@ -5,15 +5,16 @@ use crate::{
     wire::StrictNumber as Number,
 };
 use alloy_primitives::U256;
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId,
-    json::ArrayAt,
+    Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -513,7 +514,7 @@ impl Account {
         for queued in self.queue.drain(..) {
             self.failed.push((queued.pending, error.to_owned()));
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         if self.retry.is_none() {
             self.retry = Some(cx.set_timer(2_000.));
         }
@@ -682,8 +683,9 @@ impl Account {
             && let Some(expected) = self.subscriptions.get(&id)
         {
             if message.error.is_some() {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
                     "Paradex private subscription was rejected",
                 );
                 self.disconnect(cx);
@@ -734,7 +736,7 @@ impl Account {
         match result {
             Ok(true) => self.supervisor.received(cx.now),
             Ok(false) => {}
-            Err(error) => cx.log(LogLevel::Warning, error),
+            Err(error) => cx.notice(Level::Warn, code::STREAM_MALFORMED, error),
         }
     }
     fn binary(
@@ -1075,8 +1077,9 @@ impl Account {
                         rows.push((row.market.into(), row.leverage.0))
                     }
                     // Settings are upserts: a skipped row leaves its stored leverage as is.
-                    _ => cx.log(
-                        LogLevel::Warning,
+                    _ => cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match row_market(item) {
                             Some(market) => {
                                 format!("Paradex skipped malformed margin row {market}")
@@ -1100,8 +1103,9 @@ impl Account {
                     Err(()) => {}
                 }
                 let market = row_market(item);
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     match (market, registered) {
                         (Some(market), Ok(_)) => {
                             format!("Paradex skipped unmappable position {market}")
@@ -1148,8 +1152,9 @@ impl Account {
                     .ok()
                     .map(|row| row.id)
                     .filter(|id| !id.is_empty());
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     match (&id, registered.is_err() && row_market(item).is_some()) {
                         (Some(id), true) => {
                             format!("Paradex skipped order {id} on an unknown market")
@@ -1315,7 +1320,11 @@ impl Account {
                 if revision == self.balance_revision
                     && !self.balance_message_inner(cx, response.body, false)
                 {
-                    cx.log(LogLevel::Warning, "Invalid Paradex balance snapshot");
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid Paradex balance snapshot",
+                    );
                 }
                 self.balance_busy = false;
                 if cycle {
@@ -1386,7 +1395,11 @@ impl Account {
                     self.native = native;
                     cx.store.set_orders(mapped);
                 } else if invalid {
-                    cx.log(LogLevel::Warning, "Invalid Paradex orders snapshot");
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
+                        "Invalid Paradex orders snapshot",
+                    );
                 }
                 if cycle {
                     self.margins(cx, false);
@@ -1397,7 +1410,7 @@ impl Account {
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         match request {
             Request::Config => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 if self.retry.is_none() {
                     self.retry = Some(cx.set_timer(2_000.));
                 }
@@ -1441,8 +1454,9 @@ impl Account {
                 Ok(true) => {}
                 Ok(false) => continue,
                 Err(()) => {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         "Paradex private update contains an unmappable market",
                     );
                     if self.repair_orders.is_none() {
@@ -1555,8 +1569,9 @@ impl Account {
             self.native.remove(&row.id);
         }
         if !row.cancel_reason.is_empty() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::ORDER_REJECTED,
                 format!("Paradex order rejected: {}", row.cancel_reason),
             );
         }
@@ -1576,8 +1591,9 @@ impl Account {
                 Ok(true) => {}
                 Ok(false) => continue,
                 Err(()) => {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         "Paradex private update contains an unmappable market",
                     );
                     if self.repair_positions.is_none() {

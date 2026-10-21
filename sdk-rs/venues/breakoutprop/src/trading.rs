@@ -661,7 +661,7 @@ impl BreakoutProp {
         if job.error.is_some() || job.steps.is_empty() {
             let job = self.trading.jobs.remove(&id).expect("job present");
             match job.error {
-                None => cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap_or_default())),
+                None => cx.done(id, serde_json::to_string(&job.ids).unwrap_or_default()),
                 Some(mut error) => {
                     if (job.effective || !job.ids.is_empty())
                         && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))

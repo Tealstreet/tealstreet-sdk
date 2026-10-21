@@ -115,6 +115,19 @@ credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
 
+## Rust account construction
+
+`exchanges/rust/construction-rules.json` declares signing and private-data
+eligibility for every Rust account. TS reads it synchronously before WASM loads;
+Rust embeds the same table and resolves it before credential validation and
+startup. The optional `publicMode` object carries raw caller intent (including
+remote versus payload signer and index presence) beside `publicDataOnly`.
+Without it, legacy native/harness options keep their original interpretation.
+WASM `construction()` reports credential-free `canSign`, `publicDataOnly`, and
+Aster API-version metadata. `resolveConstruction` exposes the same resolution
+without engine construction or I/O. CI compares both evaluators for every
+registered name. Explicit-private Paradex validation belongs to the registry.
+
 ## Rust engine capabilities
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,

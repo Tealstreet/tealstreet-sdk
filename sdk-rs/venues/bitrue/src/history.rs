@@ -130,16 +130,16 @@ impl Bitrue {
             match query {
                 Query::OrderByClientId { symbol, client_order_id } => self.lookup_order(cx, command, symbol, client_order_id),
                 Query::PublicTrades { symbol, limit } => self.public_trades(cx, command, symbol, limit),
-                Query::OrderHistory { .. } => cx.done(command, Err("Bitrue v2 has only single-order lookup, not complete order history".into())),
-                Query::Income { .. } => cx.done(command, Err("Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger".into())),
+                Query::OrderHistory { .. } => cx.fail(command, "Bitrue v2 has only single-order lookup, not complete order history"),
+                Query::Income { .. } => cx.fail(command, "Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger"),
                 Query::Fills { .. } => unreachable!(),
             }
             return;
         };
         if !self.authenticated() {
-            cx.done(
+            cx.fail(
                 command,
-                Err("Bitrue fills require authenticated futures credentials".into()),
+                "Bitrue fills require authenticated futures credentials",
             );
             return;
         }
@@ -149,11 +149,11 @@ impl Bitrue {
             .any(|t| !t.is_finite() || t < 0.0)
             || matches!((from_ms,to_ms),(Some(from),Some(to)) if from > to)
         {
-            cx.done(command, Err("Invalid Bitrue fill time window".into()));
+            cx.fail(command, "Invalid Bitrue fill time window");
             return;
         }
         let Some(symbol) = symbol.as_deref().and_then(|s| self.resolve_symbol(cx, s)) else {
-            cx.done(command, Err("Bitrue fills require a known symbol".into()));
+            cx.fail(command, "Bitrue fills require a known symbol");
             return;
         };
         let market = cx.store.market(&symbol).unwrap();
@@ -279,29 +279,30 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
-            cx.done(request.command, Err(error));
+            cx.fail(request.command, error);
             return;
         }
         if request.failed {
-            cx.done(
-                request.command,
-                Err("Malformed Bitrue execution history".into()),
-            );
+            cx.fail(request.command, "Malformed Bitrue execution history");
             return;
         }
         // fromId advances forward from a trade ID; no backward cursor is
         // documented for the default recent page. A full filtered page cannot
         // establish absence of older matches, so never present it as complete.
         if request.received >= request.limit && request.rows.len() < request.limit {
-            cx.done(request.command, Err("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit".into()));
+            cx.fail(request.command, "INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit");
             return;
         }
         request.rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
         request.rows.truncate(request.limit);
-        cx.done(
-            request.command,
-            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            }
+        };
     }
 
     pub(crate) fn history_failed(
@@ -310,7 +311,7 @@ impl Bitrue {
         request: Request,
         error: &str,
     ) {
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
 }
 

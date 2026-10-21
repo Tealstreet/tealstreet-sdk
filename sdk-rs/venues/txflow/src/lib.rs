@@ -5,13 +5,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -312,7 +314,11 @@ impl TxFlow {
         }
         if conn.subscriptions.len() >= 4096 {
             if let Some(socket) = conn.socket {
-                cx.log(LogLevel::Warning, "TxFlow subscription backlog exhausted");
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "TxFlow subscription backlog exhausted",
+                );
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);
             }
@@ -582,7 +588,11 @@ impl TxFlow {
     ) {
         if !supported(interval) {
             if add {
-                cx.log(LogLevel::Error, interval.unsupported("TxFlow"));
+                cx.notice(
+                    Level::Error,
+                    code::COMMAND_UNSUPPORTED,
+                    interval.unsupported("TxFlow"),
+                );
             }
             return;
         }
@@ -630,11 +640,11 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if !supported(interval) {
-            cx.done(command, Err(interval.unsupported("TxFlow")));
+            cx.fail(command, interval.unsupported("TxFlow"));
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -648,7 +658,7 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.done(command, Err("Invalid candle time range".into()));
+            cx.fail(command, "Invalid candle time range");
             return;
         }
         #[derive(Serialize)]
@@ -704,7 +714,7 @@ impl Venue for TxFlow {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.metadata(cx);
@@ -835,8 +845,9 @@ impl Venue for TxFlow {
             return;
         }
         if self.public_frame(cx, text) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::WS_DISCONNECTED,
                 "TxFlow socket rate limited; reconnecting subscriptions",
             );
             cx.close(socket);
@@ -1054,14 +1065,17 @@ impl Venue for TxFlow {
                 command,
                 rows,
                 valid,
-            } => cx.done(
-                command,
-                if valid && Header::valid(response.body) {
+            } => {
+                let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
-                },
-            ),
+                };
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.history_response(cx, *request, response),
@@ -1088,15 +1102,15 @@ impl Venue for TxFlow {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Meta { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, None);
             }
             Pending::Ticker { asset } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, Some(asset));
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),

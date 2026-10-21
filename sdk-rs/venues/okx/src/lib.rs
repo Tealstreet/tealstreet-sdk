@@ -735,7 +735,7 @@ impl Okx {
             Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
         } else {
             let markets = matches!(pending, Pending::Markets { .. });
             if !markets {
@@ -1294,10 +1294,14 @@ impl Venue for Okx {
                     return;
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                );
+                {
+                    let result: Result<String, String> =
+                        serde_json::to_string(&rows).map_err(|e| e.to_string());
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
             other => self.on_request_failed(cx, other, "malformed OKX list item"),
         }
@@ -1445,7 +1449,7 @@ impl Venue for Okx {
                 to_ms,
             } => {
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 if [from_ms, to_ms]
@@ -1453,14 +1457,14 @@ impl Venue for Okx {
                     .flatten()
                     .any(|v| !v.is_finite())
                 {
-                    cx.done(command, Err("invalid candle time bounds".into()));
+                    cx.fail(command, "invalid candle time bounds");
                     return;
                 }
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
                 let end = to_ms.unwrap_or(cx.now);
                 let Some(default_start) = subtract_bars(end, interval, limit) else {
-                    cx.done(command, Err(interval.unsupported("OKX")));
+                    cx.fail(command, interval.unsupported("OKX"));
                     return;
                 };
                 let before = if explicit_limit.is_none() {
@@ -1469,7 +1473,7 @@ impl Venue for Okx {
                     default_start
                 };
                 if before > end {
-                    cx.done(command, Err("invalid candle time bounds".into()));
+                    cx.fail(command, "invalid candle time bounds");
                     return;
                 }
                 let read = CandleRead {

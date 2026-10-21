@@ -98,7 +98,7 @@ fn caller_id_and_precision_are_sent_verbatim() {
     assert!(body.contains(r#""price":"90.04""#));
     h.respond(&r, r#"{"code":0,"result":{"order_id":9007199254740993}}"#);
     pace(&mut h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, result: Ok(s) }) if s == r#"["9007199254740993"]"#)));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, result: s }) if s == r#"["9007199254740993"]"#)));
 }
 #[test]
 fn invalid_or_duplicate_caller_ids_reject_entire_batch_before_writes() {
@@ -115,13 +115,11 @@ fn invalid_or_duplicate_caller_ids_reject_entire_batch_before_writes() {
             },
         );
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 1,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
     }
 }
 
@@ -150,10 +148,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(h.actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                command: 1,
-                result: Err(message)
-            }) if message.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { command: 1, error: message }) if message.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -339,13 +334,11 @@ fn unsuccessful_http_or_missing_success_code_never_reports_write_success() {
             },
         });
         pace(&mut h);
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 1,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
     }
 }
 
@@ -370,8 +363,7 @@ fn unsuccessful_http_write_preserves_native_rejection_details() {
         },
     });
     pace(&mut h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 1, result: Err(error) }) if error.contains("30003") && error.contains("INVALID_INSTRUMENT_NAME"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text().contains("30003") && error.legacy_text().contains("INVALID_INSTRUMENT_NAME"))));
 }
 
 #[test]
@@ -420,8 +412,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("456") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -489,8 +481,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         assert!(h.actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { command: 1, result: Err(text) })
-                if *text == error.legacy_text()
+            Action::Notice(Notice::CommandFailed { command: 1, error: text })
+                if text.legacy_text() == error.legacy_text()
         )));
     }
     // Transport loss on a write is Unknown; preflight refusals were never sent.

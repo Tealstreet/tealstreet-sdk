@@ -143,7 +143,7 @@ fn done(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result.clone())),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
@@ -965,8 +965,8 @@ fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     );
     assert!(writes(&actions).is_empty());
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
-        if error == "Order amendment or cancellation is already in flight")));
+        Action::Notice(Notice::CommandFailed { command: 2, error })
+        if error.legacy_text() == "Order amendment or cancellation is already in flight")));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     e.handle(
         1002.0,
@@ -1896,8 +1896,10 @@ fn leverage_read_failures_report_once_and_keep_settings() {
     ] {
         let r = leverage_read(&mut e, id);
         let actions = raw_response(&mut e, &r, body);
-        let error = done(&actions).expect_err(body);
-        assert_eq!(command_errors(&actions), [error]);
+        // One typed failure carries the error; no separate diagnostic.
+        assert!(done(&actions).is_err(), "{body}");
+        assert!(!failure(&actions).message.is_empty());
+        assert!(command_errors(&actions).is_empty());
     }
     assert_eq!(e.store().setting("BTCUSDT"), before);
 }

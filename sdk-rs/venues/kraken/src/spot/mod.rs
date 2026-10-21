@@ -130,7 +130,7 @@ impl KrakenSpot {
                 self.ticker_reseed = false;
                 self.discovery.failed(cx, true);
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Private(_) => unreachable!(),
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
@@ -696,10 +696,14 @@ impl Venue for KrakenSpot {
                     return Err("Kraken Spot invalid candles".into());
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                );
+                {
+                    let result: Result<String, String> =
+                        serde_json::to_string(&rows).map_err(|e| e.to_string());
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
                 Ok(())
             }
         });
@@ -869,7 +873,7 @@ impl Venue for KrakenSpot {
                         },
                     );
                 } else {
-                    cx.done(command, Err(tf.unsupported("Kraken Spot")))
+                    cx.fail(command, tf.unsupported("Kraken Spot"))
                 }
             }
             _ => {}

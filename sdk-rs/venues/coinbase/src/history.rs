@@ -309,7 +309,7 @@ impl Coinbase {
                 self.history.active.insert(command);
                 self.history_read(cx, req, None)
             }
-            Err(e) => cx.done(command, Err(e)),
+            Err(e) => cx.fail(command, e),
         }
     }
     fn history_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request, cursor: Option<&str>) {
@@ -399,12 +399,12 @@ impl Coinbase {
                     self.request(cx, Method::Get, path, None, Some(at), Pending::History(req))
                 {
                     self.history.active.remove(&command);
-                    cx.done(command, Err(e));
+                    cx.fail(command, e);
                 }
             }
             Err(e) => {
                 self.history.active.remove(&command);
-                cx.done(command, Err(e));
+                cx.fail(command, e);
             }
         }
     }
@@ -692,14 +692,14 @@ impl Coinbase {
             .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
         req.rows.truncate(req.limit);
         self.history.active.remove(&req.command);
-        cx.done(
-            req.command,
-            serde_json::to_string(&req.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&req.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(req.command, data),
+            Err(error) => cx.fail(req.command, error),
+        };
     }
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {
         self.history.active.remove(&req.command);
-        cx.done(req.command, Err(error.into()));
+        cx.fail(req.command, error);
     }
 }
 fn history_symbol(cx: &Cx<'_, Pending>, product: &str, requested: Option<&str>) -> String {

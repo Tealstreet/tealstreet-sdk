@@ -119,15 +119,17 @@ impl Harness {
         }
         self.event(Event::HttpEnd { request: r.id });
     }
-    fn result(&self) -> &Result<String, String> {
+    fn result(&self) -> Result<String, String> {
         self.actions
             .iter()
-            .find_map(|a| {
-                if let Action::Notice(Notice::CommandDone { command: 1, result }) = a {
-                    Some(result)
-                } else {
-                    None
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone { command: 1, result }) => {
+                    Some(Ok(result.clone()))
                 }
+                Action::Notice(Notice::CommandFailed { command: 1, error }) => {
+                    Some(Err(error.legacy_text()))
+                }
+                _ => None,
             })
             .unwrap_or_else(|| panic!("no completion: {:?}", self.actions))
     }

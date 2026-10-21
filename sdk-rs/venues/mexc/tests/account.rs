@@ -267,7 +267,7 @@ fn flat_symbol_metadata_fetches_both_rails_and_authenticated_cap() {
         e.store().market("BTCUSDT").unwrap().limits.leverage.max,
         100.0
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:41,result:Ok(s)}) if s.contains("\"sellLeverage\":15.0")&&s.contains("\"buyLeverage\":10.0"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:41,result:s}) if s.contains("\"sellLeverage\":15.0")&&s.contains("\"buyLeverage\":10.0"))));
 }
 
 #[test]
@@ -754,7 +754,7 @@ fn owned_position_on_filtered_market_is_skipped_and_the_snapshot_commits() {
     assert_eq!(positions[0].symbol, "BTCUSDT");
     assert!(e.store().order("739113577038255617").is_some());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("uncatalogued market HIDEUSDT"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("uncatalogued market HIDEUSDT"))));
 }
 
 #[test]
@@ -774,7 +774,7 @@ fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 0.006, "previous snapshot kept");
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
 }
 
 #[test]
@@ -849,9 +849,9 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     );
     let out: Vec<_> = e.drain_actions().collect();
     let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
-    let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed leverage transport")).unwrap();
+    let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed leverage transport")).unwrap();
     assert!(error < done);
-    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed leverage transport")));
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed leverage transport")));
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
@@ -1040,7 +1040,7 @@ fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
         assert!(e.store().loaded().orders, "{surface}");
         assert!(e.store().order("valid").is_some(), "{surface}");
         assert!(e.store().order("unloaded").is_none());
-        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
+        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
     }
 }
 
@@ -1158,7 +1158,7 @@ fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_loa
             assert!(e.store().orders().is_empty());
         }
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("Malformed MEXC snapshot row"))));
+            Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Malformed MEXC snapshot row"))));
     }
 }
 
@@ -1350,7 +1350,12 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
                 Action::Notice(Notice::Log {
                     level: LogLevel::Warning,
                     message,
-                }) if message.contains("stops re-reading") => warned = true,
+                })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Warn,
+                    message,
+                    ..
+                })) if message.contains("stops re-reading") => warned = true,
                 _ => {}
             }
         }
@@ -1384,5 +1389,7 @@ fn a_market_whose_amount_step_overflows_is_malformed_and_holds_its_exposure() {
         "previous snapshot kept"
     );
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+            if message.contains("owned position market unavailable"))));
 }

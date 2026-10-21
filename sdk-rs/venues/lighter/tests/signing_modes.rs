@@ -240,7 +240,7 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
                     .iter()
                     .any(|action| matches!(action, Action::Http(_)))
             );
-            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: Ok(value) }) if value == "[]")));
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: value }) if value == "[]")));
         }
         result.engine.handle(
             NOW,

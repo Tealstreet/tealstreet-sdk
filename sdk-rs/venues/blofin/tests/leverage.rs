@@ -30,11 +30,10 @@ fn result(h: &Harness) -> Result<serde_json::Value, String> {
             Action::Notice(Notice::CommandDone {
                 command: 71,
                 result,
-            }) => Some(
-                result
-                    .clone()
-                    .map(|body| serde_json::from_str(&body).unwrap()),
-            ),
+            }) => Some(Ok(serde_json::from_str(result).unwrap())),
+            Action::Notice(Notice::CommandFailed { command: 71, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .unwrap()

@@ -79,6 +79,7 @@ fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
                 }
                 Action::WsSend { text, .. } => sends.push(text),
                 Action::Notice(Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(Notice::Event(event)) => logs.push(event.message),
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }
@@ -282,7 +283,7 @@ fn spot_orders_use_spot_prices_never_reduce_only_and_ignore_leverage() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 3,
-            result: Ok(_)
+            result: _
         })
     )));
     let opts: PlaceOrderOpts = serde_json::from_str(

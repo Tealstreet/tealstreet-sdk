@@ -731,10 +731,10 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
         ))
     );
     assert!(r.body.is_none());
-    assert!(
-        !e.drain_actions()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
-    );
+    assert!(!e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+    )));
 }
 
 fn balance_request(e: &mut TestEngine, s: safe_cex_engine::SocketId) -> safe_cex_engine::RequestId {

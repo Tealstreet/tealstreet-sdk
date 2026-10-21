@@ -75,7 +75,10 @@ impl Harness {
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::CommandError { command, message }) => {
                     self.command_errors.push((command, message))

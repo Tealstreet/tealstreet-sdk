@@ -430,10 +430,7 @@ impl Trading {
                     }
                     cx.fail(command, error);
                 }
-                None => cx.done(
-                    command,
-                    Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                ),
+                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
         }
     }
