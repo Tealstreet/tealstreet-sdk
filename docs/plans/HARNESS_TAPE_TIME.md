@@ -93,11 +93,13 @@ suite verification, independent review, full green head CI and a separate
 landing guard before merging and reporting the receipt.
 
 Raw five-run inspection found generated amend client IDs varying in all
-three Rust aliases. Inject a stream seeded from the exact tape SHA through
-wasm's JavaScript crypto bindings before loading the engine, restricted to
-private Bitget Rust replay. Keep complete raw IDs in the comparison and
-leave production randomness unchanged. Native replays still use OS
-randomness; an explicit native host entropy hook is a separate follow-up.
+three Rust aliases. The initial Bitget-only JavaScript crypto binding hook
+was replaced by the explicit host entropy work in PR #1624. Both Rust replay
+modes now inject an isolated per-engine identity stream seeded from the exact
+tape SHA, preserving the original SHA/domain/counter byte stream. Signing
+keeps production cryptographic randomness. Keep complete raw IDs in the
+comparison. Native hosts now expose an explicit entropy provider too; see
+`RUST_HOST_ENTROPY.md` for that separately owned implementation.
 
 ## Blofin phase
 
