@@ -241,3 +241,18 @@ it('fences disposed and dead generations while sibling and replacement accounts 
   expect(sibling.exchange.authFailureStreak).toBe(0);
   expect(replacement.exchange.authFailureStreak).toBe(0);
 });
+
+it('a scoped account GET refusal and its error diagnostic recover without a phantom primary context', async () => {
+  const r = fixture();
+  await r.start();
+  r.deliver(
+    auth('secondary', 'positions', 'rejected'),
+    { op: 'event', level: 'error', code: 'request.failed', message: 'Bitunix account read failed: code 10004', fields: { venueCode: '10004' } },
+  );
+  expect(r.exchange.authFailureStreak).toBe(1);
+  expect(r.errors).toHaveBeenCalledOnce();
+  r.deliver(auth('secondary', 'positions', 'accepted'));
+  expect(r.exchange.authFailureStreak).toBe(0);
+  expect(r.deactivated).not.toHaveBeenCalled();
+  expect(r.exchange.isDisposed).toBe(false);
+});

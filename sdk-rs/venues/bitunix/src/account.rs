@@ -6,7 +6,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId};
 use std::collections::{HashMap, HashSet};
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
@@ -14,12 +14,27 @@ pub const POSITIONS: &str = "/api/v1/futures/position/get_pending_positions";
 pub const SYMBOL_SETTINGS: &str = "/api/v1/futures/account/get_leverage_margin_mode";
 pub const ORDERS: &str = "/api/v1/futures/trade/get_pending_orders";
 pub const TPSL: &str = "/api/v1/futures/tpsl/get_pending_orders";
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
     Balance,
     Positions,
     Orders,
     Tpsl,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SymbolSettings {
+    leverage: f64,
+    margin_mode: String,
+}
+fn decode_symbol_settings(response: &Response<'_>) -> Option<SymbolSettings> {
+    if !crate::recovery::success(response) {
+        return None;
+    }
+    data(response.body)
+        .ok()
+        .and_then(|body| serde_json::from_str::<SymbolSettings>(body).ok())
+        .filter(|settings| settings.leverage.is_finite() && settings.leverage > 0.0)
 }
 #[derive(Default)]
 pub struct RejectedOrderRows {
@@ -191,6 +206,7 @@ pub struct OrderReadProgress {
 }
 #[derive(Default)]
 pub struct AccountState {
+    pub(crate) recovery: crate::recovery::State,
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -371,22 +387,7 @@ impl BitunixFutures {
         let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
             || matches!(&pending, Pending::History(_))
         {
-            cx.request_streamed(
-                method,
-                url,
-                headers,
-                json::ArrayAt::AnyFieldEnvelope(&[
-                    "data",
-                    "tradeList",
-                    "userTrades",
-                    "positionList",
-                    "positions",
-                    "orderList",
-                    "list",
-                    "rows",
-                ]),
-                pending,
-            )
+            cx.request_streamed(method, url, headers, crate::recovery::LIST, pending)
         } else {
             cx.request(method, url, headers, body, pending)
         };
@@ -412,6 +413,16 @@ impl BitunixFutures {
         after: Option<u32>,
     ) {
         if self.credentials.is_none() {
+            return;
+        }
+        if self
+            .account
+            .recovery
+            .blocked(cx, &crate::recovery::Key::Axis(axis))
+        {
+            if let Some(command) = after {
+                self.prepared(cx, command, false);
+            }
             return;
         }
         if axis == Axis::Positions {
@@ -460,6 +471,9 @@ impl BitunixFutures {
             Axis::Tpsl => 3,
         };
         self.account.serials[slot] += 1;
+        if axis == Axis::Balance {
+            self.account.balance_polled_at = cx.now;
+        }
         let read = Read {
             after,
             serial: self.account.serials[slot],
@@ -499,15 +513,25 @@ impl BitunixFutures {
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
     pub(crate) fn read_symbol_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if self.credentials.is_none() || !self.account.symbol_settings.insert(symbol.into()) {
+        if self.credentials.is_none()
+            || cx.store.market(symbol).is_none()
+            || self
+                .account
+                .recovery
+                .blocked(cx, &crate::recovery::Key::Settings(symbol.into()))
+            || !self.account.symbol_settings.insert(symbol.into())
+        {
             return;
         }
+        self.account.recovery.retain_settings(cx);
+        let serial = self.account.recovery.next_settings(symbol);
         let params = Params::default()
             .str("marginCoin", "USDT")
             .str("symbol", symbol);
         let pending = Pending::SymbolSettings {
             symbol: symbol.into(),
             generation: self.account.generations[Axis::Positions.index()],
+            serial,
         };
         self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
     }
@@ -516,52 +540,34 @@ impl BitunixFutures {
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
         generation: u64,
+        serial: u64,
         response: Response<'_>,
     ) {
         // A newer leverage/margin acknowledgement supersedes this read.
-        if generation != self.account.generations[Axis::Positions.index()] {
+        if !self.account.recovery.settings_current(symbol, serial) {
             return;
         }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Settings {
-            leverage: f64,
-            margin_mode: String,
+        if generation != self.account.generations[Axis::Positions.index()] {
+            self.account.symbol_settings.remove(symbol);
+            self.account.recovery.defer(
+                cx,
+                crate::recovery::Key::Settings(symbol.into()),
+                cx.now + 1000.0,
+            );
+            return;
         }
-        let parsed = data(response.body)
-            .and_then(|raw| serde_json::from_str::<Settings>(raw).map_err(|e| e.to_string()));
-        let settings = match parsed {
-            Ok(s)
-                if (200..300).contains(&response.status)
-                    && s.leverage.is_finite()
-                    && s.leverage > 0.0 =>
-            {
-                s
-            }
-            Ok(_) => {
-                self.account.symbol_settings.remove(symbol);
-                cx.notice(
-                    Level::Warn,
-                    code::STREAM_MALFORMED,
-                    "Malformed Bitunix leverage/margin mode",
-                );
-                return;
-            }
-            Err(e) => {
-                self.account.symbol_settings.remove(symbol);
-                cx.notice(
-                    Level::Warn,
-                    code::REQUEST_FAILED,
-                    format!("Bitunix leverage/margin mode read failed: {e}"),
-                );
-                return;
-            }
+        let Some(settings) = decode_symbol_settings(&response) else {
+            self.settings_failed(cx, symbol, generation, serial, Some(&response));
+            return;
         };
         let margin = if settings.margin_mode.eq_ignore_ascii_case("ISOLATION") {
             MarginType::Isolated
         } else {
             MarginType::Cross
         };
+        self.account
+            .recovery
+            .succeeded(cx, &crate::recovery::Key::Settings(symbol.into()));
         cx.store.update_setting(symbol, |s| {
             s.leverage = settings.leverage;
             s.margin_type = Some(margin);
@@ -585,20 +591,12 @@ impl BitunixFutures {
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
             Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Private(read) => {
-                self.position_answered(cx, &read);
-                self.order_answered(cx, &read);
-                if read.axis == Axis::Positions {
-                    self.debounce(cx, Axis::Positions);
-                }
-                if read.axis.order_slot().is_some() {
-                    self.debounce(cx, Axis::Orders);
-                }
-                if let Some(command) = read.after {
-                    self.prepared(cx, command, false);
-                }
-                cx.retried_failure("bitunix.account:1", error);
-            }
+            Pending::Private(read) => self.account_failed(cx, read, None),
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } => self.settings_failed(cx, &symbol, generation, serial, None),
             _ => cx.retried_failure("bitunix.account:2", error),
         }
     }
@@ -731,6 +729,17 @@ impl BitunixFutures {
         self.account.timers[i] = Some(cx.set_timer(1000.0));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(keys) = self.account.recovery.timer(cx, timer) {
+            for key in keys {
+                match key {
+                    crate::recovery::Key::Axis(axis) => self.read_axis(cx, axis),
+                    crate::recovery::Key::Settings(symbol) => {
+                        self.read_symbol_settings(cx, &symbol)
+                    }
+                }
+            }
+            return true;
+        }
         if let Some(slot) = self
             .account
             .order_reads
@@ -776,7 +785,6 @@ impl BitunixFutures {
             if self.account.balance_answered == self.account.serials[0]
                 || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS
             {
-                self.account.balance_polled_at = cx.now;
                 self.read_axis(cx, Axis::Balance);
             }
             self.account.count += 1;
@@ -909,6 +917,118 @@ impl BitunixFutures {
             }
         }
     }
+    pub(crate) fn read_current(&self, read: &Read) -> bool {
+        let slot = match read.axis {
+            Axis::Balance => 0,
+            Axis::Positions => 1,
+            Axis::Orders => 2,
+            Axis::Tpsl => 3,
+        };
+        if read.serial != self.account.serials[slot] {
+            return false;
+        }
+        if read.axis == Axis::Positions && read.after.is_none() {
+            read.position_write_revision == self.account.position_write_revision
+        } else if read.axis.order_slot().is_some() {
+            read.order_write_revision == self.account.order_write_revision
+                && (read.after.is_none()
+                    || read.generation == self.account.generations[read.axis.index()])
+        } else {
+            read.generation == self.account.generations[read.axis.index()]
+        }
+    }
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Read,
+        response: Option<&Response<'_>>,
+    ) {
+        self.position_answered(cx, &read);
+        self.order_answered(cx, &read);
+        if read.axis == Axis::Balance {
+            self.account.balance_answered = self.account.balance_answered.max(read.serial);
+        }
+        if self.read_current(&read) {
+            self.account.recovery.failed(
+                cx,
+                crate::recovery::Key::Axis(read.axis),
+                response.map_or(0.0, crate::recovery::pause),
+            );
+            crate::recovery::notice(cx, response);
+        }
+        if let Some(command) = read.after {
+            self.prepared(cx, command, false);
+        }
+    }
+    pub(crate) fn settings_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        generation: u64,
+        serial: u64,
+        response: Option<&Response<'_>>,
+    ) {
+        if !self.account.recovery.settings_current(symbol, serial) {
+            return;
+        }
+        self.account.symbol_settings.remove(symbol);
+        let key = crate::recovery::Key::Settings(symbol.into());
+        if generation != self.account.generations[Axis::Positions.index()] {
+            self.account.recovery.defer(cx, key, cx.now + 1000.0);
+            return;
+        }
+        self.account
+            .recovery
+            .failed(cx, key, response.map_or(0.0, crate::recovery::pause));
+        crate::recovery::notice(cx, response);
+    }
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let rejected = crate::recovery::refused(response);
+        let success = crate::recovery::success(response);
+        match pending {
+            Pending::Private(read) if self.read_current(read) => {
+                let outcome = if rejected {
+                    Some(Rejected)
+                } else if success {
+                    if read.axis == Axis::Balance {
+                        data(response.body)
+                            .ok()
+                            .and_then(|body| extract_account(body, 0))
+                            .map(|_| Accepted)
+                    } else {
+                        safe_cex_engine::AuthOutcome::accepted_list(response, crate::recovery::LIST)
+                    }
+                } else {
+                    None
+                };
+                match read.axis {
+                    Axis::Orders => self.account.recovery.orders_auth.report(0, outcome),
+                    Axis::Tpsl => self.account.recovery.orders_auth.report(1, outcome),
+                    _ => outcome,
+                }
+            }
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } if *generation == self.account.generations[1]
+                && self.account.recovery.settings_current(symbol, *serial) =>
+            {
+                let outcome = if rejected {
+                    Some(Rejected)
+                } else {
+                    decode_symbol_settings(response).map(|_| Accepted)
+                };
+                self.account.recovery.settings_auth(symbol, outcome)
+            }
+            _ => None,
+        }
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -920,40 +1040,26 @@ impl BitunixFutures {
         if read.axis == Axis::Balance {
             self.account.balance_answered = self.account.balance_answered.max(read.serial);
         }
-        let body = match data(response.body) {
-            Ok(b) if (200..300).contains(&response.status) && !read.invalid => b,
-            _ => {
-                cx.notice(
-                    Level::Warn,
-                    code::SNAPSHOT_DISCARDED,
-                    "Bitunix account read failed; keeping last snapshot",
-                );
-                self.debounce(cx, read.axis);
-                return;
-            }
-        };
-        let slot = match read.axis {
-            Axis::Balance => 0,
-            Axis::Positions => 1,
-            Axis::Orders => 2,
-            Axis::Tpsl => 3,
-        };
-        if read.serial != self.account.serials[slot] {
-            return;
-        }
-        let current = if read.axis == Axis::Positions && read.after.is_none() {
-            read.position_write_revision == self.account.position_write_revision
-        } else if read.axis.order_slot().is_some() {
-            read.order_write_revision == self.account.order_write_revision
-                && (read.after.is_none()
-                    || read.generation == self.account.generations[read.axis.index()])
-        } else {
-            read.generation == self.account.generations[read.axis.index()]
-        };
-        if !current {
+        if !self.read_current(&read) {
             self.debounce(cx, read.axis);
             return;
         }
+        let body = match data(response.body) {
+            Ok(b)
+                if crate::recovery::success(&response)
+                    && !read.invalid
+                    && (read.axis != Axis::Balance || extract_account(b, 0).is_some()) =>
+            {
+                b
+            }
+            _ => {
+                self.account_failed(cx, read, Some(&response));
+                return;
+            }
+        };
+        self.account
+            .recovery
+            .succeeded(cx, &crate::recovery::Key::Axis(read.axis));
         if !cx.store.loaded().orders && read.partial_orders() {
             cx.notice(
                 Level::Warn,

@@ -49,3 +49,12 @@ as failures. Apply the60s floor even to a short Retry-After header. Retained par
 rows or superseded snapshots do not constitute rejected credentials or a failed
 transport read. Preserve status/headers on malformed private streams and sanitize
 private diagnostics. Independent plan audit is clear with these constraints.
+
+Local checkpoint while refreshing predecessor CI after the shared #1656 profile
+change: initial7 auth regressions and8 SDK auth tests/typecheck/lint pass. WIP
+review fixed duplicate legacy auth diagnostics and shared settings validation.
+A negative-clock fixture exposed an inactive-pause sentinel bug, now corrected.
+Full existing account tests are30/32: two older fixtures must retain/fire actual
+backoff timers before expecting another read. Remaining grouped/currentness/rate/
+capped retry regressions and final native/strict/review gates are outstanding.
+This checkpoint is local and is not a ready PR.

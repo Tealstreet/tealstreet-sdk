@@ -2,6 +2,7 @@
 mod account;
 mod error;
 mod history;
+mod recovery;
 #[cfg(test)]
 mod secondary_tests;
 mod sign;
@@ -52,10 +53,22 @@ pub enum Pending {
     Private(account::Read),
     Trade(trading::Request),
     History(history::Request),
-    Markets { rows: Vec<Market>, invalid: bool },
-    Tickers { rows: Vec<Ticker>, invalid: bool },
-    Candles { command: u32 },
-    SymbolSettings { symbol: String, generation: u64 },
+    Markets {
+        rows: Vec<Market>,
+        invalid: bool,
+    },
+    Tickers {
+        rows: Vec<Ticker>,
+        invalid: bool,
+    },
+    Candles {
+        command: u32,
+    },
+    SymbolSettings {
+        symbol: String,
+        generation: u64,
+        serial: u64,
+    },
 }
 #[derive(Clone)]
 enum Feed {
@@ -397,6 +410,14 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn account_auth_outcome(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -605,7 +626,7 @@ impl Venue for BitunixFutures {
                 self.order_overlap(&mut read);
                 let after = read.after;
                 let success = (200..300).contains(&response.status)
-                    && data(response.body).is_ok()
+                    && recovery::success(&response)
                     && !read.invalid
                     && !read.position_rejected.any()
                     && !read.partial_orders()
@@ -628,8 +649,12 @@ impl Venue for BitunixFutures {
                 self.trade_response(cx, request, response);
                 return;
             }
-            Pending::SymbolSettings { symbol, generation } => {
-                self.symbol_settings_response(cx, &symbol, generation, response);
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } => {
+                self.symbol_settings_response(cx, &symbol, generation, serial, response);
                 return;
             }
             other => other,
@@ -715,6 +740,21 @@ impl Venue for BitunixFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
+        let pending = match pending {
+            Pending::Private(read) => {
+                self.account_failed(cx, read, Some(&response));
+                return;
+            }
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } => {
+                self.settings_failed(cx, &symbol, generation, serial, Some(&response));
+                return;
+            }
+            pending => pending,
+        };
         let read = match &pending {
             Pending::Markets { .. } => Some(DiscoveryRead::Markets),
             Pending::Tickers { .. } => Some(DiscoveryRead::Tickers),
@@ -741,6 +781,26 @@ impl Venue for BitunixFutures {
         headers: &str,
         error: &str,
     ) {
+        let response = Response {
+            status,
+            headers,
+            body: "",
+        };
+        let pending = match pending {
+            Pending::Private(read) => {
+                self.account_failed(cx, read, Some(&response));
+                return;
+            }
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } => {
+                self.settings_failed(cx, &symbol, generation, serial, Some(&response));
+                return;
+            }
+            pending => pending,
+        };
         let read = match &pending {
             Pending::Markets { .. } => Some(DiscoveryRead::Markets),
             Pending::Tickers { .. } => Some(DiscoveryRead::Tickers),
@@ -761,24 +821,13 @@ impl Venue for BitunixFutures {
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Private(read) => {
-                self.position_answered(cx, &read);
-                self.order_answered(cx, &read);
-                if read.axis == account::Axis::Balance {
-                    self.account.balance_answered = self.account.balance_answered.max(read.serial);
-                }
-                if let Some(command) = read.after {
-                    self.prepared(cx, command, false);
-                }
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                self.debounce(cx, read.axis);
-            }
+            Pending::Private(read) => self.account_failed(cx, read, None),
             Pending::Candles { command } => cx.fail(command, error),
-            Pending::SymbolSettings { symbol, .. } => {
-                // Retry on the next candle interest.
-                self.account.symbol_settings.remove(&symbol);
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-            }
+            Pending::SymbolSettings {
+                symbol,
+                generation,
+                serial,
+            } => self.settings_failed(cx, &symbol, generation, serial, None),
             Pending::Markets { .. } => self.public_failed(
                 cx,
                 DiscoveryRead::Markets,
