@@ -22,18 +22,22 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    credentials. Engine sign-request actions with browser signers, or server keys.
 3. **React Native.** `registry.native.ts` maps 9 names to the wasm engine;
    Hermes has no `WebAssembly`. Revert those to TS for mobile, or a native/JSI host.
-4. **Rollback.** `engine` accepts only `'rust'` (`types.ts:137`). Add
-   `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
-   deleting a family.
+4. **Rollback.** `engine` accepts only `'rust'`; unsetting it restores registry
+   defaults, which are already Rust for some venues. [Recommendation and costs](RUST_ROLLBACK.md):
+   one explicit `'typescript' | 'rust'` construction resolver, coherent per-venue
+   application/hosted policy, tested TS reachability and shadow/canary/soak before
+   deletion. This is a decision aid; the switch and caller policy are not implemented.
 
 Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error
 (futures and spot; spot was placing the entry unprotected until verification);
 Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
 obvious improvements (clearer errors, better messages) need no decision.
 
-Already defaulted to Rust with TS removed on this branch: `coinbase`,
-`coinbasespot`, the six Orderly brokers, `txflow`. The branch cannot reach master
-until 1–3 are settled for them.
+Ordinary registry defaults already select Rust for `coinbase`, `coinbasespot`,
+the six Orderly brokers and `txflow`. Coinbase/Orderly retain production TS
+hosted-signing delegates; they are not a generic ordinary-account rollback path.
+TxFlow has no production TS fallback. The branch cannot reach master until 1–3
+are settled for them; rollback availability remains explicit in decision 4.
 
 ## Error handling (scoping)
 
