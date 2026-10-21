@@ -923,11 +923,11 @@ fn caller_symbol_native_amend_works_before_the_order_is_cached() {
     }
 }
 #[test]
-fn malformed_active_order_rows_never_commit_partial_or_empty_reconciliation() {
+fn malformed_active_order_rows_keep_only_their_own_stored_copies() {
     for items in [
         json!([{}]),
         json!([serde_json::from_str::<Value>(ORDER).unwrap(),{"id":"bad","symbol":"BTC-USDT"}]),
-        json!([{"id":"bad","symbol":"BTC-USDT","type":"limit","side":"buy"}]),
+        json!([{"id":"order-1","symbol":"BTC-USDT","type":"limit","side":"buy"}]),
     ] {
         let mut h = H::new(true);
         h.timer(5000.0);
@@ -942,6 +942,28 @@ fn malformed_active_order_rows_never_commit_partial_or_empty_reconciliation() {
         assert_eq!(h.e.store().orders().len(), 1);
         assert_eq!(h.e.store().orders()[0].id, "order-1");
     }
+}
+#[test]
+fn malformed_active_order_row_keeps_its_stored_copy_while_peers_commit() {
+    let mut h = H::new(true);
+    h.timer(5000.0);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let peer = ORDER
+        .replace("order-1", "order-2")
+        .replace("caller-1", "caller-2");
+    let items = json!([
+        {"id":"order-1","symbol":"BTC-USDT","type":"limit","side":"buy"},
+        serde_json::from_str::<Value>(&peer).unwrap(),
+    ]);
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":1,"items":items}}).to_string(),
+    );
+    assert_eq!(h.e.store().order("order-1").unwrap().amount, 2.0);
+    assert!(h.e.store().order("order-2").is_some());
 }
 #[test]
 fn lookup_native_order_alias_matches_ts_and_failed_read_stays_nondefinitive() {
@@ -1074,14 +1096,35 @@ fn missing_null_empty_or_negative_trade_account_numbers_preserve_good_balance() 
     ] {
         let mut h = H::new(true);
         h.timer(5000.0);
+        let btc = json!({"currency":"BTC","available":"2","holds":"1","balance":"3"});
         h.reply(
             "/accounts?type=trade",
-            &json!({"code":"200000","data":[row]}).to_string(),
+            &json!({"code":"200000","data":[row, btc]}).to_string(),
         );
         let b = h.e.store().balance();
         assert_eq!((b.free, b.used, b.total), (1100.0, 200.0, 1300.0));
         assert_eq!(h.e.store().coin_balances().unwrap().len(), 2);
     }
+}
+#[test]
+fn malformed_trade_account_row_keeps_its_stored_coin_and_the_previous_wallet_total() {
+    let mut h = H::new(true);
+    h.timer(5000.0);
+    // The 3 BTC (worth 300) were sold for USDT; the BTC row now fails to read.
+    h.reply(
+        "/accounts?type=trade",
+        r#"{"code":"200000","data":[{"currency":"USDT","available":"1200","holds":"100","balance":"1300"},{"currency":"BTC","available":null,"holds":"0","balance":"0"}]}"#,
+    );
+    let b = h.e.store().balance();
+    assert_eq!((b.free, b.used, b.total), (1100.0, 200.0, 1300.0));
+    let coins: Vec<_> =
+        h.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .map(|c| (c.currency.as_str(), c.balance.total))
+            .collect();
+    assert_eq!(coins, [("USDT", 1300.0), ("BTC", 3.0)]);
 }
 #[test]
 fn newer_private_rows_cannot_shrink_below_the_existing_execution_floor() {
