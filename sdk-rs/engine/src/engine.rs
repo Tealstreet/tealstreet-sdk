@@ -161,6 +161,16 @@ pub enum LogLevel {
     Error,
 }
 
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Info => Self::Info,
+            LogLevel::Warning => Self::Warn,
+            LogLevel::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
@@ -1195,6 +1205,11 @@ impl<P> Cx<'_, P> {
         level >= self.io.min_level
     }
 
+    /// [`Cx::event`] without fields.
+    pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        self.event(level, code, message, Vec::new());
+    }
+
     /// Counted in [`Health`] whatever the host's minimum level.
     pub fn event(
         &mut self,
@@ -1203,6 +1218,10 @@ impl<P> Cx<'_, P> {
         message: impl Into<String>,
         fields: Vec<(&'static str, Value)>,
     ) {
+        // A rejection often also arrives as an auth-kind failure or `deactivate`.
+        if code == log_code::AUTH_REJECTED {
+            count_auth_failure(self.io, None);
+        }
         let io = &mut *self.io;
         push_event(
             &mut io.actions,
@@ -2176,12 +2195,16 @@ impl<V: Venue> Engine<V> {
 
     /// Like [`take_frame`](Self::take_frame) but only books, candles and
     /// fills, which consumers want at the venue's book cadence; store
-    /// sections wait for the next full frame.
+    /// sections wait for the next full frame unless fills are pending, which
+    /// travel with the orders they belong to.
     pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.write_frame(now, false)
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        // A fill must not reach a consumer before its order: a book-cadence
+        // flush carrying fills writes the store sections with them.
+        let store = store || !self.io.fills.is_empty();
         if !store && self.store.markets_pending() {
             return None;
         }
@@ -2488,7 +2511,9 @@ fn push_event(
     min_level: Level,
     mut event: LogEvent,
 ) {
-    health.count(event.code);
+    if event.code != log_code::AUTH_REJECTED {
+        health.count(event.code);
+    }
     if event.level < min_level {
         return;
     }
@@ -3427,19 +3452,20 @@ mod streaming_tests {
         let kinds = crate::wire::sections(&market)
             .map(|(kind, _)| kind)
             .collect::<Vec<_>>();
-        for kind in [section::BOOK, section::CANDLES, section::FILLS] {
+        // A fill travels with the store sections, so its flush carries them too.
+        for kind in [
+            section::BOOK,
+            section::CANDLES,
+            section::FILLS,
+            section::TICKER_DELTAS,
+            section::BALANCE,
+        ] {
             assert!(kinds.contains(&kind));
         }
         assert!(
             engine.take_market_frame(1.).is_none(),
             "events must flush exactly once"
         );
-        let normal = engine.take_frame(1.).unwrap().to_vec();
-        let kinds = crate::wire::sections(&normal)
-            .map(|(kind, _)| kind)
-            .collect::<Vec<_>>();
-        assert!(kinds.contains(&section::TICKER_DELTAS));
-        assert!(kinds.contains(&section::BALANCE));
         assert!(engine.take_frame(1.).is_none());
     }
 
@@ -3512,6 +3538,10 @@ mod streaming_tests {
                 volume: 4.,
             },
         ));
+        assert!(engine.take_market_frame(1.).is_none());
+        assert_eq!(engine.io.changed_books_active, 1);
+        assert_eq!(engine.io.candles.len(), 1);
+        // A pending fill would promote the flush to a full frame (MARKETS first).
         engine.io.fills.push(Fill {
             order_id: "filled-order".into(),
             symbol: "ORPHAN".into(),
@@ -3519,10 +3549,6 @@ mod streaming_tests {
             price: 7.,
             amount: 0.25,
         });
-        assert!(engine.take_market_frame(1.).is_none());
-        assert_eq!(engine.io.changed_books_active, 1);
-        assert_eq!(engine.io.candles.len(), 1);
-        assert_eq!(engine.io.fills.len(), 1);
         let frame = engine.take_frame(2.).unwrap().to_vec();
         let sections: Vec<_> = crate::wire::sections(&frame).collect();
         assert!(sections.iter().any(|(kind, _)| *kind == section::MARKETS));
@@ -4900,5 +4926,116 @@ mod startup_watch_tests {
         store.set_orders(vec![]);
         store.set_positions(vec![]);
         assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod fill_frame_tests {
+    use super::streaming_tests::market;
+    use super::*;
+    use crate::model::{Order, OrderSide, OrderStatus, OrderType};
+
+    /// The private stream updates an order (`order`) or fills it (`fill`).
+    struct Stream;
+
+    fn order() -> Order {
+        Order {
+            id: "7".into(),
+            parent_id: None,
+            status: OrderStatus::Closed,
+            symbol: "A".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 1.,
+            remaining: 0.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    impl Venue for Stream {
+        type Pending = ();
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
+            cx.store.upsert_order(order());
+            if text == "fill" {
+                cx.fill(Fill {
+                    order_id: "7".into(),
+                    symbol: "A".into(),
+                    side: OrderSide::Buy,
+                    price: 1.,
+                    amount: 1.,
+                });
+            }
+        }
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, ()>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn started() -> Engine<Stream> {
+        let mut engine = Engine::new(Stream);
+        engine.start(0.);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        engine
+    }
+
+    fn kinds(frame: Option<&[u8]>) -> Vec<u16> {
+        frame
+            .map(|frame| crate::wire::sections(frame).map(|(kind, _)| kind).collect())
+            .unwrap_or_default()
+    }
+
+    fn message(engine: &mut Engine<Stream>, text: &str) {
+        engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text,
+            },
+        );
+    }
+
+    #[test]
+    fn a_book_cadence_flush_carries_the_orders_its_fills_belong_to() {
+        let mut engine = started();
+        message(&mut engine, "fill");
+        let sections = kinds(engine.take_market_frame(1.));
+        assert!(sections.contains(&section::FILLS));
+        assert!(
+            sections.contains(&section::ORDERS),
+            "a fill must never reach a consumer before its order: {sections:?}"
+        );
+        assert!(
+            kinds(engine.take_frame(2.)).is_empty(),
+            "nothing is sent twice"
+        );
+    }
+
+    #[test]
+    fn a_book_cadence_flush_without_fills_leaves_store_sections_to_the_full_frame() {
+        let mut engine = started();
+        message(&mut engine, "order");
+        assert!(!kinds(engine.take_market_frame(1.)).contains(&section::ORDERS));
+        assert!(kinds(engine.take_frame(2.)).contains(&section::ORDERS));
     }
 }

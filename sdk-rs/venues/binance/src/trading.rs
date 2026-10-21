@@ -5,12 +5,14 @@ use crate::account::{PmOrderSource, venue_error};
 use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -757,8 +759,9 @@ impl BinanceFutures {
             }
         }
         if !replaced.is_empty() {
-            cx.log(
-                LogLevel::Info,
+            cx.notice(
+                Level::Info,
+                code::ORDERS_REPLACED,
                 format!(
                     "Canceling {} existing closePosition order(s) before placing new one",
                     replaced.len()

@@ -7,6 +7,7 @@
     feature = "bitrue",
     feature = "coinbase",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -31,7 +32,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
@@ -51,6 +52,8 @@ use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "bitrue")]
 use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
+#[cfg(feature = "bitunix")]
+use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "breakoutprop")]
@@ -525,6 +528,18 @@ pub fn build<T: Visit>(
                     .clamp(1.0, 60_000.0) as u32,
             })),
         ),
+        #[cfg(feature = "bitunix")]
+        "bitunix" => finish(
+            visitor,
+            policy,
+            startup,
+            Engine::new(BitunixFutures::new(BitunixOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key.take(),
+                secret: options.secret.take(),
+            })),
+        ),
         #[cfg(feature = "backpack")]
         "backpack" => finish(
             visitor,
@@ -829,6 +844,7 @@ pub struct KucoinExtra {
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -904,6 +920,7 @@ pub struct EngineOptions {
         feature = "coinbase",
         feature = "paradex",
         feature = "binance",
+        feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
@@ -931,6 +948,7 @@ pub struct EngineOptions {
         feature = "grvt",
         feature = "coinbase",
         feature = "binance",
+        feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
         feature = "breakoutprop",
@@ -1044,6 +1062,7 @@ pub struct EngineOptions {
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -1077,6 +1096,7 @@ impl EngineOptions {
             feature = "grvt",
             feature = "coinbase",
             feature = "binance",
+            feature = "bitunix",
             feature = "apexomni",
             feature = "asterdex",
             feature = "breakoutprop",
@@ -1138,6 +1158,7 @@ impl EngineOptions {
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",

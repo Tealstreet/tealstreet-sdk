@@ -35,6 +35,10 @@ impl Venue for Logger {
             }
             Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
             Some(("deactivate", _)) => cx.deactivate(),
+            Some(("rejectlogged", _)) => {
+                cx.notice(Level::Error, code::AUTH_REJECTED, "key rejected");
+                cx.deactivate();
+            }
             Some(("rejectboth", _)) => {
                 cx.startup_failed(VenueError::new("refused").kind(ErrorKind::AuthInvalid));
                 cx.deactivate();
@@ -340,4 +344,13 @@ fn deactivation_and_auth_kind_failures_count_as_auth_failures() {
     // One rejection reported both ways in one event counts once.
     send(&mut engine, "rejectboth:");
     assert_eq!(engine.health().auth_failures, 3);
+}
+
+#[test]
+fn an_auth_rejected_event_and_a_deactivation_in_one_event_count_once() {
+    let mut engine = engine();
+    send(&mut engine, "rejectlogged:");
+    assert_eq!(engine.health().auth_failures, 1);
+    send(&mut engine, "rejectlogged:");
+    assert_eq!(engine.health().auth_failures, 2);
 }

@@ -7,6 +7,7 @@ description = "Every Rust venue, constructed by name from one options shape"
 
 [features]
 default = [
+    "bitunix",
     "grvt",
     "polymarket",
     "coinbase",
@@ -47,6 +48,7 @@ asterdex = ["dep:safe-cex-venue-asterdex"]
 lighter = ["dep:safe-cex-venue-lighter"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
+bitunix = ["dep:safe-cex-venue-bitunix"]
 bitget = ["dep:safe-cex-venue-bitget"]
 backpack = ["dep:safe-cex-venue-backpack"]
 blofin = ["dep:safe-cex-venue-blofin"]
@@ -79,6 +81,7 @@ safe-cex-venue-asterdex = { path = "../venues/asterdex", optional = true }
 safe-cex-venue-lighter = { path = "../venues/lighter", optional = true }
 safe-cex-venue-woo = { workspace = true, optional = true }
 safe-cex-venue-bitrue = { workspace = true, optional = true }
+safe-cex-venue-bitunix = { workspace = true, optional = true }
 safe-cex-venue-bitget = { path = "../venues/bitget", optional = true }
 safe-cex-venue-backpack = { path = "../venues/backpack", optional = true }
 safe-cex-venue-blofin = { workspace = true, optional = true }

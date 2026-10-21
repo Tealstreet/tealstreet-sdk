@@ -489,7 +489,8 @@ impl Okx {
                     m.precision.price,
                     false,
                 )?));
-                p.order_px = Some(if let Some(price) = o.price {
+                // Like TS, a zero price means market execution once triggered.
+                p.order_px = Some(if let Some(price) = o.price.filter(|p| *p != 0.0) {
                     num::format(adjusted(price, m.precision.price, false)?)
                 } else {
                     "-1".into()

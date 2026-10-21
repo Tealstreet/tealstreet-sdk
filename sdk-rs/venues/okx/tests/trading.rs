@@ -1549,3 +1549,21 @@ fn a_partially_accepted_batch_is_not_reported_as_rejected() {
         .expect("failed command");
     assert_eq!(failure.outcome, None, "one order is live: {failure:?}");
 }
+
+#[test]
+fn conditional_zero_price_executes_at_market_once_triggered() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":41000,"price":0}"#,
+        )],
+    );
+    let request = http(&out);
+    assert!(matches!(request, Action::Http(r) if r.url.ends_with("/order-algo")));
+    assert!(
+        body(request).contains(r#""orderPx":"-1""#),
+        "{}",
+        body(request)
+    );
+}
