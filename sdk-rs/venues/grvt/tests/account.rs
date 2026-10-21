@@ -1537,9 +1537,8 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
     h.ws(r#"{"code":1008,"message":"IP not whitelisted","status":403}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            message,
-        }) if message.starts_with("GRVT IP is not whitelisted")
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.level == safe_cex_engine::Level::Error
+                && event.message.starts_with("GRVT IP is not whitelisted")
     )));
 }

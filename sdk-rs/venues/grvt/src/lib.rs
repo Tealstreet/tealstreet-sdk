@@ -695,8 +695,7 @@ impl Venue for Grvt {
         ) && let Ok(signer) = sign::signer_address(secret)
             && !signer.eq_ignore_ascii_case(expected)
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::CONFIG_INVALID,
                 format!(
                     "Provided signer address ({expected}) does not match wallet address ({signer}). Make sure {signer} is tagged to your API key in the GRVT UI."
                 ),

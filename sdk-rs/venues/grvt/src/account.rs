@@ -1862,8 +1862,7 @@ impl Grvt {
             return true;
         }
         if code == "1008" {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(Level::Error, code::AUTH_REJECTED,
                 "GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).",
             );
             return true;
