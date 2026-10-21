@@ -14,3 +14,9 @@ existing time/dedupe/fee rules. Run Bitunix/Binance tests, strict Clippy/fmt/ban
 independent review and CI. Hold source merge for entropy1624; integrate actual
 landing/fresh CI, separate exact guard then green merge/report. No trading writes,
 private lifecycle, native identity or owner-gated policies in this phase.
+
+Seven native tests fail original source (missing ownership, silently successful
+failures and missing stall evidence). Fixed history16 and combined Bitunix/Binance
+368 tests pass; strict Bitunix Clippy/fmt/bans pass. Two independent correctness/
+adversarial reviews CLEAR. RustEngineExchange history methods directly propagate
+native command rejections, so no caller fallback can mislabel a failed read clean.

@@ -477,11 +477,15 @@ Remaining resilience and completeness findings are independent of request parity
 - Medium: every WS position/order/tpsl event bumps the snapshot generation and the
   in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
   events do not update positions; under steady activity positions never commit.
-- Medium: history failures return success with empty or partial rows
-  (`history.rs:526,554`). TS historical fills warn and return empty rows; orders
-  toast and return empty rows, and income toasts and returns collected rows.
-  Neither comparison establishes completeness: Rust partial income ledgers look
-  complete without an owned semantic marker.
+- Medium: ~~history failures return success with empty or partial rows~~.
+  Rust now rejects failed first/later pages (transport, HTTP/native, malformed
+  rows/envelopes), so a failed read cannot establish complete history. Full
+  duplicate/nonadvancing pages and caps retain validated rows only with an owned
+  `history.incomplete` marker before completion. Empty end pages and proved
+  requested-start crossings remain complete. TS historical fills warn and return
+  empty rows; orders toast and return empty rows, and income toasts and returns
+  collected rows. Those fallbacks do not establish completeness or justify a
+  clean native success on a failed page.
 - Medium: ~~one failed `batch_order` chunk drops IDs already placed by earlier
   chunks~~. #1589 (`ef362708305`) preserves acknowledged IDs and effective legs
   in one classified failure, with Unknown sticky across later refusals. Native
@@ -965,6 +969,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
+  ~~Bitunix's query page-cap ownership omission~~ now carries the actual request
+  command before partial completion, as do duplicate/nonadvancing-page markers.
+  Failed pages reject rather than masquerading as complete empty/partial history.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
