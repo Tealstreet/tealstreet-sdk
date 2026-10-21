@@ -896,12 +896,16 @@ impl Kraken {
                     // Only `since` reaches the venue, so a full page that cannot advance leaves
                     // rows unread. Like TS, return what was read and say it is truncated.
                     if request.rows.len() < request.limit {
-                        cx.notice(
+                        cx.event(
                             safe_cex_engine::Level::Warn,
                             safe_cex_engine::log::code::HISTORY_INCOMPLETE,
                             format!(
                                 "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; some rows in the window are missing and any total is a lower bound."
                             ),
+                            vec![(
+                                "command",
+                                safe_cex_engine::Value::Num(f64::from(request.command)),
+                            )],
                         );
                     }
                     None
