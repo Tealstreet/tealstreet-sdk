@@ -68,3 +68,24 @@ empty-symbol account-wide command deletes it. The Rust SDK routes true
 `cancelSymbolOrders(symbol)` retains symbol scope. Regressions cover both scopes,
 stop-book failure reporting, uncached-ID direct dispatch followed by a known ID
 on both successful and rejected responses, and rejection of empty identities.
+
+## Acknowledged placements the store has not seen
+
+A placement resolves with venue ids before the private stream or the next
+reconciliation stores those orders. On venues whose cancellation needs a stored
+order, an immediate cancel or amend of a returned id used to fail with the
+explicit missing-order error above, and a chaser stopped mid-placement left its
+order live. Such venues declare `Venue::cancel_needs_stored_order`; the engine
+(`engine/src/placement_acks.rs`) then holds a `CancelOrders` or `AmendOrder`
+naming an acknowledged, still-unstored id until the store has it, or for at most
+10 seconds on an engine-owned timer, and dispatches it unchanged. An id that
+never appears still fails explicitly at the venue; unrelated unknown ids are
+never held. A stored virtual leg (`{id}_sl`), a group child whose `parent_id` is
+the id ends the wait; a fill of the id shortens it to 1.5 seconds, since a
+venue may drop a filled order while a partial fill's row may still follow. A
+later write to a held order waits behind it, so writes to one order keep their
+arrival order. Opted in: Binance,
+Bybit, Crypto.com, Hyperliquid, Backpack, BingX, GRVT, Lighter, MEXC, Orderly,
+TxFlow, WOO. BloFin, Bitget, Bitrue, OKX and Phemex route acknowledged ids from
+their own acknowledgement caches; AsterDEX and KuCoin spot cancel with symbols;
+the remaining venues send the supplied id directly.
