@@ -599,6 +599,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+- ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
+  and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
+  their headers; reset and Retry-After hints extend all waiting category retries
+  without changing attempt counts, bounded by the shared one-hour cap. HTTP403
+  keeps its ten-minute floor; success headers do not manufacture a pause.
 - ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
@@ -799,7 +804,10 @@ TxFlow loses nothing (master TS was a placeholder).
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
 - Low: ~~one bad market row or unknown order row fails closed~~ (stale:
   discovery skips malformed rows; order snapshot coverage retains rejected
-  roots and commits valid peers); ~~trailing-stop display price~~ (maps native
+  roots and commits valid peers); ~~one malformed margin-mode row freezes the
+  defaults map~~ (accepted peers commit; rejected symbols retain old defaults,
+  unidentified rejections protect the old scope, and structural failures retain
+  the whole map); ~~trailing-stop display price~~ (maps native
   extreme/callback value or rate using order side, for REST and WS);
   ~~cancels skipped for unknown/finished ids~~ (unknown IDs reject explicitly;
   finished IDs are an intentional no-op. **RISKY** to infer normal/algo endpoint,

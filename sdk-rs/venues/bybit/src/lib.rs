@@ -348,6 +348,36 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
+fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
+    use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
+
+    // HTTP403 is Bybit's ten-minute IP ban; 10006 is its API rate-limit code.
+    // https://bybit-exchange.github.io/docs/v5/rate-limit
+    let http_pause = if response.status == 403 {
+        600_000.0
+    } else {
+        rate_limit_pause_ms(response, 10_000.0)
+    };
+    if !matches!(venue_error(response), Some((10006, _))) {
+        return http_pause;
+    }
+    let reset = response
+        .header("x-bapi-limit-reset-timestamp")
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|at| at.is_finite() && *at > now)
+        .map(|at| (at - now).min(MAX_RATE_LIMIT_PAUSE_MS));
+    // Reuse the HTTP rate-limit parser for an envelope-level limit without
+    // changing the original response passed to the venue's continuation.
+    let limited = Response {
+        status: 429,
+        headers: response.headers,
+        body: response.body,
+    };
+    rate_limit_pause_ms(&limited, reset.unwrap_or(10_000.0))
+        .max(reset.unwrap_or(0.0))
+        .max(http_pause)
+}
+
 fn signing_rejection(code: i64, message: &str) -> Option<String> {
     let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
         "request signature rejected"
@@ -1598,14 +1628,20 @@ impl BybitLinear {
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
             )
         {
-            // Bybit answers 403 when an IP exceeds the public limit and bans it for 10 minutes:
-            // https://bybit-exchange.github.io/docs/v5/rate-limit
-            let pause = if response.status == 403 {
-                600_000.0
-            } else {
-                safe_cex_engine::startup::rate_limit_pause_ms(response, 10_000.0)
-            };
-            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+            let pause = discovery_rate_limit_pause_ms(response, cx.now);
+            if pause > 0.0 {
+                self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+                let remaining = self.discovery_paused_until - cx.now;
+                // Categories share this limit. Extend already-armed retries;
+                // waiting entries retain their attempt count and longer waits.
+                for startup in std::iter::once(&mut self.startup)
+                    .chain(self.products.iter_mut().map(|product| &mut product.startup))
+                {
+                    if startup.backoff.waiting(&()) {
+                        startup.backoff.failed_after(cx, (), remaining);
+                    }
+                }
+            }
         }
         match then {
             Then::RefreshMarkets(page) => match response {
@@ -2142,8 +2178,15 @@ impl Venue for BybitLinear {
         pending: Pending,
         response: Response<'_>,
     ) {
-        // A rejected fee read carries `result: {}`; its retCode decides startup.
-        if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_)) {
+        // Fee, refresh and discovery-limit failures can carry `result: {}`.
+        // Preserve typed limit evidence and headers; successful discovery still
+        // requires its streamed list.
+        if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_))
+            || (matches!(
+                pending.then,
+                Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
+            ) && matches!(venue_error(&response), Some((10006, _))))
+        {
             return self.on_response(cx, pending, response);
         }
         self.on_request_failed(

@@ -221,7 +221,9 @@ fn an_error_envelope_in_place_of_the_market_list_is_retried() {
     );
     assert!(!h.engine.store().loaded().markets);
     assert!(h.logs.iter().any(|m| m.contains("Too many visits!")));
-    h.advance(1_000.0);
+    h.advance(9_999.0);
+    assert!(!h.has_request("/v5/market/instruments-info"));
+    h.advance(1.0);
     h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
     assert!(h.engine.store().loaded().markets);
 }
