@@ -1363,7 +1363,7 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
         }));
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Secondary read credentials"))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Secondary read credentials"))));
         assert!(
             !actions
                 .iter()
@@ -1440,7 +1440,7 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         "owner mapping must still exist when diagnostic arrives"
     );
     assert!(!h.actions.iter().any(
-        |a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed write transport")
+        |a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed write transport")
     ));
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }

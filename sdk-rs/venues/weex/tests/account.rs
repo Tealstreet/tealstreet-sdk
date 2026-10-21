@@ -2,7 +2,7 @@
 //! deliberately exceed JavaScript's exact integer range.
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{
-    Action, Engine, Event, HttpRequest, LogLevel, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Engine, Event, HttpRequest, Level, Notice, RequestId, Response, SocketId, TimerId,
 };
 use safe_cex_venue_weex::{Options, WeexFutures};
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -539,7 +539,7 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     e.handle(NOW + 22_000.0, Event::TimerFired { timer: deadline });
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(e.store().orders(), expected);
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
     let retry = actions
         .iter()
         .find_map(|a| match a {
@@ -812,7 +812,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                     .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
             );
             e.handle(NOW + 32_000.0, Event::TimerFired { timer: extended });
-            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
+            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
         } else {
             assert!(e.store().loaded().positions);
             assert!(
@@ -1111,16 +1111,11 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     assert!(value(192).is_nan());
     assert!(e.take_market_frame(NOW).is_none());
 }
-fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
+fn logs(actions: &[Action], level: Level) -> Vec<String> {
     actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log { level: l, message }) if *l == level => {
-                Some(message.clone())
-            }
-            Action::Notice(Notice::Event(event))
-                if event.level == safe_cex_engine::Level::from(level) =>
-            {
+            Action::Notice(Notice::Event(event)) if event.level == level => {
                 Some(event.message.clone())
             }
             _ => None,
@@ -1147,7 +1142,7 @@ fn malformed_order_rows_are_skipped_and_their_known_copies_retained() {
         assert!(ids.contains(&id), "{id} missing from {ids:?}");
     }
     assert_eq!(ids.len(), 5);
-    let warnings = logs(&e.drain_actions().collect::<Vec<_>>(), LogLevel::Warning);
+    let warnings = logs(&e.drain_actions().collect::<Vec<_>>(), Level::Warn);
     assert!(
         warnings
             .iter()
@@ -1278,7 +1273,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(logs(&actions, LogLevel::Error)[0].contains("passphrase"));
+    assert!(logs(&actions, Level::Error)[0].contains("passphrase"));
     let loaded = e.store().loaded();
     assert!(!loaded.balance && !loaded.orders && !loaded.positions);
 }
@@ -1373,10 +1368,7 @@ fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Ac
         })
         .unwrap();
     e.handle(NOW + 2000.0, Event::TimerFired { timer });
-    (
-        logs(&drained, LogLevel::Warning),
-        e.drain_actions().collect(),
-    )
+    (logs(&drained, Level::Warn), e.drain_actions().collect())
 }
 #[test]
 fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
@@ -1490,8 +1482,8 @@ fn startup_position_row_without_identity_is_an_error_logged_once_until_a_clean_s
         response(e, request(actions, "allPosition"), 200, rows);
         complete_except_positions(e, actions);
         let (drained, next) = drain_then_next_cycle(e);
-        let errors = logs(&drained, LogLevel::Error);
-        let warnings = logs(&drained, LogLevel::Warning);
+        let errors = logs(&drained, Level::Error);
+        let warnings = logs(&drained, Level::Warn);
         (
             errors,
             warnings.iter().filter(|l| *l == message).count(),
@@ -1519,7 +1511,7 @@ fn startup_order_row_without_identity_is_an_error_with_no_stored_orders() {
     assert!(e.store().loaded().orders);
     let (drained, _) = drain_then_next_cycle(&mut e);
     assert_eq!(
-        logs(&drained, LogLevel::Error),
+        logs(&drained, Level::Error),
         ["WEEX skipped malformed order row without an ID"]
     );
 }

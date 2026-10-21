@@ -65,10 +65,10 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
                 assert!(done.is_empty(), "diagnostic before Done");
                 errors.push(message);
             }
-            Action::Notice(Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
+            Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Error,
                 ..
-            }) => panic!("identity error must be correlated"),
+            })) => panic!("identity error must be correlated"),
             Action::Http(_) => panic!("identity must not trigger account reconciliation"),
             _ => {}
         }

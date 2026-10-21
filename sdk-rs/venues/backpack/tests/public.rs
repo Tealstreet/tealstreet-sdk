@@ -252,10 +252,7 @@ fn gap_evidence_survives_repeated_stale_snapshots_and_failure_is_local() {
         .filter(|a| {
             matches!(
                 a,
-                Action::Notice(safe_cex_engine::Notice::Log {
-                    level: safe_cex_engine::LogLevel::Error,
-                    ..
-                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Error,
                     ..
                 }))
@@ -486,8 +483,7 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
         match a {
             Action::Http(r) => requests.push(r),
             Action::WsConnect { socket: s, .. } => socket = Some(s),
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => logs.push(message),
@@ -510,8 +506,7 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
             );
         }
         logs.extend(e.drain_actions().filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),

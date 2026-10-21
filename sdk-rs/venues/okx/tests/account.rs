@@ -609,9 +609,6 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
                 reply(&mut e, &action, &body, 5.0);
                 pending.extend(actions(&mut e));
             }
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
-                logs.push(message.clone())
-            }
             Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                 logs.push(event.message.clone())
             }

@@ -75,12 +75,12 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
   });
   it('settles account selection startup failures without waiting forever', async () => {
     const message = 'DXtrade startup failed: Multiple accounts found';
-    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
+    const { exchange } = fixture({}, [{ op: 'event', code: 'test.diagnostic', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
     await expect(exchange.start()).rejects.toThrow('Multiple accounts found');
     expect(exchange.isDisposed).toBe(true);
   });
   it('treats an error log alone as a toast, not a startup failure', async () => {
-    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    const { exchange } = fixture({}, [{ op: 'event', code: 'test.diagnostic', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
     const outcome = await Promise.race([exchange.start().then(() => 'started', () => 'rejected'), new Promise((resolve) => setTimeout(() => resolve('pending'), 20))]);
     expect(outcome).toBe('pending');
   });
@@ -98,7 +98,7 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     const started = fixture({}, [{ op: 'startupFailed', detail }], false);
     await expect(started.exchange.start()).rejects.toMatchObject({ message, kind: 'authInvalid', venueCode: '10003' });
     // Venues log the reason just before StartupFailed in the same batch.
-    const validated = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail }], false);
+    const validated = fixture({}, [{ op: 'event', code: 'test.diagnostic', level: 'error', message }, { op: 'startupFailed', detail }], false);
     await expect(validated.exchange.validateAccount()).resolves.toEqual({ error: message, kind: 'authInvalid' });
   });
   it('settles definitive login rejection through the shared deactivation contract', async () => {

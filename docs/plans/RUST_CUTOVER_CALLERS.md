@@ -5,6 +5,28 @@ Audited 2026-10-20 on the phase-9 readiness branch, against the repository's
 migration plan. This change deletes no TypeScript venue. The authoritative
 phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
+## Log shim removal (PR6)
+
+Engine diagnostics now use `Event` exclusively. WASM actions and Durable Object
+messages use `{ op: 'event', level, code, message, fields }`; native clients get
+`{ type: 'event', level, code, message, fields }`. Levels are debug/info/warn/error.
+Host transport/command callbacks still use `onLog`; those are not venue shim
+notices. The DO wraps them as `host.diagnostic` events, and its refused requests
+as `host.rejected`; native oversized notices use `host.notice_dropped`.
+
+New engine codes: `command.failed` for replyless diagnostics, `command.duplicate`
+for an in-flight ID collision, `startup.incomplete` for the startup watchdog,
+and `public_feed.rejected` for invalid trusted-provider updates. Startup retries
+use `request.failed`; malformed discovery rows count `row.skipped`, and rejected
+empty catalogues count `snapshot.discarded`, including when their warning is
+filtered. Existing severity and retry cadence are preserved.
+
+**Deploy safe-cex-server before Info+ venue events matter to native clients.**
+The old NativeFrameSession rejects `event`; deployment is Sam's call and this
+PR performs none. DO clients must accept the coded `event` envelope before
+adopting this host version. tealstreet-next remains read-only in this lane.
+
+
 ## What is ready, and what is still a deletion blocker
 
 The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
@@ -1494,6 +1516,18 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Lighter port-review confirmation and failures
+
+A Rust Lighter reduce-only limit order without matching known exposure now waits
+for account-read completion, up to10 seconds, before any nonce/signing request.
+Unconfirmed, failed or timed-out reads refuse the unsent leg; a prior accepted
+leg remains reflected in the aggregate outcome. Late reads cannot release later
+queued orders. Both Lighter deployments keep their existing placement units and
+result shapes. HTTP405/429 include neutral guidance with native diagnostics;
+explicit invalid-margin21613 rejection refreshes state without changing cached
+mode by guess or automatically replaying a placement.
+
 
 ### Phemex explicit index triggers and daily cutoff
 

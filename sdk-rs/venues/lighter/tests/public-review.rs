@@ -290,10 +290,7 @@ fn wholly_unusable_ticker_seed_retains_live_quotes_and_retries_with_backoff() {
             let actions = e.drain_actions().collect::<Vec<_>>();
             assert!(actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(safe_cex_engine::Notice::Log {
-                    level: safe_cex_engine::LogLevel::Warning,
-                    ..
-                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Warn,
                     ..
                 }))
