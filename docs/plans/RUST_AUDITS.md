@@ -489,8 +489,14 @@ Remaining resilience and completeness findings are independent of request parity
   recovery never resets private settings/state. Shared capped discovery backoff
   preserves native/HTTP rate-limit floors and degradation/recovery; malformed
   streams/envelopes remain failures with sanitized public diagnostics.
-- Medium: one unmappable positions/orders row keeps the previous snapshot forever
-  (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
+- Medium: ~~one unmappable position row holds all financial peers and absence
+  forever~~. Rejected native symbols retain their cached hedge legs, settings and
+  REST routing IDs; valid peers and explicitly closed zero rows advance after a
+  complete envelope. Unknown identities hold absence, known duplicate conflicts
+  quarantine their whole symbol, and partial mode mixes remain atomic. Partial
+  initial reads cannot establish readiness or prove trading prerequisites.
+  Regular/TP-SL order rows still hold the whole order snapshot on a malformed peer;
+  native raw-family retention remains a separate open repair.
 - Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
   and postpone reconciliation indefinitely under steady activity~~. Ordinary
   positions now retain their in-flight serial for a bounded read interval and

@@ -600,6 +600,7 @@ impl Venue for BitunixFutures {
                 let success = (200..300).contains(&response.status)
                     && data(response.body).is_ok()
                     && !read.invalid
+                    && !read.position_rejected.any()
                     && self.account.generations[read.axis.index()] == read.generation
                     && self.account.serials[match read.axis {
                         account::Axis::Balance => 0,
