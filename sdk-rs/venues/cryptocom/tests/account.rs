@@ -89,11 +89,13 @@ fn failed_second_order_snapshot_keeps_the_first_good_state() {
         },
     });
     assert_eq!(h.engine.store().orders().len(), 1);
-    assert!(
-        h.actions
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::Log { .. })))
-    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::Log { .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(
+                safe_cex_engine::LogEvent { .. }
+            ))
+    )));
 }
 #[test]
 fn each_execution_emits_once_with_large_ids_intact() {
@@ -569,7 +571,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
 
 fn warned(h: &Harness, needle: &str) -> bool {
     h.actions.iter().any(|a| {
-        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message })
+        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains(needle))
     })
 }

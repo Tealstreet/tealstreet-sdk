@@ -7,7 +7,10 @@ fn fetch_account(options: Options) -> Result<String, String> {
     engine
         .drain_actions()
         .find_map(|action| match action {
-            Action::Notice(Notice::CommandDone { command: 4, result }) => Some(result),
+            Action::Notice(Notice::CommandDone { command: 4, result }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 4, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("FetchAccount completes")

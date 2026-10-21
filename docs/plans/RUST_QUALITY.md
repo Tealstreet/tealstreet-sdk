@@ -7,9 +7,10 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
 
 ## Bugs found (fix now, ahead of the standards)
 
-- Command rejections on Rust venues never emit `'error'`
+- ~~Command rejections on Rust venues never emit `'error'`
   (`rust.exchange.ts:857-868`), so the app shows no toast unless the venue also
-  logs. Emit once per rejection, de-duplicated against a same-frame `Log Error`.
+  logs. Emit once per rejection, de-duplicated against a same-frame `Log Error`.~~
+  Each rejection emits one `'error'` carrying its `ExchangeError`.
 - ~~Lost-send recovery never runs for Rust: `isUnknownOutcome`
   (`utils/unknownSendOutcome.ts:3`) does not match the Rust "outcome unknown"
   texts (lighter, coinbase, txflow, orderly, bybit). **Risky** (enables lookups
@@ -63,7 +64,8 @@ pub struct VenueError {
 }
 ```
 
-`CommandDone` carries it, `Deactivate{error}` and a terminal
+`CommandFailed` carries it (`Cx::fail` is the only failure path; `Cx::done`
+is success-only), `Deactivate{error}` and a terminal
 `StartupFailed{error}` replace the reasonless deactivate and the BreakoutProp
 prefix match. The wire carries the object. TS exposes `ExchangeError extends
 Error` with `kind`, `category` (1:1 onto `ErrorCategory`), `outcome`,
@@ -71,16 +73,18 @@ Error` with `kind`, `category` (1:1 onto `ErrorCategory`), `outcome`,
 `failedOrderIndex`, redacted `debug`. Regex classification stays only as the
 TS-venue fallback.
 
-PRs: (1) types and plumbing, byte-identical messages, URL redaction
-(Rust side landed: `engine/src/error.rs`, `Cx::fail`, host `detail` beside
-the unchanged `error` text, partial batches as fields; TS `ExchangeError`
-follows the bridge PR); (2) one
-shared parser per venue family, replacing `malformed` flags; (3) TS toast on
-rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
-`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
-`StartupFailed`, BreakoutProp and Bybit landed); (6)
-app and chaser read `kind`/`outcome`; ~~(7) wasm panic disposes the engine and
-surfaces `Internal`~~ (`EngineDeadError` carries `kind: 'internal'`).
+PRs: ~~(1) types and plumbing, byte-identical messages, URL redaction~~
+(landed: `engine/src/error.rs`, `Cx::fail`, host `detail` beside the unchanged
+`error` text, partial batches as fields, TS `ExchangeError`); ~~(2) one
+shared parser per venue family, replacing `malformed` flags~~ (every venue
+classifies `kind`/`outcome`/`venueCode`); ~~(3) TS toast on rejection~~;
+~~(4) `outcome: Unknown` at unknown-outcome sites (**risky**)~~; ~~(5)
+`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries)~~
+(validateAccount carries the startup `kind`; the `'error'` event carries
+`classified` and Sentry tags `error_kind`/`error_category`/`error_outcome`/
+`venue_code`); (6) app and chaser read `kind`/`outcome` (tealstreet-next);
+~~(7) wasm panic disposes the engine and surfaces `Internal`~~
+(`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),
@@ -146,8 +150,11 @@ Medium:
    venue for the wasm and native hosts and owns the credential rules (#1467,
    #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
    venue list is the `hostClock` capability (#1520); polling is the runtime
-   policy (#1392). Follow-ups: public-mode derivation with Paradex's rule,
-   AsterDEX API-version resolution, and the HyroTrader endpoint and
+   policy (#1392). AsterDEX version inference is shared by native construction
+   and registry metadata; the bridge forwards only explicit overrides and reads
+   the native version after WASM loads. Its synchronous pre-host fallback stays
+   under a compiled TS/Rust parity matrix. Follow-ups: public-mode derivation with
+   Paradex's rule, and the HyroTrader endpoint and
    payload-signer name branches in `createHost`.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:

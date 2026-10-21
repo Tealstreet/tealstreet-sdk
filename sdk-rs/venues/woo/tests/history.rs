@@ -38,7 +38,9 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
                 result,
             }) = a
             {
-                Some(result)
+                Some(Ok(result))
+            } else if let Action::Notice(Notice::CommandFailed { command: 99, error }) = a {
+                Some(Err(error.legacy_text()))
             } else {
                 None
             }
@@ -422,7 +424,6 @@ fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
             }) => Some(result),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     assert!(json.contains(r#""id":"1""#), "{json}");
     assert!(!json.contains(r#""id":"2""#));
@@ -526,10 +527,11 @@ fn invalid_history_inputs_finish_without_http() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 

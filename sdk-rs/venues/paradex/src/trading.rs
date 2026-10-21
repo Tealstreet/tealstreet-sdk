@@ -4,12 +4,14 @@ use crate::{
     sign::Credentials,
     wire::StrictNumber as Number,
 };
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt,
-    Outcome, Response, VenueError,
+    Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
+    Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -645,7 +647,7 @@ impl Trading {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
                 return true;
             }
@@ -660,7 +662,7 @@ impl Trading {
                         not_sent("Paradex supports one-way mode only").kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                 }
                 return true;
             }
@@ -788,7 +790,10 @@ impl Trading {
                 } else {
                     Ok("[]".into())
                 };
-                cx.done(state.command, result);
+                match result {
+                    Ok(data) => cx.done(state.command, data),
+                    Err(error) => cx.fail(state.command, error),
+                };
             } else {
                 let command = state.command;
                 cx.fail(command, state.failure());
@@ -924,14 +929,15 @@ impl Trading {
                     sell_leverage: f64,
                 }
                 let leverage = cx.store.setting(&symbol).map_or(10., |s| s.leverage);
-                cx.done(
-                    job.command,
-                    serde_json::to_string(&Rails {
-                        buy_leverage: leverage,
-                        sell_leverage: leverage,
-                    })
-                    .map_err(|e| e.to_string()),
-                );
+                match serde_json::to_string(&Rails {
+                    buy_leverage: leverage,
+                    sell_leverage: leverage,
+                })
+                .map_err(|e| e.to_string())
+                {
+                    Ok(data) => cx.done(job.command, data),
+                    Err(error) => cx.fail(job.command, error),
+                };
             }
         } else {
             let rejected = ((400..500).contains(&response.status)
@@ -1020,7 +1026,12 @@ impl Trading {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
                         }
                     };
-                    cx.log(LogLevel::Error, message);
+                    let code = if leg.is_some() {
+                        code::CHILD_LEG_FAILED
+                    } else {
+                        code::ORDER_REJECTED
+                    };
+                    cx.notice(Level::Error, code, message);
                     // A failed entry orphans its children; a failed child must not skip its
                     // sibling, or a rejected TP would leave the position without its SL.
                     if leg.is_none() {

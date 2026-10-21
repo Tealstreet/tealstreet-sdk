@@ -197,7 +197,7 @@ fn candle_seconds_and_empty_stream_candles() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(_), .. })
+        Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
     )));
     e.handle(
         0.0,
@@ -255,7 +255,10 @@ fn gap_evidence_survives_repeated_stale_snapshots_and_failure_is_local() {
                 Action::Notice(safe_cex_engine::Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )
         })
         .count();
@@ -483,7 +486,11 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
         match a {
             Action::Http(r) => requests.push(r),
             Action::WsConnect { socket: s, .. } => socket = Some(s),
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => logs.push(message),
             _ => {}
         }
     }
@@ -503,7 +510,11 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
             );
         }
         logs.extend(e.drain_actions().filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
             Action::WsConnect { socket: s, .. } => {
                 socket = Some(s);
                 None

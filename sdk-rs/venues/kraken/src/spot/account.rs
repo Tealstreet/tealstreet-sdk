@@ -627,7 +627,14 @@ impl KrakenSpot {
                     self.balance_read(cx, None);
                 }
                 if let Some(c) = command {
-                    cx.done(*c, r.as_ref().map(|_| "null".into()).map_err(Clone::clone));
+                    {
+                        let result: Result<String, String> =
+                            r.as_ref().map(|_| "null".into()).map_err(Clone::clone);
+                        match result {
+                            Ok(data) => cx.done(*c, data),
+                            Err(error) => cx.fail(*c, error),
+                        }
+                    };
                 }
                 r
             }
@@ -706,7 +713,7 @@ impl KrakenSpot {
                 Kind::Balance { command, revision } => {
                     self.account.balance_flight.remove(&revision);
                     if let Some(c) = command {
-                        cx.done(c, Err(error.into()))
+                        cx.fail(c, error)
                     }
                 }
                 Kind::Orders { .. } => self.account.orders_flight = false,

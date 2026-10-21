@@ -1051,13 +1051,13 @@ impl Coinbase {
                 invalid,
             } => {
                 if invalid {
-                    cx.done(command, Err("Malformed Coinbase candles".into()));
+                    cx.fail(command, "Malformed Coinbase candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                    );
+                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    };
                 }
             }
         }
@@ -1069,7 +1069,7 @@ impl Coinbase {
         error: &str,
     ) {
         match pending {
-            Request::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Request::Candles { command, .. } => cx.fail(command, error),
             Request::Daily {
                 symbol, generation, ..
             } => {
@@ -1401,10 +1401,7 @@ impl Coinbase {
         {
             if self.public.deferred.len() >= 256 {
                 if let Command::FetchCandles { command, .. } = command {
-                    cx.done(
-                        command,
-                        Err("Coinbase public startup command queue is full".into()),
-                    );
+                    cx.fail(command, "Coinbase public startup command queue is full");
                 }
                 cx.notice(
                     Level::Warn,
@@ -1530,11 +1527,11 @@ impl Coinbase {
                 to_ms,
             } => {
                 let Some((granularity, seconds)) = interval(timeframe) else {
-                    cx.done(command, Err(timeframe.unsupported("Coinbase")));
+                    cx.fail(command, timeframe.unsupported("Coinbase"));
                     return None;
                 };
                 if cx.store.market(&symbol).is_none() {
-                    cx.done(command, Err("Unknown Coinbase market".into()));
+                    cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
                 let end = to_ms.unwrap_or(cx.now) / 1000.;
@@ -1542,7 +1539,7 @@ impl Coinbase {
                     .map(|n| n / 1000.)
                     .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).clamp(1, 300)));
                 if !start.is_finite() || !end.is_finite() || start < 0. || end <= start {
-                    cx.done(command, Err("Invalid Coinbase candle range".into()));
+                    cx.fail(command, "Invalid Coinbase candle range");
                     return None;
                 }
                 let path = format!(
@@ -1564,7 +1561,7 @@ impl Coinbase {
                         invalid: false,
                     }),
                 ) {
-                    cx.done(command, Err(error));
+                    cx.fail(command, error);
                 }
             }
             Command::SetTickerSymbols { .. } => {}

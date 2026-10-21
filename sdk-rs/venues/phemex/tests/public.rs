@@ -209,22 +209,16 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
             },
         },
     );
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
     e.handle(now + 59_999., candles(8));
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(error)
-        }) if error.contains("rate limited")
+        Action::Notice(Notice::CommandFailed { command: 8, error }) if error.legacy_text().contains("rate limited")
     )));
     e.handle(now + 60_000., candles(9));
     assert!(e.drain_actions().any(|a| matches!(
