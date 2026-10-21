@@ -326,7 +326,7 @@ describe('Rust bridge routes from the engine capability record', () => {
   });
 
   it('keeps existing onRead venues fresh only on explicit reads, without new metadata dispatch', async () => {
-    const { exchange, commands } = fixture({}, 'weex');
+    const { exchange, commands } = fixture({}, 'grvt');
     await exchange.start();
     await exchange.updateSymbolMetadata('BTCUSDT');
     expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(0);
