@@ -751,6 +751,20 @@ fn balance_request(e: &mut TestEngine, s: safe_cex_engine::SocketId) -> safe_cex
     e.handle(1100.0, Event::TimerFired { timer });
     requests(e).remove(0).id
 }
+fn fire_read_retry(e: &mut TestEngine, now: f64) -> safe_cex_engine::RequestId {
+    let (timer, at) = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms >= now + 750.0 && at_ms <= now + 1000.0 => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("actual first failed-read retry");
+    e.handle(at, Event::TimerFired { timer });
+    requests(e).remove(0).id
+}
 #[test]
 fn newer_socket_and_overlapping_reads_cannot_restore_old_balance() {
     let (mut e, s) = startup();
@@ -770,13 +784,19 @@ fn newer_socket_and_overlapping_reads_cannot_restore_old_balance() {
     reply(&mut e, a, ACCOUNT);
     assert_eq!(e.store().balance().free, 700.0);
     let a = balance_request(&mut e, s);
-    reply(
-        &mut e,
-        a,
-        r#"{"code":10001,"msg":"request too frequently","data":[]}"#,
+    e.handle(
+        1100.0,
+        Event::HttpResponse {
+            request: a,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":10001,"msg":"request too frequently","data":[]}"#,
+            },
+        },
     );
     assert_eq!(e.store().balance().free, 700.0);
-    let a = balance_request(&mut e, s);
+    let a = fire_read_retry(&mut e, 1100.0);
     reply(&mut e, a, r#"{"code":0,"data":{"unexpected":1}}"#);
     assert_eq!(e.store().balance().free, 700.0);
 }
@@ -1107,22 +1127,68 @@ fn subscribe_candles_settings_read(
 }
 
 #[test]
-fn failed_or_malformed_symbol_settings_read_retries_on_next_candle_interest() {
+fn failed_or_malformed_symbol_settings_read_retries_without_interest_bypassing_backoff() {
     use safe_cex_engine::model::Interval;
     let (mut e, _) = startup();
     let read = subscribe_candles_settings_read(&mut e, Interval::M1).expect("first read");
-    reply(&mut e, read, r#"{"code":0,"data":{"leverage":0}}"#);
-    let read = subscribe_candles_settings_read(&mut e, Interval::M5)
-        .expect("a malformed read must be retried");
     e.handle(
-        1.0,
+        2.0,
+        Event::HttpResponse {
+            request: read,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":{"leverage":0}}"#,
+            },
+        },
+    );
+    let pending: Vec<_> = e.drain_actions().collect();
+    assert!(
+        subscribe_candles_settings_read(&mut e, Interval::M5).is_none(),
+        "interest must not bypass failed-read backoff"
+    );
+    let (timer, at) = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= 752.0 && *at_ms <= 1002.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("malformed settings retry");
+    e.handle(at, Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .unwrap()
+        .id;
+    e.handle(
+        at + 1.0,
         Event::HttpFailed {
             request: read,
             error: "network down",
         },
     );
-    let read = subscribe_candles_settings_read(&mut e, Interval::M15)
-        .expect("a failed read must be retried");
+    let pending: Vec<_> = e.drain_actions().collect();
+    assert!(
+        subscribe_candles_settings_read(&mut e, Interval::M15).is_none(),
+        "interest must not bypass second failure's backoff"
+    );
+    let (timer, due) = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= at + 1501.0 && *at_ms <= at + 2001.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("second settings retry");
+    e.handle(due, Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .unwrap()
+        .id;
     reply(
         &mut e,
         read,

@@ -50,11 +50,26 @@ rows or superseded snapshots do not constitute rejected credentials or a failed
 transport read. Preserve status/headers on malformed private streams and sanitize
 private diagnostics. Independent plan audit is clear with these constraints.
 
-Local checkpoint while refreshing predecessor CI after the shared #1656 profile
-change: initial7 auth regressions and8 SDK auth tests/typecheck/lint pass. WIP
-review fixed duplicate legacy auth diagnostics and shared settings validation.
-A negative-clock fixture exposed an inactive-pause sentinel bug, now corrected.
-Full existing account tests are30/32: two older fixtures must retain/fire actual
-backoff timers before expecting another read. Remaining grouped/currentness/rate/
-capped retry regressions and final native/strict/review gates are outstanding.
-This checkpoint is local and is not a ready PR.
+Implemented with a local typed recovery module and existing scoped account tags.
+AccountAuth is the sole credential evidence; coded failure notices never emit the
+legacy auth.rejected signal that would invent primary/account rejection in SDK.
+A shared settings decoder preserves the existing empty margin-mode fallback.
+
+Verification: 457 Bitunix/Binance native tests pass, including17 new auth/recovery
+groups; existing account32, scheduling7 and position-progress5 retain their
+financial assertions while firing actual bounded retry timers. Eight SDK auth
+regressions, SDK typecheck/lint, and strict Clippy pass. Final adversarial source
+and regression reviews are clear. Four original-source regressions fail; four
+precise disabled-guard controls independently fail for Orders/Settings grouping,
+stale auth currentness and healthy-key host pause. Restored source passes all17. Typed malformed rows explicitly require
+row.skipped and preserve each scope's initial readiness; malformed numeric text
+coercion remains the established financial policy. Rate tests cover60s/120s/1h,
+healthy paused sources, both simultaneous deferred/retry expiry orders, stale
+replacement callbacks,40 settings symbols, and owned NotSent/no resurrection.
+
+Negative-clock coverage proves initial requests are not blocked by an inactive
+rate pause. Shared Backoff's inherited zero-based failure deadline remains
+unchanged; runtime host time is epoch milliseconds. Family-profile #1656 and
+exact reviewed #1658 are integrated as genuine predecessors; merge only after
+all dependent heads actually land, fresh CI is green, and the separate own-scope
+guard passes. Owner/live-capture decisions remain excluded.
