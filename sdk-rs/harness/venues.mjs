@@ -1958,6 +1958,7 @@ export const VENUES = {
     ['binanceinverse', 'BinanceInverseExchange'], ['binancespot', 'BinanceSpotExchange'],
   ].map(([name, className]) => [name, {
     rust: name,
+    virtualPrivateClock: true,
     requestKey: typedRequest,
     validateRequest: validateBinanceRequest,
     subscriptionMessage: binanceSubscriptionMessage,

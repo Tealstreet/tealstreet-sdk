@@ -574,7 +574,7 @@ fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_leg
             assert_eq!(e.store().positions().len(), 1);
             assert_eq!(e.store().positions()[0].contracts, positions[0].contracts);
             assert_eq!(*e.store().balance(), balance);
-            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped position 999 on an unknown market")));
+            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped position 999 on an unknown market")));
         } else {
             assert_eq!(e.store().positions().len(), positions.len());
             assert_eq!(e.store().positions()[0].contracts, positions[0].contracts);
@@ -601,7 +601,7 @@ fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_ar
         assert_eq!(previous.len(), 1);
         assert!(e.store().orders().is_empty());
         assert_eq!(
-            e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped order 999 on an unknown market")),
+            e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message == "Lighter skipped order 999 on an unknown market")),
             status == "open"
         );
     }
@@ -638,11 +638,7 @@ fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
                             };
                         reply(&mut e, &r, 200, body);
                     }
-                    Action::Notice(safe_cex_engine::Notice::Log {
-                        level: safe_cex_engine::LogLevel::Warning,
-                        message,
-                    })
-                    | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                         level: safe_cex_engine::Level::Warn,
                         message,
                         ..
@@ -1086,8 +1082,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
         }
         e.drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => Some(message),
@@ -1206,8 +1201,7 @@ fn spot_rows_in_private_snapshots_are_skipped_silently_and_perp_rows_commit() {
     let logs = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),
@@ -1312,7 +1306,7 @@ fn skipped_position_row_with_only_a_market_id_keeps_the_stored_copy() {
         r#""positions":[{"market_id":999,"position":"5"},"#,
     );
     reply_at(&mut e, NOW + 2., &request, 200, &body);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Lighter skipped position SOL on an unknown market")));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Lighter skipped position SOL on an unknown market")));
     assert_eq!(e.store().position("SOL").map(|p| p.contracts), Some(5.0));
     assert_eq!(e.store().position("ETH").map(|p| p.contracts), Some(2.0));
 }

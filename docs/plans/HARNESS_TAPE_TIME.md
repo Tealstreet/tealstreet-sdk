@@ -59,3 +59,19 @@ root Cargo configuration, family/tool/flag changes, missing/corrupt package
 files and early CLI refusal. Review independently, run the focused harness
 suite, and require full green CI on the PR head before merge. Local replay
 outputs accelerate iteration; they do not replace that merge gate.
+
+## Binance family phase
+
+Enable the shared virtual private clock for Binance USD-M, Spot, inverse and
+portfolio margin, including the frozen scripted lifecycle capture. Generate
+exactly the same synthetic tapes as CI and keep the frozen capture unchanged.
+Use a matching engine from CI for five focused private pairs per identity;
+inspect complete outputs and remove only exact unobserved tape-bound keys.
+Declare any new Rust-ahead difference only after reviewing its exact keys,
+tape SHA and specific cause. Preserve all strict FAIL results.
+
+Run focused harness tests and independent review, then the nine-case Binance
+CI suite with five pairs for all five private identities (50 raw outputs).
+Record run ID, tape identities and every raw hash, verify fresh CI reports,
+require full green head CI and the normal Binance dependency guard, merge
+with a separate call and report the receipt before the next family.

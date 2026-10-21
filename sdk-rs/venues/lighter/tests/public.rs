@@ -395,7 +395,7 @@ fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors(
         .unwrap();
     reply(&mut e, id, &MARKETS.replacen("[", "[{},", 1));
     assert_eq!(e.store().markets().len(), 2);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]

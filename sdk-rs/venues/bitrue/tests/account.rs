@@ -381,14 +381,142 @@ fn progress_time_and_amount_survive_an_empty_authoritative_snapshot() {
     assert_eq!(order.remaining, 60.0);
     assert_eq!(h.fills(), vec![(111.0, 40.0)]);
 }
+impl Harness {
+    /// Reopens the private stream, which re-reads the account and open orders; returns its logs.
+    fn reread(&mut self, account: Option<&str>, orders: Option<&str>) -> Vec<String> {
+        self.actions.clear();
+        self.e.handle(
+            self.now,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
+        if let Some(body) = account {
+            self.reply("/account", body);
+        }
+        if let Some(body) = orders {
+            self.reply("/openOrders", body);
+        }
+        self.actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) => Some(event.message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+}
 #[test]
-fn malformed_order_snapshot_retains_the_complete_symbol() {
+fn one_malformed_order_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let order = |id: &str, side: &str, price: u32| {
+        format!(
+            r#"{{"orderId":"{id}","type":"LIMIT","side":"{side}","status":"NEW","action":"OPEN","price":{price},"origQty":100,"executedQty":0,"transactTime":1}}"#
+        )
+    };
+    let list = |rows: &[String]| format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(","));
     let mut h = Harness::new();
-    h.seed();
-    h.order(1, "PART_FILLED", "LIMIT", 111);
-    h.reply("/openOrders",r#"{"code":"0","data":[{"orderId":"bad","type":"LIMIT","side":"BUY","status":"NEW","origQty":100}]}"#);
-    assert_eq!(h.e.store().orders().len(), 1);
-    assert_eq!(h.e.store().orders()[0].filled, 10.0);
+    h.reply("/account", EMPTY);
+    h.reply(
+        "/openOrders",
+        &list(&[order("a", "BUY", 100), order("b", "SELL", 120)]),
+    );
+    let stored = h.e.store().order("b").unwrap().clone();
+    let snapshot = list(&[order("a", "BUY", 101), order("b", "HOLD", 999)]);
+    for round in 0..2 {
+        let logs = h.reread(None, Some(&snapshot));
+        assert_eq!(h.e.store().order("a").unwrap().price, 101.0);
+        assert_eq!(h.e.store().order("b"), Some(&stored));
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &["Bitrue skipped malformed order row b"]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("HOLD") || l.contains("999")));
+    }
+    h.reread(None, Some(&list(&[order("a", "BUY", 101)])));
+    let ids: Vec<_> = h.e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["a"]);
+}
+#[test]
+fn a_malformed_child_without_an_id_keeps_the_cached_protective_child() {
+    let child = |id: &str| {
+        format!(
+            r#"{{{id}"type":"MARKET","conditionOrder":true,"triggerType":1,"triggerPrice":90,"triggerPriceType":1,"side":"BUY","status":"NEW","action":"OPEN","origQty":100,"executedQty":0}}"#
+        )
+    };
+    let tree = |children: &str| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":"parent","type":"LIMIT","side":"BUY","status":"NEW","action":"OPEN","price":100,"origQty":100,"executedQty":0,"childOrders":[{children}]}}]}}"#
+        )
+    };
+    let mut h = Harness::new();
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders", &tree(&child(r#""orderId":"child","#)));
+    let stored = h.e.store().order("child").unwrap().clone();
+    assert_eq!(stored.parent_id.as_deref(), Some("parent"));
+    let malformed = child("").replace(r#""side":"BUY""#, r#""side":"HOLD""#);
+    let logs = h.reread(None, Some(&tree(&malformed)));
+    assert_eq!(h.e.store().order("child"), Some(&stored));
+    assert!(h.e.store().order("parent").is_some());
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("Bitrue skipped malformed order row parent")),
+        "{logs:?}"
+    );
+}
+#[test]
+fn one_malformed_position_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let group = |contract: &str, side: &str, volume: u32| {
+        format!(
+            r#"{{"contractName":"{contract}","positions":[{{"side":"{side}","volume":{volume},"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200}}]}}"#
+        )
+    };
+    let account = |groups: &[String]| {
+        format!(
+            r#"{{"code":"0","data":{{"account":[{{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[{}]}}]}}}}"#,
+            groups.join(",")
+        )
+    };
+    let mut h = Harness::with_market(&markets);
+    h.reply(
+        "/account",
+        &account(&[
+            group("E-BTC-USDT", "BUY", 2),
+            group("E-ETH-USDT", "SELL", 3),
+        ]),
+    );
+    let eth = h.e.store().position("E-ETH-USDT").unwrap().clone();
+    let snapshot = account(&[
+        group("E-BTC-USDT", "BUY", 4),
+        group("E-ETH-USDT", "HOLD", 9),
+    ]);
+    for round in 0..2 {
+        let logs = h.reread(Some(&snapshot), None);
+        assert_eq!(h.e.store().position("E-BTC-USDT").unwrap().contracts, 4.0);
+        assert_eq!(h.e.store().position("E-ETH-USDT"), Some(&eth));
+        assert_eq!(h.e.store().balance().total, 100.0);
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        let expected: &[&str] = if round == 0 {
+            &["Bitrue skipped malformed position row E-ETH-USDT"]
+        } else {
+            &[]
+        };
+        assert_eq!(skips, expected, "{logs:?}");
+        assert!(!logs.iter().any(|l| l.contains("HOLD")));
+    }
+    h.reread(Some(&account(&[group("E-BTC-USDT", "BUY", 4)])), None);
+    let ids: Vec<_> =
+        h.e.store()
+            .positions()
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect();
+    assert_eq!(ids, ["E-BTC-USDT"]);
 }
 #[test]
 fn conditional_type_and_atomic_attached_children_preserve_native_identity() {
@@ -522,7 +650,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
         h.ws(&rejected);
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
         h.private_retry(1_000.0);
         let request = h.take("listenKey");
         h.respond(
@@ -542,7 +670,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         );
         h.collect();
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
     }
 }
 #[test]
@@ -565,7 +693,7 @@ fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
     h.collect();
     h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
     assert_stream_notices_are_safe(&h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
 }
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
@@ -764,10 +892,7 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
     assert_eq!(h.e.store().orders().len(), 1);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -804,7 +929,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
         h.actions
             .iter()
             .filter(|a| {
-                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
+                matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
             })
             .count()
     };
@@ -819,7 +944,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
     )));
 
     // A fresh failure after recovery starts again from the initial delay.
@@ -1122,7 +1247,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert!(
             !h.actions
                 .iter()
-                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
+                .any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
         );
     }
 }
@@ -1148,7 +1273,7 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         } else {
             "Bitrue account read failed"
         };
-        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
     }
 }
 
@@ -1380,5 +1505,56 @@ fn uncached_stream_condition_discriminators_precede_execution_kind() {
             "classification cannot invent closing provenance"
         );
         assert_eq!(order.parent_id, None);
+
+    }
+}
+
+#[test]
+fn unidentified_malformed_children_keep_cached_protection_while_valid_peers_commit() {
+    use serde_json::json;
+    for missing in [true, false] {
+        let mut h = Harness::new();
+        h.reply("/account", EMPTY);
+        let mut payload = json!({"code":"0","data":[
+            {"orderId":"parent","type":"LIMIT","side":"BUY","status":"NEW",
+             "action":"OPEN","price":100,"origQty":100,"executedQty":0,
+             "childOrders":[{"orderId":"child","type":"MARKET","conditionOrder":true,
+                 "triggerType":1,"triggerPrice":90,"triggerPriceType":1,"side":"BUY",
+                 "status":"NEW","action":"OPEN","origQty":100,"executedQty":0}]},
+            {"orderId":"peer","type":"LIMIT","side":"SELL","status":"NEW",
+             "action":"OPEN","price":120,"origQty":100,"executedQty":0}
+        ]});
+        h.reply("/openOrders", &payload.to_string());
+        let parent = h.e.store().order("parent").unwrap().clone();
+        let child = h.e.store().order("child").unwrap().clone();
+        assert_eq!(child.parent_id.as_deref(), Some("parent"));
+        assert_eq!(child.kind, OrderType::StopLoss);
+        assert_eq!(child.side, OrderSide::Sell);
+        assert!(child.reduce_only);
+        let damaged = payload["data"][0]["childOrders"][0]
+            .as_object_mut()
+            .unwrap();
+        if missing {
+            damaged.remove("orderId");
+        } else {
+            damaged.insert("orderId".into(), json!(""));
+        }
+        payload["data"][1]["price"] = json!(121);
+        h.reread(None, Some(&payload.to_string()));
+        assert_eq!(
+            h.e.store().order("parent"),
+            Some(&parent),
+            "missing={missing}"
+        );
+        assert_eq!(
+            h.e.store().order("child"),
+            Some(&child),
+            "missing={missing}"
+        );
+        assert_eq!(
+            h.e.store().order("peer").unwrap().price,
+            121.0,
+            "missing={missing}"
+        );
     }
 }

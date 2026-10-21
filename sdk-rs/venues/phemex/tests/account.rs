@@ -1,8 +1,7 @@
 //! Documented PerpetualV2 envelopes and aop_p execution/position payloads.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, RequestId, Response, SocketId,
-    TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
 };
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -22,7 +21,7 @@ fn execution_rows(frame: &[u8], expected_count: usize) -> &[u8] {
         if kind == safe_cex_engine::wire::section::FILLS {
             assert_eq!(
                 u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
-                1
+                2
             );
             let payload = &frame[at + 8..at + 8 + length];
             let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
@@ -1391,7 +1390,7 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
     );
     assert!(!e.store().loaded().positions);
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
 }
 
 #[test]
@@ -1406,7 +1405,7 @@ fn owned_position_outside_settled_catalogue_is_skipped_as_an_error() {
     );
     assert!(e.store().positions().is_empty());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
             if message == "Phemex skipped MISSINGUSDT position on an unavailable market")));
 }
 
@@ -1454,7 +1453,7 @@ fn unknown_working_live_order_cannot_clear_previous_snapshot_or_consume_sequence
     assert_eq!(e.store().orders(), before);
     assert!(!e.store().loaded().orders);
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
     ws(
         &mut e,
         socket,
@@ -1612,9 +1611,6 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
         let logs = actions
             .iter()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { level, message }) => {
-                    Some((safe_cex_engine::Level::from(*level), message.clone()))
-                }
                 Action::Notice(Notice::Event(event)) => Some((event.level, event.message.clone())),
                 _ => None,
             })
