@@ -21,6 +21,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
   private readonly MAX_ATTEMPTS = 2;
   private lastPrivateStreamRecoveryAt = 0;
   private readonly privateStreamRecoveryCooldownMs = 30_000;
+  private loggedIn = false;
+  private hasReportedErrorEvent = false;
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 500;
   private positionFetchScheduled = false;
@@ -194,6 +196,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.loggedIn = false;
       this.auth();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -259,10 +262,20 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
     if (json?.event === 'login') {
       if (`${json.code}` === '0') {
+        this.loggedIn = true;
+        this.hasReportedErrorEvent = false;
         this.subscribe();
       } else if (json.msg || json.code) {
         this.emitAndLogError(`Bitget private WS login failed: ${json.msg || json.code}`);
       }
+      return;
+    }
+
+    // Bitget reports a failed login (and a refused subscribe) as `event: 'error'`,
+    // never `event: 'login'`. Unhandled, the socket kept answering pings with no
+    // subscriptions: healthy by every liveness check, and silent.
+    if (json?.event === 'error') {
+      this.handleErrorEvent(json);
       return;
     }
 
@@ -306,6 +319,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.recordMessageHandlerStats('account');
       this.handleAccountTopic(json);
       return;
+    }
+  };
+
+  private handleErrorEvent = (json: Record<string, any>) => {
+    const failedLogin = !this.loggedIn;
+    // Once per streak: a rejected login repeats on every reconnect.
+    if (!this.hasReportedErrorEvent) {
+      this.hasReportedErrorEvent = true;
+      const detail = [json.code, json.msg].filter((part) => part !== undefined && part !== '').join(' ');
+      this.emitAndLogError(`Bitget private WS ${failedLogin ? 'login' : 'subscription'} rejected: ${detail}`);
+    }
+    if (failedLogin) {
+      this.reconnect();
     }
   };
 

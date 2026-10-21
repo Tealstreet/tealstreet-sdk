@@ -187,6 +187,22 @@ until a real private frame arrives. Do not rely on private WS reconnect-open
 handlers for this: `ENABLE_RECONNECTING_WEBSOCKET` is false in this repo, and
 the ordinary tick loop does not poll standalone Classic algo TP/SL orders.
 
+**Only the instance that started its private stream arms this watchdog**
+(`privateStreamStarted`, set in `start()`). The web's main-thread mirror places
+every UI order but is never started (see `apps/web/src/controllers/CLAUDE.md` →
+dual-instance model), so it never sees a private frame; before the guard, every
+UI order fired the toast 8s later, started this REST loop writing the UI's
+store, and `recoverMissingPrivateStream` opened a second private socket from
+the mirror.
+
+**Bitget answers a failed login with `event: "error"`, not `event: "login"`**
+(30005 login failed, 30011 key, 30012 passphrase, 30013 timestamp, 30015 sign;
+IP and region refusals arrive the same way). `onMessage` reports it once per
+failure streak and reconnects when it arrives before a successful login; after
+login it is a refused subscription and is reported without reconnecting. Left
+unhandled, a rejected socket kept answering pings with zero subscriptions and
+passed every liveness check while delivering nothing.
+
 ## REST API Endpoints
 
 Private trading/account endpoints are Classic v2 unless explicitly marked as v3
