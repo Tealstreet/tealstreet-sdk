@@ -53366,7 +53366,6 @@
           "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
           "keys": [
             "checkpoint 1 account.positions[0].contracts",
-            "checkpoint 1 account.positions[0].entryPrice",
             "checkpoint 1 account.positions[0].notional",
             "checkpoint 13 account.positions[0].leverage",
             "checkpoint 16 account.positions.length",

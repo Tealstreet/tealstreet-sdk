@@ -29,3 +29,13 @@ The PR body records current-head CI run IDs, tape identities and all raw
 artifact hashes. Each of the four family tapes must reproduce its complete
 nonmetric output five times per implementation, with no unexpected or
 unobserved private declarations, before merge.
+
+## WOO phase
+
+Enable the virtual private clock on WOO only. Use the matching sweep branch
+to collect five strict CI pairs, compare every complete raw output except
+measured metrics, and narrow only the exact unobserved tape-bound declaration
+keys. Inspect order censuses, poll/command ties and snapshot staging in the
+artifacts; do not change production behavior or broaden declarations. Run
+focused harness tests, independent review, full CI and the fail-closed merge
+guard, then report the merge. OKX landed in PR #1557 (`3d73437e589`).
