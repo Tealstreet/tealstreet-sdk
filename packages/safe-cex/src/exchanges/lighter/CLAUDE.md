@@ -870,3 +870,14 @@ preserved position PnL instead of calculating a fictitious entry loss from a
 zero/missing ticker. Native account equity/free remain authoritative; a genuine
 later public quote can update position PnL, which a subsequent private snapshot
 without PnL retains. Explicit native PnL overrides conflicting public quotes.
+
+## Rust reduce-only confirmation and rate errors
+
+When a reduce-only limit lacks matching exposure, Rust waits for the account
+read to complete with target size/absence evidence, with a10s deadline. The wait
+belongs to one command and read serial. Settings-only retained positions cannot
+confirm it, and a timed-out read cannot release the next queued order. Failed
+confirmation sends no nonce/signature; prior accepted legs keep aggregate outcome
+safety. HTTP405/429 retain native diagnostics and add neutral guidance without
+replaying placement. An explicit21613 placement refusal refreshes account/orders
+without guessing the opposite margin mode.

@@ -28,6 +28,17 @@ export const captureTsFill = (fill) => ({
   timestamp: fill.timestamp ?? null,
 });
 
+// Raw native evidence: an order id must never stand in for execution identity.
+export const captureRustFill = (rows, i) => ({
+  market: rows.market[i],
+  side: rows.side[i],
+  amount: rows.rows[i * 2 + 1],
+  price: rows.rows[i * 2],
+  id: rows.orderId(i),
+  executionId: rows.fillId?.(i),
+  fee: Number.isFinite(rows.fee?.[i]) ? rows.fee[i] : undefined,
+});
+
 const tsExecutionId = (fill, venue) => {
   if (fill.id === undefined || fill.id === null || String(fill.id).trim() === '') return null;
   // These handlers emit the native transaction/trade id unconditionally.

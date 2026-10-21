@@ -101,11 +101,7 @@ impl Session {
                     self.results.push((command, Err(error.message)))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
-                Action::Notice(safe_cex_engine::Notice::Log {
-                    level: safe_cex_engine::LogLevel::Warning,
-                    message,
-                })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Warn,
                     message,
                     ..

@@ -10,6 +10,7 @@ import { isErrorReported, markErrorReported, serializeCommandError } from '../..
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { setTelemetrySink } from '../../telemetry';
 import { LogSeverity, OrderSide, OrderType } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
@@ -33,6 +34,7 @@ afterEach(() => {
   setRustEngineTransport(nativeTransport);
   vi.useRealTimers();
   vi.restoreAllMocks();
+  setTelemetrySink({});
 });
 
 async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOptions> = {}) {
@@ -177,11 +179,13 @@ it('reports independent identical failures independently and preserves ordinary 
   expect(first).not.toBe(second);
   expect(r.errors).toHaveBeenCalledTimes(2);
   r.deliver([
-    { op: 'log', level: 'error', message: 'identical' },
-    { op: 'log', level: 'info', message: 'background info' },
+    { op: 'event', code: 'test.diagnostic', level: 'error', message: 'identical' },
+    { op: 'event', code: 'test.diagnostic', level: 'info', message: 'background info' },
   ]);
   expect(r.errors).toHaveBeenCalledTimes(3);
-  expect(r.logs).toHaveBeenCalledWith('[bybit] background info', LogSeverity.Info);
+  expect(r.logs).toHaveBeenCalledWith('[bybit] background info', LogSeverity.Info, {
+    code: 'test.diagnostic', level: 'info', message: 'background info', fields: {},
+  });
 });
 
 it('reports a timeout once while later attributed errors and DoneErr remain diagnostic logs', async () => {
@@ -341,4 +345,23 @@ it('reports command-local validation but does not wrap existing public preflight
     'Options are not enabled',
   );
   expect(r.errors).toHaveBeenCalledTimes(2);
+});
+
+it('exposes native codes and fields while preserving legacy Error and Warn delivery', async () => {
+  const r = await fixture();
+  const events = vi.fn();
+  const captureException = vi.fn();
+  setTelemetrySink({ captureException });
+  r.exchange.on('engine-event', events);
+  const auth = { level: 'error', code: 'auth.rejected', message: 'new refusal wording', fields: { source: 'private' } };
+  const retry = { level: 'warn', code: 'request.failed', message: 'retrying', fields: { attempt: 2 } };
+  const debug = { level: 'debug', code: 'ws.closed', message: 'closed', fields: {} };
+  r.deliver([auth, retry, debug].map(event => ({ op: 'event', ...event })));
+  expect(events.mock.calls).toEqual([[auth], [retry], [debug]]);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(captureException.mock.calls[0][1]).toMatchObject({ tags: { event_code: 'auth.rejected' }, extra: { engineEvent: auth } });
+  expect(captureException.mock.calls[0][1].tags.engineEvent).toBeUndefined();
+  expect(r.errors.mock.calls[0][0]).toContain(auth.message);
+  expect(r.errors.mock.calls[0][1]).toMatchObject({ engineEvent: auth });
+  expect(r.logs).toHaveBeenCalledExactlyOnceWith('[bybit] retrying', LogSeverity.Warning, retry);
 });
