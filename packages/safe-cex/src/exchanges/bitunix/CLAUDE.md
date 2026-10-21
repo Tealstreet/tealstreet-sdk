@@ -733,3 +733,13 @@ After a confirmed write, a later rejection cannot claim the whole command was
 rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
+
+Rust construction retains validated secondary read credentials. Signed GETs
+(account axes, symbol settings and history) use that identity and the SDK's api-key
+GET discriminator sends them through secondary egress. Unsigned public GETs also
+use the configured secondary GET transport without adding authentication. POSTs,
+other mutations and private WS login retain primary identity/egress. Partial/empty
+secondary credentials fail before startup I/O, including public-only engines;
+primary-only configurations keep existing signatures. Account/settings request
+tags name the selected credential slot; history is never account-auth evidence.
+This signing/routing fix does not classify native account-auth outcomes.

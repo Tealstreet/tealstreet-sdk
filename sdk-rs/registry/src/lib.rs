@@ -814,6 +814,7 @@ pub fn build<T: Visit>(
             startup,
             Engine::new(
                 BitunixFutures::new(BitunixOptions {
+                    read_credentials: options.read_credentials.take(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     key: options.key.take(),

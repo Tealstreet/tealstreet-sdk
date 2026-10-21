@@ -651,3 +651,63 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
         assert_eq!(actions.iter().any(|action| matches!(action, safe_cex_engine::Action::Http(request) if request.url == "https://api-demo.bybit.com/v5/user/query-api")), expected_probe);
     }
 }
+
+#[cfg(feature = "bitunix")]
+#[test]
+fn bitunix_secondary_reads_reach_the_native_signer() {
+    use safe_cex_engine::{Action, Event, HttpRequest, Response};
+    struct Started;
+    impl Visit for Started {
+        type Output = Vec<HttpRequest>;
+        fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+            engine.start(1700000000000.0);
+            let mut private = Vec::new();
+            loop {
+                let actions: Vec<_> = engine.drain_actions().collect();
+                if actions.is_empty() {
+                    break;
+                }
+                for a in actions {
+                    if let Action::Http(r) = a {
+                        let body = if r.url.ends_with("/trading_pairs") {
+                            r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}]}"#
+                        } else if r.url.ends_with("/tickers") {
+                            r#"{"code":0,"data":[{"symbol":"BTCUSDT","last":"96000","open":"95000","markPrice":"96001","baseVol":"1000","quoteVol":"96000000"}]}"#
+                        } else {
+                            private.push(r);
+                            continue;
+                        };
+                        assert!(
+                            !r.headers
+                                .iter()
+                                .any(|(n, _)| n.eq_ignore_ascii_case("api-key"))
+                        );
+                        engine.handle(
+                            1700000000000.0,
+                            Event::HttpResponse {
+                                request: r.id,
+                                response: Response {
+                                    status: 200,
+                                    headers: "",
+                                    body,
+                                },
+                            },
+                        );
+                    }
+                }
+            }
+            private
+        }
+    }
+    let requests = build("bitunix", serde_json::from_str(r#"{"key":"primary-key","secret":"primary-secret","readCredentials":{"key":"read-key","secret":"read-secret"}}"#).unwrap(), Some(safe_cex_engine::test_support::seeded_entropy(17)), Started).unwrap();
+    assert!(!requests.is_empty());
+    for request in requests {
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(n, v)| n.eq_ignore_ascii_case("api-key") && v == "read-key"),
+            "registry must forward read identity to actual native GET"
+        );
+    }
+}

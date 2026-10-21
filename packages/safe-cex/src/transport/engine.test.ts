@@ -1527,6 +1527,7 @@ describe('secondary GET identity egress', () => {
     ['kucoin', 'KC-API-KEY'],
     ['kucoinspot', 'KC-API-KEY'],
     ['mexc', 'ApiKey'],
+    ['bitunix', 'api-key'],
     ['bingx', 'X-BX-APIKEY'],
     ['bitrue', 'X-CH-APIKEY'],
     ['weex', 'ACCESS-KEY'],
@@ -1582,7 +1583,7 @@ describe('secondary GET identity egress', () => {
       routed.dispose!();
     },
   );
-  it.each(['phemex', 'weex', 'kucoin', 'kucoinspot', 'okx', 'backpack', 'krakenspot'] as ExchangeName[])(
+  it.each(['phemex', 'weex', 'kucoin', 'kucoinspot', 'okx', 'backpack', 'krakenspot', 'bitunix'] as ExchangeName[])(
     '%s rejects partial read identities before any transport effect',
     (venue) => {
       for (const extra of [
@@ -1598,7 +1599,7 @@ describe('secondary GET identity egress', () => {
       }
     },
   );
-  it.each(['bybit', 'phemex', 'kucoin', 'kucoinspot', 'woo'] as ExchangeName[])(
+  it.each(['bybit', 'phemex', 'kucoin', 'kucoinspot', 'woo', 'bitunix'] as ExchangeName[])(
     '%s secondary GET retains HOW encapsulation and primary-only request bytes',
     async (venue) => {
       const headers: Partial<Record<ExchangeName, string>> = {
@@ -1607,6 +1608,7 @@ describe('secondary GET identity egress', () => {
         kucoin: 'KC-API-KEY',
         kucoinspot: 'KC-API-KEY',
         woo: 'x-api-key',
+        bitunix: 'api-key',
       };
       const opts = options({
         passphrase: 'primary-pass',

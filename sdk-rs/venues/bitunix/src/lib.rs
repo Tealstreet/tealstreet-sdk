@@ -2,6 +2,8 @@
 mod account;
 mod error;
 mod history;
+#[cfg(test)]
+mod secondary_tests;
 mod sign;
 mod trading;
 mod wire;
@@ -29,6 +31,7 @@ const KLINE: &str = "/api/v1/futures/market/kline";
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub key: Option<String>,
     pub secret: Option<String>,
 }
@@ -37,6 +40,9 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
     fn erase_secrets(&mut self) {
         safe_cex_crypto::secrets::erase(&mut self.key);
         safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
     }
 }
 
@@ -322,6 +328,12 @@ fn candle(k: &Kline, rest: bool) -> Candle {
 impl Venue for BitunixFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            return;
+        }
         self.markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {

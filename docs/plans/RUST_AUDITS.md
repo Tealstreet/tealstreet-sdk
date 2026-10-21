@@ -508,7 +508,9 @@ Remaining resilience and completeness findings are independent of request parity
 - Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
   only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; book kept
-  while disconnected; secondary read keys dropped; `data: null` envelopes treated as
+  while disconnected; ~~secondary read keys dropped~~ (validated native options
+  now reach the GET signer, with api-key secondary egress in SDK/native plans;
+  mutations/private login remain primary and public discovery stays unsigned); `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
   as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL

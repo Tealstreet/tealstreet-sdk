@@ -26,3 +26,11 @@ strict touched Clippy/fmt/bans, focused TS transport/parity tests, package typec
 lint/test gates as appropriate. Independent plan/implementation review, full CI,
 real latest landing integration for shared registry changes and separate exact
 guard before merge. Source merge hold for1637 remains active until release.
+
+Plan and implementation reviews CLEAR, including final typed login-test decoder.
+Original SDK transport cases fail without api-key support; actual registry GET
+regression fails with forwarding disabled, and two signature tests fail with the
+secondary signer disabled. Restored production passes 372 combined native tests,
+actual registry construction, 33 native routing tests, 328 focused SDK tests plus
+the matrix case, package typecheck/lint and strict touched Clippy/fmt/bans. Four
+Bitunix routing cases added; all 70 existing fixture cases unchanged.
