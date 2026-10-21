@@ -179,6 +179,21 @@ pub enum AuthOutcome {
     Rejected,
 }
 
+impl AuthOutcome {
+    /// Validate a successful account envelope's required list, without decoding
+    /// row fields. Call after the venue's typed success/rejection and fence checks.
+    /// Row mapping failures do not invalidate credential evidence; a missing or
+    /// malformed envelope/list must stay inert before grouped auth state changes.
+    pub fn accepted_list(response: &Response<'_>, at: ArrayAt) -> Option<Self> {
+        if !(200..300).contains(&response.status) {
+            return None;
+        }
+        let mut list = ArraySplitter::new(at);
+        list.feed(response.body.as_bytes(), |_| {});
+        list.finished().then_some(Self::Accepted)
+    }
+}
+
 /// Auth evidence for one scope served by several endpoints (orders as regular,
 /// plan and stop reads). A rejection reports at once; an acceptance reports only
 /// once no endpoint of the scope still rejects, so a sibling's success cannot
@@ -205,7 +220,83 @@ impl MergedScopeAuth {
 
 #[cfg(test)]
 mod merged_scope_auth_tests {
-    use super::{AuthOutcome::*, MergedScopeAuth};
+    use super::{AuthOutcome, AuthOutcome::*, MergedScopeAuth, Response};
+    use crate::json::ArrayAt;
+
+    #[test]
+    fn accepted_list_checks_envelope_shape_without_decoding_row_fields() {
+        for (at, body, accepted) in [
+            (ArrayAt::Root, "[]", true),
+            (ArrayAt::Root, "[false,{},null]", true),
+            (ArrayAt::Root, "null", false),
+            (ArrayAt::Root, "[false", false),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":[false]}"#, true),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":null}"#, false),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":{}}"#, false),
+            (ArrayAt::EnvelopeField("data"), r#"{}"#, false),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":[]}"#,
+                true,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":{"orders":[false]}}"#,
+                true,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":{"orders":null}}"#,
+                false,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":{"orders":[]},"#,
+                false,
+            ),
+        ] {
+            let response = Response {
+                status: 200,
+                headers: "",
+                body,
+            };
+            assert_eq!(
+                AuthOutcome::accepted_list(&response, at),
+                accepted.then_some(Accepted),
+                "{at:?} {body}"
+            );
+        }
+        let limited = Response {
+            status: 429,
+            headers: "",
+            body: "[]",
+        };
+        assert_eq!(AuthOutcome::accepted_list(&limited, ArrayAt::Root), None);
+    }
+
+    #[test]
+    fn missing_list_cannot_clear_a_grouped_endpoint_before_its_sibling_succeeds() {
+        let auth = MergedScopeAuth::default();
+        assert_eq!(auth.report(0, Some(Rejected)), Some(Rejected));
+        let response = Response {
+            status: 200,
+            headers: "",
+            body: "{}",
+        };
+        assert_eq!(
+            auth.report(0, AuthOutcome::accepted_list(&response, ArrayAt::Root)),
+            None
+        );
+        assert_eq!(auth.report(1, Some(Accepted)), None);
+        let response = Response {
+            body: "[false]",
+            ..response
+        };
+        assert_eq!(
+            auth.report(0, AuthOutcome::accepted_list(&response, ArrayAt::Root)),
+            Some(Accepted)
+        );
+    }
 
     #[test]
     fn a_rejected_endpoint_holds_back_its_siblings_acceptance_until_it_recovers() {
