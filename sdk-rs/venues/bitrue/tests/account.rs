@@ -1505,7 +1505,6 @@ fn uncached_stream_condition_discriminators_precede_execution_kind() {
             "classification cannot invent closing provenance"
         );
         assert_eq!(order.parent_id, None);
-
     }
 }
 
