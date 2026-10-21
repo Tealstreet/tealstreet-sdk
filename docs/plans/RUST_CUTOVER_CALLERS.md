@@ -121,6 +121,16 @@ already declare `extra.asterdexApiVersion?: 'v1' | 'v3'` and
 The native account/fill follow-up checks #1430 at `3002a226469` against the same
 NX revision; mobile `master` remains `8377a4f3f1e` (GitHub API).
 The leverage follow-up checks #1522 at `faad41cfba5` with those inventory revisions.
+The coded-health follow-up checks #1583 at `916585a30f2`, with NX `fdd2389a825`
+and mobile `8377a4f3f1e` unchanged; its caller inventory remains cutover work.
+The OKX port follow-up checks #1588 at `447134dbf24`; mirror `origin/master`
+`1f91dfe4dcb` still has the old 8443 URLs. Live-master/hot-patch status below is
+the overseer's 2026-10-21 report, not evidence of a deployed change.
+The coded-only host follow-up checks #1586 at `ef68c4ba563`; its landed PR6
+protocol/deployment section above is retained as cutover work.
+The fill-identity follow-up checks #1592 at `389f42aa2e2`; focused live-fill
+callers were rechecked read-only at NX `65e086a3c90`. Earlier inventory pins
+still apply to the other caller rows.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -129,8 +139,8 @@ cannot proceed for the affected venues/hosts until one does.
 **Re-run** when a contract PR merges: repeat the three scans in
 [Audit method](#audit-method), then update the Status and Resolving PRs columns
 and the rows that cite that PR. Open contract work is tracked separately from
-the merged behavior below. #1430's fill financials are landed; their wire header
-remains revision 1, as detailed below.
+the merged behavior below. #1430 introduced financial tails under revision 1;
+#1592 now writes FILLS revision 2 with execution identity, as detailed below.
 
 ### Contract refresh, 2026-10-21
 
@@ -141,6 +151,7 @@ The construction follow-ups check through #1575 at `570d15f3001`, including
 The subsequent #1558 logging-level merge is checked at `e757d8d7990`.
 Native account reads, identities, fill financials and nuke check #1430 at `3002a226469`.
 Fresh leverage reads and combined capability records check #1522 at `faad41cfba5`.
+Coded health, SDK event metadata and worker forwarding check #1583 at `916585a30f2`.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -171,11 +182,15 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 | #1430 / `3002a22646` | Account reads synchronize authoritative native state without a network refresh or new streaming freshness observation; worker mirrors forward the reads. Native identity lookup expands by capability. Live fills add optional `realizedPnl`/`fee` tails under the existing revision-1 header, and native nuke batches closes without automatic retry. See [Native account reads, identities and fills](#native-account-reads-identities-and-fills-1430) for caller and host requirements. |
 | #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. The metadata-refreshed bridge issues a native command for uncached symbols instead of returning a cache miss immediately; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
+| #1583 / `916585a30f` | SDK `engine-event` and the same worker op expose received coded diagnostics. Legacy Error and Info/Warn delivery retains event metadata for caller-controlled duplicate suppression; Error telemetry adds scalar `event_code`. `ExchangeHealthMonitor.processEvent` classifies codes/optional typed detail, and `processHealth` copies authoritative engine counters. Downstream handlers still need migration; preserve the [coded diagnostic caller inventory](#coded-diagnostic-caller-cutover-pr5). #1586 removes the engine log shim; host protocol and deployment requirements are recorded above. |
+| #1588 / `447134dbf2` | Rust/TS OKX public/private/business WebSocket URLs use default TLS 443 across global/EEA live/demo, preserving host/path; relay upstream metadata changes the global live private/business targets. SDK arguments stay unchanged. Proxy upstreams and live master need a separate owner-run port migration before the public-internet 8443 deadline; see [OKX operations prerequisite](#okx-websocket-port-operations-prerequisite-1588). |
+| #1586 / `ef68c4ba56` | Removes `Cx::log`, `LogLevel`, `Notice::Log`, WASM `log` actions and native `log` notices. Diagnostics use coded `event` envelopes; DO changes from `op: 'log'` to `op: 'event'` with `warn`, preserving its host `onLog` callbacks as coded host events. Deploy compatible safe-cex-server before native clients receive Info+ venue events; DO clients must accept the new envelope before host adoption. Sam owns that deployment. See [Log shim removal](#log-shim-removal-pr6). |
+| #1592 / `389f42aa2e` | Rust always writes FILLS revision 2 with optional execution-ID refs and aligned financial columns. Updated readers retain revisions 0/1; old readers reject revision 2, requiring coordinated producer/consumer builds. Hyperliquid perp/merged spot/spot-only `tid` becomes SDK fill `id`, with `orderId` separately preserved; other venues retain order-ID fallback. See [Fill identity and wire compatibility](#fill-identity-and-wire-compatibility-1592). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
-downstream call shape. They add no cutover edit here. Execution-ID attribution and a literal FILLS revision 2
-are separate follow-up work; #1430 did not introduce either.
+downstream call shape. They add no cutover edit here. #1592 separately lands
+execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 
 ### Summary: cutover blockers (no new equivalent)
 
@@ -189,7 +204,7 @@ are separate follow-up work; #1430 did not introduce either.
 | B6 | **Resolved; no tealstreet-next edit** | #1441 (merged `ae3a1fc122`) | **In-process shared public data.** Rust accepts exchange-server's `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) unchanged. `serveInProcessPublicData` (`exchanges/rust/publicFeed.ts`) speaks the shared-feed protocol over an in-memory port pair, so the account ingests natively and validates the catalog as with `RustPublicFeedProvider`. Like the TS adapter it is lenient: private startup continues after 30 s without a loaded source, and account markets the source has not listed yet are tolerated (their book/candle requests wait). It follows the server's re-attaching source across public-exchange restarts and re-announces a changed catalog. Real field mismatches still fail, so the source must run on the same engine (at cutover the public exchange is Rust too). One hub per source broadcasts changed tickers every 250 ms. Websocket gateways still reject. Optional exchange-server edit: `createSharedPublicDataSource` keys by venue only, so testnet accounts receive the mainnet source; Rust ignores it for testnet and runs its own feed, while TS prices testnet off mainnet. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
 | B7 | **Resolved; no tealstreet-next edit** | #1439 (merged `0ced7ccf1e`) | **Per-account proxy token across async engine work.** Each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
 | B8 | **Resolved; no tealstreet-next edit** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | none |
-| B9 | **Resolved in the SDK; tealstreet-next must pass the classification** | #1377, #1383, #1401, #1424, #1482, #1483, #1484 (merged); venue PRs merged for all 26 venue families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a classified kind over text patterns. **Left (tealstreet-next):** the hosts' `'error'` handlers must pass `opts.classified` to `processMessage` (edit below), or classification keeps matching text. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
+| B9 | **Resolved in the SDK; caller migration remains** | #1377, #1383, #1401, #1424, #1482, #1483, #1484, #1583 (merged); venue PRs merged for all 26 venue families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a specific classified kind over text patterns. **Left (tealstreet-next):** pass `opts.classified` for ordinary command/legacy errors; for coded diagnostics, adopt #1583's `engine-event`/metadata, `processEvent` and `processHealth`. Suppress a duplicate legacy diagnostic only when its matching event metadata is present. Preserve auth/reload behavior and the caller inventory below. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
 | B10 | **Resolved, given B1** | #1375 (merged `b6c4f006a6`) | **candle-server public exchanges never started.** `fetchMarkets` (`exchange-pool.ts:265`) now starts the engine and waits ≤30 s for native data; it still needs the engine loadable in that image (B1). See [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
 | B11 | **Open: history completeness forwarding and ingest** | #1542, #1554 (host flag merged; propagation remains) | **Partial history must not become complete coverage.** Kraken futures' saturated income page and Binance's exhausted income chunks resolve with available rows and a non-enumerable `incomplete: true` in the JS WASM host. Worker/JSON hops lose that property; collection and derived history can also discard it. Carry completeness explicitly through each hop and consume it before recording coverage. See [Incomplete history](#incomplete-history-1542-1554). | SDK `CallMethodHandler`/Rust mirror; NX `ExchangeServerWorker`, `collectAccountAxes`, `runHistoricalWindow` | affected Rust income reads and any fill/position axis derived from them |
 
@@ -207,7 +222,7 @@ tealstreet-next edits, shipped with the cutover (listed in [tealstreet-next call
 2. Warm-start skip for Rust accounts (B4).
 3. `callMethodInWorkerFireAndForget.ts:3-7` also accepts `code === 'COMMAND_TIMEOUT'`.
 4. Root `CLAUDE.md:662` names `isBaseCapabilityFallback` as the brand check; point it at `exchange.capabilities`.
-5. Pass `opts.classified` from the web and CLI `'error'`/`'warning'` handlers into `ExchangeHealthMonitor.processMessage` (#1484).
+5. Pass typed detail for ordinary errors (#1484); migrate coded diagnostics to `processEvent`/`processHealth` (#1583), forwarding `engine-event` and suppressing duplicate legacy delivery only by event metadata. See [Coded diagnostic callers](#coded-diagnostic-caller-cutover-pr5).
 6. Preserve/read history completeness through the worker/hosted response and
    journal collection; incomplete windows never call `completeWindow` (B11).
 
@@ -319,7 +334,7 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 | Native `nuke`/`nukePositions` (#1430) | web `hooks/trading/useNuke.ts:7`; mirrored CLI `commands/trading/NukeCommand.ts:32,42,51,60` | inherited store-based closes/retries | one native-state batch of reduce-only market closes; no automatic replay even if callers pass `3`. Observe/catch the promise and reconcile partial/unknown outcomes; CLI's max-retries text must not imply a guarantee | RT; caller error/retry handling |
 | `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced; the main-thread mirror forwards them (#1462) | none (B4) |
 | `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command; main-thread mirror forwards it (#1462) | RT (B4) |
-| Optional live fill `fee`/`realizedPnl` (#1430) | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949`; script-editor `monacoTypesString.ts:614-618` | fields absent from Rust events | `{ id, orderId, symbol, side?, price, amount, realizedPnl?, fee? }`; only reported finite values appear, including zero. Both IDs still identify the order. Existing script-editor types already declare the optional fields | additive; matching engine/reader/applier required |
+| Live fill identity/financials (#1430/#1592) | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949`; script-editor `monacoTypesString.ts:614-618` | Rust IDs identified the order; #1430 added optional financials | `{ id, orderId, symbol, side?, price, amount, realizedPnl?, fee? }`; only reported finite values appear, including zero. Since #1592, `id` is the reported execution identity or falls back to `orderId`; `orderId` remains the order identity. Existing script-editor types already declare the optional fields | RT for order-ID assumptions; matching engine/reader/applier required |
 | `options.enableSpotMarkets` on hyperliquid | web `ChartContainer.tsx:161`, `useChartSession.ts:303` | spot markets | the Rust perp engine merges spot markets, holdings and orders into the account, as the TS venue; best-effort spot discovery retries on the discovery backoff without holding back perps | none (handled) |
 | `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | Lighter tier bridged; Bybit (all five names) syncs the engine's last REST wallet account verbatim (`balanceInfo` capability, `fetchBalanceInfo` every 2 s), replacing `info` as TS does; frame-forwarding workers send `info` changes to main | none (handled) |
 | `Market.info` raw payload | cli-core `order/prepareCliOrder.ts:44`, `commands/session/CheckCommand.ts:14` (`classifyMarket`); MCP strips `info` (`tools.ts:113`) | raw venue JSON | typed exceptions only (Bybit class/region/underlying, Polymarket, OKX) | RT |
@@ -343,14 +358,42 @@ intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
 issues native `fetchLeverage` (Kraken spot still returns `null`); `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
-The work formerly called **FILLS revision 2** in this inventory landed as an
-extension of **revision 1**: the existing order/market/side/price/amount prefix
-and raw-symbol tail are followed, when any row reports financials, by aligned
-f64 `realizedPnl` and `fee` columns. The reader detects these tails by section
-length, accepts legacy rows without them and rejects literal revision 2.
-Missing/nonfinite values become absent SDK fields; reported zeroes survive.
-`id` and `orderId` remain the order ID, not a unique execution ID. Updating the
-engine alone does not enable financial fields in an older reader/applier.
+#### Fill identity and wire compatibility (#1592)
+
+#1430 introduced optional financial tails under revision 1. #1592 now always
+writes **FILLS revision 2**: the existing order/market/side/price/amount prefix
+and raw-symbol refs are followed by execution-ID refs (`NONE` when absent),
+then aligned f64 `realizedPnl[n]` and `fee[n]` columns (`NaN` when unreported).
+The updated reader accepts revisions 0/1, including revision-1 frames without
+financials and with #1430's financial tails; revision 2 is accepted only for
+FILLS. Missing/nonfinite financial values become absent SDK fields; reported
+zeroes survive.
+
+`FillRows.fillId?(i)` exposes the optional native execution identity. The SDK
+emits `id = fillId ?? orderId`, retaining `orderId` separately. Hyperliquid perp,
+merged spot and spot-only fills populate `id` with the decimal `tid` string;
+other native venues leave execution identity absent and retain order-ID fallback.
+Use `orderId` for order attribution; do not assume every venue's `id` identifies
+a unique execution. Live fills remain events rather than persisted store rows.
+
+**Build compatibility prerequisite:** old readers reject FILLS revision 2.
+Ship matching Rust/WASM producers, JS readers and SDK appliers, including both
+worker and main-thread consumers when forwarding frames. A new reader can read
+legacy producers; updating only the producer breaks older consumers. This
+requirement is separate from B1's choice of engine delivery mechanism.
+
+Focused NX checks at `65e086a3c90`: web optimistic-order retirement and CLI
+`recordFill` already prefer `orderId ?? id`; fill toast coalescing also prefers
+`orderId`. FillsModule uses live fills only as a symbol-based database refresh
+hint, and HistoricalIngestionWorker discards the payload and marks the account
+dirty. No edits to those handlers are required for the new identity. Script
+consumers assuming `id === orderId` must instead use the separate `orderId`.
+
+Replay now captures native `executionId` separately from order ID and captures
+finite fee. #1592's green Hyperliquid/HyperliquidSpot CI replay gates prove the
+four removed identity-only exception groups (37 paths); unrelated declarations
+remain. This does not claim identity parity for every venue. See the
+[fill execution identity plan](RUST_FILL_EXECUTION_ID.md).
 
 Live financial conventions remain venue-specific: Hyperliquid close fills use
 net PnL (`closedPnl - fee`, requiring both values) and the reported fee; opening
@@ -372,8 +415,9 @@ TP/SL-specific trigger fields; no caller signature changes.
 | Partial-batch fields across the worker | web `order/createScaledOrder.ts:64-71` (`partialOrderCount`, `partialOrderIds`) | TS venue errors | preserved across the worker by `serializeCommandError` (#1375, landed) | none |
 | Packed ticker delta adds `midPrice` | exchange-server `public-virtual-worker-context.ts:4,200-235` (imports `PACKED_TICKER_FIELDS`) | | follows the imported constant | none |
 | `exec-result`/`updatePositions:done` gain `errorDetails` (#1375) | web CLI `components/cli/CLI.tsx:306`, `cliChainRunner.ts:454-479`, `runCliLine.ts:77-78` | `{reqId, success, error}` | additive | add |
-| #1388 (merged) `event` notice on native sessions; DO `log` messages gain optional `code`/`fields` | no tealstreet-next consumer (`NativeFrameSession` unused) | | #1538 emits coded venue events; native-session validator must understand `event`. #1554's `history.incomplete` uses an engine command ID, requiring translation if a server remaps IDs | none for current NX hosts; native consumers must update |
+| Native/DO diagnostic protocol (#1388/#1586) | no current NX `NativeFrameSession` consumer found; native/DO host adopters | native `event` plus legacy `log`; DO `op: 'log'` with optional code/fields | #1586 diagnostics use native `type: 'event'` / DO `op: 'event'`, levels debug/info/warn/error. Deploy compatible safe-cex-server before native Info+ events; upgrade DO clients before host adoption. #1554's command-correlated `history.incomplete` still needs ID translation when a server remaps commands | host compatibility/deployment prerequisite; Sam's call |
 | #1527 fill/store frame ordering | web fill listeners, provisional positions and SDK chasers | fills could flush before already-pending orders by up to 250 ms | a fill-bearing flush carries pending store sections; existing appliers publish them before fill events. Venue execution-before-order delivery can still occur | none; no new FILLS revision |
+| Coded diagnostics (#1583) | web worker dispatcher `exchangeAccountController.ts:2715-2727`; web/CLI health/error listeners in the [caller inventory](#coded-diagnostic-caller-cutover-pr5) | only legacy `error`/`log` paths handled | add worker `op: 'engine-event', data: [event]` dispatch and code-aware listeners; legacy Error `opts.engineEvent` / Info-Warn third `log` argument identifies duplicates. Debug has only structured delivery when received | additive SDK/worker API; caller migration required |
 
 #### Exchange-server hosting
 
@@ -402,6 +446,30 @@ the op protocol is its ABI. Beyond B2, B6, B7:
 | Global teardown | `repl.ts:2940-2948` (`virtualClock.stop()`, `disposeHOWWebSockets()`), MCP `index.ts:15` | `dispose()` must release engine timers/sockets so Bun/Node exit |
 | Chaser/TWAP/cross-trade managers driven against the exchange | cli-core `ChaseCommand.ts:340-350`, `TwapCommand.ts`, `apps/cli/src/cross-trade-daemon.ts:221-224` | `on('update'|'fill')`, `mintClientOrderId`, `findOrderByClientOrderId`, `store.*BySymbol` on Rust (present) |
 
+### OKX WebSocket port operations prerequisite (#1588)
+
+**Open ops work, before 2026-10-31.** [OKX's port-retirement notice](https://www.okx.com/docs-v5/log_en/)
+states public-internet WebSocket connections to 8443 stop on that date; 443
+already works, with the same hosts and paths. #1588 removes `:8443` from SDK
+global/EEA live/demo URLs; relay metadata covers only global live private/business
+upstreams. This merge does not migrate deployed proxy upstreams or allowlists.
+The overseer identified these deployment prerequisites on 2026-10-21; repo
+[OKX routing notes](../../packages/safe-cex/src/exchanges/okx/CLAUDE.md) describe
+the global/EEA tunnels and Caddy passthrough, while the
+[routing table](../../packages/safe-cex/src/transport/tealstreet/routing/routingTable.ts)
+pins the global relay targets and host+path allowlist requirement.
+
+| Ops dependency | Required action / owner boundary |
+| --- | --- |
+| Python `ws-proxy` global/EEA termination | Move global `okx/private` / `okx/business` upstreams on `ws.okx.com:8443` and EEA `okxeu/private` / `okxeu/business` upstreams on `wseea.okx.com:8443` to default 443, preserving each entity host and channel path. Changing only client URLs does not update these server-side destinations. |
+| `okx-proxy-ja.tealstreet.io` Caddy passthrough | Move its deployed upstream destination from 8443 to 443 before the deadline. Its client-facing 443 listener is not proof that its OKX upstream already uses 443. |
+| `tradetunnel` relay allowlist | Ensure deployed `RELAY_ALLOWED_UPSTREAMS` host+path-prefix rules accept the port-less global-live `wss://ws.okx.com/ws/v5/private` and `/ws/v5/business` targets from relay metadata, retaining the intended host/path match. |
+| Live master / hot patch | The overseer reports live master still uses 8443; checked mirror `origin/master` `1f91dfe4dcb` also retains those URLs. Sam decides the production hot patch and rollout timing; the Rust landing merge is not a deployed fix. |
+
+Keep this prerequisite separate from B1's engine delivery and the Rust cutover:
+the port deadline also affects the live TS path. No proxy edit, hot patch or
+deployment is performed by this documentation refresh.
+
 ### Error strings that must move to codes
 
 All of these match message **text**; Rust venue messages differ from the TS
@@ -417,11 +485,15 @@ web worker the error is a plain `Error` carrying those fields, so match
 `'error'` event carries `opts.classified` (#1484), worker Sentry reports carry
 `error_kind`-family tags (#1483), `start()` rejects with an `ExchangeError` and `validateAccount`
 returns `kind` since #1482. #1388's event codes (`ws.reconnect`, `auth.rejected`, …) are
-counted in `getHealth()` and reach `onLog`, but are not exposed on `exchange.on`.
+counted in `getHealth()`. Since #1583 they also reach `exchange.on('engine-event', …)`
+and the worker's `engine-event` op; legacy Error uses `opts.engineEvent`, and
+Info/Warn supplies the event as the third `log` argument. These are diagnostic
+metadata, separate from classified command failures. Error telemetry carries
+scalar `event_code` and the event object in extra data; explicit tags still win.
 
 | Site | Matched text | Status | Target |
 | --- | --- | --- | --- |
-| SDK `health/errorPatterns.ts` via web `exchangeAccountController.ts:1773,1831,356-394` and CLI `apps/cli/src/exchange-manager.ts:203`, `repl.ts:958-1025`, `error-classifier.ts:18-76` | ~48 regexes (auth/rate/network/time-sync/order) incl. `Bybit API key environment mismatch` | **Movable** (#1484): pass `opts.classified` from the `'error'` handler (`:1986-2019`, `repl.ts:959`) | `processMessage(message, isError, classified)`; a classified kind wins, text stays the fallback for TS venues. The exhaustive switch `:356-394` is CT if categories change |
+| SDK `health/errorPatterns.ts` via web `exchangeAccountController.ts:1773,1831,356-394` and CLI `apps/cli/src/exchange-manager.ts:203`, `repl.ts:958-1025`, `error-classifier.ts:18-76` | ~48 regexes (auth/rate/network/time-sync/order) incl. `Bybit API key environment mismatch` | **Movable** (#1484): pass `opts.classified` from the `'error'` handler (`:1986-2019`, `repl.ts:959`) | `processEvent(event, classified?)` for coded diagnostics and `processHealth(exchange.getHealth())` for lifetime counters (#1583); `processMessage(message, isError, classified)` for ordinary command/legacy TS errors. Do not classify a diagnostic twice via its structured and metadata-bearing legacy paths. The exhaustive switch `:356-394` is CT if categories change |
 | web `exchangeAccountController.ts:245-246,338-340` | `/error sign/i` (bybit*); `builder fee has not been approved` (hyperliquid*) | **Movable**: `opts.classified` on the `'error'` event (#1484); bybit (#1479) and hyperliquid (#1470) are classified | `opts.classified.kind === 'authInvalid'` / `venueCode`, keeping the text for TS venues |
 | `packages/exchange-pretty-error-messages/src/bybit/bybitHandler.ts:12,21-33` | `/ab not enough for new leverage/i`, `EC_*` reject reasons, `/error sign/i` | **Movable** for command rejections: bybit trading is classified (#1479) | map from `venueCode`; the `'error'`-event toasts read `opts.classified.venueCode` (#1484) |
 | web `utils/exchange/callMethodInWorkerFireAndForget.ts:3-7` | `'Timeout callMethodInWorker'` | **Movable now** | `error.message === CALL_METHOD_IN_WORKER_TIMEOUT \|\| (error as { code?: string }).code === 'COMMAND_TIMEOUT'` (the Rust timeout message differs, `rust.exchange.ts:730-737`; TS venues have no code) |
@@ -714,7 +786,33 @@ factory rely on it starting the engine (B10).
 
 `ExchangeHealthMonitor` uses a classified kind only when the host passes it.
 The SDK puts it on the `'error'` event options (`opts.classified`), the same
-object that already carries `sendToSentry`/`enhancedContext`.
+object that already carries `sendToSentry`/`enhancedContext`. The calls below
+remain required for ordinary command/host errors and legacy TS diagnostics.
+
+For received native diagnostics, #1583 adds `processEvent(event, classified?)`:
+classification follows stable codes and available typed detail without matching
+message text. Recognized codes may classify even Info/Debug events; unrecognized
+Info/Debug returns `null`; unrecognized Warn/Error uses typed classification
+or `unknown`.
+A generic `request.failed` message alone does not establish auth failure.
+`processHealth(exchange.getHealth())` copies lifetime counters into
+`HealthState.engineHealth`; it does not increment observed `errorCounts` or
+reconstruct events hidden by log-level filtering. Polling/calling it remains
+host work, and an absent snapshot leaves the last one unchanged. Collect snapshots
+in the engine-owning realm: an unstarted/disposed Rust exchange or a main-thread
+mirror without a host returns `undefined`. Hosts must deliver snapshots to the
+monitor owner; forwarding `engine-event` alone does not forward counter snapshots.
+
+Use either `engine-event` or the event attached to a legacy notification for
+that diagnostic. Metadata-bearing legacy Error/Info/Warn is compatibility
+delivery, not evidence of another failure. Keep ordinary command/host errors
+without metadata. See the [caller inventory](#coded-diagnostic-caller-cutover-pr5)
+for web/CLI listeners, worker dispatch and telemetry migration. #1583 added no
+native notice format; #1586 now removes legacy engine `log` actions/notices and
+changes the DO diagnostic envelope to coded `op: 'event'`. Upgrade matching
+WASM/JS hosts and DO clients together, and deploy compatible safe-cex-server
+before native Info+ events. The [PR6 section](#log-shim-removal-pr6) records the
+protocol; the deployment remains Sam's decision.
 
 | File | Old call | New call |
 | --- | --- | --- |
