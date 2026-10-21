@@ -1153,7 +1153,7 @@ impl Venue for Bingx {
         match command {
             Command::FetchLeverage { command, symbol } => {
                 if self.trading.settings_pending() {
-                    cx.done(command, Err("BingX settings write is still pending; refresh metadata after it completes".into()));
+                    cx.fail(command, account::metadata_error("BingX settings write is still pending; refresh metadata after it completes"));
                 } else {
                     self.account
                         .fetch_metadata(cx, self.credentials.as_ref(), command, symbol);

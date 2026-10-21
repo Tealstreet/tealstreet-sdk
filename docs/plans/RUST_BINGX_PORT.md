@@ -409,3 +409,8 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   touched ESLint including ignored tests, fmt, strict all-target BingX Clippy
   and banned patterns. Additional regressions prove independent-symbol reads
   both succeed and empty position polls do not invalidate flat metadata.
+- Integrated pinned34adfdb71a6 and its success-only command completion API.
+  Metadata failures use Cx.fail with NotSent (no trading effect), retaining raw
+  message classification; success returns plain JSON. Added one-failure/no-I/O
+  preflight outcome coverage. Independent API-integration review clean;
+  144BingX+246Binance,14host,13TS tests and typecheck/fmt/Clippy/bans pass.

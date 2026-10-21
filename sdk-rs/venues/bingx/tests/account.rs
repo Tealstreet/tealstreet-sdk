@@ -72,7 +72,7 @@ impl Harness {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.message)))
@@ -1474,7 +1474,7 @@ fn metadata_reads_flat_symbol_leverage_and_margin_without_a_position() {
         },
     );
     let out = h.engine.drain_actions().collect::<Vec<_>>();
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command:901, result:Ok(json) }) if serde_json::from_str::<serde_json::Value>(json).unwrap() == serde_json::json!({"buyLeverage":12,"sellLeverage":34}))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command:901, result:json }) if serde_json::from_str::<serde_json::Value>(json).unwrap() == serde_json::json!({"buyLeverage":12,"sellLeverage":34}))));
     let setting = h.engine.store().setting("BTCUSDT").unwrap();
     assert_eq!(setting.buy_leverage, Some(12.0));
     assert_eq!(setting.sell_leverage, Some(34.0));
@@ -1749,4 +1749,21 @@ fn independent_symbol_metadata_and_empty_poll_do_not_invalidate_each_other() {
     h.reply(snapshot.id, 200, r#"{"code":0,"data":[]}"#);
     h.reply(read.id, 200, ISOLATED);
     assert!(h.done.iter().any(|(id, r)| *id == 916 && r.is_ok()));
+}
+
+#[test]
+fn metadata_preflight_emits_one_not_sent_failure_on_the_new_completion_api() {
+    let mut h = Harness::ready();
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 917,
+            symbol: "MISSING".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(out.len(), 1);
+    assert!(
+        matches!(&out[0],Action::Notice(Notice::CommandFailed {command:917,error}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent))
+    );
 }

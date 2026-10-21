@@ -277,11 +277,14 @@ impl Account {
         symbol: String,
     ) {
         let Some(credentials) = credentials else {
-            cx.done(command, Err("BingX metadata requires credentials".into()));
+            cx.fail(
+                command,
+                metadata_error("BingX metadata requires credentials"),
+            );
             return;
         };
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, Err("Unknown BingX market".into()));
+            cx.fail(command, metadata_error("Unknown BingX market"));
             return;
         };
         let native = market.id.clone();
@@ -814,9 +817,11 @@ impl Account {
                 if revision != self.settings_revision
                     || self.metadata_generations.get(&symbol) != Some(&generation)
                 {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("BingX settings changed during metadata read; refresh metadata".into()),
+                        metadata_error(
+                            "BingX settings changed during metadata read; refresh metadata",
+                        ),
                     );
                     return;
                 }
@@ -826,7 +831,7 @@ impl Account {
                         Ok("ISOLATED") => MarginType::Isolated,
                         Ok("CROSSED") => MarginType::Cross,
                         _ => {
-                            cx.done(command, Err("Invalid BingX margin metadata".into()));
+                            cx.fail(command, metadata_error("Invalid BingX margin metadata"));
                             return;
                         }
                     };
@@ -839,7 +844,7 @@ impl Account {
                     });
                     cx.done(
                         command,
-                        Ok(format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#)),
+                        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
                     );
                 } else {
                     let parsed = serde_json::from_str::<Data<Leverage>>(response.body);
@@ -848,13 +853,13 @@ impl Account {
                         .map(|p| p.data)
                         .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
                     else {
-                        cx.done(command, Err("Invalid BingX leverage metadata".into()));
+                        cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
                         return;
                     };
                     let Some(market) = cx.store.market(&symbol) else {
-                        cx.done(
+                        cx.fail(
                             command,
-                            Err("BingX market disappeared during metadata read".into()),
+                            metadata_error("BingX market disappeared during metadata read"),
                         );
                         return;
                     };
@@ -1090,7 +1095,7 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
-            Request::Metadata { command, .. } => cx.done(command, Err(error.into())),
+            Request::Metadata { command, .. } => cx.fail(command, metadata_error(error)),
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1591,6 +1596,11 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
+}
+
+/// Metadata reads do not submit a trading effect, including failed confirmations.
+pub(crate) fn metadata_error(message: impl Into<String>) -> safe_cex_engine::VenueError {
+    safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }
 
 #[cfg(test)]
