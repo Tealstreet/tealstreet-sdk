@@ -148,7 +148,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1575 / `570d15f300` | Rust selects HyroTrader endpoints from optional raw mode/network maps, retaining legacy explicit endpoints when that config is absent. Private non-Paradex `payloadSigner` refusal moves into the registry; WASM registry failures carry JSON `Error.venueError`, which the SDK converts to `ExchangeError`, preserving `unsupported`/`notSent` for that refusal. Factory routing and application options stay unchanged; see [Host construction rules](#host-construction-rules-1575). |
 | #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 | #1430 / `3002a22646` | Account reads synchronize authoritative native state without a network refresh or new streaming freshness observation; worker mirrors forward the reads. Native identity lookup expands by capability. Live fills add optional `realizedPnl`/`fee` tails under the existing revision-1 header, and native nuke batches closes without automatic retry. See [Native account reads, identities and fills](#native-account-reads-identities-and-fills-1430) for caller and host requirements. |
-| #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. Metadata-refreshed venues read an uncached symbol rather than returning `null`; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
+| #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. The metadata-refreshed bridge issues a native command for uncached symbols instead of returning a cache miss immediately; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -318,7 +318,7 @@ rails to `buyLeverage`/`sellLeverage`; WEEX returns rails plus `marginType` from
 the symbol configuration. BingX fences against configuration events and settings
 writes; WEEX fences against settings writes. Failures leave native settings
 intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
-queries the venue; `settings` stays cache-only. Ship matching engine and
+issues native `fetchLeverage` (Kraken spot still returns `null`); `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
 The work formerly called **FILLS revision 2** in this inventory landed as an
