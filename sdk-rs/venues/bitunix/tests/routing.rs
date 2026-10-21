@@ -48,7 +48,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
                 url,
                 channel,
                 context,
+                headers,
             } => {
+                assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
                 assert!(!binary, "Bitunix feeds use the text protocol");
                 Some((socket, url, channel.unwrap(), context.unwrap()))
             }
@@ -73,7 +75,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             url,
             channel,
             context,
+            headers,
         } => {
+            assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
             assert!(!binary, "Bitunix feeds use the text protocol");
             Some((socket, url, channel.unwrap(), context.unwrap()))
         }

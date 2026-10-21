@@ -532,7 +532,7 @@ pub fn build<T: Visit>(
         "bitunix" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(BitunixFutures::new(BitunixOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,

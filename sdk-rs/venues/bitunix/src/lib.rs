@@ -142,7 +142,11 @@ impl BitunixFutures {
                 format!("{channel}:{}", range.start),
             ),
         };
-        let id = cx.connect_feed(url, channel, identity, recover);
+        let id = cx.connect(
+            safe_cex_engine::SocketSpec::new(url)
+                .channel(channel)
+                .feed(identity, recover),
+        );
         self.sockets.push(Socket {
             id,
             feed,
