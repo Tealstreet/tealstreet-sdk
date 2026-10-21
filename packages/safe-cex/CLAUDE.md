@@ -36,6 +36,12 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+Rust venue release profiles live in `sdk-rs/Cargo.toml`; standalone overrides
+live in `sdk-rs/harness/build.sh`. Size profiles must pass the fixed family and
+combined budgets, public CPU/memory gates and complete raw replay comparison,
+retaining identities and financial fields. Native release builds share the
+package setting; measured performance evidence covers WASM.
+
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
 `ExchangeWorker`. Registry defaults remain independent of that opt-in.
