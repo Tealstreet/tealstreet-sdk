@@ -47,7 +47,8 @@ A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `
 - Tests from the venue's documented payload examples.
 
 Register it (the workspace picks up `venues/*` itself): `hosts/wasm`
-(`Cargo.toml` and the `WasmEngine::new` match), `RUST_VENUES` in
+(a feature), `sdk-rs/registry` (`safe-cex-venues`: a feature, the `build` match
+and the venue's construction rules, with tests in `registry/tests`), `RUST_VENUES` in
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
 and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
 script beside `rust:private-tape`. Extend `replay.mjs` generically; never

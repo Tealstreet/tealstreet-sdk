@@ -171,3 +171,25 @@ fn a_rejected_key_is_reported_once_and_never_reread() {
     assert!(!h.has_request("/v5/account/fee-rate"), "{:?}", h.paths());
     assert_eq!(h.startup_failures.len(), 1);
 }
+
+#[test]
+fn trading_commands_fail_instead_of_hanging_when_options_are_invalid() {
+    use safe_cex_engine::{Command, Outcome};
+    // Custom endpoints are rejected for non-HyroTrader accounts, so no request can be sent.
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        endpoints: Some(safe_cex_venue_bybit::Endpoints {
+            rest: "https://example.invalid".into(),
+            public_ws: "wss://example.invalid".into(),
+            private_ws: "wss://example.invalid".into(),
+        }),
+        ..Options::default()
+    });
+    h.event(Event::Command(Command::CancelOrders {
+        command: 5,
+        ids: vec!["1".into()],
+    }));
+    assert!(h.requests.is_empty());
+    assert_eq!(h.outcomes, [(5, Some(Outcome::NotSent))]);
+}
