@@ -306,3 +306,12 @@ listener on disposal; Rust accounts send the resolved interval as a scale on
 each venue's own cadence (plus that interval as a ceiling) rather than
 reconstructing wildcard/exact precedence. A paused interval stays paused across configuration
 updates. Other TS pollers continue reading the multiplier at their next tick.
+
+## Native position sizing
+
+`nativePositionSize.ts` is the shared sizing leaf for SDK bulk closes and the
+existing script-api-core re-export. It converts base contracts for linear
+markets and quote notional for inverse markets, retaining the existing maximum
+of derived size and `extra.contractsNative`. Missing/zero contract size defaults
+to one. Rounding and input validation belong to the caller; do not add a reverse
+dependency on script-api-core.

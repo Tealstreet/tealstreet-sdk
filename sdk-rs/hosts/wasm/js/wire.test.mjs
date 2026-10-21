@@ -3,6 +3,24 @@ import { test } from 'node:test';
 
 import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
 
+test('account read markers survive transfer and do not change legacy frames', () => {
+  const buffer = new ArrayBuffer(24);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, SECTION.ACCOUNT_READ, true);
+  assert.equal(new Frame(structuredClone(buffer)).accountRead(), true);
+  view.setUint16(16, SECTION.STATUS, true);
+  assert.equal(new Frame(buffer).accountRead(), false);
+  const invalid = new ArrayBuffer(32);
+  new Uint8Array(invalid).set(new Uint8Array(buffer));
+  const bad = new DataView(invalid);
+  bad.setUint16(16, SECTION.ACCOUNT_READ, true);
+  bad.setUint32(20, 8, true);
+  assert.throws(() => new Frame(invalid).accountRead(), /Invalid account read marker/);
+});
+
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
   const encoded = strings.map((text) => encoder.encode(text));
@@ -863,6 +881,130 @@ test('numeric-only frames remain readable without STRINGS while present tables v
   assert.equal(strings.string(0), 'native-id');
   for (const reference of [1, -1, NaN, undefined]) {
     assert.throws(() => strings.string(reference), /invalid string reference/);
+  }
+});
+
+function fillFrame(rows, financials) {
+  const count = rows.length;
+  const data = Math.ceil((4 + count * 12) / 8) * 8;
+  const length = data + count * 16 + (financials ? count * 16 : 0);
+  const frame = numericFrame([
+    { kind: SECTION.FILLS, length, write(view, at) {
+      view.setUint32(at, count, true);
+      for (let i = 0; i < count; i++) {
+        view.setUint32(at + 4 + i * 4, 0, true);
+        view.setUint32(at + 4 + count * 4 + i * 4, i, true);
+        view.setUint32(at + 4 + count * 8 + i * 4, i % 2, true);
+        view.setFloat64(at + data + i * 16, rows[i][0], true);
+        view.setFloat64(at + data + i * 16 + 8, rows[i][1], true);
+        if (financials) {
+          view.setFloat64(at + data + count * 16 + i * 8, financials[i][0], true);
+          view.setFloat64(at + data + count * 24 + i * 8, financials[i][1], true);
+        }
+      }
+    } },
+    { kind: SECTION.STATUS, length: 16, write(view, at) {
+      view.setUint32(at, 31, true);
+      view.setFloat64(at + 8, 123, true);
+    } },
+  ]);
+  frame.strings = stringFrame(['fill-order']).strings;
+  return frame;
+}
+
+test('legacy fills retain exact row offsets without consuming the following section', () => {
+  for (const rows of [[], [[100, 2]], [[100, 2], [101, 3]]]) {
+    const frame = fillFrame(rows);
+    const fills = frame.fills();
+    assert.equal(fills.count, rows.length);
+    assert.deepEqual([...fills.rows], rows.flat());
+    assert.deepEqual([...fills.market], rows.map((_, i) => i));
+    assert.deepEqual([...fills.side], rows.map((_, i) => i % 2));
+    assert.equal(fills.realizedPnl, undefined);
+    assert.equal(fills.fee, undefined);
+    if (rows.length) assert.equal(fills.orderId(0), 'fill-order');
+    assert.equal(frame.status().latency, 123);
+  }
+});
+
+test('fill financial tails survive transfer with missing, zero and negative values', () => {
+  const frame = fillFrame([[100, 2], [101, 3], [102, 4]], [[NaN, NaN], [0, 0], [-3.5, -0.25]]);
+  const fills = frame.fills();
+  assert.deepEqual([...fills.rows], [100, 2, 101, 3, 102, 4]);
+  assert.deepEqual([...fills.realizedPnl], [NaN, 0, -3.5]);
+  assert.deepEqual([...fills.fee], [NaN, 0, -0.25]);
+  // A reader using only the legacy prefix still sees the unchanged values.
+  const section = frame.first(SECTION.FILLS);
+  const legacy = new Float64Array(frame.buffer, section.offset + 40, 6);
+  assert.deepEqual([...legacy], [...fills.rows]);
+  assert.equal(frame.status().loaded, 31);
+});
+
+test('fill decoder rejects truncated and ambiguous tails before constructing column views', () => {
+  for (const length of [0, 1, 4, 8, 16, 24, 40, 48, 56]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length, write(view, at) {
+      if (length >= 4) view.setUint32(at, 2, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section|truncated/);
+  }
+  for (const count of [0x10000000, 0x80000000, 0xffffffff]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length: 8, write(view, at) {
+      view.setUint32(at, count, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section|truncated/);
+  }
+  for (const length of [40, 56, 64]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length, write(view, at) {
+      view.setUint32(at, 1, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section length/);
+  }
+});
+
+test('revised fills preserve raw orphan symbols before aligned optional financial columns', () => {
+  for (const count of [1, 2, 3]) {
+    for (const financials of [false, true]) {
+      const data = Math.ceil((4 + count * 12) / 8) * 8;
+      const baseline = data + count * 20;
+      const financialAt = Math.ceil(baseline / 8) * 8;
+      const length = financials ? financialAt + count * 16 : financialAt;
+      const make = (size = length) => withStrings(numericFrame([
+        { kind: SECTION.FILLS, revision: 1, length: size, write(view, at) {
+          view.setUint32(at, count, true);
+          for (let i = 0; i < count; i++) {
+            view.setUint32(at + 4 + i * 4, 0, true);
+            view.setUint32(at + 4 + count * 4 + i * 4, NONE, true);
+            view.setUint32(at + 4 + count * 8 + i * 4, i % 2, true);
+            view.setFloat64(at + data + i * 16, 100 + i, true);
+            view.setFloat64(at + data + i * 16 + 8, i + 1, true);
+            view.setUint32(at + data + count * 16 + i * 4, 1, true);
+            if (financials) {
+              view.setFloat64(at + financialAt + i * 8, i ? -i : 0, true);
+              view.setFloat64(at + financialAt + count * 8 + i * 8, i ? NaN : 0, true);
+            }
+          }
+        } },
+        { kind: SECTION.STATUS, length: 16, write(view, at) { view.setUint32(at, 31, true); } },
+      ]), ['native-order', 'DELISTED-PERP']);
+      const frame = make();
+      const fills = frame.fills();
+      for (let i = 0; i < count; i++) {
+        assert.equal(fills.orderId(i), 'native-order');
+        assert.equal(fills.market[i], NONE);
+        assert.equal(fills.symbol(i), 'DELISTED-PERP');
+        assert.deepEqual([...fills.rows.slice(i * 2, i * 2 + 2)], [100 + i, i + 1]);
+      }
+      assert.equal(frame.status().loaded, 31);
+      if (financials) {
+        assert.deepEqual([...fills.realizedPnl], Array.from({ length: count }, (_, i) => i ? -i : 0));
+        assert.deepEqual([...fills.fee], Array.from({ length: count }, (_, i) => i ? NaN : 0));
+      } else {
+        assert.equal(fills.realizedPnl, undefined);
+        assert.equal(fills.fee, undefined);
+      }
+      assert.throws(() => make(length + 8).fills(), /invalid fill section length/);
+      if (financials) assert.throws(() => make(length - 8).fills(), /invalid fill section length/);
+    }
   }
 });
 

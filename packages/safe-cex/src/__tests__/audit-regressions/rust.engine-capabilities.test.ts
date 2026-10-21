@@ -134,7 +134,8 @@ describe('Rust bridge routes from the engine capability record', () => {
   it('answers a client order lookup from open orders before an engine exists', async () => {
     const { exchange, commands } = fixture({ clientOrderLookup: true });
     await expect(exchange.findOrderByClientOrderId('BTC', 'id-1')).resolves.toEqual({ found: false, definitive: false });
-    expect(commands).toEqual([]);
+    // The native open-order read may start the engine; no lookup command is sent.
+    expect(commands.filter((command) => command.op !== 'setPollScale')).toEqual([]);
   });
 
   it('keeps reported history axes as engine queries', async () => {
@@ -159,7 +160,19 @@ describe('Rust bridge routes from the engine capability record', () => {
 
     const perSymbol = fixture({ cancelAll: 'eachOpenSymbol' });
     await perSymbol.exchange.start();
-    perSymbol.exchange.store.update({ orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')] });
+    // Cancel-all reads the native open orders; the fixture's native state mirrors the store.
+    perSymbol.exchange.store.update({
+      markets: ['BTC', 'ETH'].map((symbol) => ({
+        id: symbol,
+        symbol,
+        base: symbol,
+        quote: 'USDT',
+        active: true,
+        precision: { amount: 0.1, price: 0.1 },
+        limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
+      })),
+      orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
+    });
     await perSymbol.exchange.cancelAllOrders();
     expect(perSymbol.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual([
       'BTC',
@@ -209,6 +222,21 @@ describe('Rust bridge routes from the engine capability record', () => {
     await settings.exchange.start();
     await expect(settings.exchange.fetchLeverageForSymbol('BTC')).resolves.toBeNull();
     expect(settings.commands.map((c) => c.op)).not.toContain('fetchLeverage');
+
+    // A metadata-refreshed venue reads a flat symbol it has not refreshed yet,
+    // then serves the published rails without another venue read.
+    const onMetadata = fixture({ leverageQuery: 'onMetadata' });
+    await onMetadata.exchange.start();
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toEqual({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toMatchObject({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
   });
 
   it('takes maximum leverage from the reported source', async () => {
