@@ -361,9 +361,13 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 
 #1522's leverage reads use native signed symbol queries: BingX maps long/short
 rails to `buyLeverage`/`sellLeverage`; WEEX returns rails plus `marginType` from
-the symbol configuration. BingX fences against configuration events and settings
-writes; WEEX fences against settings writes. Failures leave native settings
-intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
+the symbol configuration. BingX fences stale store publication against
+configuration/settings changes and newer same-symbol queries. Superseded reads
+and reads issued during a pending settings write still return current cached
+buy/sell rails, falling back independently to validated read values for a
+missing rail; overlap alone does not fail the read or cause a `null` result.
+WEEX fences store publication against settings writes. Native read failures
+still leave settings intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
 issues native `fetchLeverage` (Kraken spot still returns `null`); `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
@@ -1612,11 +1616,16 @@ subtracts. This corrects TS's BUY/rate display, with no write-contract change.
 ### BingX port-review metadata and stream recovery
 
 Rust BingX `updateSymbolMetadata(symbol)` now reads native leverage and margin
-mode for flat symbols and publishes them together. Existing metadata consumers
-keep their API and can retry a read invalidated by a concurrent settings change;
-`fetchLeverageForSymbol` performs a fresh leverage/margin pair on every explicit
-read; selected metadata refreshes publish the same atomic settings. No extra
-polling or write retry is added. Malformed position-stream rows retain prior exposure
+mode for flat symbols and publishes them together when the read remains current.
+Revision/query-generation races and reads issued during a pending settings write
+prevent stale store publication; they still return current cached buy/sell rails,
+with an independent validated-read fallback for each missing rail. Overlap alone
+never fails the read or produces `null`; transport/native-response failures
+remain failures. A superseded read finishes without another margin-mode request;
+a read issued during a pending write stays ineligible to publish even after that
+write settles. Current reads retain atomic leverage/margin publication.
+`fetchLeverageForSymbol` and selected metadata refreshes keep their existing APIs.
+No extra polling or write retry is added. Malformed position-stream rows retain prior exposure
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
 
