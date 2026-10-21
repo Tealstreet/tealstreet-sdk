@@ -84,6 +84,8 @@ export interface EngineHandlers {
   /** Structured events at or above the engine's `logLevel` option; Info+ also
    * reach `onLog` when this is absent. */
   onEvent?(event: EngineEvent): void;
+  /** A socket opened, received its first frame, or closed; never per frame. */
+  onSocketChange?(): void;
 }
 
 export interface OrderIdentityReceipt {
@@ -225,6 +227,24 @@ export interface EngineEvent {
   fields: Record<string, string | number | boolean | null>;
 }
 
+/** One socket channel's state since host construction; times are `Date.now()`. */
+export interface EngineSocketStats {
+  /** Sockets currently open. */
+  open: number;
+  /** Open sockets that have received a frame since opening. */
+  initialized: number;
+  /** Newest frame on any socket of this channel; 0 before the first. */
+  lastReceived: number;
+  lastCloseCode?: number;
+  lastCloseAt: number;
+  /** Monotonic close count. */
+  closes: number;
+  /** Closes since a socket last received a frame. */
+  closeStreak: number;
+}
+
+export type EngineSocketChannel = 'public' | 'business' | 'private';
+
 /** Counters since engine construction. */
 export interface EngineHealth {
   wsOpened: number;
@@ -278,6 +298,10 @@ export class EngineHost {
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
+  /** Abnormally close the open sockets of `channel` (all when omitted) so the
+   * venue reconnects; returns how many were closed. */
+  reconnectSockets(channel?: EngineSocketChannel): number;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
   dispose(): void;

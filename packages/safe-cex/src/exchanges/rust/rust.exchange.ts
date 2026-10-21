@@ -2,6 +2,7 @@ import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   CommandProgress,
   EngineCapabilities,
+  EngineEvent,
   EngineHealth,
   EngineHost as EngineHostType,
   Transport,
@@ -66,10 +67,13 @@ import {
   CAPABILITY_METHODS,
   type ExchangeCapabilities,
   markBaseCapabilityFallback,
+  summarizeSocketHealth,
   WORKER_FORWARDED_METHODS,
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import type { BaseWebSocket } from '../base.ws';
+import { RustSocketHandle } from './rustSockets';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -304,6 +308,7 @@ const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
+const SOCKET_HEALTH_SYNC_MS = 5_000;
 
 /**
  * An exchange account run by the Rust engine. Venue I/O, parsing and state
@@ -483,6 +488,12 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
     this.commandTimeoutMs = commandTimeoutMs;
+    // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
+    const socket = (channel: RustSocketHandle['channel']) =>
+      new RustSocketHandle(channel, this) as unknown as BaseWebSocket<any>;
+    this.publicWebsocket = socket('public');
+    this.businessWebsocket = socket('business');
+    if (!this.isPublicDataOnly) this.privateWebsocket = socket('private');
     this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
       exchangeName,
     );
@@ -770,9 +781,12 @@ export class RustEngineExchange extends BaseExchange {
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
+        onEvent: this.receiveEvent,
+        onSocketChange: this.syncSocketHealthToStore,
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
+          this.recordAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
@@ -940,6 +954,8 @@ export class RustEngineExchange extends BaseExchange {
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     const bookMs = (exchangeMetadata[this.name]?.orderbookTickDelay || STORE_FLUSH_MS) * multiplier;
     this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    // Staleness has no socket event of its own; re-derive health on a slow clock.
+    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -1192,6 +1208,29 @@ export class RustEngineExchange extends BaseExchange {
       this.frameRecoveryPending = false;
     }
   }
+
+  private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'auth.rejected') this.recordAuthFailure();
+    if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
+  };
+
+  get socketHost() {
+    return this.host;
+  }
+
+  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  override syncSocketHealthToStore = () => {
+    if (this.isDisposed) return;
+    const shared = this.sharedPublicFeed
+      ? { isInitialized: this.sharedPublicReady, isHealthy: this.sharedPublicReady }
+      : undefined;
+    const health = summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared);
+    const current = this.store.socketHealth;
+    // A private stream delivering again proves the key; later rejections still count.
+    if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
+    if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key])) return;
+    this.store.updateSocketHealth(health);
+  };
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
     if (level === 'error') this.emitAndLogError(message);
