@@ -278,3 +278,16 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 -21optionalfeatures/build/factoryentriespreserved. IndependentscopedreviewsandcrossreviewsCLEAN acrossharness/WASM/JS/engine/native/wrapper/cryptocleanup. Fixed concreteautomergeomission: addPhemex tonewsecretfeaturecfgso single-venueprivateauthretainssecret. AllthreeexistingtextWSAPIs/legacyStringABIremainbyte-identical;separateexplicitbinaryevent/transportpreserves negotiatedbytesandnormalPhemextext/decompression. CallerIDrules/mints,ensureHostlifecycle,allpriorvenuehooksandstrictmemoryscoringremain. Retiredgenericcryptohelpershave no venuecallers;dynamicABIonlyindevoracles,starknet-core removed.
 -326affectednativePASS(86Phemex,107Paradex,7WASM),444SDK/32filesPASS(238focused+206transport),331harnessPASS,bans/fmt/lockedmetadata/workspace+WASMclippy/typecheck44/lint28PASS. Previousd414 allthreeCIrunsnowfullysuccess(66replays+7controls),preservedasprecedingproofonly. Publishthisstablemergefor68replays(25public43private)+7controls/26Rustjobs;runcombined21-featurehost+SDKWASM/6Phemex-Binance-Paradexreplaysinparallel. Requireallcurrentlocal/fullCIgreenbeforelanding.
+
+### Port-review lows plan (2026-10-21)
+
+1. Encode the documented `ByIndexPrice` trigger for standalone and attached
+   SL/TP; native account readback already supports it. Test exact wire fields
+   and cached readback without altering other trigger defaults.
+2. Pin correct daily candle `to`: native honors the caller; TS's previous-day
+   shift drops valid bars. Record the deliberate correction and stale public-row
+   startup finding. Retain cached cancel provenance and policy-controlled account
+   polling; explain safety/load choices in the audit rather than guessing IDs.
+3. Reproduce index refusal first; run Phemex/Binance focused native tests,
+   touched fmt/Clippy and bans with CARGO_BUILD_JOBS=4. Independent review,
+   PR into feat/rust-rewrite, green CI, revert guard, merge and report.
