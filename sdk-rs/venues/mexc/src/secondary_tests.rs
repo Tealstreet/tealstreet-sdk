@@ -28,7 +28,7 @@ fn probe(
                 false,
                 Pending::Markets {
                     rows: vec![],
-                    failed: false,
+                    malformed: Default::default(),
                 },
             );
         }
