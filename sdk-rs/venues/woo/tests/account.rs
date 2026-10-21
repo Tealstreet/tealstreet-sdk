@@ -945,6 +945,38 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     )));
 }
 #[test]
+fn unidentified_position_row_keeps_every_stored_position() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        80.0,
+        r#"{"success":true,"data":{"positions":[{"holding":1}]}}"#,
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+}
+#[test]
+fn unidentified_order_row_keeps_every_stored_order() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    assert!(e.store().order("9007199254740993").is_some());
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    response(&mut e, &regular, 80.0, &page(r#"{"order_id":[1]}"#));
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 90.0, &algos(ALGO));
+    assert!(e.store().order("9007199254740993").is_some());
+    assert!(e.store().order("43").is_some());
+}
+#[test]
 fn invalid_known_position_row_keeps_its_stored_copy() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
