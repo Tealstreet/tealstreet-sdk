@@ -104,8 +104,7 @@ jobs:
     timeout-minutes: 45
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Budget per single-venue browser bundle (1.25 MiB; see RUST_WASM_FAMILIES.md).
-      WASM_BUDGET_BYTES: 1310720
+      # The single-venue size budget is read from sdk-rs/harness/wasm-budget.mjs.
     defaults:
       run:
         working-directory: .
@@ -164,6 +163,9 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: bitunix
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bitunix
           - venue: orderly
             books: BTCUSDC,ETHUSDC
             private_script: rust:private-tape-orderly

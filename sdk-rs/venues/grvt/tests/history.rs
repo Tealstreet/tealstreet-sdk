@@ -8,6 +8,7 @@ struct Harness {
     e: Engine<Grvt>,
     requests: Vec<HttpRequest>,
     results: Vec<(u32, Result<String, String>)>,
+    logs: Vec<String>,
     now: f64,
 }
 impl Harness {
@@ -25,6 +26,7 @@ impl Harness {
             e,
             requests: vec![],
             results: vec![],
+            logs: vec![],
             now: NOW,
         };
         h.collect();
@@ -45,9 +47,13 @@ impl Harness {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.results.push((command, result))
                 }
+                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 _ => {}
             }
         }
+    }
+    fn logs(&self) -> &[String] {
+        &self.logs
     }
     fn query(&mut self, q: Query) {
         self.now += 1.;
@@ -434,13 +440,22 @@ fn retired_product_history_rows_cannot_be_credited_to_perpetual_queries() {
             to_ms: None,
             limit: None,
         });
-        let unsupported = ORDER.replace("BTC_USDT_Perp", instrument);
+        let unsupported = ORDER
+            .replace("BTC_USDT_Perp", instrument)
+            .replace("0x000abcd", "0x000abce");
         h.reply(
             "order_history",
             &format!(r#"{{"r":[{ORDER},{unsupported}],"n":""}}"#),
             "",
         );
-        assert!(h.result().is_err());
+        // The retired row is skipped on its own; it neither fails nor joins the read.
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&h.result().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1, "{instrument}");
+        assert!(
+            h.logs()
+                .iter()
+                .any(|l| l.starts_with("Skipped malformed GRVT historical order"))
+        );
 
         let mut h = Harness::new(true);
         h.query(Query::OrderByClientId {
@@ -847,4 +862,50 @@ fn insta_like(sent: &[String]) {
         r#"fill_history {"sa":"777","st":"1699999999000000000","et":"1700000000000000000","l":1000,"c":"t1"}"#,
     ];
     assert_eq!(sent, expected);
+}
+
+#[test]
+fn a_history_page_of_only_malformed_orders_still_advances_the_cursor() {
+    let mut h = Harness::new(true);
+    h.query(Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: Some(NOW),
+        limit: None,
+    });
+    let bad = ORDER.replace(r#""s":"FILLED""#, r#""s":"BOGUS""#);
+    // A cursor follows, so the skipped row must count as fresh or the walk would stall.
+    h.reply(
+        "order_history",
+        &format!(r#"{{"r":[{bad}],"n":"next"}}"#),
+        "",
+    );
+    assert!(
+        h.logs()
+            .iter()
+            .any(|l| l.starts_with("Skipped malformed GRVT historical order"))
+    );
+    h.reply("order_history", &format!(r#"{{"r":[{ORDER}],"n":""}}"#), "");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&h.result().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn an_undecodable_order_from_another_subaccount_still_fails_the_read() {
+    let mut h = Harness::new(true);
+    h.query(Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: Some(NOW),
+        limit: None,
+    });
+    let foreign = ORDER
+        .replace(r#""sa":"777""#, r#""sa":"888""#)
+        .replace(r#""s":"FILLED""#, r#""s":"BOGUS""#);
+    h.reply(
+        "order_history",
+        &format!(r#"{{"r":[{foreign}],"n":""}}"#),
+        "",
+    );
+    assert!(h.result().is_err());
 }

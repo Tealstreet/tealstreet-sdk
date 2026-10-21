@@ -1029,6 +1029,35 @@ describe('RustEngineExchange', () => {
     expect(tape.writes).toHaveLength(1);
   });
 
+  it('applies a filled order before its fill reaches listeners at the book cadence', async () => {
+    const tape = bybitTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, store);
+    await exchange.start();
+    await until(() => tape.sockets.has('/v5/private'));
+    const row = { orderId: '4242', symbol: 'BTCUSDT', orderType: 'Limit', side: 'Buy', price: '90000', qty: '0.012' };
+    const send = (message: unknown) => tape.sockets.get('/v5/private')!(JSON.stringify(message));
+    send({ topic: 'order', data: [{ ...row, orderStatus: 'New', leavesQty: '0.012', cumExecQty: '0' }] });
+    await until(() => store.orders.some((order) => order.id === '4242'));
+    const seen: Array<{ status?: OrderStatus; filled?: number }> = [];
+    exchange.on('fill', () => {
+      const order = store.orders.find((candidate) => candidate.id === '4242');
+      seen.push({ status: order?.status, filled: order?.filled });
+    });
+    // Bybit reports the order and its execution on separate private topics.
+    send({
+      topic: 'order',
+      data: [
+        { ...row, orderStatus: 'Filled', leavesQty: '0', cumExecQty: '0.012', cumExecValue: '1080', avgPrice: '90000' },
+      ],
+    });
+    send({ topic: 'execution', data: [{ ...row, execId: 'e-1', execType: 'Trade', execQty: '0.012', execPrice: '90000' }] });
+    await until(() => seen.length > 0);
+    expect(seen[0]).toEqual({ status: OrderStatus.Closed, filled: 0.012 });
+  });
+
   it('rejects unhonorable Bybit client IDs and whole batches before any write', async () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);
