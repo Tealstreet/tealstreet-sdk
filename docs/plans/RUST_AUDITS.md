@@ -495,8 +495,14 @@ Remaining resilience and completeness findings are independent of request parity
   complete envelope. Unknown identities hold absence, known duplicate conflicts
   quarantine their whole symbol, and partial mode mixes remain atomic. Partial
   initial reads cannot establish readiness or prove trading prerequisites.
-  Regular/TP-SL order rows still hold the whole order snapshot on a malformed peer;
-  native raw-family retention remains a separate open repair.
+- Medium: ~~one malformed regular/TP-SL order row holds every healthy order peer~~.
+  Request-local native raw-ID coverage retains rejected cached parents, attached
+  brackets or both standalone siblings together with routing metadata. Valid peers
+  and safely absent raw families advance; admitted parents remove old omitted
+  brackets despite an unknown neighbor. Unknown identities hold absence only in
+  their endpoint scope, and only admitted raw groups advance fill baselines.
+  Initial readiness requires both current serials without rejected rows, while
+  command-owned partial refreshes cannot prove a trading prerequisite.
 - Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
   and postpone reconciliation indefinitely under steady activity~~. Ordinary
   positions now retain their in-flight serial for a bounded read interval and

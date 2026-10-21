@@ -784,3 +784,15 @@ conservatively. A partial snapshot cannot mix held exposure with contradictory
 position modes, establish first readiness or qualify as a trading prerequisite.
 Only admitted rows update settings; WS routing hints and existing financial/side
 fallbacks stay unchanged. Order/TP-SL rows use a separate policy.
+
+Rust regular/TP-SL REST snapshots retain malformed native raw-ID families together
+with cached parent/virtual siblings and routing metadata; valid peers and safely
+absent raw families advance only after complete envelopes. Unknown identity holds
+absence within that endpoint scope, while an admitted raw parent supersedes its
+entire old family, including omitted brackets or changed standalone leg shapes.
+Known bad/valid duplicates quarantine the raw ID, and bounded coverage overflow
+holds conservatively. Only admitted groups advance execution baselines; pending
+execution and optimistic/terminal guards remain. Partial initial halves cannot
+establish readiness, both staged serials/generations must be current, and partial
+command-owned refreshes cannot qualify as trading prerequisites. WS generation
+fences and financial/side defaults remain separate unchanged policies.

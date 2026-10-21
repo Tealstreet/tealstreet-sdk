@@ -22,6 +22,35 @@ pub enum Axis {
     Tpsl,
 }
 #[derive(Default)]
+pub struct RejectedOrderRows {
+    keys: HashSet<String>,
+    unidentified: bool,
+    overflowed: bool,
+}
+impl RejectedOrderRows {
+    fn reject(&mut self, key: Option<String>) {
+        match key {
+            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
+                self.keys.insert(key);
+            }
+            Some(_) => {
+                self.unidentified = true;
+                self.overflowed = true;
+            }
+            None => self.unidentified = true,
+        }
+    }
+    fn holds(&self, raw: &str) -> bool {
+        self.unidentified || self.keys.contains(raw)
+    }
+    fn conflicts(&self, raw: &str) -> bool {
+        self.overflowed || self.keys.contains(raw)
+    }
+    pub(crate) fn any(&self) -> bool {
+        self.unidentified || !self.keys.is_empty()
+    }
+}
+#[derive(Default)]
 pub struct RejectedPositionRows {
     keys: HashSet<String>,
     unidentified: bool,
@@ -67,9 +96,36 @@ pub struct Read {
     pub position_admitted: Vec<PositionAdmission>,
     pub identities: Vec<(String, String)>,
     pub orders: Vec<Order>,
+    pub order_rejected: RejectedOrderRows,
+    pub order_accepted: HashSet<String>,
     pub native: Vec<(String, NativeOrder)>,
     pub invalid: bool,
     pub baselines: Vec<(String, (f64, f64))>,
+}
+impl Read {
+    fn reject_order(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(
+                borrow,
+                default,
+                deserialize_with = "text",
+                alias = "id",
+                rename = "orderId"
+            )]
+            raw: Str<'a>,
+        }
+        let key = serde_json::from_str::<Identity<'_>>(item)
+            .ok()
+            .filter(|row| !row.raw.is_empty())
+            .map(|row| row.raw.into_owned());
+        self.order_rejected.reject(key);
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "Bitunix malformed order row; keeping its cached native family",
+        );
+    }
 }
 impl Read {
     fn reject_position(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
@@ -371,6 +427,8 @@ impl BitunixFutures {
             position_admitted: vec![],
             identities: vec![],
             orders: vec![],
+            order_rejected: Default::default(),
+            order_accepted: HashSet::new(),
             native: vec![],
             invalid: false,
             baselines: vec![],
@@ -674,9 +732,10 @@ impl BitunixFutures {
             }),
             Axis::Orders | Axis::Tpsl => serde_json::from_str::<OrderRow<'_>>(item).map(|o| {
                 if o.order_id.is_empty() || o.symbol.is_empty() {
-                    read.invalid = true;
+                    read.reject_order(cx, item);
                     return;
                 }
+                read.order_accepted.insert(o.order_id.to_string());
                 if self.account.terminal.contains_key(o.order_id.as_ref()) {
                     return;
                 }
@@ -703,6 +762,8 @@ impl BitunixFutures {
         if result.is_err() {
             if read.axis == Axis::Positions {
                 read.reject_position(cx, item);
+            } else if matches!(read.axis, Axis::Orders | Axis::Tpsl) {
+                read.reject_order(cx, item);
             } else {
                 read.invalid = true;
             }
@@ -748,15 +809,25 @@ impl BitunixFutures {
             self.debounce(cx, read.axis);
             return;
         }
+        if !cx.store.loaded().orders && read.order_rejected.any() {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "Bitunix partial initial orders cannot establish readiness",
+            );
+            self.debounce(cx, Axis::Orders);
+            return;
+        }
         if !cx.store.loaded().orders && matches!(read.axis, Axis::Orders | Axis::Tpsl) {
             let slot = usize::from(read.axis == Axis::Tpsl);
             self.account.initial_orders[slot] = Some(read);
             if self.account.initial_orders.iter().all(Option::is_some) {
                 for slot in 0..2 {
-                    if self.account.initial_orders[slot]
-                        .as_ref()
-                        .is_some_and(|r| r.generation != self.account.generations[2])
-                    {
+                    if self.account.initial_orders[slot].as_ref().is_some_and(|r| {
+                        r.generation != self.account.generations[2]
+                            || r.serial
+                                != self.account.serials[if r.axis == Axis::Orders { 2 } else { 3 }]
+                    }) {
                         self.account.initial_orders[slot] = None;
                         self.debounce(cx, Axis::Orders);
                         return;
@@ -882,6 +953,23 @@ impl BitunixFutures {
     }
     fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut read: Read) {
         let tpsl = read.axis == Axis::Tpsl;
+        read.order_accepted
+            .retain(|raw| !read.order_rejected.conflicts(raw));
+        let incoming_raw: HashMap<_, _> = read
+            .native
+            .iter()
+            .map(|(id, meta)| (id.as_str(), meta.raw_id.as_str()))
+            .collect();
+        read.orders.retain(|row| {
+            !read.order_rejected.conflicts(
+                incoming_raw
+                    .get(row.id.as_str())
+                    .copied()
+                    .unwrap_or(&row.id),
+            )
+        });
+        read.baselines
+            .retain(|(raw, _)| read.order_accepted.contains(raw));
         let optimistic: std::collections::HashSet<_> = cx
             .store
             .orders()
@@ -890,7 +978,9 @@ impl BitunixFutures {
             .map(|o| o.id.clone())
             .collect();
         read.orders.retain(|o| !optimistic.contains(&o.id));
-        read.native.retain(|(id, _)| !optimistic.contains(id));
+        read.native.retain(|(id, meta)| {
+            !optimistic.contains(id) && !read.order_rejected.conflicts(&meta.raw_id)
+        });
         let mut orders: Vec<_> = cx
             .store
             .orders()
@@ -901,6 +991,14 @@ impl BitunixFutures {
                         !n.attached
                             && (o.kind == OrderType::StopLoss || o.kind == OrderType::TakeProfit)
                     }) != tpsl
+                    || {
+                        let raw = self
+                            .account
+                            .native
+                            .get(&o.id)
+                            .map_or(o.id.as_str(), |meta| meta.raw_id.as_str());
+                        read.order_rejected.holds(raw) && !read.order_accepted.contains(raw)
+                    }
             })
             .cloned()
             .collect();
