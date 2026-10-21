@@ -121,9 +121,10 @@ fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account
         };
         let mut engine = Engine::new(Bingx::new(options));
         engine.start(1700000000000.0);
-        assert!(!engine.drain_actions().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-        )));
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+        );
     }
 }
