@@ -711,7 +711,7 @@ impl BinanceFutures {
                     {
                         join.failed = true;
                     }
-                    _cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Binance inverse owned position market unavailable; preserving previous snapshot");
+                    _cx.notice(Level::Warn, code::ROW_SKIPPED, "Binance inverse owned position market unavailable; preserving previous snapshot");
                     return;
                 }
                 if let (Some(leverage), Some(join)) = (p.leverage, &mut self.account.positions)
@@ -932,7 +932,7 @@ impl BinanceFutures {
                     Ok(()) => cx.store.set_balance(balance),
                     Err(error) => cx.notice(
                         Level::Error,
-                        code::REQUEST_FAILED,
+                        code::STREAM_MALFORMED,
                         format!("Binance balance: {error}"),
                     ),
                 }
@@ -981,7 +981,7 @@ impl BinanceFutures {
                     }
                     Err(error) => cx.notice(
                         Level::Error,
-                        code::REQUEST_FAILED,
+                        code::STREAM_MALFORMED,
                         format!("Binance account: {error}"),
                     ),
                 }
@@ -1495,7 +1495,7 @@ impl BinanceFutures {
             }
             cx.notice(
                 Level::Warn,
-                code::SNAPSHOT_DISCARDED,
+                code::ROW_SKIPPED,
                 "Binance positionRisk row unmappable during discovery; preserving previous snapshot",
             );
             return;
@@ -2634,7 +2634,7 @@ impl BinanceFutures {
             }
             Err(error) => cx.notice(
                 Level::Error,
-                code::REQUEST_FAILED,
+                code::STREAM_MALFORMED,
                 format!("Binance Spot account: {error}"),
             ),
         }

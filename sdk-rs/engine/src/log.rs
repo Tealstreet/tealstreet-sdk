@@ -123,8 +123,9 @@ pub struct LogEvent {
 /// Codes counted in [`Health`]. The engine counts socket closes, reconnects
 /// on a declared socket role, HTTP failures, and auth failures it sees
 /// (`deactivate`, and auth-kind startup or command failures); venues emit the
-/// rest through `Cx::event`, and `auth.rejected` only for rejections they do
-/// not report through those paths.
+/// rest through `Cx::event`. Venues tag every credential rejection
+/// `auth.rejected`: one engine event counts at most one auth failure, however
+/// many of these paths report it.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
@@ -164,7 +165,7 @@ pub mod code {
     pub const CONFIG_INVALID: &str = "config.invalid";
     /// Startup progress, such as markets loaded.
     pub const STARTUP_PROGRESS: &str = "startup.progress";
-    /// A routine account summary; Debug, since it repeats on every update.
+    /// A routine account summary, logged at Debug.
     pub const BALANCE_SUMMARY: &str = "balance.summary";
 }
 
