@@ -531,7 +531,9 @@ Remaining resilience and completeness findings are independent of request parity
   (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
   requires order detail to be final immediately (`trading.rs:1437`); a login
   rejection without `data` is ignored (`account.rs:744`).
-- Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
+- Low: ~~no clock sync~~ (Bitunix requests synchronized SDK host time before
+  startup; authenticated REST and private login use that time); signature-rejection
+  (10007) resend remains separate (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
   only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
   while disconnected~~ (futures retirement immediately invalidates subscribed
