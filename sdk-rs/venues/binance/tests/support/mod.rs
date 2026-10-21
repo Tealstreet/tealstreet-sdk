@@ -129,7 +129,12 @@ impl Harness {
                     }
                     self.logs.push(message)
                 }
-                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
+                Action::Notice(Notice::Event(event)) => {
+                    if event.level == safe_cex_engine::Level::Error {
+                        self.errors.push(event.message.clone());
+                    }
+                    self.logs.push(event.message);
+                }
                 Action::Notice(Notice::Deactivate) => {
                     panic!("unexpected Binance account deactivation")
                 }

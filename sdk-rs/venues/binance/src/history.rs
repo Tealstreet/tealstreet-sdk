@@ -4,11 +4,11 @@ use crate::account::{order_side, order_type, venue_error};
 use crate::sign::{Query, Signed};
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderStatus};
 use safe_cex_engine::paging::{self, PageRow, RangeWalk, Step, WindowOrder};
-use safe_cex_engine::{
-    CommandId, Cx, LogLevel, Method, Query as Read, Response, TimerId, json, num,
-};
+use safe_cex_engine::{CommandId, Cx, Method, Query as Read, Response, TimerId, json, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
@@ -583,8 +583,7 @@ impl BinanceFutures {
             Step::ChunkDone => *delay = Some(cx.set_timer(INCOME_CHUNK_DELAY_MS)),
             Step::Finished => {
                 if walk.truncated {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                         format!(
                             "Income history is INCOMPLETE: {} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.",
                             walk.exhausted_chunks
