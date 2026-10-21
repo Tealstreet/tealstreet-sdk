@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deserializeCommandError,
   exchangeErrorCategory,
+  exchangeErrorTags,
   isErrorReported,
   markErrorReported,
   serializeCommandError,
@@ -224,3 +225,14 @@ describe('command outcome serialization', () => {
   });
 });
 
+describe('exchange error tags', () => {
+  it('tags only the closed set of classified fields', () => {
+    expect(
+      exchangeErrorTags(
+        Object.assign(new Error('rejected key'), { kind: 'authInvalid', outcome: 'rejected', venueCode: '10003' }),
+      ),
+    ).toEqual({ error_kind: 'authInvalid', error_category: 'auth_invalid', error_outcome: 'rejected', venue_code: '10003' });
+    expect(exchangeErrorTags(Object.assign(new Error('x'), { kind: 'made-up', venueCode: 'has spaces and more' }))).toEqual({});
+    expect(exchangeErrorTags('plain text')).toEqual({});
+  });
+});

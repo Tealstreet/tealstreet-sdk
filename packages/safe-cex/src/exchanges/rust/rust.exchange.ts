@@ -38,11 +38,10 @@ import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
-import bs58 from 'bs58';
-
-import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
+import type { ExchangeErrorKind } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
@@ -56,11 +55,8 @@ import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverri
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import {
-  ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
   hasAsterDEXV3AuthContext,
-  isAsterDEXAddress,
   isAsterDEXStpMode,
-  isAsterDEXV3PrivateKey,
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
@@ -157,6 +153,35 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 ]);
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
+
+/**
+ * A hosted account: no local secret, signed by the browser through `remoteSigner`.
+ * Paradex and Polymarket keep their signing key in `key`, and Lighter runs read-only
+ * without one, as TS does, so none of them is keyless here.
+ */
+export const isKeylessRemoteSigned = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  Boolean(options.remoteSigner) &&
+  !options.secret &&
+  !(name === 'asterdex' && options.auth?.privateKey) &&
+  !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
+
+/**
+ * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
+ * account stays on the TS venue, which merges spot markets into the perp account; the
+ * engine's perp venue does not, and refuses the option when constructed directly. A
+ * keyless remote-signed account stays on TS too, which signs through the browser.
+ */
+export const runsOnRustEngine = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  options.engine === 'rust' &&
+  isRustVenue(name) &&
+  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
+  !isKeylessRemoteSigned(name, options);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -571,27 +596,18 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(this.options, this.name);
-    if (this.name === 'breakoutprop' && (!this.options.key || !this.options.secret)) {
-      throw new Error('BreakoutProp market data requires a legacy DXtrade username and password');
-    }
     if (this.name === 'paradex') {
       if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
         throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
       }
     }
-    if (this.name === 'asterdex' && !this.options.publicDataOnly) {
-      const auth = resolveAsterDEXV3AuthContext(this.options);
-      if (
-        resolveAsterDEXApiVersion(this.options) === 'v1' &&
-        isAsterDEXAddress(this.options.key) &&
-        isAsterDEXV3PrivateKey(this.options.secret) &&
-        !auth.userAddress
-      ) {
-        throw new Error(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
-      }
-    }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error('Rust Hyperliquid currently supports perpetual markets only');
+      throw new Error(
+        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
+      );
+    }
+    if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
+      throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     if (
       ![
@@ -603,42 +619,13 @@ export class RustEngineExchange extends BaseExchange {
         'coinbase',
         'coinbasespot',
         'polymarket',
+        'breakoutprop',
       ].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
-    }
-    if (this.name === 'polymarket' && !this.isPublicDataOnly) {
-      if (!/^(?:0x)?[a-fA-F0-9]{64}$/.test(this.options.key)) {
-        throw new Error('Polymarket requires a local 32-byte wallet private key');
-      }
-      const { apiKey, apiSecret, apiPassphrase, signerType = 0, funderAddress } = this.options.polymarket ?? {};
-      const credentials = [apiKey, apiSecret, apiPassphrase];
-      if (
-        credentials.some((value) => value !== undefined) &&
-        !credentials.every((value) => typeof value === 'string' && value.trim())
-      ) {
-        throw new Error('Polymarket requires all three L2 API credentials together');
-      }
-      if (![0, 1, 2, 3].includes(signerType)) throw new Error('Invalid Polymarket signature type');
-      if ((signerType !== 0 || funderAddress !== undefined) && !/^0x[a-fA-F0-9]{40}$/.test(funderAddress ?? '')) {
-        throw new Error('Polymarket requires a valid funder address for non-EOA signing');
-      }
-    }
-    if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
-      if (!this.options.applicationId || !/^[A-Za-z0-9_-]+$/.test(this.options.applicationId)) {
-        throw new Error('Orderly private applicationId is required');
-      }
-      for (const key of [this.options.key, this.options.secret]) {
-        const encoded = key?.replace(/^ed25519:/, '') ?? '';
-        try {
-          if (bs58.decode(encoded).length !== 32) throw new Error();
-        } catch {
-          throw new Error('Orderly requires base58-encoded 32-byte key and secret');
-        }
-      }
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -790,7 +777,8 @@ export class RustEngineExchange extends BaseExchange {
           this.emitter.emit('deactivate');
         },
         onStartupFailed: (detail) => {
-          this.startupFailure ??= new Error(detail.message);
+          // Keeps kind/venueCode so start() and validateAccount can branch on them.
+          this.startupFailure ??= new ExchangeError(detail.message, detail);
           for (const wake of this.startupWaiters) wake();
         },
       },
@@ -1252,10 +1240,17 @@ export class RustEngineExchange extends BaseExchange {
         clearTimeout(timeout);
         resolve(result);
       };
+      // Venues log the reason just before StartupFailed in the same batch; let the typed failure win.
       const onError = (message: unknown) =>
-        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        queueMicrotask(() => {
+          if (this.startupFailure) return loaded();
+          finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        });
       const loaded = () => {
-        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.startupFailure) {
+          const { kind } = this.startupFailure as { kind?: ExchangeErrorKind };
+          return finish(kind ? { error: this.startupFailure.message, kind } : { error: this.startupFailure.message });
+        }
         if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
         if (
           started &&

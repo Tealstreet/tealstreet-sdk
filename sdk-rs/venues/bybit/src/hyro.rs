@@ -137,7 +137,7 @@ impl BybitLinear {
         let key = match key {
             Ok(key) => key,
             Err(message) => {
-                cx.done(command, Err(message));
+                cx.fail(command, not_sent(message));
                 return;
             }
         };
@@ -192,7 +192,7 @@ impl BybitLinear {
         let creates = match planned {
             Ok(planned) => planned,
             Err(message) => {
-                cx.done(command, Err(message));
+                cx.fail(command, not_sent(message));
                 return;
             }
         };
@@ -270,7 +270,7 @@ impl BybitLinear {
         let creates = match creates {
             Ok(creates) => creates,
             Err(error) => {
-                cx.done(command, Err(error));
+                cx.fail(command, not_sent(error));
                 return;
             }
         };
@@ -403,9 +403,18 @@ impl BybitLinear {
                 create.link
             )
         };
+        // An explicit refusal only proves nothing happened if no earlier create landed.
+        let error = safe_cex_engine::VenueError::new(message.clone());
+        let error = match (rejected, group.index) {
+            (true, 0) => error
+                .kind(safe_cex_engine::ErrorKind::Rejected)
+                .outcome(safe_cex_engine::Outcome::Rejected),
+            (true, _) => error,
+            (false, _) => error.outcome(safe_cex_engine::Outcome::Unknown),
+        };
         for command in group.waiters.drain(..) {
             cx.command_error(command, message.clone());
-            cx.done(command, Err(message.clone()));
+            cx.fail(command, error.clone());
         }
         group.running = false;
         if rejected {
@@ -733,4 +742,9 @@ impl BybitLinear {
             }
         }
     }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: String) -> safe_cex_engine::VenueError {
+    safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }

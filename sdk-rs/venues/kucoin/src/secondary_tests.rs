@@ -25,7 +25,7 @@ fn probe(venue: Kucoin) -> ProbeVenue<Kucoin, impl FnMut(&mut Kucoin, &mut Cx<'_
                 None,
                 Pending::Markets {
                     rows: vec![],
-                    invalid: false,
+                    malformed: Default::default(),
                 },
             );
         }
@@ -37,7 +37,7 @@ fn probe(venue: Kucoin) -> ProbeVenue<Kucoin, impl FnMut(&mut Kucoin, &mut Cx<'_
             ArrayAt::EnvelopeField("data"),
             Pending::Markets {
                 rows: vec![],
-                invalid: false,
+                malformed: Default::default(),
             },
         );
     })

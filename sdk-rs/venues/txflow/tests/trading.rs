@@ -5,6 +5,7 @@ use safe_cex_venue_txflow::{Options, TxFlow};
 use serde_json::{Value, json};
 #[path = "support/account.rs"]
 mod account_support;
+use account_support::{Plain, failures};
 const NOW: f64 = 1_800_000_000_000.0;
 fn engine() -> Engine<TxFlow> {
     let mut e = Engine::new(TxFlow::new(Options {
@@ -15,7 +16,7 @@ fn engine() -> Engine<TxFlow> {
     }));
     e.start(NOW);
     let request = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -36,7 +37,7 @@ fn engine() -> Engine<TxFlow> {
             },
         },
     );
-    let mut startup = e.drain_actions().collect::<Vec<_>>();
+    let mut startup = e.drain_plain().collect::<Vec<_>>();
     let ticker = startup
         .iter()
         .find_map(|action| match action {
@@ -53,7 +54,7 @@ fn engine() -> Engine<TxFlow> {
         r#"{"success":true,"code":0,"data":{"instrumentId":1}}"#,
     );
     let timer = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == NOW + 25.0).then_some(timer)
@@ -63,7 +64,7 @@ fn engine() -> Engine<TxFlow> {
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    startup.extend(e.drain_actions());
+    startup.extend(e.drain_plain());
     let initial = startup;
     let node = initial
         .iter()
@@ -92,7 +93,7 @@ fn engine() -> Engine<TxFlow> {
             },
         );
     }
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e
 }
 fn opts(value: Value) -> PlaceOrderOpts {
@@ -110,7 +111,7 @@ fn place(e: &mut Engine<TxFlow>, command: u32, orders: Vec<PlaceOrderOpts>) {
     );
 }
 fn write(e: &mut Engine<TxFlow>) -> HttpRequest {
-    e.drain_actions()
+    e.drain_plain()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
             _ => None,
@@ -164,7 +165,7 @@ fn batch_receipts_match_all_caller_and_generated_ids_before_signed_http() {
     let mut generated = limit("unused");
     generated.client_order_id = None;
     place(&mut e, 91, vec![limit("caller-receipt"), generated]);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     let (write_at, request) = actions
         .iter()
         .enumerate()
@@ -228,7 +229,7 @@ fn complete_batch_preflight_rejects_invalid_last_shape_without_writes() {
             ),
         ],
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -264,7 +265,7 @@ fn request_preserves_caller_id_and_confirm_executed_but_ack_never_fabricates_oid
         r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
     );
     assert!(
-        !e.drain_actions()
+        !e.drain_plain()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
     );
     assert!(e.store().orders().is_empty());
@@ -281,7 +282,7 @@ fn authoritative_read_resolves_native_ids_in_requested_order() {
         r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
     );
     let read = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::Http(r)
                 if r.body
@@ -296,7 +297,7 @@ fn authoritative_read_resolves_native_ids_in_requested_order() {
     let order = |oid: u64, cloid: &str| json!({"asset":1,"oid":oid,"side":"B","orderType":"Limit","limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":cloid,"state":"Open","tif":"GTC","children":null});
     let body = json!({"success":true,"code":0,"data":[order(22,"second"),order(11,"first")],"hasMore":false}).to_string();
     ack(&mut e, &read, 200, &body);
-    assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Ok(ids)}) if ids == r#"["11","22"]"#)));
+    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Ok(ids)}) if ids == r#"["11","22"]"#)));
 }
 #[test]
 fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
@@ -337,7 +338,7 @@ fn unconfirmed_consensus_success_is_not_executed_success() {
     ));
 }
 #[test]
-fn explicit_rejections_stay_plain_and_lost_responses_are_unknown() {
+fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
     let mut e = engine();
     place(&mut e, 7, vec![limit("rejected")]);
     let r = write(&mut e);
@@ -347,10 +348,13 @@ fn explicit_rejections_stay_plain_and_lost_responses_are_unknown() {
         200,
         r#"{"status":"err","message":"Insufficient margin"}"#,
     );
-    assert!(e.drain_actions().any(
-        |a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
-        if error == "Insufficient margin; reconcile before any resubmission")
-    ));
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        error.legacy_text(),
+        "Insufficient margin; reconcile before any resubmission"
+    );
+    // A top-level `status: "err"` is TxFlow's explicit refusal.
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
 
     let mut e = engine();
     place(&mut e, 8, vec![limit("lost")]);
@@ -362,8 +366,18 @@ fn explicit_rejections_stay_plain_and_lost_responses_are_unknown() {
             error: "connection reset",
         },
     );
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, error })
-        if error.message == "connection reset; reconcile before any resubmission" && error.outcome == Some(Outcome::Unknown))));
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        error.message,
+        "connection reset; reconcile before any resubmission"
+    );
+    assert_eq!(
+        (error.kind, error.outcome),
+        (
+            Some(safe_cex_engine::ErrorKind::Network),
+            Some(Outcome::Unknown)
+        )
+    );
 }
 #[test]
 fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
@@ -371,7 +385,7 @@ fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
     place(&mut e, 7, vec![limit("same-id")]);
     let _r = write(&mut e);
     place(&mut e, 8, vec![limit("same-id")]);
-    assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("Duplicate"))));
+    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("Duplicate"))));
 }
 #[test]
 fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protection() {
@@ -421,7 +435,7 @@ fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protect
         202,
         r#"{"status":"pending","txHash":"fixture"}"#,
     );
-    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let mut actions = e.drain_plain().collect::<Vec<_>>();
     if let Some(timer) = actions.iter().find_map(|a| {
         if let Action::SetTimer { timer, at_ms } = a {
             (*at_ms == NOW + 110.0).then_some(*timer)
@@ -430,7 +444,7 @@ fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protect
         }
     }) {
         e.handle(NOW + 110.0, Event::TimerFired { timer });
-        actions.extend(e.drain_actions());
+        actions.extend(e.drain_plain());
     }
     assert!(
         !actions
@@ -445,7 +459,7 @@ fn reserved_prefix_and_utf8_limit_fail_before_write() {
         let mut e = engine();
         place(&mut e, 7, vec![limit(&id)]);
         assert!(
-            !e.drain_actions()
+            !e.drain_plain()
                 .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange")))
         );
     }
@@ -459,7 +473,7 @@ fn bybit_controls_and_unknown_slippage_are_not_silently_dropped() {
         let mut e = engine();
         place(&mut e, 7, vec![self::opts(opts)]);
         assert!(
-            !e.drain_actions()
+            !e.drain_plain()
                 .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange")))
         );
     }
@@ -486,7 +500,7 @@ fn unimplemented_request_commands_complete_with_errors_instead_of_hanging() {
         },
     ] {
         e.handle(NOW, Event::Command(command));
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if !error.is_empty())).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
@@ -502,7 +516,7 @@ fn fetch_leverage_returns_confirmed_account_rails_in_wrapper_json_shape() {
         account_support::NOW + 10.0,
         r#"{"channel":"activeAssetData","data":{"coin":"1","leverage":{"mode":"hedge","type":"isolated","long_value":5,"short_value":8}}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         account_support::NOW + 20.0,
         Event::Command(Command::FetchLeverage {
@@ -511,7 +525,7 @@ fn fetch_leverage_returns_confirmed_account_rails_in_wrapper_json_shape() {
         }),
     );
     let result = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 91,
@@ -552,10 +566,40 @@ fn caller_id_preflight_preserves_shared_shape_duplicate_and_split_errors() {
     for (orders, expected) in cases {
         let mut e = engine();
         place(&mut e, 7, orders);
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error == expected)), "{actions:?}");
     }
+}
+
+#[test]
+fn preflight_refusals_are_never_sent() {
+    let mut e = engine();
+    place(&mut e, 7, vec![limit("same-id")]);
+    let _r = write(&mut e);
+    place(&mut e, 8, vec![limit("same-id")]);
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert!(error.message.contains("Duplicate"));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn a_single_action_error_status_is_a_rejection() {
+    let mut e = engine();
+    place(&mut e, 7, vec![limit("rejected")]);
+    let r = write(&mut e);
+    ack(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":[{"error":"Insufficient margin"}]}}}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        error.legacy_text(),
+        "Insufficient margin; reconcile before any resubmission"
+    );
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
 }
 
 #[test]
