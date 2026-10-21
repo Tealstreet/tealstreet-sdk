@@ -206,3 +206,15 @@ Full-position TP/SL snaps the position's native volume to `volUnit` before
 signing. A singleton Rust placement uses `/order/submit` with the regular
 450 ms FIFO pacing; multi-order batches retain the batch entitlement fallback
 and 1.5 s scaled pacing, including the existing throttle cooldown.
+
+## Rust snapshot and plan reads
+
+The Rust adapter supports independent `fetchOrderBook(symbol, limit)` public
+snapshots without subscriptions. Default 100, SDK range 1–1000; amounts and
+cumulative totals use base units via captured `contractSize`. Versions remain
+exact strings. A query cannot replace a live book. Public endpoint failures do
+not provide evidence of invalid account credentials. Callers control retries.
+
+Opening plan sides 1/3 are reduce-only only when the native flag says so;
+closing sides 2/4 and dedicated position stops are reduce-only. Native fill-fee
+sign is retained until debit/rebate conventions are independently verified.
