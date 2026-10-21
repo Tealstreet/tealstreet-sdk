@@ -566,12 +566,14 @@ their behavior; no application option shape changes.
 Bitunix failures now carry the existing typed error fields, preserving native
 codes/messages; HTTP status owns classification over a contradictory body code.
 Preflight/signing failures are `notSent`. After a dispatched write, transport
-loss, HTTP408/5xx, malformed acknowledgements and undocumented native errors
+loss, HTTP 408/5xx, malformed acknowledgements and undocumented native errors
 remain `unknown`. A failed replacement-reconciliation read does not imply that
 a new write was sent.
 
-Batch failure retains observed accepted IDs and confirmed effects; independent
-later legs may still run before the aggregate rejects once. An effective leg
+Batch failure retains observed accepted IDs and confirmed effects. After partial
+batch-place acknowledgement failures, independent later legs may still run before
+the aggregate rejects once; transport, HTTP, envelope and cancel failures reject
+immediately. An effective leg
 clears an aggregate `notSent`/`rejected` label, while an uncertain leg keeps
 `unknown`. Reconcile partial IDs/effects before retrying. Only definitive
 rejection may enter the existing recovery-write path; no automatic caller retry
@@ -651,8 +653,7 @@ venue messages they replace. Codes available on landing: `ExchangeError`
 (#1424) on rejected **command promises**, with `kind` (`rejected`,
 `invalidInput`, `authInvalid`, `authExpired`, `authPermission`, `rateLimited`,
 `network`, `timeout`, `venueUnavailable`, `unsupported`, `internal`), `outcome`
-(`notSent`, `rejected`, `unknown`) and `venueCode`, for the classified venue families listed in B9
-in B9; host `error.code` (`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`,
+(`notSent`, `rejected`, `unknown`) and `venueCode`, for the classified venue families listed in B9; host `error.code` (`COMMAND_TIMEOUT`, `COMMAND_DEADLINE_FAILED`,
 `ENGINE_PROTOCOL_ERROR`, `ENGINE_DISPOSED`, `ENGINE_DEAD`, #1375). Through the
 web worker the error is a plain `Error` carrying those fields, so match
 `(err as { kind?: string }).kind`, never `instanceof ExchangeError`. The
