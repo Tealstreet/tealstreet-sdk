@@ -170,7 +170,7 @@ async fn native_host_resumes_http_only_after_the_signature_event_preserving_jwt(
     let (commands, inbox) = mpsc::unbounded_channel();
     let host = tokio::spawn(
         safe_cex_native::Host::new(
-            safe_cex_engine::Engine::new(SignedVenue),
+            safe_cex_engine::test_support::seeded_engine(SignedVenue),
             SignedTransport { signer, outgoing },
         )
         .run(inbox, std::time::Duration::from_secs(1), |_| {}, |_| {}),

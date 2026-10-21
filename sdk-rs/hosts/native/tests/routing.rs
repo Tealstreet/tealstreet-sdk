@@ -4,7 +4,7 @@
 #![allow(clippy::result_large_err)]
 
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{Command, Engine, HttpRequest, Method, Notice, RequestId, SocketId};
+use safe_cex_engine::{Command, HttpRequest, Method, Notice, RequestId, SocketId};
 use safe_cex_native::{
     Host, HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
     SocketChannel, SocketChannelRule, Transport,
@@ -1666,12 +1666,12 @@ async fn routed_signed_network_notices(
 ) -> Vec<Notice> {
     let signed_url =
         format!("{origin}/private?api_key={NOTICE_API_KEY}&signature={NOTICE_SIGNATURE}");
-    let engine = Engine::new(safe_cex_venue_binance::BinanceFutures::new(
-        safe_cex_venue_binance::Options {
+    let engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_binance::BinanceFutures::new(safe_cex_venue_binance::Options {
             public_data_only: true,
             ..Default::default()
-        },
-    ));
+        }),
+    );
     let transport = NoticeNetwork {
         network,
         signed_url: signed_url.clone(),

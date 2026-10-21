@@ -33,7 +33,7 @@ fn answer_request(engine: &mut Engine<Cryptocom>, request: RequestId, body: &str
     engine.handle(0.0, Event::HttpEnd { request });
 }
 fn ready() -> (Engine<Cryptocom>, SocketId) {
-    let mut engine = Engine::new(Cryptocom::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -67,7 +67,7 @@ fn nested_chunked_lists_seed_markets_and_tickers() {
 #[test]
 fn automatic_seed_budget_ignores_early_books_and_counts_unique_channels() {
     for market_count in [200, 351] {
-        let mut engine = Engine::new(Cryptocom::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
             public_data_only: true,
             ..Default::default()
         }));
@@ -185,7 +185,8 @@ fn valuations_distinguish_current_funding_and_index_instruments() {
 }
 #[test]
 fn code_after_array_is_checked_before_committing() {
-    let mut engine = Engine::new(Cryptocom::new(Options::default()));
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options::default()));
     engine.start(0.0);
     answer(
         &mut engine,
@@ -237,7 +238,8 @@ fn malformed_streamed_array_never_commits_empty() {
         r#"{"result":{"data":[,]},"code":0}"#,
         r#"{"result":{"data":[{},]},"code":0}"#,
     ] {
-        let mut engine = Engine::new(Cryptocom::new(Options::default()));
+        let mut engine =
+            safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options::default()));
         engine.start(0.0);
         answer(&mut engine, body);
         assert!(!engine.store().loaded().markets);
@@ -246,7 +248,7 @@ fn malformed_streamed_array_never_commits_empty() {
 
 #[test]
 fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
-    let mut engine = Engine::new(Cryptocom::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -313,7 +315,7 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
 }
 #[test]
 fn startup_stops_when_no_instrument_or_ticker_row_maps() {
-    let mut engine = Engine::new(Cryptocom::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -330,7 +332,7 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("instrument")
     )));
 
-    let mut engine = Engine::new(Cryptocom::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

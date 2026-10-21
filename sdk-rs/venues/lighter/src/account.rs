@@ -728,12 +728,14 @@ impl Lighter {
         self.account.sync = Some(cx.set_poll_timer(2_000.0));
     }
 
-    pub(crate) fn account_auth(&self, now: f64) -> Result<String, String> {
+    pub(crate) fn account_auth(&self, cx: &Cx<'_, Pending>) -> Result<String, String> {
         self.account
             .signer
             .as_ref()
             .ok_or("Lighter signer unavailable")?
-            .auth_token((now / 1000.0).floor() as u64 + 60)
+            .auth_token((cx.now / 1000.0).floor() as u64 + 60, |bytes| {
+                cx.fill_signing_entropy(bytes).map_err(|_| ())
+            })
     }
     pub(crate) fn account_snapshot_serial(&self) -> Option<u64> {
         self.account
@@ -779,7 +781,7 @@ impl Lighter {
         revision: u64,
         coverage: SnapshotCoverage<String>,
     ) {
-        let auth = match self.account_auth(cx.now) {
+        let auth = match self.account_auth(cx) {
             Ok(a) => a,
             Err(e) => {
                 self.account.orders_inflight = false;
@@ -865,7 +867,7 @@ impl Lighter {
             socket,
             format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
         );
-        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,e)}
+        match self.account_auth(cx){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,e)}
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -2420,7 +2422,7 @@ impl Lighter {
     }
     fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
         let auth =
-            match self.account_auth(cx.now) {
+            match self.account_auth(cx) {
                 Ok(auth) => auth,
                 Err(e) => {
                     cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,

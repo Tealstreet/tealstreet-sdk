@@ -199,7 +199,8 @@ impl BybitLinear {
         let creates: Result<Vec<Create>, String> = creates
             .into_iter()
             .map(|(base, opts, stop_body)| {
-                let link = safe_cex_crypto::uuid::uuid()?;
+                let link =
+                    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?;
                 // Publish the sent lot, not the original unsplit quantity.
                 #[derive(Deserialize)]
                 struct Lot {
@@ -420,7 +421,9 @@ impl BybitLinear {
         if rejected {
             if group.index == 0 {
                 self.trading.hyro.groups.remove(key);
-            } else if let Ok(link) = safe_cex_crypto::uuid::uuid() {
+            } else if let Ok(link) =
+                safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+            {
                 create.identity_dispatched = false;
                 create.link = link.clone();
                 create.optimistic.client_order_id = Some(link);

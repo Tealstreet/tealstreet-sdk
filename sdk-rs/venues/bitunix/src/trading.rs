@@ -682,7 +682,10 @@ impl BitunixFutures {
                 payload.client_id = Some(if let Some(id) = &o.client_order_id {
                     id.clone()
                 } else {
-                    format!("ts_{}", safe_cex_crypto::uuid::uuid()?)
+                    format!(
+                        "ts_{}",
+                        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+                    )
                 });
                 Ok((PLACE, payload))
             })

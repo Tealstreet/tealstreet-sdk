@@ -2,7 +2,7 @@ use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
 use safe_cex_venue_polymarket::{Options, Polymarket};
 #[test]
 fn unsupported_histories_fail_explicitly_without_network_or_empty_success() {
-    let mut e = Engine::new(Polymarket::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -41,7 +41,7 @@ fn unsupported_histories_fail_explicitly_without_network_or_empty_success() {
 }
 #[test]
 fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitive() {
-    let mut e = Engine::new(Polymarket::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options::default()));
     for command in [
         Command::SetLeverage {
             command: 1,
@@ -102,7 +102,7 @@ fn account_uses_signer_identity_and_never_funder_or_private_io() {
             "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
         ),
     ] {
-        let mut e = Engine::new(Polymarket::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
             key: key.map(str::to_owned),
             public_data_only: true,
             polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
@@ -125,7 +125,7 @@ fn account_uses_signer_identity_and_never_funder_or_private_io() {
 
 #[test]
 fn stp_queries_and_setters_reject_without_network_or_state_mutation() {
-    let mut e = Engine::new(Polymarket::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options::default()));
     for command in [
         Command::FetchStpMode { command: 8 },
         Command::SetStpMode {
@@ -147,7 +147,7 @@ fn stp_queries_and_setters_reject_without_network_or_state_mutation() {
 
 fn engine_with_market() -> Engine<Polymarket> {
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-    let mut e = Engine::new(Polymarket::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options::default()));
     e.store_mut().set_markets(vec![Market {
         id: "107505882767731489358349912513945399560393482969656700824895970500493757150417".into(),
         symbol: "election-Yes".into(),

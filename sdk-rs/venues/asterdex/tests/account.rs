@@ -30,7 +30,7 @@ impl H {
     }
     fn pending_mode() -> Self {
         let mut h = Self {
-            engine: Engine::new(AsterDex::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
                 key: Some("documented-key".into()),
                 secret: Some("synthetic-secret".into()),
                 ..Default::default()

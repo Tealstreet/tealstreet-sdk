@@ -301,8 +301,9 @@ fn valid_client_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b".:/_-".contains(&b))
 }
-fn mint() -> Result<String, String> {
-    safe_cex_crypto::uuid::uuid().map(|id| format!("ts{id}"))
+fn mint(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+        .map(|id| format!("ts{id}"))
 }
 fn working(t: StopTriggerType) -> Result<&'static str, String> {
     match t {
@@ -518,7 +519,7 @@ impl WeexFutures {
             };
             let id = match &o.client_order_id {
                 Some(id) => id.clone(),
-                None => mint()?,
+                None => mint(cx)?,
             };
             if !seen.insert(format!("native:{id}")) {
                 return Err("WEEX duplicate generated clientOrderId".into());

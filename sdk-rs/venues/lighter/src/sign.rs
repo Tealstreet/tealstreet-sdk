@@ -148,12 +148,6 @@ fn append_words(bytes: &mut Vec<u8>, words: &[u64]) {
     }
 }
 
-fn hedged_sign(input: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
-    hedged_sign_with_entropy(input, key, |bytes| {
-        getrandom::getrandom(bytes).map_err(|_| ())
-    })
-}
-
 fn hedged_sign_with_entropy(
     input: &[u8],
     key: &[u8],
@@ -287,8 +281,12 @@ impl Signer {
         })
     }
 
-    pub fn auth_token(&self, deadline_seconds: u64) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, None)
+    pub fn auth_token(
+        &self,
+        deadline_seconds: u64,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
+    ) -> Result<String, String> {
+        self.auth_token_inner(deadline_seconds, None, fill)
     }
 
     /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
@@ -297,13 +295,14 @@ impl Signer {
         deadline_seconds: u64,
         schnorr_nonce: SchnorrNonce,
     ) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, Some(schnorr_nonce))
+        self.auth_token_inner(deadline_seconds, Some(schnorr_nonce), |_| Err(()))
     }
 
     fn auth_token_inner(
         &self,
         deadline_seconds: u64,
         schnorr_nonce: Option<SchnorrNonce>,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
     ) -> Result<String, String> {
         bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
         let message = format!(
@@ -314,7 +313,7 @@ impl Signer {
         data.resize(data.len().div_ceil(8) * 8, 0);
         let signature = match schnorr_nonce {
             Some(nonce) => schnorr_sign(&data, self.key.as_ref(), nonce)?,
-            None => hedged_sign(&data, self.key.as_ref())?,
+            None => hedged_sign_with_entropy(&data, self.key.as_ref(), fill)?,
         };
         Ok(format!("{message}:{}", safe_cex_crypto::hex(&signature)))
     }
@@ -324,8 +323,9 @@ impl Signer {
         tx: &Transaction,
         nonce: u64,
         now_ms: u64,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
     ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, None)
+        self.sign_inner(tx, nonce, now_ms, None, fill)
     }
 
     /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
@@ -336,7 +336,7 @@ impl Signer {
         now_ms: u64,
         schnorr_nonce: SchnorrNonce,
     ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, Some(schnorr_nonce))
+        self.sign_inner(tx, nonce, now_ms, Some(schnorr_nonce), |_| Err(()))
     }
 
     fn sign_inner(
@@ -345,6 +345,7 @@ impl Signer {
         nonce: u64,
         now_ms: u64,
         schnorr_nonce: Option<SchnorrNonce>,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
     ) -> Result<SignedTransaction, String> {
         safe_integer(nonce, "transaction nonce")?;
         let expired_at = now_ms
@@ -409,7 +410,7 @@ impl Signer {
         let preimage = signing_preimage(&data, &attrs)?;
         let signature_bytes = match schnorr_nonce {
             Some(nonce) => schnorr_sign(&preimage, self.key.as_ref(), nonce)?,
-            None => hedged_sign(&preimage, self.key.as_ref())?,
+            None => hedged_sign_with_entropy(&preimage, self.key.as_ref(), fill)?,
         };
         let signature = safe_cex_crypto::hex(&signature_bytes);
         let encoded = safe_cex_crypto::encode(&signature_bytes, safe_cex_crypto::Encoding::Base64);

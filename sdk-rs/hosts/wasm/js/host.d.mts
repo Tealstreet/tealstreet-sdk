@@ -216,11 +216,21 @@ export class EngineDisposedError extends Error {
 }
 
 export interface EngineHostOptions {
+  /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
+   * Defaults to Web Crypto. A seed here never replaces signing entropy. */
+  entropy?: EntropyProvider;
+  /** Independent signing nonces/salts. Defaults to the engine's cryptographic source.
+   * Deterministic signing requires this explicit override, intended for fixtures. */
+  signingEntropy?: EntropyProvider;
   /** Whole-command waiting deadline, including pagination; default 120000 ms.
    * Positive safe integer <= 2147483647. Long history queries may need a larger value.
    * Expiry does not cancel venue work or retry it. */
   commandTimeoutMs?: number;
 }
+
+/** Return exactly length bytes; the host copies the returned storage.
+ * Throwing or returning another type/length fails the draw. */
+export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
@@ -282,6 +292,9 @@ export interface EngineConstruction {
 }
 
 export interface WasmEngineLike {
+  /** Configure before startup; optional only for older/fake engines without injection. */
+  setEntropy?(source: EntropyProvider): void;
+  setSigningEntropy?(source: EntropyProvider): void;
   /** Resolved account choices, without credentials. Older hosts may omit it. */
   construction?(): string;
   accountId?(): string | undefined;

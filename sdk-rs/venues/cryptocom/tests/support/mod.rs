@@ -31,7 +31,7 @@ impl Harness {
     }
     fn start(options: Options, policy: PublicFeedPolicy, instruments: &str) -> Self {
         let mut h = Self {
-            engine: Engine::new(Cryptocom::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options)),
             actions: vec![],
             failures: vec![],
             now: 1_610_000_000_000.0,

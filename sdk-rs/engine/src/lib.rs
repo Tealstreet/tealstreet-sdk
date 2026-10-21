@@ -7,6 +7,7 @@ pub mod coverage;
 pub mod credentials;
 pub mod de;
 pub mod engine;
+pub mod entropy;
 pub mod error;
 pub mod fence;
 pub mod json;
@@ -21,7 +22,7 @@ pub mod public_feed;
 pub mod socket;
 pub mod startup;
 pub mod store;
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod time;
 pub mod url;

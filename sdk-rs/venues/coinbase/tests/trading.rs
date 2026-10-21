@@ -49,7 +49,7 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut e = Engine::new(Coinbase::new(options).unwrap());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Coinbase::new(options).unwrap());
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),

@@ -1,8 +1,6 @@
 mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, OrderType, PositionSide};
-use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, SocketChannel, SocketId,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::*;
 
@@ -16,7 +14,7 @@ const ORDERS: &str = r#"{"code":0,"data":[{"id":"parent","symbol":"BTC-USDT","st
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
@@ -754,7 +752,7 @@ fn private_pong_reports_rounded_one_way_latency() {
 
 #[test]
 fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         omni_key_seed: Some("11".repeat(65)),
@@ -778,7 +776,7 @@ fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
 
 #[test]
 fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
@@ -975,7 +973,7 @@ fn malformed_terminal_ws_identity_cannot_remove_or_tombstone_a_live_order() {
 
 #[test]
 fn account_identity_can_be_read_before_start_without_an_omni_seed() {
-    let mut engine = Engine::new(ApexOmni::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),

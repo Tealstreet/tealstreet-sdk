@@ -1,6 +1,6 @@
 //! Live last prices value the balance like TS; reported PnL covers absent or placeholder quotes.
 mod support;
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, TimerId};
+use safe_cex_engine::{Action, Event, HttpRequest, Notice, TimerId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::{MARKETS, TestEngine, response};
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","initialMargin":"100","maintenanceMargin":"20"}}"#;
@@ -20,7 +20,7 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let mut h = Self {
-            engine: Engine::new(ApexOmni::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 passphrase: Some("pass".into()),

@@ -55,7 +55,7 @@ pub fn bootstrap_with_meta(
     wallet: &str,
     meta: &str,
 ) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some(wallet.into()),
         secret: Some(format!("0x{:064x}", 1)),

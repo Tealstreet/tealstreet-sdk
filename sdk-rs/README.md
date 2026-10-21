@@ -28,6 +28,32 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Host entropy
+
+Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a
+`Result`, and `None` is a typed `InvalidInput` error before startup. Registry
+`build` takes the same provider argument. Native production callers use
+`safe_cex_native::production_entropy()`; the frame server supplies it automatically.
+Replay hosts can replace identity using `Host::with_entropy` before startup.
+
+WASM construction binds WebCrypto without new crypto dependencies. `EngineHost`
+uses the same secure defaults in browser workers, Cloudflare Workers, and the
+Node/Bun SDK paths used by CLI and exchange-mcp. Its optional fourth argument
+accepts `entropy: (length: number) => Uint8Array`; the host copies and validates
+those bytes for client IDs, jitter and receipt sessions. `signingEntropy` is a
+separate, explicit test override. Seeding identity never changes Lighter signing
+nonces, Coinbase JWTs or other request-signing randomness. No provider or seed is
+serialized into account options or commands. Both raw WASM setters and native
+setters reject replacement after startup. Provider failures stop ID/signature
+creation before send; retry jitter alone uses the nominal delay on failure.
+
+Rust correctness and performance replays each install an isolated identity
+stream from the exact tape SHA-256. The landed Bitget SHA/domain/counter byte
+stream and full raw-ID comparisons are retained. Production crypto globals are
+never patched, and signing stays cryptographic unless a test explicitly supplies
+its separate source. Test fixtures deliberately inject both sources through the
+`test-support` feature; production constructors have no implicit seeded mode.
+
 ## Account transport routing
 
 Venues emit real URLs and logical socket roles; the core never chooses a proxy.

@@ -16,7 +16,7 @@ impl Harness {
         Self::with_catalog(private, CATALOG)
     }
     fn with_catalog(private: bool, catalog: &str) -> Self {
-        let mut e = Engine::new(Grvt::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
             public_data_only: !private,
             key: Some("fixture-key".into()),
             ..Options::default()

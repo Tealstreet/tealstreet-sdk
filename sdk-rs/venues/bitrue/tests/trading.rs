@@ -21,7 +21,7 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut e = Engine::new(Bitrue::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
             key: Some("replay-key".into()),
             secret: Some("replay-secret".into()),
             ..Options::default()

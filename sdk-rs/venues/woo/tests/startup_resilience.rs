@@ -6,7 +6,7 @@ use support::jittered;
 
 const CATALOGUE: &str = r###"{"success":true,"rows":[{"broken":true},{"symbol":"SPOT_BTC_USDT"},{"symbol":"PERP_BTC_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01}]}"###;
 fn public_engine() -> Engine<Woo> {
-    Engine::new(Woo::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -74,7 +74,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(Woo::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         application_id: Some("scripted-app".into()),

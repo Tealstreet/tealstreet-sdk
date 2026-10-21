@@ -306,14 +306,24 @@ fn malformed_signer_inputs_and_transaction_bounds_fail_closed() {
 }
 
 #[test]
-fn live_signing_draws_fresh_nonce_and_signatures_verify() {
+fn host_signing_draws_fresh_nonce_and_signatures_verify() {
     let signer = signer();
     let tx = Transaction::Create {
         order: simple_order(),
         builder: None,
     };
-    let first = signer.sign(&tx, 7, 1_700_000_000_000).unwrap();
-    let second = signer.sign(&tx, 7, 1_700_000_000_000).unwrap();
+    let first = signer
+        .sign(&tx, 7, 1_700_000_000_000, |bytes| {
+            bytes.fill(1);
+            Ok(())
+        })
+        .unwrap();
+    let second = signer
+        .sign(&tx, 7, 1_700_000_000_000, |bytes| {
+            bytes.fill(2);
+            Ok(())
+        })
+        .unwrap();
     assert_ne!(first.signature, second.signature);
     assert_eq!(first.data, second.data);
     let key = [1u8].into_iter().chain([0; 39]).collect::<Vec<_>>();

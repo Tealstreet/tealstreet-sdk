@@ -36,7 +36,7 @@ fn pending() -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
     pending_with(CATALOGUE)
 }
 fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         testnet: true,
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),

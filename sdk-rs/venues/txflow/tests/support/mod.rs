@@ -28,7 +28,7 @@ pub fn ready_with_timers(
     ticker: &str,
 ) -> (Engine<TxFlow>, SocketId, SocketId, Vec<(TimerId, f64)>) {
     let mut pending = Vec::new();
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()

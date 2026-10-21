@@ -1,7 +1,5 @@
 mod support;
-use safe_cex_engine::{
-    Action, Command, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId,
-};
+use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::TestEngine;
 
@@ -24,7 +22,7 @@ impl Harness {
     }
 
     fn with_policy(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(ApexOmni::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
             public_data_only: true,
             ..Default::default()
         }));

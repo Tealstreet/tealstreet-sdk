@@ -6,7 +6,7 @@ use safe_cex_venue_mexc::{MexcFutures, Options};
 
 const NOW: f64 = 1_700_000_000_000.;
 fn engine(options: Options) -> Engine<MexcFutures> {
-    let mut e = Engine::new(MexcFutures::new(options));
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(options));
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,
