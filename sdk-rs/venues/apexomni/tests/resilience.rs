@@ -97,7 +97,7 @@ fn order_ids(e: &TestEngine) -> Vec<&str> {
 }
 fn warned(actions: &[Action], text: &str) -> bool {
     actions.iter().any(|a| {
-        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) if message.contains(text))
+        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(text))
     })
 }
 fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
@@ -349,7 +349,7 @@ fn account_rows_on_a_skipped_market_are_reported_once_as_hidden() {
     let hidden = e
         .drain_actions()
         .filter(|a| {
-            matches!(a, Action::Notice(Notice::Log { level: LogLevel::Error, message })
+            matches!(a, Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
                 if message.contains("position on ETH-USDT is hidden"))
         })
         .count();
@@ -379,7 +379,7 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
     assert!(socket.is_some());
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
             if message.contains("Invalid OmniKey seed") && message.contains("placement is disabled")
     )));
     answer(&mut e, http, 30.0, ACCOUNT, &list(&[PARENT]));

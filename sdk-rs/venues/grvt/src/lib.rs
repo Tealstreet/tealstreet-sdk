@@ -4,13 +4,14 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -294,7 +295,11 @@ impl Grvt {
             }
             Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
-                cx.log(LogLevel::Warning, "GRVT instrument read failed");
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "GRVT instrument read failed",
+                );
                 self.startup_retry.failed(cx, ());
             }
             Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
@@ -690,8 +695,7 @@ impl Venue for Grvt {
         ) && let Ok(signer) = sign::signer_address(secret)
             && !signer.eq_ignore_ascii_case(expected)
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::CONFIG_INVALID,
                 format!(
                     "Provided signer address ({expected}) does not match wallet address ({signer}). Make sure {signer} is tagged to your API key in the GRVT UI."
                 ),
@@ -915,8 +919,9 @@ impl Venue for Grvt {
                 failed,
             } => {
                 if failed || rows.is_empty() {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "Invalid or empty GRVT instrument catalog",
                     );
                     self.startup_retry.failed(cx, ());
@@ -1185,7 +1190,11 @@ impl Venue for Grvt {
                 interval: timeframe,
             } => {
                 if interval(timeframe).is_none() {
-                    cx.log(LogLevel::Error, timeframe.unsupported("GRVT"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        timeframe.unsupported("GRVT"),
+                    );
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {

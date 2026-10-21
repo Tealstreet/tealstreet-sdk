@@ -1136,9 +1136,12 @@ fn a_mismatched_configured_signer_warns_without_blocking_startup() {
             },
         ));
         e.start(0.0);
-        let warned = e.drain_actions().any(|a| matches!(a,
-            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
-                if message.contains("does not match wallet address")));
+        let warned = e.drain_actions().any(|a| {
+            matches!(a,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Warn
+                    && event.message.contains("does not match wallet address"))
+        });
         assert_eq!(warned, warns, "{configured}");
     }
 }

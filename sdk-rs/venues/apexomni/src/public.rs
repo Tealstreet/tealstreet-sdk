@@ -1,13 +1,15 @@
 //! Market discovery and one quote socket with reference-counted consumers.
 use crate::{ApexOmni, Pending, public_wire as wire};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -183,8 +185,9 @@ impl ApexOmni {
         if self.public.unlisted.contains(symbol)
             && self.public.unlisted_reported.insert(symbol.to_owned())
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::ROW_SKIPPED,
                 format!(
                     "ApeX {kind} on {symbol} is hidden because its market metadata is malformed"
                 ),
@@ -208,7 +211,7 @@ impl ApexOmni {
                 "perpetualContract",
             ])),
         ) {
-            cx.log(LogLevel::Warning, error);
+            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
             self.public.seed_retry.failed(cx, ());
         }
     }
@@ -332,8 +335,9 @@ impl ApexOmni {
                             (id, _) => id,
                         })
                         .collect::<Vec<_>>();
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
                     );
                 }
@@ -403,7 +407,11 @@ impl ApexOmni {
     ) {
         match request {
             Request::Markets { .. } => {
-                cx.log(LogLevel::Warning, format!("ApeX markets: {error}"));
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("ApeX markets: {error}"),
+                );
                 self.public.seed_retry.failed(cx, ());
             }
             Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
@@ -765,7 +773,11 @@ impl ApexOmni {
                 interval: i,
             } => {
                 let Some((native, _)) = interval(i) else {
-                    cx.log(LogLevel::Error, i.unsupported("ApeX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("ApeX"),
+                    );
                     return Ok(());
                 };
                 let was_trades = self.public.candles.keys().any(|(s, _)| s == &symbol);

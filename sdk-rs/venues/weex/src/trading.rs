@@ -2,12 +2,14 @@
 //! subsequent steps run only after the previous acknowledgement. Writes are
 //! never retried, including when the transport cannot determine their outcome.
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
     OrderType, PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -773,7 +775,11 @@ impl WeexFutures {
             && self.trading.jobs.values().any(|job| job.refresh)
         {
             if self.trading.jobs.contains_key(id) {
-                cx.log(LogLevel::Error, "WEEX command ID is already in flight");
+                cx.notice(
+                    Level::Error,
+                    code::COMMAND_UNSUPPORTED,
+                    "WEEX command ID is already in flight",
+                );
             } else {
                 reject(
                     cx,
@@ -1107,7 +1113,11 @@ impl WeexFutures {
             return None;
         }
         if self.trading.jobs.contains_key(&id) {
-            cx.log(LogLevel::Error, "WEEX command ID is already in flight");
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                "WEEX command ID is already in flight",
+            );
             return None;
         }
         self.trading.jobs.insert(
