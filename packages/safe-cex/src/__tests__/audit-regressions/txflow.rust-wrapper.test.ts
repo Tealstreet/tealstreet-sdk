@@ -11,6 +11,7 @@ const options: ExchangeOptions = { key: '', secret: '0x' + 'ab'.repeat(32), appl
 describe('TxFlow account identity at the worker seam', () => {
   it.each([{ orderId: '42' }, { status: [OrderStatus.Closed] }, { orderId: '42', status: [OrderStatus.Closed] }])('rejects unsupported order-history filters before dispatch: %j', async (filters) => {
     const exchange = new RustEngineExchange('txflow', options, new DefaultStore());
+    adoptEngineCapabilities(exchange);
     const command = vi.spyOn(exchange as never as { command: (args: unknown) => Promise<unknown> }, 'command');
     try {
       await expect(exchange.fetchHistoricalOrders(filters)).rejects.toThrow('TxFlow order history does not support orderId or status filters');

@@ -40,6 +40,10 @@ pub struct HyroConfig {
 }
 
 impl HyroConfig {
+    pub(crate) fn is_demo(&self) -> bool {
+        self.mode.as_deref() == Some("demo")
+    }
+
     pub fn resolve(self, testnet: bool) -> Result<EndpointOptions, VenueError> {
         // The missing-production fallback checks livenet even for testnet accounts.
         let selected =
