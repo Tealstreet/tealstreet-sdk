@@ -201,6 +201,9 @@ The WEEX metadata-hook catch-up checks #1675 at `22c6c6133f2`; its incoming
 B8 and hook inventory updates are retained.
 The GRVT builder-error catch-up checks #1679 at `bcf9fc37afe`; the validated
 helper and required NX migration below use that actual merge.
+The first REST-book batch checks Backpack #1680 (`6e14b6a0ef9`) and MEXC
+#1681 (`3db712f0446`) at their actual merges; other pending venue query PRs
+are not covered by these pins.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -302,6 +305,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1670 / `ce906e136` | In-scope WEEX fill-history rows with parsed empty `id`/`tradeId`/`fillId` remain skipped without invented identity. Useful peers resolve with one per-query Warn `row.skipped` (`field: id`) and owned `history.incomplete`. Error-only logging retains the semantic marker, while the ordinary row diagnostic is suppressed. Strict parsing and method shapes remain; B11 consumers must not complete coverage for retained partial or flagged-empty rows. |
 | #1675 / `22c6c6133` | WEEX now reports `onReadAndMetadata`, so the existing ready private `updateSymbolMetadata(symbol)` hook performs a fresh native configuration read even for cached/flat symbols. Malformed reads reject while good rails remain; public-only skips private I/O. Explicit reads and caller arguments stay unchanged; await capability readiness and preserve ordinary hook rejection handling. |
 | #1679 / `bcf9fc37a` | Definitive GRVT builder refusals carry validated flat code/reason/raw caps through host errors and SDK command RPC. The SDK-root `builderAuthorizationOf(error)` helper works without class identity. **REQUIRED:** migrate NX's live class-only handler, preserving reason-specific modal/toast, cleanup/rethrow and approval reload. Upgrade sender/receiver together; keep the command's existing outcome and do not replay a write. |
+| #1680 / `6e14b6a0e` | Backpack adds unsigned request-owned REST `fetchOrderBook` and advertises the capability. Native queries need no market seed, credentials or subscription; caller limit is ignored, lexical price IDs and native side order remain, `total` is zero and no update ID is returned. Standalone JSON admission uses the precise shared book-command feature. |
+| #1681 / `3db712f04` | Standalone MEXC family builds now admit JSON `fetchOrderBook`, matching their existing capability and native REST implementation. Mapper, limits, base-unit scaling, signing/auth and rate policy are unchanged. The existing family-artifact gate now probes actual JSON admission for advertised queries without dispatching I/O. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -319,7 +324,7 @@ execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 | B5 | **Resolved; no tealstreet-next edit** | #1388 (merged `f9e21a8f37`), #1450 (merged `5ff7ebde6c`) | **Socket health and recovery.** Before #1450, `store.socketHealth` was never written by frames, `reconnect`/`recoverAfterOffline` were no-ops/`true`, `getAllSockets()` returned `[]` and `authFailureStreak` stayed 0. #1450 writes `socketHealth` through the TS summarizer on every socket change and every 5 s, makes `reconnect`/`recoverAfterOffline` close open engine sockets (code 1006) so the venue reopens them (`false` only after dispose or engine death), returns per-channel handles from `getAllSockets` (`isReadonlyFallbackActive()` is always `false`), raises `authFailureStreak` on credential rejections, and teaches the CLI's `findKeyRejection` the engine's wording. Every caller listed then works unchanged; a private stream counts as healthy for 60 s of silence (TS: 20 s), and a socket already in venue backoff (up to 30 s) is not hurried. | web `exchangeAccountController.ts:3391-3415`, `utils/exchange/getWebSocketStatus.ts:27-55`, `getExchangeAppearsConnected.tsx:34`, `components/connectionStatus/{ConnectionStatusIndicator.tsx:39,97,ReconnectingBanner.tsx:157-261}`, `nudges/hostedServerForInstability.ts:66`, `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82`, `order/createLimitOrder.ts:221-222`; CLI `packages/cli-core/src/commands/BaseCommand.ts:173`, `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `apps/cli/src/repl.ts:2831,2903`; exchange-server `public-exchange-manager.ts:95,459` | all Rust venues |
 | B6 | **Resolved; no tealstreet-next edit** | #1441 (merged `ae3a1fc122`) | **In-process shared public data.** Rust accepts exchange-server's `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) unchanged. `serveInProcessPublicData` (`exchanges/rust/publicFeed.ts`) speaks the shared-feed protocol over an in-memory port pair, so the account ingests natively and validates the catalog as with `RustPublicFeedProvider`. Like the TS adapter it is lenient: private startup continues after 30 s without a loaded source, and account markets the source has not listed yet are tolerated (their book/candle requests wait). It follows the server's re-attaching source across public-exchange restarts and re-announces a changed catalog. Real field mismatches still fail, so the source must run on the same engine (at cutover the public exchange is Rust too). One hub per source broadcasts changed tickers every 250 ms. Websocket gateways still reject. Optional exchange-server edit: `createSharedPublicDataSource` keys by venue only, so testnet accounts receive the mainnet source; Rust ignores it for testnet and runs its own feed, while TS prices testnet off mainnet. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
 | B7 | **Resolved; no tealstreet-next edit** | #1439 (merged `0ced7ccf1e`) | **Per-account proxy token across async engine work.** Each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
-| B8 | **Partial: remaining SDK methods** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. Still open: REST book queries for Backpack/Crypto.com/GRVT/Paradex/WEEX, Hyperliquid `scheduleCancel`. Definitive GRVT builder failures now preserve validated code/reason/raw caps through command replies; the NX structural-handler migration below remains required. WEEX metadata refresh now uses native `onReadAndMetadata` with the shared bridge path. See [Cutover tail audit](RUST_CUTOVER_TAIL_AUDIT.md). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | remaining SDK method gaps |
+| B8 | **Partial: remaining SDK methods** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets), #1680 (merged `6e14b6a0ef9`), #1681 (merged `3db712f0446`) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. Still open: REST book queries for Crypto.com/GRVT/Paradex/WEEX, Hyperliquid `scheduleCancel`. Backpack REST queries now work; MEXC standalone JSON admission matches its existing query implementation. Definitive GRVT builder failures now preserve validated code/reason/raw caps through command replies; the NX structural-handler migration below remains required. WEEX metadata refresh now uses native `onReadAndMetadata` with the shared bridge path. See [Cutover tail audit](RUST_CUTOVER_TAIL_AUDIT.md). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | remaining SDK method gaps |
 | B9 | **Resolved in the SDK; caller migration remains** | #1377, #1383, #1401, #1424, #1482, #1483, #1484, #1583 (merged); venue PRs merged for the listed families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix (#1589), blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a specific classified kind over text patterns. **Left (tealstreet-next):** pass `opts.classified` for ordinary command/legacy errors; for coded diagnostics, adopt #1583's `engine-event`/metadata, `processEvent` and `processHealth`. Suppress a duplicate legacy diagnostic only when its matching event metadata is present. Preserve auth/reload behavior and the caller inventory below. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
 | B10 | **Resolved, given B1** | #1375 (merged `b6c4f006a6`) | **candle-server public exchanges never started.** `fetchMarkets` (`exchange-pool.ts:265`) now starts the engine and waits ≤30 s for native data; it still needs the engine loadable in that image (B1). See [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
 | B11 | **Open: NX history ingestion and coverage** | #1542, #1554, #1593, #1591; SDK transport/mapping #1666 (merged `bba1f43126c`) | **Partial history must not become complete coverage.** Command-owned partial arrays now retain their assertion through SDK worker/hosted JSON, SDK derived history and MCP serialization. Upgrade SDK sender and receiver together. NX must inspect completeness before transforming rows, preserve incomplete derived axes and leave coverage uncompleted. See [Incomplete history](#incomplete-history-1542-1554). | NX `ExchangeServerWorker` (matching SDK upgrade), `collectAccountAxes`, `runHistoricalWindow`; MCP consumers (flagged envelope) | affected Rust history reads and any fill/position axis derived from them |
@@ -1593,8 +1598,13 @@ negative caller searches do not cover third-party or dynamic user code.
 Ordinary NX books use `OrderbookComponentWorker.tsx:26-62` →
 `utils/market/listenOrderBook.ts:316-324,412-424` → SDK
 `OrderBookSubscriptionsHandler.ts:47-78` → `exchange.listenOrderBook`.
-No direct application/CLI/MCP/service/mobile producer of the five missing
-public REST snapshot methods was found in the searched NX roots. TS WEEX
+No direct application/CLI/MCP/service/mobile producer of these public REST
+snapshot methods was found in the searched NX roots. This includes the MEXC
+recheck for #1681; it does not exclude venue-internal TS calls. Without an
+external public provider, MEXC
+`mexc.exchange.ts:606-610` delegates to its TS listener, which requires a market
+and calls `parent.fetchOrderBook(symbol, 100)` before the first callback and
+subscription (`mexc.ws-public.ts:128-153`). TS WEEX
 internally queries a snapshot before subscribing and after sequence gaps;
 its native stream path is a separate contract. NX metadata marks WEEX
 dev-only for new-account selection, but an existing instance can still subscribe
@@ -2431,6 +2441,33 @@ are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberate
 keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
 caller signatures are unchanged.
 
+### Backpack REST book queries (#1680)
+
+The existing SDK `fetchOrderBook(symbol, limit?)` now dispatches an unsigned
+Backpack `GET /api/v1/depth?symbol=<encoded caller symbol>` with the existing
+broker header. The native query needs neither cached markets nor a live
+subscription. The shared SDK capability-readiness behavior remains: an existing
+pending startup is awaited, and no-start/failed-start or terminal-engine errors
+must still be handled. An unseeded sans-I/O native test does not establish
+pre-start SDK readiness.
+
+Caller limit is ignored as in TS. Both sides are required arrays of two-string
+levels; server order, duplicate prices, lexical price-string IDs and zero
+quantities are retained. Each level has `total: 0`; no `lastUpdateId` is exposed.
+Empty or one-sided arrays succeed, while malformed structures or invalid/nonfinite
+financial rows reject the whole query. Callers keep ordinary typed error
+handling, with `notSent` public failures and non-auth classification even for
+credential-looking endpoint refusals. Usable HTTP429 Retry-After metadata uses
+the existing shared one-hour cap; no automatic failed-query retry is added.
+
+REST success/failure completes its own command without publishing or repairing
+the subscribed book. Native regressions preserve the next WS delta and an
+outstanding query across unsubscribe/resubscribe. Keep subscription readiness,
+sequence continuity and disconnected-book invalidation as separate contracts.
+No direct default NX app/SDK CLI/MCP snapshot producer was found; Backpack's TS
+socket seed uses its own XHR rather than this method. Manual/third-party SDK
+query parity remains supported without a new caller argument.
+
 ### MEXC port-review snapshot and plan corrections
 
 Rust MEXC `fetchOrderBook(symbol, limit)` now returns an independent public REST
@@ -2440,6 +2477,17 @@ an exact string `lastUpdateId`. Default depth is 100; the SDK accepts 1–1000
 levels. Query results never replace subscribed books. Rate limits fail with a
 retry delay; callers choose whether to retry. Public endpoint refusals cannot
 invalidate private account credentials.
+
+#1681 repairs standalone MEXC JSON admission for that existing implementation.
+Its engine dependency now enables the precise `command-order-book` decoder
+introduced by #1680, which retains AsterDEX/Polymarket admission. No MEXC mapper,
+capability, limit, financial unit or HTTP/auth/rate policy changes here. The new
+standalone regression decodes actual JSON into an unsigned native depth GET,
+retains version `9007199254740993` and base amounts, and leaves the live book
+absent. The family-artifact test separately probes the advertised command in
+isolated builds; its returned sans-I/O requests are not dispatched. Neither
+proof establishes NX runtime adoption or changes the TS listener's internal
+snapshot-seed path described above.
 
 Plan orders now expose the native reduce-only flag or closing-side semantics;
 opening plans no longer appear reduce-only. Position stops stay reduce-only.

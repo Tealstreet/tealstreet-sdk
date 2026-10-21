@@ -357,3 +357,84 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("ticker")
     )));
 }
+
+#[test]
+fn rest_book_success_and_failure_leave_live_book_ticker_and_account_untouched() {
+    let (mut engine, socket) = ready();
+    engine.handle(
+        1.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSD-PERP".into(),
+        }),
+    );
+    engine.handle(2.0,Event::WsMessage {socket,text:r#"{"id":-1,"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["99","4","1"]],"asks":[]}]}}"#});
+    engine.drain_actions().for_each(drop);
+    let before = (
+        engine.store().tickers().to_vec(),
+        engine.store().balance().clone(),
+        engine.store().positions().to_vec(),
+        engine.store().orders().to_vec(),
+    );
+    for (command, status, body) in [
+        (
+            7,
+            200,
+            r#"{"code":0,"result":{"data":[{"bids":[["1","2"]],"asks":[]}]}}"#,
+        ),
+        (8, 503, "down"),
+    ] {
+        engine.handle(
+            3.0,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: "BTCUSD-PERP".into(),
+                limit: Some(1),
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(actions.len(), 1);
+        let Action::Http(request) = &actions[0] else {
+            panic!("unsigned public query")
+        };
+        engine.handle(
+            4.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        if status == 200 {
+            assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:7,result}) if serde_json::from_str::<serde_json::Value>(result).unwrap()["bids"][0]["price"]==1.0)));
+        } else {
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 8, .. })
+            )));
+        }
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_)
+                | Action::WsConnect { .. }
+                | Action::WsClose { .. }
+                | Action::SetTimer { .. }
+        )));
+        assert_eq!(engine.book("BTCUSD-PERP").unwrap().bids(), [(99.0, 4.0)]);
+        assert!(engine.book("BTCUSD-PERP").unwrap().asks().is_empty());
+        assert_eq!(
+            (
+                engine.store().tickers().to_vec(),
+                engine.store().balance().clone(),
+                engine.store().positions().to_vec(),
+                engine.store().orders().to_vec()
+            ),
+            before
+        );
+    }
+    engine.handle(5.0,Event::WsMessage {socket,text:r#"{"id":-1,"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["98","5","1"]],"asks":[]}]}}"#});
+    assert_eq!(engine.book("BTCUSD-PERP").unwrap().bids(), [(98.0, 5.0)]);
+}

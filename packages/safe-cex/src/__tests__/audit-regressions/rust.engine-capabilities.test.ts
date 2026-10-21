@@ -25,7 +25,7 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
     findOrderByClientOrderId: { found: false, definitive: true },
     fetchOrderBook: name === 'grvt'
       ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [] }
-      : name === 'backpack'
+      : ['backpack', 'cryptocom'].includes(name)
       ? { bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [] }
       : { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
   };
@@ -167,6 +167,18 @@ describe('Rust bridge routes from the engine capability record', () => {
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTC_USDT_PERP', limit: 1 }),
+    ]);
+    expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
+  });
+
+  it('routes Crypto.com REST books from the native capability without subscribing', async () => {
+    const { exchange, commands } = fixture({}, 'cryptocom');
+    await exchange.start();
+    await expect(exchange.fetchOrderBook('BTCUSD-PERP', 1)).resolves.toEqual({
+      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [],
+    });
+    expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
+      expect.objectContaining({ symbol: 'BTCUSD-PERP', limit: 1 }),
     ]);
     expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
   });
