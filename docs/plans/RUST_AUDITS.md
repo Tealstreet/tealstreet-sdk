@@ -519,7 +519,9 @@ Remaining resilience and completeness findings are independent of request parity
   only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
   while disconnected~~ (futures retirement immediately invalidates subscribed
   books and publishes consumer clearing before retry; current interests replay
-  once on replacement); secondary read keys dropped; `data: null` envelopes treated as
+  once on replacement); ~~secondary read keys dropped~~ (validated native options
+  now reach the GET signer, with api-key secondary egress in SDK/native plans;
+  mutations/private login remain primary and public discovery stays unsigned); `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
   as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL
