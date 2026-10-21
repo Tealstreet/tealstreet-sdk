@@ -138,6 +138,15 @@ pub mod code {
     /// Counted once per report: one skipped row, or one summary of several.
     pub const ROW_SKIPPED: &str = "row.skipped";
 
+    /// A replyless command diagnostic; attributed commands use CommandError.
+    pub const COMMAND_FAILED: &str = "command.failed";
+    /// A command ID was reused while the original command remains in flight.
+    pub const COMMAND_DUPLICATE: &str = "command.duplicate";
+    /// Startup is still missing required data after its watchdog deadline.
+    pub const STARTUP_INCOMPLETE: &str = "startup.incomplete";
+    /// A trusted public-feed update was rejected by validation.
+    pub const PUBLIC_FEED_REJECTED: &str = "public_feed.rejected";
+
     // Not counted. Hosts and apps match these codes, never message text.
     /// A socket dropped and the venue is reconnecting it.
     pub const WS_DISCONNECTED: &str = "ws.disconnected";

@@ -207,13 +207,13 @@ fn collateral_tokens_without_a_valuation_market_keep_native_amount_and_load_bala
         message(&mut engine, socket, 2000.0, state);
         let warnings = engine
             .drain_actions()
-            .filter(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market")))
+            .filter(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market")))
             .count();
         assert_eq!(engine.store().balance().total, 300.0);
         assert_eq!(engine.store().balance().free, 300.0);
         assert_eq!(warnings, 1);
         message(&mut engine, socket, 2100.0, state);
-        assert!(!engine.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market"))));
+        assert!(!engine.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market"))));
     }
 }
 

@@ -866,10 +866,7 @@ fn stale_headers_cannot_resurrect_session_while_refresh_login_is_incomplete() {
     assert!(!h.requests.iter().any(|r| r.url.ends_with("open_orders")));
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -892,10 +889,7 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
     assert!(!h.requests.iter().any(|r| r.url.ends_with("login")));
     assert!(!h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -1427,10 +1421,7 @@ fn skip_warnings(h: &Harness, kind: &str) -> usize {
     h.actions
         .iter()
         .filter(|a| {
-            matches!(a, Action::Notice(safe_cex_engine::Notice::Log {
-                level: safe_cex_engine::LogLevel::Warning,
-                message,
-            }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
+            matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
         })
         .count()
 }
