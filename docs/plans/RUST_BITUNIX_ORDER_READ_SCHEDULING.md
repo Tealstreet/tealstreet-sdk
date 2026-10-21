@@ -35,3 +35,24 @@ Verification: all seven regressions fail against the original scheduling source
 and pass with the correction. Bitunix/Binance native tests pass (427), together
 with strict Clippy, formatting and bans. Independent implementation and fixture
 reviews are clear. CI and the final landing guard remain required.
+
+CI run39653858321 exposes 44 private checkpoint differences after reconciliation
+can run sooner. Independent full raw audit confirms every missing row was already
+terminal on the tape, and every open/common-ID row is completely equal at all 16
+checkpoints. Exact declarations use tape SHA
+`e8d90edafa93fabcbd9cefb0e84be32a077399e0e3a2f4a906999d9d48a3850c`
+and these native terminal records:
+
+| Native ID | Terminal time (ms) | Status | Affected checkpoint indices |
+| --- | ---: | --- | --- |
+| 1001 | 2400 | closed | 1, 2, 3, 4 |
+| second | 3600 | canceled | 1, 2, 3, 4 |
+| 1003 | 6000 | canceled | 4 |
+| 1004 | 9200 | canceled | 7, 8 |
+| 1005 | 9600 | canceled | 7, 8 |
+
+The 44 literal keys include positional shifts at checkpoint4; no still-open row
+is missing. Thirteen command results, seven writes and signature/protocol checks
+agree. HTTP read counts increase with reconciliation, so total transport receipts
+are not asserted identical. The overseer approved exact terminal-retention paths;
+no tape, comparison, budget, integrity or threshold change is included.
