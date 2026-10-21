@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { CommandDeadlineError, CommandProtocolError, CommandTimeoutError, DEFAULT_COMMAND_TIMEOUT_MS, EngineDeadError, EngineDisposedError, EngineHost } from './host.mjs';
 import { ReplayClock } from '../../../harness/tape.mjs';
@@ -479,6 +480,29 @@ test('a history.incomplete event naming the command marks its rows incomplete', 
 
 const coverageEvent = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },
+});
+
+test('native WEEX incomplete failure fixture reaches only its pending caller before rejection', async () => {
+  const event = JSON.parse(readFileSync(new URL('../../../venues/weex/tests/fixtures/incomplete-query-event.json', import.meta.url), 'utf8'));
+  const events = [[], []];
+  const r = rig();
+  const first = r.host.command({ op: 'fetchIncome' }, { onEvent: (event) => {
+    assert.equal(r.host.commands.size, 2, 'marker arrives before either completion');
+    events[0].push(event);
+  } });
+  const second = r.host.command({ op: 'fetchIncome' }, { onEvent: (event) => events[1].push(event) });
+  const rejected = assert.rejects(first, /page reset/);
+  r.host.run(JSON.stringify([
+    event,
+    { op: 'done', command: 1, error: 'page reset' },
+    { op: 'done', command: 2, result: '[]' },
+  ]));
+  await rejected;
+  const { op, ...notice } = event;
+  assert.equal(op, 'event');
+  assert.deepEqual(events, [[notice], []]);
+  assert.equal((await second).incomplete, undefined);
+  assert.equal(r.host.commands.size, 0);
 });
 
 test('per-command event observer is installed before synchronous dispatch and sees coverage before done', async () => {

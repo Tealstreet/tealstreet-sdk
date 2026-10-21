@@ -136,6 +136,12 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
 
 ## Primary Endpoints
 
+Rust income queries emit `history.incomplete` with the actual native command
+ID before partial completion or failure. This includes range chunk failures,
+opaque cursors and chunk/lifetime budgets. The host routes coverage to the
+owning caller and marks successful partial arrays incomplete; non-range read
+failures still reject, while range failures retain the existing continuation.
+
 - Markets: `GET /capi/v3/market/exchangeInfo`
 - Tickers: `GET /capi/v3/market/ticker/24hr`,
   `GET /capi/v3/market/ticker/bookTicker`
