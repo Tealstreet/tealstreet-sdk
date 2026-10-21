@@ -1926,6 +1926,24 @@ export class RustEngineExchange extends BaseExchange {
     return market.limits.leverage.max;
   };
 
+  override scheduleCancel = async (time?: number | null): Promise<void> => {
+    // Validate before either bridge serializes: JSON would turn NaN/Infinity into a clear.
+    if (time != null) {
+      if (typeof time !== 'number' || !Number.isSafeInteger(time))
+        throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
+      if (time < virtualClock.getCurrentTimeMs() + 5_000)
+        throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
+    }
+    if (this.routesToWorker) {
+      await this.callWorker('scheduleCancel', time);
+      return;
+    }
+    const ready = this.capabilitiesFor('scheduleCancel');
+    const capabilities = ready instanceof Promise ? await ready : ready;
+    if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
+    await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
+  };
+
   fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
     const ready = this.capabilitiesFor('fetchOrderBook');
     const capabilities = ready instanceof Promise ? await ready : ready;

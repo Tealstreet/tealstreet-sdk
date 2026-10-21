@@ -119,6 +119,12 @@ enum CommandIn {
         command: u32,
         mode: StpMode,
     },
+    #[cfg(feature = "command-schedule-cancel")]
+    ScheduleCancel {
+        command: u32,
+        #[serde(default)]
+        time: Option<f64>,
+    },
     FetchAccountTier {
         command: u32,
     },
@@ -313,6 +319,11 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            #[cfg(feature = "command-schedule-cancel")]
+            CommandIn::ScheduleCancel { command, time } => Self::Venue {
+                command,
+                action: crate::VenueAction::ScheduleCancel { time_ms: time },
+            },
             CommandIn::RefreshMarkets { command } => Self::Venue {
                 command,
                 action: crate::VenueAction::RefreshMarkets,

@@ -60,3 +60,24 @@ Plan audit refinement before implementation:
   boundary; no new cross-worker/process coordinator is implied.
 - Handle schedule replies before generic trading reconciliation so order reads
   cannot imply arming or mutate settings; malformed/unknown ACKs fail closed.
+
+Implementation phase evidence (before current landing integration):
+- Original unsupported JSON/capability/control regression: seven groups fail
+  before implementation; eleven native schedule groups and ordinary-write queue
+  regression now pass. Hyperliquid + Binance: 431 tests pass.
+- Eight independent TS signer vectors pin exact MessagePack, action hash and
+  signature for both networks, vault/no vault and arm/clear. Rust verifier uses
+  typed fixture records; no runtime JSON-value signer path is introduced.
+- SDK: 31 focused tests pass, including invalid values before worker/JSON,
+  synchronized native command time, void completion, worker route, native
+  uncertainty and capability refusal. Typecheck and explicit ESLint pass.
+- Host: 87 command/diagnostic/wire tests pass. Independent review exposed direct
+  host NaN -> JSON null -> clear; the original host fails the new zero-dispatch
+  regression, and the narrow safe-integer ingress fix passes.
+- Default combined-host capability fixture passes. Strict touched-crate Clippy
+  passes; native and SDK/host independent reviews are clear after fixes.
+
+Remaining integration phase: actual shared landing + #1689; preserve Backpack
+and MEXC precise decoder additions, add schedule probe alongside the family book
+probe, refresh focused checks and exact-head CI before any merge. No API closure
+or caller deployment is inferred from a draft PR.

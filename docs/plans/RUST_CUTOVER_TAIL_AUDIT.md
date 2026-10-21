@@ -78,11 +78,14 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    currently refuse `fetchOrderBook`; streaming subscriptions are separate.
    Add native query/typed book responses and capability bits for supported
    products, without synthesizing a REST answer from a possibly absent stream.
-4. **Hyperliquid dead-man switch:** TS `scheduleCancel(time?: number | null)`
-   sends a signed account-wide action; Rust inherits the base rejection and
-   has no matching engine command. Preserve cancellation semantics, UTC-ms
-   validation, signing/vault handling, worker ownership and uncertain-write
-   errors; no automatic retry or rescheduling.
+4. ~~**Hyperliquid dead-man switch:**~~ Rust perpetuals now route
+   `scheduleCancel(time?: number | null)` through a precise standalone decoder
+   and append-only capability. Native safe UTC-ms deadlines are checked at
+   admission and signing, with vault/network signing vectors independently pinned
+   against TS. SDK and direct-host validation prevents nonfinite JSON values from
+   clearing the switch. Existing write/worker ownership preserves uncertain
+   outcomes; no automatic retry, rescheduling or lifecycle arming/clear.
+   [Implementation and evidence](RUST_HYPERLIQUID_SCHEDULE_CANCEL.md).
 5. **Browser cold-start evidence:** add actual browser module-load/compile/
    instantiation observations for shipped artifacts. Existing Node metrics and
    public replay timing do not supply this proof. CI owns artifact builds and

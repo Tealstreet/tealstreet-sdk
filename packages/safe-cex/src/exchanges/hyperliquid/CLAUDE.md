@@ -384,6 +384,24 @@ omitting `action.time` from the signed L1 action; never serialize `time: null`.
 The request uses the normal monotonic nonce, vault-aware phantom-agent
 signature, `/exchange` transport, and propagates transport/upstream errors.
 
+Rust perpetuals expose the same method through the native `scheduleCancel`
+capability (wire flag 25); the spot adapter refuses it. SDK and direct host ingress
+reject unsafe numbers before JSON can turn them into a clear. Native admission
+and dispatch both recheck the five-second deadline using the synchronized host
+clock. Controls share the existing 334 ms FIFO, signer nonce and vault-aware
+signer with ordinary writes, without requiring a catalogue or builder check.
+Nonce sharing remains bounded to one native process or WASM module.
+
+Native completion requires a 2xx `status: ok` object response with `type: default`
+and absent/null data or an empty `statuses` list. This conservative control ACK
+shape is inferred from the existing SDK control response, not a live captured
+schedule ACK. An explicit native `err` string below HTTP 500 (except 408) proves
+rejection; transport loss, 408, 5xx and malformed ACKs remain uncertain. Both
+native and worker/host interruption paths preserve that uncertainty, perform no
+retry and never claim account/order reads prove the switch is armed. Preflight
+and signing refusals remain `notSent`. Native success resolves the SDK's void
+promise without mutating orders, settings or a local scheduling flag.
+
 Lifecycle ownership is deliberately explicit. Safe-cex does not auto-arm,
 refresh, or clear this switch during startup/disposal, and there is no implicit
 account setting. A strategy or UI that opts in must periodically move the
