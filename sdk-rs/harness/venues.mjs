@@ -1739,6 +1739,7 @@ export const VENUES = {
   },
   bingx: {
     rust: 'bingx',
+    virtualPrivateClock: true,
     ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >=
