@@ -174,3 +174,13 @@ it.each([0, -1, NaN, Infinity, 0.5, 2_147_482_648])('rejects an invalid Rust dea
     .toThrow('rustCommandTimeoutMs must be a positive integer');
   expect(subscribe).not.toHaveBeenCalled();
 });
+
+it('treats a lost catalogue-refresh worker reply as a read timeout', async () => {
+  vi.useFakeTimers();
+  const exchange = account(true, { publicDataOnly: true, extra: { rustCommandTimeoutMs: 25 } });
+  const failure = exchange.callMethodInWorker('refreshMarkets').catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(1025);
+  const error = await failure;
+  expect(error).toMatchObject({ code: 'COMMAND_TIMEOUT', command: 'refreshMarkets' });
+  expect(error).not.toHaveProperty('outcome');
+});

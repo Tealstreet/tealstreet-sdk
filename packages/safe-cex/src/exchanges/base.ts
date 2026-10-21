@@ -310,6 +310,7 @@ export type EngineSnapshot = {
 
 /** Methods a main-thread Rust mirror forwards whole to its worker's engine. */
 export const WORKER_FORWARDED_METHODS = [
+  'refreshMarkets',
   'placeOrder',
   'placeOrders',
   'placeOrderWithClientOrderId',
@@ -347,6 +348,7 @@ export const WORKER_OPTIONAL_METHODS = [
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
+  'refreshMarkets',
   'fetchPositions',
   'fetchBalance',
   'fetchPositionMode',
@@ -481,6 +483,7 @@ export interface Exchange {
   scheduleCancel: (time?: number | null) => Promise<void>;
   fetchOHLCV: (opts: OHLCVOptions) => Promise<Candle[]>;
   fetchHistoricalFills: (opts: ExecutionsOptions) => Promise<Execution[]>;
+  refreshMarkets: () => Promise<{ added: Market[]; removed: Market[] }>;
   fetchMarkets?: () => Promise<Market[]>;
   fetchTickers?: () => Promise<Ticker[]>;
   fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;

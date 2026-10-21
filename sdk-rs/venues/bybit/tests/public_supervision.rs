@@ -248,3 +248,55 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert!(h.timers.is_empty());
 }
+#[test]
+fn hyro_early_and_retired_watch_timers_do_not_send_early_pings() {
+    use safe_cex_venue_bybit::{Endpoints, Variant};
+    let mut h = Harness::started(Options {
+        variant: Variant::Hyrotrader,
+        public_data_only: true,
+        endpoints: Some(Endpoints {
+            rest: "https://hyro.example".into(),
+            public_ws: "wss://hyro.example/v5/public/linear".into(),
+            private_ws: "wss://hyro.example/v5/private".into(),
+        }),
+        ..Options::default()
+    });
+    h.load_public();
+    let socket = h.socket(PUBLIC).unwrap();
+    let watch = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == OPENED + 5_000.0)
+        .unwrap()
+        .0;
+    h.now = OPENED + 2_000.0;
+    h.event(Event::TimerFired { timer: watch });
+    assert_eq!(pings(&h, PUBLIC), 0);
+    h.event(Event::TimerFired { timer: watch });
+    assert_eq!(pings(&h, PUBLIC), 0);
+    h.advance(OPENED + 9_999.0 - h.now);
+    assert_eq!(pings(&h, PUBLIC), 0);
+    h.advance(1.0);
+    assert_eq!(pings(&h, PUBLIC), 1);
+    // The first ping rearms the current watch for five seconds later. Closing
+    // must clear that active watch, not just ignore the already consumed one.
+    let active_watch = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == OPENED + 15_000.0)
+        .expect("watch rearmed after the first ping")
+        .0;
+    assert_ne!(active_watch, watch);
+    h.event(Event::WsClosed { socket, code: 1006 });
+    assert!(!h.timers.iter().any(|(timer, _)| *timer == active_watch));
+    let pending_after_close = h.timers.clone();
+    h.event(Event::TimerFired {
+        timer: active_watch,
+    });
+    h.event(Event::TimerFired { timer: watch });
+    assert_eq!(pings(&h, PUBLIC), 1);
+    assert_eq!(
+        h.timers, pending_after_close,
+        "retired watches cannot rearm"
+    );
+}

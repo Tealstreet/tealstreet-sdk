@@ -91,6 +91,18 @@ describe('CallMethodHandler', () => {
         for (const method of Object.keys(reads)) expect(WORKER_WRITE_METHODS.has(method)).toBe(false);
       });
 
+      it('routes catalogue refresh to the worker engine and returns its authoritative delta', async () => {
+        const delta = { added: [{ id: 'NEWUSDT' }], removed: [{ id: 'OLDUSDT' }] };
+        const refresh = vi.fn().mockResolvedValue(delta);
+        Object.assign(mockExchange, { refreshMarkets: refresh });
+        await handler.handleCallMethod('refresh', 'refreshMarkets', []);
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(mockPostMessage).toHaveBeenLastCalledWith({
+          op: 'callMethod:done', data: { requestId: 'refresh', result: delta, success: true },
+        });
+        expect(WORKER_WRITE_METHODS.has('refreshMarkets')).toBe(false);
+      });
+
       it('should call setLeverage and post success', async () => {
         const payload: StoreWorkerPayload = {
           op: 'callMethod',
