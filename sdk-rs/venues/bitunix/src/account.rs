@@ -193,7 +193,7 @@ pub struct AccountState {
     pub reduces: HashMap<String, bool>,
     pub filled: HashMap<String, (f64, f64)>,
     pub pending_executions: HashMap<String, f64>,
-    pub login_retry: Option<TimerId>,
+    pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
@@ -608,14 +608,16 @@ impl BitunixFutures {
         self.account.timers[i] = Some(cx.set_timer(1000.0));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.login_retry == Some(timer) {
+        if let Some((owned_timer, socket)) = self.account.login_retry
+            && owned_timer == timer
+        {
             self.account.login_retry = None;
-            if let Some(s) = self
+            if self
                 .sockets
                 .iter()
-                .find(|s| s.active && matches!(s.feed, Feed::Private) && s.opened)
+                .any(|s| s.active && s.id == socket && matches!(s.feed, Feed::Private) && s.opened)
             {
-                self.login(cx, s.id);
+                self.login(cx, socket);
             }
             return true;
         }
@@ -1187,33 +1189,66 @@ impl BitunixFutures {
         }
         (orders, natives)
     }
-    pub(crate) fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: &Message<'_>) {
+    pub(crate) fn private_message(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: safe_cex_engine::SocketId,
+        m: &Message<'_>,
+    ) {
+        let operation = if m.op.is_empty() {
+            m.ch.as_ref()
+        } else {
+            m.op.as_ref()
+        };
+        if operation == "login" {
+            #[derive(serde::Deserialize)]
+            struct Login {
+                result: bool,
+            }
+            let result = m
+                .data
+                .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
+                .map(|login| login.result);
+            if result == Some(true) {
+                if let Some((timer, owner)) = self.account.login_retry
+                    && owner == socket
+                {
+                    self.account.login_retry = None;
+                    cx.clear_timer(timer);
+                }
+                return;
+            }
+            if result == Some(false) {
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
+                    "Bitunix private ws login failed, double check your key and secret",
+                );
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "Malformed Bitunix private login response",
+                );
+            }
+            if self
+                .account
+                .login_retry
+                .is_some_and(|(_, owner)| owner == socket)
+            {
+                return;
+            }
+            if let Some((timer, _)) = self.account.login_retry.take() {
+                cx.clear_timer(timer);
+            }
+            self.account.login_retry = Some((cx.set_timer(2000.0), socket));
+            return;
+        }
         let Some(raw) = m.data else {
             return;
         };
         let text = raw.get();
-        match if m.op.is_empty() {
-            m.ch.as_ref()
-        } else {
-            m.op.as_ref()
-        } {
-            "login" => {
-                #[derive(serde::Deserialize)]
-                struct Login {
-                    result: bool,
-                }
-                if !serde_json::from_str::<Login>(text).is_ok_and(|l| l.result) {
-                    cx.notice(
-                        Level::Error,
-                        code::AUTH_REJECTED,
-                        "Bitunix private ws login failed, double check your key and secret",
-                    );
-                    if let Some(t) = self.account.login_retry.take() {
-                        cx.clear_timer(t);
-                    }
-                    self.account.login_retry = Some(cx.set_timer(2000.0));
-                }
-            }
+        match operation {
             "balance" => {
                 self.account.generations[0] += 1;
                 self.debounce(cx, Axis::Balance);

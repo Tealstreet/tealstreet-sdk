@@ -237,7 +237,7 @@ impl BitunixFutures {
             cx.clear_timer(timer);
         }
         if matches!(s.feed, Feed::Private)
-            && let Some(timer) = self.account.login_retry.take()
+            && let Some((timer, _)) = self.account.login_retry.take()
         {
             cx.clear_timer(timer);
         }
@@ -498,7 +498,7 @@ impl Venue for BitunixFutures {
                     if m.op == "pong" {
                         s.pong_observed = true;
                     }
-                    self.private_message(cx, &m);
+                    self.private_message(cx, socket, &m);
                     return;
                 }
                 if let Err(e) = self.public_message(cx, &m) {

@@ -802,3 +802,11 @@ before the first engine start and supplies its virtual clock for authenticated
 REST and private-login timestamps, including later socket epochs. Signing keeps
 its existing millisecond flooring and byte format. This does not add automatic
 signature-rejection retries or resend writes.
+
+Rust private-login controls are inspected even without `data`. An explicit false
+`data.result` keeps the existing rejection diagnostic; absent/null/malformed
+results warn as malformed stream data without claiming invalid credentials or
+copying the response. Failed controls share one two-second retry per socket
+without postponing its deadline. Success and socket retirement cancel that retry;
+a late timer cannot sign on a replacement. The existing first-pong compatibility,
+login timestamp units and write retry policy remain unchanged.
