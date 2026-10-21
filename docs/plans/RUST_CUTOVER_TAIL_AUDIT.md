@@ -1,0 +1,98 @@
+# Re-verify the Rust cutover audit tail
+
+Base: `bba1f43126cd` (landing after SDK B11 #1666). Re-check the eight
+Cutover bullets in RUST_AUDITS.md against current source and existing tests.
+No TypeScript venue deletion, NX writes, deployment or release is authorized.
+
+1. Commit this short plan first. Audit socket health/recovery and CLI stale-stream
+   refusal; venue methods and capability refusals; downstream BloFin identity
+   checks and deletion deep imports; MCP packaged engine delivery; WASM budgets,
+   layout and cold-start evidence; replay golden-fixture prerequisites.
+2. Attach exact source, regression and actual merged-PR evidence to each stale
+   finding. Preserve narrower unsupported-product, delivery and downstream
+   requirements instead of inferring complete cutover readiness.
+3. Request a read-only NX re-check from codex-cxxyqr for caller-owned gaps.
+   List owner decisions separately for claude-ddi2il. Keep the audit evidence
+   distinct from deployed-runtime or npm-publication verification.
+4. Land one docs-only PR striking stale Cutover findings and listing the exact
+   remaining SDK/NX/owner work. Independently review correctness/adversarial
+   claims, run focused documentation checks, require green CI and a fresh
+   separate guard, then merge and report the actual pin.
+5. Fix any remaining SDK-owned defects in separate behaviour batches on fresh
+   landing branches, with regressions reproducing the failures before each fix.
+   Use focused local checks; CI owns release WASM builds and replay/timing
+   matrices. Preserve lane priorities: shared source merges hold for Kraken
+   #1663's current proof cycle. Apply normal integration/trial and guard rules.
+6. Report every merge to claude-ddi2il and precise caller follow-ups to
+   codex-cxxyqr. Stop when the assigned SDK scope and evidence refresh land;
+   owner decisions and NX implementation remain explicit handoffs.
+
+## Re-verification at `bba1f43126cd`
+
+This is source and regression evidence on the landing branch, not an npm
+publication, browser timing or deployed NX runtime claim. NX source observations
+are read-only at `65e086a3c90` and supplied by codex-cxxyqr.
+
+| Original Cutover finding | Current evidence | Disposition / owner |
+| --- | --- | --- |
+| Main-thread writes have no engine | `RustEngineExchange.forwardToWorker`, `WORKER_FORWARDED_METHODS` and the common matching worker receiver route writes to the engine owner. #1443 / `6d6e3d666f`, #1462 / `341ea148bb`; retained worker-contract regressions and green #1666 CI. | Already closed; preserve forwarding before local runtime policy. |
+| Missing socket health/reconnect/offline recovery; CLI stale-stream fails open | `rustSockets.ts` exposes channel handles, 60 s freshness, reconnect and offline recovery. `syncSocketHealthToStore` writes the shared summary. `BaseCommand.healthGate` refuses exposure-increasing writes after an initialized private stream becomes unhealthy; reduce-only/close/cancel remain available. #1450 / `5ff7ebde6c1`. Fresh tests: 7 SDK socket cases and 3 real-bridge CLI cases pass. | Stale SDK finding. Missing/uninitialized evidence still intentionally fails open; a quiet initialized stream does not. Recovery does not bypass venue backoff or revive disposed/dead engines. |
+| All listed venue methods absent | Native capability policies route journals, reported PnL and Bitrue metadata; Hyperliquid merges spot markets when enabled. #1445 / `fc771ab13d3`, #1447 / `8f29096de9c`, #1453 / `fe43821c3e8`, #1501 / `550e534e08f`. Existing `rust.journal-paths`, `rust.closed-pnl`, `rust.binance-journal`, `bitrue.rust-max-leverage` and Hyperliquid `spot_markets.rs` cover those paths. | Partly stale. Actual SDK gaps are listed below; a registered method or streaming book does not prove a REST query. Unsupported product/history axes retain explicit capability refusals. |
+| Downstream BloFin `instanceof` blocks cutover | The named helper still imports/checks the TS class, but no production import/render of that helper was found in the pinned NX search. `ExchangesContainer.tsx:59,223` uses the generic helper, which has no class guard; `onPositionMetaChange.ts:34-35` returns for BloFin. | Unused-source/deletion cleanup, not a demonstrated active runtime blocker. Preserve that evidence boundary; do not delete the file/class here. |
+| Deletion inventory misses listed deep imports | The SDK inventory already resolves base/registry/class and frozen-reference graphs. NX still imports Hyperliquid constants, Bitget family helpers and Aster types/validators; current caller requirements are recorded in RUST_CUTOVER_CALLERS.md. No production NX direct Bybit inverse/spot class import outside SDK runtime was found; internal registries and AST fixture scripts still depend on them. | The updated inventory now includes these dependencies; extraction/caller migration remains open. No source deletion is authorized. |
+| MCP release omits engine WASM | `package.json` includes `dist/wasm/rust`; `tsup.config.ts` copies CJS glue and WASM; `rust-engine.ts` registers an artifact-relative loader. The release workflow builds the pinned engine, runs isolated smoke and requires both files in the exact npm pack list. #1342 consumer-blocker implementation; green #1666 Binance consumer/package checks exercise current source. | Stale SDK packaging finding. This does not assert that a particular npm version or NX installation already contains this branch. |
+| No WASM budget/layout decision or browser cold-start measurement | `wasm-budget.mjs` fixes family 1,343,488 B and combined 14,155,776 B ceilings; CI checks family isolation/size and combined size before standalone overwrite. #1393 / `cb371229da1` chooses browser/Workers family loading and Node/MCP combined; #1644/#1656/#1661 recover size without raising budgets. Fresh 2 budget regressions pass. | Budget/layout portions stale. `family-measure.mjs` measures fresh **Node** read/compile CPU/wall/RSS; no actual browser cold-start timing was found. Browser measurement remains SDK evidence work. Historical artifact sizes are pinned in RUST_WASM_ARTIFACT_SIZE.md, not asserted as current bytes here. |
+| Freeze TS outputs, then remove executable references | `venues.mjs` still selects executable TS implementations, including retained Coinbase/Orderly/TxFlow test references, and `replay.mjs` imports them. Static output goldens do not measure TS CPU or retained memory. | Owner decision from claude-ddi2il: keep executable TS references as the CPU/memory oracle through cutover. **No venue or reference deletion until after cutover.** Freezing/retiring oracles is a later reviewed prerequisite, not a current deletion instruction. |
+
+## Remaining SDK behaviour batches
+
+Pinned NX reachability finds no direct production/default REST snapshot or
+dead-man-switch producer. SDK CLI/MCP expose neither method; script API books
+read a subscription cache. WEEX TS internal snapshot/gap reads and Paradex
+optional capped IOC preflight are distinct native-stream/trading contracts.
+Manual/third-party API parity remains required, without a claim that every
+method is a default cutover feature. Per overseer ordering, WEEX metadata goes
+first, then GRVT typed builder errors, then public/manual book and dead-man
+parity; browser measurement remains open. Each source batch needs its own
+fresh landing branch, before/after regression, focused checks, CI and review.
+
+1. **WEEX selected-symbol metadata:** TS `updateSymbolMetadata` forces a symbol
+   configuration refresh. Native WEEX has real explicit leverage reads but
+   `leverageQuery: onRead` leaves the SDK metadata hook inert. Its existing
+   no-dispatch assertion proves that limitation, not equivalent refresh.
+2. **GRVT builder-specific rejection:** native checks/retries already block
+   unauthorized orders, but generic `invalidInput`/`notSent` cannot identify
+   the authorization UI contract. Preserve a stable typed builder code,
+   `unauthorized`/`cap-too-low` reason, required raw cap and available authorized
+   raw cap across engine, SDK and worker error serialization. Keep transport
+   or malformed-check failures distinct from a definitive missing approval.
+3. **REST order-book queries:** Rust `orderBookQuery` is enabled only for
+   AsterDEX, MEXC and Polymarket. TS additionally implements the REST query for
+   Backpack, Crypto.com, GRVT, Paradex and WEEX. Their Rust capability records
+   currently refuse `fetchOrderBook`; streaming subscriptions are separate.
+   Add native query/typed book responses and capability bits for supported
+   products, without synthesizing a REST answer from a possibly absent stream.
+4. **Hyperliquid dead-man switch:** TS `scheduleCancel(time?: number | null)`
+   sends a signed account-wide action; Rust inherits the base rejection and
+   has no matching engine command. Preserve cancellation semantics, UTC-ms
+   validation, signing/vault handling, worker ownership and uncertain-write
+   errors; no automatic retry or rescheduling.
+5. **Browser cold-start evidence:** add actual browser module-load/compile/
+   instantiation observations for shipped artifacts. Existing Node metrics and
+   public replay timing do not supply this proof. CI owns artifact builds and
+   timing; do not run a local release matrix or infer device/network performance
+   from a headless CI sample.
+
+## Caller work and owner decisions
+
+NX-owned: preserve/extract the concrete runtime deep imports before deleting
+modules; update capability-brand readers and script probes deliberately; handle
+request-scoped history completeness at ingestion/coverage (B11). The unused
+BloFin helper needs cleanup before its class can disappear, rather than an
+unproved production migration. SDK source fixes do not modify or deploy NX.
+
+Owner-decided: browser/Workers family loading versus combined Node/MCP is
+already implemented; executable TS performance oracles stay through cutover and
+no venue/reference is deleted before then. Engine delivery into NX (B1),
+hosted signer strategy and mobile execution remain separate recorded owner
+items; this Cutover-tail audit does not settle them or authorize a release.

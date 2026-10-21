@@ -48,27 +48,57 @@ Audit results and the standards: `docs/plans/RUST_QUALITY.md`.
 
 ## Cutover
 
+Re-verified on landing `bba1f43126cd`; exact source, regression and caller
+boundaries: [Cutover tail audit](RUST_CUTOVER_TAIL_AUDIT.md). Source proof is
+not a deployed-runtime or npm-publication claim.
+
 - ~~Main-thread writes: web places orders on the main-thread exchange
   (`apps/web/src/order/sendOrder.ts:24`); a main-thread `RustEngineExchange` has
   no engine (`rust.exchange.ts:701`). Route commands to the worker engine.~~
   Fixed: a bridged main-thread instance forwards its trading methods to the worker engine (B4).
-- No `socketHealth`, `reconnect` or `recoverAfterOffline` on Rust
-  (`base.ts:1663,2053`); CLI stale-stream gate fails open
-  (`cli-core/src/commands/BaseCommand.ts:172`).
-- Rust lacks per venue: `fetchHistoricalPositions`, `fetchClosedPnl`,
-  `fetchOrderBook`, Hyperliquid `scheduleCancel`, `updateSymbolMetadata`
-  (bitrue, weex), typed GRVT builder error, Hyperliquid `enableSpotMarkets`.
-- `instanceof BlofinExchange` downstream (`BlofinExchangeReactiveStateHelper.tsx:20`).
-- Deletion inventory misses downstream deep imports: `hyperliquid.constants`,
-  `bitget.family`, `asterdex.types`, `bybitinverse`/`bybitspot` exchanges,
-  `exchanges/registry`, `exchanges/base`.
-- exchange-mcp npm release ships without the engine wasm
-  (`.github/workflows/exchange-mcp-release.yml:133`, `tsup.config.ts:36`).
-- Combined wasm is 11.7 MB with no budget; no browser cold-start measurement.
-  Decide combined vs per-family wasm.
-- Replay gate references live TS venues (`harness/venues.mjs`); freeze TS outputs
-  as golden fixtures before deleting any TS venue, and drop
-  `__tests__/reference/`.
+- ~~No `socketHealth`, `reconnect` or `recoverAfterOffline` on Rust;
+  CLI stale-stream gate fails open.~~ Fixed by #1450 (`5ff7ebde6c1`): native
+  channel handles feed store health and recovery. Fresh 7 SDK socket and 3 CLI
+  regressions pass, including refusal after initialized private-stream silence.
+  Missing/uninitialized evidence still intentionally fails open; risk-reducing
+  operations remain available.
+- ~~Missing `fetchHistoricalPositions`, `fetchClosedPnl`, Bitrue
+  `updateSymbolMetadata` and Hyperliquid `enableSpotMarkets`.~~ Implemented
+  through native capability policies and #1445/#1447/#1453/#1501; preserve
+  supported-product limits and explicit unsupported-axis refusals (B8).
+  **Still SDK-owned:** REST `fetchOrderBook` for Backpack/Crypto.com/GRVT/
+  Paradex/WEEX; Hyperliquid `scheduleCancel`; WEEX metadata refresh; typed GRVT
+  builder rejection. Streaming books and generic errors do not close these gaps.
+- ~~`instanceof BlofinExchange` as an active downstream cutover blocker.~~
+  Pinned NX read-only audit finds the class check in an unused helper, with no
+  production import/render; active generic helpers have no guard. It remains
+  source/deletion cleanup, not a proved active user-feature failure.
+- ~~Deletion inventory misses downstream deep imports.~~ The inventory now
+  records the pinned NX callers and SDK/reference dependencies. **Extraction
+  and caller migration remain open:** Hyperliquid constants, Bitget family
+  helpers, Aster types/validators and base/registry contracts have downstream
+  consumers. Include their exact callers in
+  [the inventory](RUST_CUTOVER_CALLERS.md); extraction/caller migration is not
+  completed by listing them. No production NX direct Bybit inverse/spot class
+  import outside SDK runtime was found, but internal registries and fixture
+  scripts still use those classes.
+- ~~exchange-mcp release ships without engine WASM.~~ Current package/tsup,
+  artifact-relative loader, exact release pack check and isolated smoke include
+  the engine CJS/WASM (#1342). Green #1666 CI exercises the packaged consumer.
+  A published npm version or deployed NX binary is separate evidence.
+- ~~Combined WASM has no budget; combined versus family layout undecided.~~
+  #1393 selects families for browser/Workers and combined for Node/MCP. CI
+  enforces 1,343,488 B family / 14,155,776 B combined ceilings; #1644/#1656/
+  #1661 recover size without raising them. **Still open:** actual browser
+  cold-start measurement. Existing fresh-process metrics measure Node load,
+  not browser startup.
+- Replay gates still execute TS venues and frozen references. ~~Drop
+  `__tests__/reference`.~~ **Owner decision:** keep executable TS references as
+  the CPU/memory oracle through cutover; no venue or reference deletion until
+  after cutover. Golden output/retirement work is deferred, not implemented;
+  before any later deletion, preserve an independent correctness oracle and
+  performance baseline in a reviewed change. Do not turn TS-vs-Rust into
+  Rust-vs-itself.
 
 ## Trading correctness
 
@@ -549,6 +579,13 @@ Remaining resilience and completeness findings are independent of request parity
   NotSent and never replays a write. Sanitized coded diagnostics preserve native
   and rate metadata. Regression coverage includes malformed lists/rows, stale
   callbacks,40 settings symbols, both shared-expiry orders and owned no-write.
+- Medium: ~~per-symbol settings reads starve under any position notification,
+  hiding leverage/margin updates and scoped refusal/backoff evidence~~. Settings
+  attempts now retain their symbol serial and accepted settings-write revision;
+  WS-only routing-ID notifications cannot supersede them. Accepted leverage,
+  margin and position-mode ACKs still fence old metadata and auth evidence;
+  refused/unproved writes do not. Current failures retain ordinary bounded
+  retries, and grouped per-symbol credential refusals remain independent.
 - Medium (unverified venue behaviour): leverage serialized as `30.0`
   (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
   requires order detail to be final immediately (`trading.rs:1437`); ~~a login
