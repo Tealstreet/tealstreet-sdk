@@ -461,6 +461,22 @@ fn private_deltas_preserve_authoritative_child_parent_direction_and_reference() 
         child.trigger_type,
         Some(safe_cex_engine::model::StopTriggerType::LastPrice)
     );
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":"child","S":"BUY","o":"LIMIT","x":"NEW","X":"NEW","q":"100","z":"0","p":"101","conditionOrder":true,"triggerType":2,"triggerPrice":95,"triggerPriceType":2}}"#);
+    let child =
+        h.e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "child")
+            .unwrap();
+    assert_eq!(child.kind, OrderType::StopLoss);
+    assert_eq!(child.side, OrderSide::Sell);
+    assert_eq!(child.parent_id.as_deref(), Some("parent"));
+    assert!(child.reduce_only);
+    assert_eq!(child.price, 95.0);
+    assert_eq!(
+        child.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
 }
 
 #[test]
@@ -1320,4 +1336,49 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     }
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn uncached_stream_condition_discriminators_precede_execution_kind() {
+    use serde_json::json;
+    for (execution, trigger, conditional, expected) in [
+        ("MARKET", json!(1), true, OrderType::StopLoss),
+        ("LIMIT", json!("2"), true, OrderType::TakeProfit),
+        ("MARKET", json!(1), false, OrderType::Market),
+        ("LIMIT", json!(2), false, OrderType::Limit),
+        ("MARKET", json!(3), true, OrderType::Market),
+    ] {
+        let mut h = Harness::new();
+        h.reply("/account", EMPTY);
+        h.reply("/openOrders", r#"{"code":"0","data":[]}"#);
+        h.ws(&json!({"e":"ORDER_TRADE_UPDATE","o":{
+            "s":"E_BTCUSDT","i":"uncached","S":"SELL","o":execution,
+            "x":"NEW","X":"NEW","q":"100","z":"0","p":"100",
+            "conditionOrder":conditional,"triggerType":trigger,
+            "triggerPrice":"90","triggerPriceType":1,"open":"OPEN"
+        }})
+        .to_string());
+        let order =
+            h.e.store()
+                .orders()
+                .iter()
+                .find(|o| o.id == "uncached")
+                .unwrap();
+        assert_eq!(order.kind, expected);
+        assert_eq!(
+            order.price,
+            if matches!(expected, OrderType::StopLoss | OrderType::TakeProfit) {
+                90.0
+            } else {
+                100.0
+            }
+        );
+        assert_eq!(order.amount, 100.0);
+        assert_eq!(order.filled, 0.0);
+        assert!(
+            !order.reduce_only,
+            "classification cannot invent closing provenance"
+        );
+        assert_eq!(order.parent_id, None);
+    }
 }

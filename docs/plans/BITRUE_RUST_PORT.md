@@ -220,3 +220,21 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
    snapshot admission as intentional/RISKY to bypass, with usable state preserved.
 4. Run focused Bitrue/Binance tests, touched fmt/strict Clippy/bans, independent
    review and exact-head CI; merge only after the overseer's short hold lifts.
+
+- Reproduced uncached conditional MARKET decoded as Market instead of StopLoss.
+  Private OrderEvent now decodes conditionOrder and numeric/string triggerType;
+  explicit native SL/TP wins over execution type. Cached protective child kind,
+  side, parent and reduce-only provenance remain authoritative. Native positive
+  trigger price/recognized reference still precede their cached fallbacks.
+  No price-based guessing, quantity scaling or execution accounting changes.
+- Catalogue and per-symbol order startup findings are stale (existing row
+  isolation and first-attempt sweep completion). Malformed account admission
+  remains an explicit risk to bypass; prior balances/exposure remain intact.
+  Native/TS discriminator schema: https://www.bitrue.com/api_docs_includes_file/futures/index.html
+  The live docs define conditionOrder and triggerType1/2 in order records; the
+  TS private stream uses those exact fields and precedence.
+- Validation: the new classification regression fails before repair;377 focused
+  Bitrue/Binance tests pass, then all35 account tests pass with the extended cached
+  child precedence case. Touched formatting, strict all-target Clippy and bans pass.
+  Independent read-only review found no runtime blocker; corrected its docs note
+  that cached price/reference are fallbacks behind valid native trigger fields.

@@ -1387,3 +1387,11 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+### Bitrue private conditional display
+
+Newly observed Bitrue conditional orders use native conditionOrder/triggerType
+for SL/TP classification even when execution type is MARKET/LIMIT. Existing
+protective child identity, direction and trigger reference remain authoritative.
+Order overlays and protective controls receive corrected kinds/prices with no
+method, quantity, placement or cancellation contract change.
