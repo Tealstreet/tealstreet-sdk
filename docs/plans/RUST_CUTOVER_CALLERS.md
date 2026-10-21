@@ -92,6 +92,10 @@ GitHub API. Existing line references retain the original NX audit revision;
 new history-forwarding references below use `fdd2389a825`. Open PR proposals
 are not merged contracts.
 
+Construction follow-up: checked SDK landing `60a3dc1e79e` for #1563, retaining
+those downstream inventory revisions. The existing NX script-editor options
+already declare `extra.asterdexApiVersion?: 'v1' | 'v3'`; no new caller edit.
+
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
 cannot proceed for the affected venues/hosts until one does.
@@ -103,8 +107,10 @@ the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
 
 ### Contract refresh, 2026-10-21
 
-Checked landing `3d73437e589`, including the merges after the last refresh
+Initial batch checked landing `3d73437e589`, including the merges after the last refresh
 (#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
+The construction follow-up checks #1563 at `60a3dc1e79e` and the intervening
+#1550 logging merge.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -127,6 +133,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1501 / `550e534e08` | Spot-enabled `hyperliquid` accounts now run on Rust; the perp engine merges spot pairs, holdings and orders. B8's product fallback is superseded. The keyless hosted/payload-signer TS routing remains in place. |
 | #1506 / `c0d37f95d9` | Optional `UNDERLYING_TOKENS` frame section 20 carries merged Hyperliquid spot token names; both consumers reconstruct `Market.info.hlTokenName`/`hlTokenFullName`. The Margin panel's underlying-token risk disclosure works without an app edit. Ship matching engine/reader/applier. |
 | #1560 / `d68a47b7c7` | Orderly bounded OHLCV reads now use native history and preserve caller bounds; trailing-stop display uses the native extreme/callback with BUY adding and SELL subtracting. Candle/order shapes and write contracts are unchanged. The landed display/read note is preserved below. |
+| #1550 / `012e073e4f` | The remaining fifteen venue families use coded log events, completing #1538's migration. Message text and levels remain unchanged; B9's classified-error integration and the native/DO notice contract remain the caller requirements. |
+| #1563 / `60a3dc1e79` | Shared Rust AsterDEX API-version resolution now also supplies optional WASM construction metadata. The wrapper forwards only a valid explicit `extra.asterdexApiVersion` override and adopts the native version for signing eligibility/STP checks after loading. Synchronous pre-host and older-host inference remains parity-tested; account/options/trading call shapes are unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -216,6 +224,14 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
 | `Exchange` gains `fetchEngineSnapshot`; #1400 adds `capabilities`/`loadCapabilities` | no `implements Exchange` downstream; only `as Exchange` casts (`apps/cli/src/repl.ts:713,1517-1925`, `cross-trade-daemon.ts:222`, web tests) | | casts still compile | none |
 | #1476/#1519/#1520 construction and clock policy | factory/worker creation and MCP config callers above | TS local-credential check, per-venue options/clock name lists | shared Rust validation, uniform options and engine `hostClock`; no caller edit. Missing secondary-secret errors are now specific; #1531 still narrows payload-signer fallback | RT validation text; same signing clock |
+| AsterDEX API-version construction metadata (#1563) | saved-account/factory/worker callers above; web `components/customModules/monacoTypesString.ts` already declares the override | synchronous `resolveAsterDEXApiVersion` inference | after WASM loading, wrapper `canSign`/STP checks use native `asterdexApiVersion`; pre-host and older-host inference stays. Optional `WasmEngineLike.construction()` returns JSON `EngineConstruction { asterdexApiVersion?: 'v1' \| 'v3' }`; other venues return `{}`. This is separate from frame/engine capabilities | none; optional host API addition |
+
+#1563 moves API-version resolution, not all public-mode/signing eligibility
+policy, into Rust. Raw public-mode intent and native `canSign`/`publicDataOnly`
+construction fields remain follow-up work in
+[RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md); they are not part of
+the merged metadata contract above. B2's factory routing for keyless remote
+signing and supported payload signers still applies.
 
 #### Capability detection
 
