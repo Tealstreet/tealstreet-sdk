@@ -65,7 +65,8 @@ it.each([
   'binance',
   'bybit',
 ] as const)('refuses a payloadSigner on private %s before the engine or transport starts', async (name) => {
-  for (const secret of ['', 'local-secret']) {
+  // Lighter signs locally, and a payload-only Lighter account starts public by contract.
+  for (const secret of name.startsWith('lighter') ? ['local-secret'] : ['', 'local-secret']) {
     const { construct, transport } = recordEngine(name);
     const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
@@ -94,15 +95,14 @@ it('keeps Paradex delegated signing and explicitly public-only accounts', async 
 });
 
 it('reports the structured refusal through start and validateAccount', async () => {
-  const { construct, transport } = recordEngine('lighter');
-  // Without apiKeyIndex Lighter would otherwise become public-only and drop the signer silently.
-  const lighter = new RustEngineExchange(
-    'lighter',
+  const { construct, transport } = recordEngine('hyperliquid');
+  const hyperliquid = new RustEngineExchange(
+    'hyperliquid',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
     new DefaultStore(),
   );
-  running.push(lighter);
-  await expect(lighter.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  running.push(hyperliquid);
+  await expect(hyperliquid.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
 
   const coinbase = new RustEngineExchange(
     'coinbase',
@@ -119,11 +119,13 @@ it('reports the structured refusal through start and validateAccount', async () 
 });
 
 it('routes payload-signed accounts to TS before a Rust instance exists', () => {
-  for (const name of ['hyperliquid', 'coinbase', 'lighter', 'binance', 'bybit'] as const) {
+  for (const name of ['hyperliquid', 'coinbase', 'polymarket', 'binance', 'bybit'] as const) {
     expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(false);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(false);
     expect(runsOnRustEngine(name, { engine: 'rust', payloadSigner, publicDataOnly: true }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's' }), name).toBe(true);
   }
   expect(runsOnRustEngine('paradex', { engine: 'rust', payloadSigner })).toBe(true);
+  // Lighter keeps its engine contract: payload-only is public, a secret is refused at startup.
+  expect(runsOnRustEngine('lighter', { engine: 'rust', secret: '', payloadSigner })).toBe(true);
 });
