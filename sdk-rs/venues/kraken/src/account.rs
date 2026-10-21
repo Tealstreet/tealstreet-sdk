@@ -1,8 +1,10 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
+    Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
     json::{self, ArrayAt},
     model::*,
     socket::{Config, Supervisor, Tick, Timeout},
@@ -539,8 +541,9 @@ impl Kraken {
     fn account_unlisted(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
         for symbol in symbols {
             if self.account.unlisted_logged.insert(symbol.clone()) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!("Kraken {symbol} is not a listed market; its rows are skipped"),
                 );
             }
@@ -628,13 +631,19 @@ impl Kraken {
             };
             if let Err(error) = result {
                 self.account.inflight.remove(&key);
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
             }
         }
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.heal.is_none() {
-            let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
+            let nominal = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
+            // A heal after a websocket event keeps its fixed debounce; failed reads spread.
+            let delay = if self.account.read_failures > 0 {
+                cx.jittered(nominal)
+            } else {
+                nominal
+            };
             self.account.heal = Some(cx.set_timer(delay));
         }
     }
@@ -679,7 +688,7 @@ impl Kraken {
         true
     }
     fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        cx.log(LogLevel::Error, message);
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, message);
         if let Some(socket) = self.account.socket {
             cx.close(socket);
             self.account_ws_close(cx, socket);
@@ -878,8 +887,9 @@ impl Kraken {
                             self.account_commit_orders(cx, orders, true);
                         }
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "Kraken order snapshot contains an unmappable or invalid row",
                         );
                         self.account_schedule_heal(cx);
@@ -946,8 +956,9 @@ impl Kraken {
                         self.account.snapshot_positions_seen = true;
                         self.account_commit_positions(cx, positions);
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "Kraken position snapshot contains an unmappable or invalid row",
                         );
                         self.account_schedule_heal(cx);
@@ -1259,7 +1270,11 @@ impl Kraken {
         }
         if !wire::success(response) || !request.valid {
             self.account.read_failures = self.account.read_failures.saturating_add(1);
-            cx.log(LogLevel::Error, "Kraken account reconciliation failed");
+            cx.notice(
+                Level::Error,
+                code::REQUEST_FAILED,
+                "Kraken account reconciliation failed",
+            );
             self.account_schedule_heal(cx);
             return;
         }
@@ -1314,7 +1329,11 @@ impl Kraken {
                     cx.store.set_coin_balances(coins);
                 }
                 Err(_) => {
-                    cx.log(LogLevel::Error, "Kraken malformed account balances");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "Kraken malformed account balances",
+                    );
                     self.account_schedule_heal(cx);
                 }
             },
@@ -1328,8 +1347,9 @@ impl Kraken {
     ) {
         self.account.inflight.remove(&(request.scope as u8));
         self.account.read_failures = self.account.read_failures.saturating_add(1);
-        cx.log(
-            LogLevel::Error,
+        cx.notice(
+            Level::Error,
+            code::REQUEST_FAILED,
             "Kraken account reconciliation transport failure",
         );
         self.account_schedule_heal(cx);

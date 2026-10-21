@@ -104,6 +104,7 @@ jobs:
     timeout-minutes: 45
     env:
       WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
       # The single-venue size budget is read from sdk-rs/harness/wasm-budget.mjs.
     defaults:
       run:
@@ -131,6 +132,8 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
       - run: yarn install --frozen-lockfile --network-timeout 600000
       - name: Build every venue family package
         run: yarn rust:build-wasm --families
@@ -163,6 +166,9 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: bitunix
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bitunix
           - venue: orderly
             books: BTCUSDC,ETHUSDC
             private_script: rust:private-tape-orderly
@@ -243,6 +249,7 @@ jobs:
             private_script: rust:private-tape-txflow
     env:
       WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
     defaults:
       run:
         working-directory: .
@@ -267,6 +274,8 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
       - run: yarn install --frozen-lockfile --network-timeout 600000
       - name: Rust book delta wire through the JS decoder and SDK
         if: matrix.venue == 'binance'

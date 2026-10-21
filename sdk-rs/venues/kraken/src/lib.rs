@@ -6,13 +6,15 @@ mod history;
 pub mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -464,7 +466,7 @@ impl Kraken {
             }
             _ => {}
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }
 /// The PF_ symbol of an undecodable instrument row that was not marked untradeable.
@@ -507,7 +509,7 @@ impl Venue for Kraken {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if !self.options.public_data_only
@@ -519,14 +521,16 @@ impl Venue for Kraken {
             && self.options.secret.is_some()
             && self.signer.is_none()
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Kraken secret must be nonempty valid base64",
             );
         }
         if self.options.read_credentials.is_some() && self.read_signer.is_none() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Kraken secondary secret must be nonempty valid base64",
             );
             return;
@@ -562,7 +566,11 @@ impl Venue for Kraken {
         self.public.supervisor.received(cx.now);
         if !msg.event.is_empty() {
             if msg.event == "error" {
-                cx.log(LogLevel::Warning, "Kraken public subscription error");
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Kraken public subscription error",
+                );
             }
             return;
         }
@@ -710,8 +718,9 @@ impl Venue for Kraken {
                     }
                     Err(error) => {
                         safe_cex_engine::startup::skipped_row(cx);
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Kraken invalid public row: {error}"),
                         );
                         if let Some(symbol) = malformed_perpetual(item) {
@@ -756,8 +765,9 @@ impl Venue for Kraken {
                 }
                 Err(error) => {
                     safe_cex_engine::startup::skipped_row(cx);
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!("Kraken invalid public row: {error}"),
                     );
                 }
@@ -767,8 +777,9 @@ impl Venue for Kraken {
                     Ok(row) => rows.push(row.candle()),
                     Err(error) => {
                         *failed = true;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_MALFORMED,
                             format!("Kraken invalid public row: {error}"),
                         );
                     }
@@ -803,7 +814,7 @@ impl Venue for Kraken {
                 self.markets_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, false);
-                    cx.log(LogLevel::Warning, "Invalid Kraken markets");
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, "Invalid Kraken markets");
                     return;
                 }
                 let mut seen = HashSet::new();
@@ -850,7 +861,11 @@ impl Venue for Kraken {
                 self.ticker_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, true);
-                    cx.log(LogLevel::Warning, "Invalid or empty Kraken tickers");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Invalid or empty Kraken tickers",
+                    );
                     return;
                 }
                 self.discovery.succeeded(cx, &true);
@@ -1080,7 +1095,11 @@ impl Venue for Kraken {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if resolution(interval).is_none() {
-                    cx.log(LogLevel::Error, interval.unsupported("Kraken"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Kraken"),
+                    );
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
@@ -1173,8 +1192,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Kraken stops re-reading a catalogue with {after} malformed markets"),
         );
     }

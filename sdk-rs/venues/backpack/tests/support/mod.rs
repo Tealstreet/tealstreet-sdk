@@ -2,6 +2,10 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_backpack::{Backpack, Options};
 pub type Driver = Engine<Backpack>;
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 pub const SYMBOL: &str = "SOL_USDC_PERP";
 pub const POSITIONS: &str = r#"[{"symbol":"SOL_USDC_PERP","netQuantity":"5","entryPrice":"140","netExposureNotional":"705","pnlUnrealized":"5","estLiquidationPrice":"100"}]"#;
 pub const BALANCE: &str = r#"{"netEquity":"1005","netEquityAvailable":"905","netEquityLocked":"100","pnlUnrealized":"5"}"#;

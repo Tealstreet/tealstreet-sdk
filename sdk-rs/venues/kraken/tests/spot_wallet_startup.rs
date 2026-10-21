@@ -45,7 +45,9 @@ impl Wallet {
                 .unwrap()
         };
         let metadata_retry = actions.iter().find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1000. => Some((*timer, *at_ms)),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - NOW, 1000.) => {
+                Some((*timer, *at_ms))
+            }
             _ => None,
         });
         let poll = actions
@@ -86,7 +88,12 @@ impl Wallet {
             if let Action::Notice(Notice::Log {
                 level: LogLevel::Warning,
                 message,
-            }) = action
+            })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                message,
+                ..
+            })) = action
             {
                 self.warnings.push(message);
             }
@@ -390,13 +397,14 @@ fn persistent_rejected_pair_rereads_only_the_catalogue() {
     let mut wallet = Wallet::with_meta(&partial.to_string());
     wallet.tickers(TICKERS);
     assert!(wallet.engine.store().loaded().tickers);
+    let first_retry = wallet.metadata_retry.expect("metadata retry").1;
     let reread = wallet.recover_metadata(&partial.to_string());
     assert!(!reread.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(!reread.iter().any(|a| matches!(a, Action::WsConnect { .. })));
     assert!(
-        reread
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 3000.)),
+        reread.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if jittered(*at_ms - first_retry, 2000.))
+        ),
         "the catalogue retry stays on backoff"
     );
 }

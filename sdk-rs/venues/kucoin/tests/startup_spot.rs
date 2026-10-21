@@ -1,7 +1,9 @@
 #![cfg(feature = "spot")]
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
+use support::jittered;
 const CATALOGUE: &str = r###"{"code":"200000","data":[{"broken":true},{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"},{"symbol":"ETH-USDT","baseCurrency":"ETH","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.01","priceIncrement":"0.01","baseMinSize":"0.01","baseMaxSize":"1000"}]}"###;
 fn public_engine() -> Engine<KucoinSpot> {
     Engine::new(KucoinSpot::new(Options {
@@ -39,7 +41,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -67,7 +69,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
     assert!(engine.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -189,10 +191,7 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             let timer = engine
                 .drain_actions()
                 .find_map(|action| match action {
-                    Action::SetTimer {
-                        timer,
-                        at_ms: 1000.0,
-                    } => Some(timer),
+                    Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");
@@ -340,7 +339,7 @@ fn wallet_read(actions: &[Action]) -> safe_cex_engine::HttpRequest {
 fn count(actions: &[Action], text: &str) -> usize {
     actions
         .iter()
-        .filter(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) if message.contains(text)))
+        .filter(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(text)))
         .count()
 }
 

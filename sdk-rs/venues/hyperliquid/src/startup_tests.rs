@@ -41,14 +41,19 @@ fn http(actions: &[Action], kind: &str) -> HttpRequest {
         })
         .unwrap_or_else(|| panic!("missing request {kind}"))
 }
-fn retry(actions: &[Action], at: f64) -> TimerId {
-    actions
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
-            _ => None,
-        })
-        .expect("public context backoff")
+/// The retry timer armed at `sent` plus the engine's jittered `[0.75, 1.0] * nominal`.
+fn retry_timer(actions: &[Action], sent: f64, nominal: f64) -> Option<TimerId> {
+    actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms }
+            if (0.75 * nominal..=nominal).contains(&(at_ms - sent)) =>
+        {
+            Some(*timer)
+        }
+        _ => None,
+    })
+}
+fn retry(actions: &[Action], sent: f64, nominal: f64) -> TimerId {
+    retry_timer(actions, sent, nominal).expect("public context backoff")
 }
 fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
     let options = Options {
@@ -92,7 +97,7 @@ fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {
             &tuple(meta, r#"[{"midPx":"bad"},{"midPx":"bad"}]"#),
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
-        let timer = retry(&actions, 2000.0);
+        let timer = retry(&actions, 1000.0, 1000.0);
         assert!(!e.store().loaded().markets);
         assert!(!e.store().loaded().tickers);
         assert!(
@@ -121,7 +126,7 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
         let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
         reply(&mut e, &req, 1000.0, &tuple(meta, ETH_BAD));
         let mut actions = e.drain_actions().collect::<Vec<_>>();
-        let timer = retry(&actions, 2000.0);
+        let timer = retry(&actions, 1000.0, 1000.0);
         if !spot {
             let req = http(&actions, "perpDexs");
             reply(&mut e, &req, 1000.0, "[null]");
@@ -158,7 +163,7 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let first = retry(&actions, 2000.0);
+    let first = retry(&actions, 1000.0, 1000.0);
     let dexs = http(&actions, "perpDexs");
     let btc = e.store().market("BTC-PERP").unwrap().clone();
     assert_eq!(e.venue().assets["BTC-PERP"], 0);
@@ -174,7 +179,7 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, BTC_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let second = retry(&actions, 4000.0);
+    let second = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
             .iter()
@@ -205,7 +210,7 @@ fn partial_hip3_context_keeps_dex_offset_and_does_not_advance_discovery_twice() 
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     assert_eq!(e.venue().assets["XYZ|BTC-PERP"], 110000);
     assert_eq!(e.venue().coins["xyz:btc"], "XYZ|BTC-PERP");
     e.handle(2000.0, Event::TimerFired { timer });
@@ -225,7 +230,7 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
     let actions = e.drain_actions().collect::<Vec<_>>();
@@ -272,7 +277,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     );
     reply(&mut e, &req, 1000.0, &tuple(SPOT_META, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "spotClearinghouseState");
     assert!(!e.store().loaded().balance);
     assert!(e.store().loaded().positions);
@@ -319,7 +324,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 4000.0);
+    let timer = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
             .iter()
@@ -375,9 +380,7 @@ fn delisted_and_unquoted_core_perps_complete_discovery_without_retry() {
     reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0)),
+        retry_timer(&actions, 1000.0, 1000.0).is_none(),
         "well-formed unquoted rows are not a discovery failure"
     );
     assert!(!e.venue().core_discovery_incomplete);
@@ -402,11 +405,7 @@ fn unquoted_spot_contexts_complete_discovery_and_publish_owned_native_balance() 
     );
     reply(&mut e, &req, 1000.0, &tuple(meta, contexts));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0))
-    );
+    assert!(retry_timer(&actions, 1000.0, 1000.0).is_none());
     assert!(!e.venue().core_discovery_incomplete);
     let req = http(&actions, "spotClearinghouseState");
     reply(
@@ -617,7 +616,7 @@ fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
     let actions = e.drain_actions().collect::<Vec<_>>();
-    let timer = retry(&actions, 2000.0);
+    let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
     assert!(e.store().setting("BTC-PERP").is_some());

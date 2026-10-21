@@ -99,6 +99,12 @@ impl Session {
                     }
                     self.logs.push(message)
                 }
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    if event.level == safe_cex_engine::Level::Error {
+                        self.errors.push(event.message.clone());
+                    }
+                    self.logs.push(event.message)
+                }
                 Action::WsSend { socket, text } => self.sends.push((socket, text)),
                 Action::WsClose { socket } if self.privates.contains(&socket) => {
                     self.closes.push(socket)

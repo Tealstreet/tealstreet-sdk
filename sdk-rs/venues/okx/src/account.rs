@@ -1,9 +1,11 @@
 //! Private streams and atomic REST reconciliation, guarded against newer pushes.
 use crate::wire::*;
 use crate::{Okx, Pending, Topic, scaled, usd};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    CommandId, Cx, ErrorKind, Fill, LogLevel, Method, Response, TimerId, VenueError, json, num,
+    CommandId, Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -453,7 +455,7 @@ impl Okx {
                     {
                         if self.unlisted_exposure(cx, p.inst_id) {
                             *invalid = true;
-                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "OKX owned position market unavailable; preserving account snapshot");
                         } else {
                             self.unlisted_skipped(cx, p.inst_id);
                         }
@@ -498,8 +500,9 @@ impl Okx {
                     {
                         if self.unlisted_exposure(cx, o.inst_id) {
                             *invalid = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::SNAPSHOT_DISCARDED,
                                 "OKX working order market unavailable; preserving order snapshot",
                             );
                         } else {
@@ -658,7 +661,11 @@ impl Okx {
                     if cursor.is_empty() || cursors.len() >= 200 || !cursors.insert(cursor.clone())
                     {
                         self.account.orders_in_flight = false;
-                        cx.log(LogLevel::Error, "OKX order paging did not advance");
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            "OKX order paging did not advance",
+                        );
                         if self.account.retry.is_none() {
                             self.account.retry = Some(cx.set_timer(5_000.0));
                         }
@@ -829,9 +836,9 @@ impl Okx {
                 self.account.config_in_flight = false;
                 if self.account.configured {
                     self.account.config_read_at = cx.now;
-                    cx.log(LogLevel::Warning, error);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 } else {
-                    cx.log(LogLevel::Error, error);
+                    cx.notice(Level::Error, code::REQUEST_FAILED, error);
                     let pause = std::mem::take(&mut self.account.config_pause_ms);
                     self.account.startup.failed_after(cx, (), pause);
                 }
@@ -842,7 +849,7 @@ impl Okx {
                 return;
             }
         }
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
@@ -929,7 +936,11 @@ impl Okx {
                 cx.close(socket);
             }
         }
-        cx.log(LogLevel::Error, &error.message);
+        cx.notice(
+            Level::Error,
+            code::for_startup_error(&error),
+            &error.message,
+        );
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -1032,8 +1043,7 @@ impl Okx {
             .skipped_instruments_logged
             .insert(inst_id.into())
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(Level::Error, code::ROW_SKIPPED,
                 format!("OKX {inst_id} has open exposure but its instrument row was malformed; it is not shown"),
             );
         }
@@ -1042,8 +1052,9 @@ impl Okx {
 
     fn unlisted_skipped(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
         if self.account.unlisted_logged.insert(inst_id.into()) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "OKX {inst_id} is not a listed market; its positions and orders are skipped"
                 ),
@@ -1077,8 +1088,9 @@ impl Okx {
                     let imr = risk.native_imr * rate;
                     let upl = risk.native_upl * rate;
                     if !contracts.is_finite() || !imr.is_finite() || !upl.is_finite() {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::VALUATION_UNAVAILABLE,
                             "OKX collateral FX overflow; retaining previous account valuation",
                         );
                         return;
@@ -1240,7 +1252,7 @@ impl Okx {
             .filter(|total| total.is_finite());
         let Some(collateral) = collateral else {
             if !self.account.valuation_pending {
-                cx.log(LogLevel::Warning, "OKX collateral price unavailable; retaining native currencies and previous USD balance");
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE, "OKX collateral price unavailable; retaining native currencies and previous USD balance");
             }
             self.account.valuation_pending = true;
             return;
@@ -1255,8 +1267,9 @@ impl Okx {
         let used = usd(self.account.risk.values().map(|risk| risk.imr).sum());
         let upnl = usd(self.account.risk.values().map(|risk| risk.upl).sum());
         if !used.is_finite() || !upnl.is_finite() {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "OKX collateral risk invalid; retaining previous USD balance",
             );
             return;
@@ -1365,8 +1378,9 @@ impl Okx {
                     cx.close(socket);
                     safe_cex_engine::Venue::on_close(self, cx, socket, 1008);
                 }
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::STREAM_UNAVAILABLE,
                     format!("OKX login {}: {}", message.code, message.msg),
                 );
             }
@@ -1382,8 +1396,9 @@ impl Okx {
             "orders" | "orders-algo" | "algo-advance" => {
                 let _ = json::each::<OrderRow<'_>>(data.get(), |row| {
                     if cx.store.market_by_id(row.inst_id).is_none() {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "OKX order update market unavailable; preserving previous orders",
                         );
                         return;
@@ -1456,29 +1471,29 @@ impl Okx {
             }
             "positions" => {
                 let mut valid = false;
-                let _ = json::each::<PositionRow<'_>>(data.get(), |row| {
-                    if let Some((p, risk)) = self.position(cx, &row) {
-                        valid = true;
-                        self.account.revision += 1;
-                        self.account
-                            .position_versions
-                            .insert(p.id.clone(), self.account.revision);
-                        Self::setting(cx, &p);
-                        if p.contracts == 0.0 {
-                            self.account.risk.remove(&p.id);
-                        } else {
-                            self.account.risk.insert(p.id.clone(), risk);
-                        }
-                        cx.store.upsert_position(p);
-                    } else if cx.store.market_by_id(row.inst_id).is_none()
-                        && row.pos.parse::<f64>().ok() != Some(0.0)
-                    {
-                        cx.log(
-                            LogLevel::Warning,
+                let _ =
+                    json::each::<PositionRow<'_>>(data.get(), |row| {
+                        if let Some((p, risk)) = self.position(cx, &row) {
+                            valid = true;
+                            self.account.revision += 1;
+                            self.account
+                                .position_versions
+                                .insert(p.id.clone(), self.account.revision);
+                            Self::setting(cx, &p);
+                            if p.contracts == 0.0 {
+                                self.account.risk.remove(&p.id);
+                            } else {
+                                self.account.risk.insert(p.id.clone(), risk);
+                            }
+                            cx.store.upsert_position(p);
+                        } else if cx.store.market_by_id(row.inst_id).is_none()
+                            && row.pos.parse::<f64>().ok() != Some(0.0)
+                        {
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                             "OKX owned position market unavailable; preserving previous positions",
                         );
-                    }
-                });
+                        }
+                    });
                 if !valid {
                     return;
                 }

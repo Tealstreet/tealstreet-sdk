@@ -250,7 +250,8 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
           timestamp: '<timestamp>',
           sign: '<signature>',
           ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
-          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
+          // BloFin and Bitunix sign a fresh random nonce; the audit verifies it.
+          ...(options.blofinProtocol || options.rust === 'bitunix' ? { nonce: '<nonce>' } : {}),
         };
         return nested ? JSON.stringify(normalized) : normalized;
       });

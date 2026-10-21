@@ -3,15 +3,17 @@ mod trading;
 mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
-    SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
+    SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -489,16 +491,16 @@ impl KucoinSpot {
         self.wallet_valuation_pending = unpriced;
         if unpriced {
             if newly_unpriced {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     "KuCoin Spot USD wallet valuation awaits a valid quote; retaining prior USD balance",
                 );
             }
             return Ok(());
         }
         if unquoted && !self.wallet_unquoted_warned {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "KuCoin Spot wallet currency has no USD quote; valued at 0",
             );
         }
@@ -776,12 +778,13 @@ impl Venue for KucoinSpot {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if self.options.testnet || (!self.options.public_data_only && self.credentials.is_none()) {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "KuCoin Spot requires production key, secret and passphrase",
             );
             return;
@@ -982,7 +985,11 @@ impl Venue for KucoinSpot {
                         )));
                     }
                     _ => {
-                        cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
+                        cx.notice(
+                            Level::Error,
+                            code::STREAM_UNAVAILABLE,
+                            "invalid KuCoin Spot bullet server",
+                        );
                         self.reconnect(cx, channel);
                     }
                 }
@@ -993,7 +1000,7 @@ impl Venue for KucoinSpot {
                 if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT)
                     && let Err(e) = self.account_balance(cx, data)
                 {
-                    cx.log(LogLevel::Error, e);
+                    cx.notice(Level::Error, code::REQUEST_FAILED, e);
                 }
                 if !current {
                     self.heal(cx, true);
@@ -1008,7 +1015,7 @@ impl Venue for KucoinSpot {
                         .collect::<VecDeque<_>>(),
                     Err(e) => {
                         self.orders_loading = false;
-                        cx.log(LogLevel::Error, e.to_string());
+                        cx.notice(Level::Error, code::REQUEST_FAILED, e.to_string());
                         return;
                     }
                 };
@@ -1245,14 +1252,8 @@ impl Venue for KucoinSpot {
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
-        cx.log(
-            if discovery {
-                LogLevel::Warning
-            } else {
-                LogLevel::Error
-            },
-            error,
-        );
+        let level = if discovery { Level::Warn } else { Level::Error };
+        cx.notice(level, code::REQUEST_FAILED, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(tickers) = self.discovery.on_timer(timer) {
@@ -1317,7 +1318,11 @@ impl Venue for KucoinSpot {
                 interval: i,
             } => {
                 if interval(i).is_err() {
-                    cx.log(LogLevel::Error, i.unsupported("KuCoin Spot"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("KuCoin Spot"),
+                    );
                     return;
                 }
                 let n = self.candles.entry((symbol.clone(), i)).or_default();
