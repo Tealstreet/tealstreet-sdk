@@ -39,3 +39,23 @@ keys. Inspect order censuses, poll/command ties and snapshot staging in the
 artifacts; do not change production behavior or broaden declarations. Run
 focused harness tests, independent review, full CI and the fail-closed merge
 guard, then report the merge. OKX landed in PR #1557 (`3d73437e589`).
+
+## CI-built engine reuse
+
+Before Binance, land a separate infrastructure PR approved by the overseer.
+Archive the three actual CI-built Node wasm package files immediately after
+each venue build. Record their hashes, source head/run, a fixed build-input
+git-tree fingerprint, family and pinned compiler/tool/flag contract. Upload
+this package separately for three days; keep existing replay-report retention.
+
+Add a gate option that validates the fingerprint against the tested HEAD,
+refuses dirty or untracked build inputs, checks family/tool/flag provenance
+and all package hashes, and passes only the validated JS path to Rust replay.
+Any missing or mismatched artifact fails without falling back to installed
+wasm. Harness-only clock/declaration edits can reuse unchanged Rust inputs.
+
+Test matching reuse, mismatched commits, dirty/staged/untracked inputs,
+root Cargo configuration, family/tool/flag changes, missing/corrupt package
+files and early CLI refusal. Review independently, run the focused harness
+suite, and require full green CI on the PR head before merge. Local replay
+outputs accelerate iteration; they do not replace that merge gate.

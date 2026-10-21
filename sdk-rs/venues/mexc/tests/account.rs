@@ -1080,6 +1080,61 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
 }
+
+#[test]
+fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup() {
+    let (mut e, socket, _, _) = private_started();
+    let rows = [
+        r#"{"tradeId":"f1","orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10}"#,
+        r#"{"tradeId":"f2","orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10,"fee":"-0.2","profit":"0","realizedPnl":"9"}"#,
+        r#"{"tradeId":"f3","orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10,"fee":0,"realizedPnl":-2}"#,
+        r#"{"tradeId":"f4","orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10,"fee":{},"profit":"NaN"}"#,
+        r#"{"tradeId":"f5","orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10,"fee":null,"profit":null,"realizedPnl":"5"}"#,
+    ];
+    for row in rows {
+        let text = format!(r#"{{"channel":"push.personal.order.deal","data":{row}}}"#);
+        ws(&mut e, socket, &text);
+        ws(&mut e, socket, &text);
+    }
+    let frame = e.take_frame(200.).unwrap();
+    let payload = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 5);
+    assert_eq!(payload.len(), 248);
+    let symbol_refs: Vec<_> = payload[144..164]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|value| u32::from_le_bytes(*value))
+        .collect();
+    assert_eq!(symbol_refs.len(), 5);
+    assert!(
+        symbol_refs
+            .iter()
+            .all(|value| *value != u32::MAX && *value == symbol_refs[0])
+    );
+    let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+    for row in 0..5 {
+        assert_eq!(
+            [value(64 + row * 16), value(72 + row * 16)],
+            [65000., 0.001]
+        );
+    }
+    assert!(value(168).is_nan());
+    assert_eq!([value(176), value(184)], [0., -2.]);
+    assert!(
+        value(192).is_nan(),
+        "malformed metadata cannot discard a valid fill"
+    );
+    assert_eq!(value(200), 5.);
+    assert!(value(208).is_nan());
+    assert_eq!([value(216), value(224)], [0.2, 0.]);
+    assert!(value(232).is_nan());
+    assert!(value(240).is_nan());
+    assert!(e.take_market_frame(200.).is_none());
+}
 #[test]
 fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
     for surface in ["open_orders", "planorder", "stoporder"] {

@@ -106,7 +106,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
-| 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
+| 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution; optional appended f64 realizedPnl[n], fee[n] (NaN means unreported) |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 | 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
 | 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
@@ -116,6 +116,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 | 19 | `CAPABILITIES` (snapshot frames only) | `u32` flags (bits 0-11: clientOrderLookup, fillHistory, orderHistory, incomeHistory, fillsByOrderId, accountLeverage, accountMarginType, cancelWithSymbols, amendWithSymbol, orderBookQuery, options, accountTier); `u32` four-bit fields: account, cancelAll, leverageQuery, maxLeverage, quantityUnits |
 | 20 | `UNDERLYING_TOKENS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][2]` (venue token name, optional full name): the token behind a wrapped pair, e.g. Hyperliquid `UBTC`/`Unit Bitcoin` behind `BTC/USDC`; applied as `market.info.hlTokenName`/`hlTokenFullName` |
+| 21 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
 
 The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
 Section revision 0 preserves the layouts above. Revision 1 has explicit fixed

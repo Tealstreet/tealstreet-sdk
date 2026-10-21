@@ -21,16 +21,9 @@ const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone)]
 pub enum Kind {
-    Balance {
-        revision: u64,
-        command: Option<safe_cex_engine::CommandId>,
-    },
-    Orders {
-        revision: u64,
-    },
-    Token {
-        socket: SocketId,
-    },
+    Balance { revision: u64 },
+    Orders { revision: u64 },
+    Token { socket: SocketId },
     Trade(super::trading::Step),
 }
 #[derive(Clone)]
@@ -320,7 +313,7 @@ impl KrakenSpot {
         }
         self.spot_settings(cx);
         self.private_connect(cx);
-        self.balance_read(cx, None);
+        self.balance_read(cx);
         self.orders_read(cx);
         self.account.poll = Some(cx.set_poll_timer(10_000.));
     }
@@ -356,12 +349,8 @@ impl KrakenSpot {
         cx.store.set_settings(settings);
         cx.store.set_hedged(false);
     }
-    pub(super) fn balance_read(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: Option<safe_cex_engine::CommandId>,
-    ) {
-        if !self.account.balance_flight.is_empty() && command.is_none() {
+    pub(super) fn balance_read(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.balance_flight.is_empty() {
             return;
         }
         self.account.balance_revision += 1;
@@ -374,7 +363,6 @@ impl KrakenSpot {
             vec![],
             Kind::Balance {
                 revision: self.account.balance_revision,
-                command,
             },
         );
     }
@@ -706,23 +694,13 @@ impl KrakenSpot {
             }
         };
         let r = match &request.kind {
-            Kind::Balance { revision, command } => {
+            Kind::Balance { revision } => {
                 self.account.balance_flight.remove(revision);
                 let r = self.balance_response(cx, text, *revision);
                 if *revision != self.account.balance_revision
                     && self.account.balance_flight.is_empty()
                 {
-                    self.balance_read(cx, None);
-                }
-                if let Some(c) = command {
-                    {
-                        let result: Result<String, String> =
-                            r.as_ref().map(|_| "null".into()).map_err(Clone::clone);
-                        match result {
-                            Ok(data) => cx.done(*c, data),
-                            Err(error) => cx.fail(*c, error),
-                        }
-                    };
+                    self.balance_read(cx);
                 }
                 r
             }
@@ -798,11 +776,8 @@ impl KrakenSpot {
         let Kind::Trade(_) = request.kind else {
             let error = error.message.as_str();
             match request.kind {
-                Kind::Balance { command, revision } => {
+                Kind::Balance { revision } => {
                     self.account.balance_flight.remove(&revision);
-                    if let Some(c) = command {
-                        cx.fail(c, error)
-                    }
                 }
                 Kind::Orders { .. } => self.account.orders_flight = false,
                 Kind::Token { socket } => {
@@ -844,7 +819,7 @@ impl KrakenSpot {
         }
         if self.account.poll == Some(timer) {
             self.account.poll = Some(cx.set_poll_timer(10_000.));
-            self.balance_read(cx, None);
+            self.balance_read(cx);
             self.orders_read(cx);
             return true;
         }
@@ -913,7 +888,7 @@ impl KrakenSpot {
         let Some(data) = msg.data else { return true };
         if msg.channel == "balances" {
             self.account.balance_revision += 1;
-            self.balance_read(cx, None);
+            self.balance_read(cx);
             return true;
         }
         if msg.channel != "executions" {

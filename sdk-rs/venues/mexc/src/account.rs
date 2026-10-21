@@ -9,7 +9,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const SKIP_LOG_LIMIT: usize = 4_096;
@@ -457,13 +457,19 @@ impl MexcFutures {
                     return;
                 }
                 if raw.vol > 0.0 {
-                    cx.fill(Fill {
-                        order_id: raw.order_id.to_string(),
-                        symbol,
-                        side: side(raw.side),
-                        price: raw.price,
-                        amount: raw.vol * m.contract_size.unwrap_or(1.0),
-                    });
+                    cx.fill_with_financials(
+                        Fill {
+                            order_id: raw.order_id.to_string(),
+                            symbol,
+                            side: side(raw.side),
+                            price: raw.price,
+                            amount: raw.vol * m.contract_size.unwrap_or(1.0),
+                        },
+                        FillFinancials {
+                            realized_pnl: raw.profit.or(raw.realized_pnl),
+                            fee: raw.fee.map(f64::abs),
+                        },
+                    );
                 }
             }
             "push.personal.position.mode" => {

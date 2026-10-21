@@ -165,6 +165,19 @@ function describeRhs(target: RhsTarget): string {
 }
 
 export function parseCondition(args: string[]): ParsedCondition | null {
+  const condition = parseConditionBody(args);
+  if (!condition || !['position', 'long', 'short', 'anyposition', 'pnl', 'fill'].includes(args[0]?.toLowerCase()))
+    return condition;
+  return {
+    ...condition,
+    check: (exchange, symbol, ctx) => {
+      exchange.syncAccountState?.();
+      return condition.check(exchange, symbol, ctx);
+    },
+  };
+}
+
+function parseConditionBody(args: string[]): ParsedCondition | null {
   if (args.length === 0) return null;
   const head = args[0].toLowerCase();
 

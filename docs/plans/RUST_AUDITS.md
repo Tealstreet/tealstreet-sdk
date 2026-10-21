@@ -744,7 +744,9 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
   (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX and
+  WEEX now read native rails `onRead`; MEXC reads a symbol its metadata refresh
+  has not covered yet); command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
   `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base
@@ -1079,8 +1081,15 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   ~~one malformed SBE frame recycles the public socket (`public.rs:388`)~~ — malformed frames
   now drop without clearing books/socket or refreshing liveness; subsequent valid
   sequence gaps still recover only the affected book (native regressions).
-- Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
-  of 0 rejects order; history fails on one row; stale uPnL after WS close;
+- Low: ~~one unmappable order row discards refresh~~ (row isolation keeps its
+  stored copy while valid peers commit); ~~leverage-0 config row~~ (only positive
+  valid configuration leverage is admitted; bad rows preserve cached settings);
+  ~~stale uPnL after WS close~~ (closing removes the leg and recomputes aggregate
+  UPnL). Existing regressions cover row isolation, invalid configs and REST/WS
+  closure; zero-config behavior is source-verified, not a dedicated test claim.
+  RISKY retained: explicit zero TP/SL rejects before entry dispatch rather than
+  silently dropping requested protection; malformed financial-history rows fail
+  visibly rather than returning a plausible incomplete ledger.
   ~~README says remote signing rejected~~ — corrected to the landed payload
   signing contract exercised by the delegated-signing regressions.
 
