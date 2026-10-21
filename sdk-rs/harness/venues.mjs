@@ -1689,6 +1689,7 @@ export const VENUES = {
   },
   mexc: {
     rust: 'mexc',
+    virtualPrivateClock: true,
     mexcProtocol: true,
     requestBody: mexcRequestBody,
     requestUrl: mexcRequestUrl,
