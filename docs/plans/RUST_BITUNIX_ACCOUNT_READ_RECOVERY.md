@@ -40,3 +40,12 @@ https://www.bitunix.com/api-docs/futures/ErrorCode/error_code.html
 Fresh branch from actual landing; integrate exact reviewed #1658 as a genuine
 read-admission dependency. No merge while any predecessor remains unlanded.
 Owner/live-capture decisions and signature resend remain excluded.
+
+Plan-audit refinements: validate the complete required shape before mutating auth
+groups, use a per-symbol settings attempt serial, and aggregate refused settings
+symbols without hashing them into fixed endpoint bits. Keep one clean deferred
+read scheduler for healthy keys blocked by a host pause; do not count poll attempts
+as failures. Apply the60s floor even to a short Retry-After header. Retained partial
+rows or superseded snapshots do not constitute rejected credentials or a failed
+transport read. Preserve status/headers on malformed private streams and sanitize
+private diagnostics. Independent plan audit is clear with these constraints.
