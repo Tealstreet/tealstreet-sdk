@@ -120,3 +120,21 @@ The `s` profile measured 1,370,484 bytes (31,022 bytes above baseline and
 run 39647878514 / Bybit job 119388893518. The hard size gate rejected it
 before replay, so there is no timing or raw-output proof for this candidate.
 The next candidate tests `z`, integrating landing `a8b1cb00a31` cleanly first.
+
+The `z` profile measured 1,196,217 bytes (143,245 bytes below baseline),
+leaving 147,271 bytes (143.8 KiB) of headroom under the unchanged budget.
+SHA-256 `3c14c73b5af94fb1cd261aaebccb772fe9c3d3da1fb2d601c3d48080ca9b5cff`,
+run 39648619392 / Bybit job 119391018923. Public timing/memory gates passed
+for all five aliases; existing declared coverage failures remain unchanged.
+The first downloaded raw artifact has 49 outputs because inverse, spot and
+demo received seven adaptive performance samples. All available hashes match
+the baseline, retaining every raw field except top-level metrics; this is
+explicitly incomplete and does not satisfy the required 55/55 final proof.
+
+Select `z` for Bybit alone: it exceeds the 30 KiB headroom target while `s`
+fails the fixed budget. The package override applies to family/combined WASM
+and native release builds; measured performance evidence here covers WASM.
+No native debug profile, source algorithm or other package profile changes.
+Final acceptance still requires current-landing integration, green CI including
+all budgets and public gates, complete 55/55 byte-identical raw replay proof,
+and a separate fresh revert guard before merging the exact green head.

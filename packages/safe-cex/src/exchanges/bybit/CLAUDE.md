@@ -2041,7 +2041,7 @@ native query command in `history.incomplete` before partial completion/window
 continuation. Existing rows, caps and error policies are preserved; the host can
 flag the owning partial array and route its warning without crossing callers.
 
-Rust release code generation for the Bybit crate is selected for family WASM
-size. CI still requires the public CPU/memory gates and complete raw replay
+Rust release code generation for the Bybit crate uses `opt-level = "z"` for
+family WASM size. CI still requires the public CPU/memory gates and complete raw replay
 outputs, including caller identities; the source parsers, handlers and financial
 calculations retain their existing behavior. Other venue profiles are unchanged.
