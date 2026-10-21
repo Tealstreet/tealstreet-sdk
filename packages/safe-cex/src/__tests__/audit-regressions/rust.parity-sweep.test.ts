@@ -111,8 +111,8 @@ describe('Rust parity query forwarding', () => {
     ]);
     expect(commands[0]).not.toHaveProperty('symbol');
   });
-  it('forwards secondary credentials separately from the primary account', async () => {
-    const { exchange, construct } = fixture('phemex', { secondary_key: 'read-key', secondary_secret: 'read-secret' });
+  it.each(['phemex', 'bitunix'] as const)('%s forwards secondary credentials separately from the primary account', async (venue) => {
+    const { exchange, construct } = fixture(venue, { secondary_key: 'read-key', secondary_secret: 'read-secret' });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(JSON.parse(construct.mock.calls[0]![1] as string)).toMatchObject({
