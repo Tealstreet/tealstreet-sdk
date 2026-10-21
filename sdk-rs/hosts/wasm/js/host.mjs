@@ -150,6 +150,8 @@ export class EngineDeadError extends Error {
     super('Exchange engine stopped unexpectedly', { cause });
     this.name = 'EngineDeadError';
     this.code = 'ENGINE_DEAD';
+    // A trap (a Rust panic) is the engine's own fault, never a venue answer.
+    this.kind = 'internal';
     if (command) {
       this.command = command.op;
       if (WRITE_COMMANDS.has(command.op)) {
@@ -207,7 +209,11 @@ export class EngineHost {
         default: return fn.call(this.engine, a, b, c, d);
       }
     } catch (error) {
-      if (typeof WebAssembly === 'undefined' || !(error instanceof WebAssembly.RuntimeError)) throw error;
+      // A trap is a RuntimeError. A RangeError here unwound wasm mid-mutation (stack
+      // overflow, allocation failure in an import, result decode) with its borrow held.
+      const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
+        || error instanceof RangeError;
+      if (!fatal) throw error;
       this.deadError = new EngineDeadError(error);
       this.disposed = true;
       try { this.cleanup(); }

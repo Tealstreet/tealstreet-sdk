@@ -10,7 +10,7 @@ const PUBLIC = 'wss://ws-contract.weex.com/v3/ws/public';
 const PRIVATE = 'wss://ws-contract.weex.com/v3/ws/private';
 const records = [];
 const http = (method, path, body, requestBody, effectiveAt = 0, afterCommand) => records.push({ t: 0, effectiveAt, ...(afterCommand === undefined ? {} : { afterCommand }), type: 'http', method, url: REST + path, requestBody: requestBody && JSON.stringify(requestBody), status: 200, body: JSON.stringify(body) });
-const ws = (t, url, payload) => records.push({ t, type: 'ws', url, text: JSON.stringify(payload) });
+const ws = (t, url, payload, extra = {}) => records.push({ t, type: 'ws', url, text: JSON.stringify(payload), ...extra });
 let commands = 0;
 const command = (t, payload) => { commands++; records.push({ t, type: 'command', ...payload }); };
 // A write belongs to the command just issued; its stage gates that command's snapshots.
@@ -69,9 +69,10 @@ ws(4200, PRIVATE, { e: 'orders', E: streamTime, msgEvent: 'OrderUpdate', d: [
   orderEvent({ id: placedBtc.orderId, side: 'BUY', type: 'LIMIT', size: '0.002', price: '69300', status: 'CANCELED', clientOrderId: 'caller-btc' }),
   orderEvent({ id: algo.algoId, side: 'BUY', type: 'STOP_MARKET', size: '0.001', triggerPrice: '70000', status: 'CANCELED' }),
 ] });
+// Production often pushes the order event before the REST acknowledgement.
 ws(4600, PRIVATE, { e: 'orders', E: streamTime, msgEvent: 'OrderUpdate', d: [
   orderEvent({ id: protective.algoId, side: 'SELL', type: 'TAKE_PROFIT_MARKET', size: '0.01', triggerPrice: '76000', status: 'UNTRIGGERED', reduceOnly: true }),
-] });
+] }, { beforeAck: true, afterCommand: 4 });
 ws(4800, PRIVATE, { type: 'ping', time: '1773298805000' });
 command(5300, { op: 'cancelSymbolOrders', symbol: 'BTCUSDT' });
 write('DELETE', '/capi/v3/allOpenOrders?symbol=BTCUSDT', [{ orderId: resting.orderId, success: true }]);
@@ -84,6 +85,14 @@ ws(5600, PRIVATE, { e: 'account', E: 1773298805123, d: [{ coin: 'USDT', amount: 
 command(6300, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'conditional', side: 'buy', amount: 0.001, triggerPrice: 71000 }] });
 write('POST', '/capi/v3/algoOrder', { orderId: finalAlgo.algoId, clientOrderId: '$clientAlgoId', success: true }, { symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG', type: 'STOP_MARKET', quantity: '0.001', triggerPrice: '71000' });
 ws(6400, PRIVATE, { e: 'orders', E: 1773298805123, d: [finalAlgo] });
+// A post-only buy above the ask is accepted and canceled at once; its terminal
+// event arrives before the acknowledgement, which must not reopen the order.
+const rejectedPostOnly = '702345678901234566';
+command(6700, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.001, price: 69400, timeInForce: 'PostOnly', clientOrderId: 'caller-post' }] });
+write('POST', '/capi/v3/batchOrders', [{ orderId: rejectedPostOnly, clientOrderId: 'caller-post', success: true }], { batchOrders: [{ symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG', type: 'LIMIT', timeInForce: 'POST_ONLY', quantity: '0.001', price: '69400', newClientOrderId: 'caller-post' }] });
+ws(6800, PRIVATE, { e: 'orders', E: streamTime, msgEvent: 'OrderUpdate', d: [
+  orderEvent({ id: rejectedPostOnly, side: 'BUY', type: 'LIMIT', size: '0.001', price: '69400', status: 'CANCELED', clientOrderId: 'caller-post' }),
+] }, { beforeAck: true, afterCommand: commands });
 ws(7200, PRIVATE, { e: 'positions', E: streamTime, d: [finalPosition] });
 ws(7200, PRIVATE, { e: 'orders', E: streamTime, d: [finalEth] });
 ws(7200, PRIVATE, { type: 'ping', time: String(streamTime) });
