@@ -28,6 +28,7 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     /// Commands completed with `outcome: Unknown`.
     pub unknown: Vec<u32>,
+    pub outcomes: Vec<(u32, Option<safe_cex_engine::Outcome>)>,
     pub logs: Vec<String>,
     pub notices: Vec<Notice>,
     pub command_errors: Vec<(u32, String)>,
@@ -61,6 +62,7 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             unknown: Vec::new(),
+            outcomes: Vec::new(),
             logs: Vec::new(),
             notices: Vec::new(),
             command_errors: Vec::new(),
@@ -135,6 +137,8 @@ impl Harness {
                     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
                         self.unknown.push(command);
                     }
+                    self.command_notices.push((command, "done"));
+                    self.outcomes.push((command, error.outcome));
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
