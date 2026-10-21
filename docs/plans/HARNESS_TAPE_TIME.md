@@ -303,3 +303,22 @@ within each implementation, including complete IDs, timestamps and receipts.
 The standalone private strict gate passes with zero diagnostics; keep the
 17-record fixture and declaration manifest unchanged. Current-head CI must
 independently reproduce the proof and verify both mandatory cases before merge.
+
+## Kraken futures phase
+
+Enable the private tape clock only for Kraken futures, using the existing
+1700000000000 epoch. Keep startup rewind and the strict Rust increasing/fresh
+nonce audit, exact encoded-form/path signatures and TS's existing audit policy.
+Preserve reconnect challenge/subscription authentication, fill deduplication,
+the staged 3800 ms REST reconciliation, leverage, terminal orders and unsupported
+command receipts. Kraken Spot is a separate completed phase.
+
+Use a hard fingerprint-matching CI engine for five focused pairs. Compare full
+nonmetric outputs, including IDs, timestamps and command receipts. Remove only
+exact unobserved private declaration keys; review any new key with its tape SHA
+and specific cause. Keep public declarations unchanged. Require focused tests,
+independent plan/implementation/current-CI raw audits, fresh mandatory public/
+private verification, five identical current-head pairs and full green CI.
+Integrate any actual shared-profile dependency landing before final proof. Guard
+Kraken separately from merging, audit actual parents/files, report, then move to
+Lighter mainnet/testnet before its Robinhood alias.
