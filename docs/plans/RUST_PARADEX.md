@@ -469,3 +469,35 @@ tests validate the aliases and explicit unsupported decoding. The ApeX standalon
 secret guard is included. No engine, native, JS/Workers transport or crypto
 primitive changes arrive with this landing. Independent review and fresh final
 gates/CI remain required; their proof is posted on PR #1320.
+
+### Port-review lows revalidation plan (Codex, 2026-10-21)
+
+1. Recheck order-row isolation, leverage-zero config admission and closed-position
+   UPnL against current native source and existing deterministic regressions.
+2. Strike stale findings precisely, without claiming a dedicated zero-config test
+   where only source plus adjacent invalid-config regressions exist.
+3. Retain explicit zero TP/SL refusal and strict financial-history errors as
+   intentional safeguards. Docs-only scope unless a real safe gap is found.
+4. Run the relevant existing focused regressions, independent review and docs CI;
+   merge under the exact revert guard and report the result.
+
+- Current native lows require no runtime change. Account order snapshots use
+  row isolation and retain invalid rows' stored identities while valid peers
+  update. Existing tests bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them
+  and unmapped_perpetual_rows_are_skipped_and_protect_only_their_own_identity
+  cover that behavior. Configuration admission explicitly requires leverage>0
+  (account.rs); one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit
+  covers negative/bad peers, not a dedicated zero-config case.
+- Closing a position removes it and calls update_upnl, summing remaining exposure.
+  closed_positions_with_defaulted_optional_fields_remove_existing_exposure covers
+  REST and WS removal and asserts balance.upnl=0; the reported stale-UPnL low is stale.
+- Preserve zero TP/SL refusal before dispatch: treating zero as absent could place
+  an unprotected entry despite requested protection. Preserve strict financial
+  history failures: tests cursor_loops_and_malformed_financial_reads_fail_without_touching_store
+  and malformed_financial_scalars_fail_instead_of_becoming_zero_or_missing_rows
+  pin this safeguard. Silent partial financial reads and implicit protection
+  removal remain explicitly risky. No signatures, API shapes or host contracts change.
+- Validation: three existing account regressions and two strict-history
+  regressions pass. Independent read-only review cleared the two-file docs diff,
+  including the source-only zero-config claim. No runtime tests were invented
+  for unchanged behavior; CI validates the documentation commit.

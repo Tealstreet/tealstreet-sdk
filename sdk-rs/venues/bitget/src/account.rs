@@ -238,7 +238,7 @@ impl BitgetFutures {
                     cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
                 }
             }
-            Err(error) => cx.notice(Level::Error, code::REQUEST_FAILED, error),
+            Err(error) => cx.retried_failure("bitget.account:241", error),
         }
     }
 
@@ -741,7 +741,7 @@ impl BitgetFutures {
                             self.apply_balance(cx, amounts);
                         }
                     }
-                    Err(error) => cx.notice(Level::Error, code::REQUEST_FAILED, error),
+                    Err(error) => cx.retried_failure("bitget.account:744", error),
                 }
             }
             Request::Orders(mut snapshot) => {
@@ -867,7 +867,7 @@ impl BitgetFutures {
         error: &str,
     ) {
         self.clear_in_flight(&request);
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("bitget.account:870", error);
     }
 
     pub(crate) fn account_transport_failed(

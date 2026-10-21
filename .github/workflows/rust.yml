@@ -319,6 +319,8 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex-wasm test
       - name: Build the venue wasm engine
         run: yarn rust:build-wasm --venue ${{ matrix.venue }}
+      - name: Archive the matching CI replay engine
+        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         run: corepack yarn -s rust:wasm-budget
       - name: Replay request normalization
@@ -455,3 +457,11 @@ jobs:
           path: |
             sdk-rs/harness/out/
           retention-days: 14
+      - name: Retain the matching CI replay engine briefly
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-wasm-${{ matrix.venue }}
+          path: sdk-rs/hosts/wasm/pkg/ci-replay/
+          retention-days: 3
+          if-no-files-found: ignore
