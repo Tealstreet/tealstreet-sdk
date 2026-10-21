@@ -1468,9 +1468,6 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    // Out of line: `handle` and `release_held` both dispatch through it, and
-    // inlining the venue's whole dispatch twice grows every venue wasm.
-    #[inline(never)]
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
         if self.venue.cancel_needs_stored_order()
             && !self.releasing

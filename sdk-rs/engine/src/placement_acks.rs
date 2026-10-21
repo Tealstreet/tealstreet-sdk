@@ -9,7 +9,6 @@
 //! unchanged, so an id that never appears still fails explicitly at the venue.
 
 use crate::{Command, CommandId, Store};
-use std::collections::{HashMap, HashSet};
 
 /// How long an acknowledged id may wait for the store before a command naming
 /// it is dispatched anyway.
@@ -20,9 +19,9 @@ pub(crate) const FILL_GRACE_MS: f64 = 1_500.0;
 
 #[derive(Default)]
 pub(crate) struct PlacementAcks {
-    placing: HashSet<CommandId>,
+    placing: Vec<CommandId>,
     /// Acknowledged ids not yet seen in the store, with their expiry.
-    acked: HashMap<String, f64>,
+    acked: Acked,
     /// Held commands, each with a hard cap; the live deadline is computed from
     /// the acknowledgements it still awaits, so it never goes stale.
     held: Vec<(Command, f64)>,
@@ -49,25 +48,79 @@ const LEG_SUFFIXES: [&str; 6] = [
 
 /// Every identity the store answers for, built once per pass: each row's id,
 /// the order its virtual leg belongs to (`{id}_sl` → `id`) and its group parent.
-struct Stored<'a>(HashSet<&'a str>);
+/// Sorted vectors rather than hashed containers keep this off the venue wasm
+/// size budget (each hashed instantiation adds code to every opted-in venue).
+struct Stored<'a>(Vec<&'a str>);
 
 impl<'a> Stored<'a> {
     fn of(store: &'a Store) -> Self {
-        let mut ids = HashSet::with_capacity(store.orders().len() * 2);
+        let mut ids = Vec::with_capacity(store.orders().len() * 2);
         for order in store.orders() {
-            ids.insert(order.id.as_str());
-            ids.insert(native(&order.id));
+            ids.push(order.id.as_str());
+            ids.push(native(&order.id));
             if let Some(parent) = order.parent_id.as_deref() {
-                ids.insert(parent);
+                ids.push(parent);
             }
         }
+        ids.sort_unstable();
         Self(ids)
     }
 
     /// Whether the store holds the order `id` names, its legs or its children.
     fn has(&self, id: &str) -> bool {
-        self.0.contains(id) || self.0.contains(native(id))
+        self.0.binary_search(&id).is_ok() || self.0.binary_search(&native(id)).is_ok()
     }
+}
+
+/// Acknowledged ids and their expiry, sorted by id.
+#[derive(Default)]
+struct Acked(Vec<(String, f64)>);
+
+impl Acked {
+    fn find(&self, id: &str) -> Result<usize, usize> {
+        self.0.binary_search_by(|(acked, _)| acked.as_str().cmp(id))
+    }
+
+    fn get(&self, id: &str) -> Option<f64> {
+        self.find(id).ok().map(|index| self.0[index].1)
+    }
+
+    fn insert(&mut self, id: String, expiry: f64) {
+        match self.find(&id) {
+            Ok(index) => self.0[index].1 = expiry,
+            Err(index) => self.0.insert(index, (id, expiry)),
+        }
+    }
+
+    fn remove(&mut self, id: &str) {
+        if let Ok(index) = self.find(id) {
+            self.0.remove(index);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn retain(&mut self, mut keep: impl FnMut(&str, f64) -> bool) {
+        self.0.retain(|(id, expiry)| keep(id, *expiry));
+    }
+}
+
+/// The ids in a placement result: a JSON array of plain strings. Anything else
+/// (an object, escapes) is not tracked, so its cancels are never held.
+fn result_ids(json: &str) -> Option<Vec<String>> {
+    let inner = json.trim().strip_prefix('[')?.strip_suffix(']')?.trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    inner
+        .split(',')
+        .map(|item| {
+            let id = item.trim().strip_prefix('"')?.strip_suffix('"')?;
+            (!id.contains(['"', '\\'])).then(|| id.to_owned())
+        })
+        .collect()
 }
 
 fn named_ids(command: &Command) -> &[String] {
@@ -80,16 +133,16 @@ fn named_ids(command: &Command) -> &[String] {
 
 impl PlacementAcks {
     pub fn placing(&mut self, command: CommandId) {
-        self.placing.insert(command);
+        self.placing.push(command);
     }
 
     /// A placement finished; on success its result lists the venue ids.
     pub fn finished(&mut self, command: CommandId, result: Option<&str>, now: f64) {
-        if !self.placing.remove(&command) {
+        let Some(index) = self.placing.iter().position(|placing| *placing == command) else {
             return;
-        }
-        let Some(ids) = result.and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
-        else {
+        };
+        self.placing.swap_remove(index);
+        let Some(ids) = result.and_then(result_ids) else {
             return;
         };
         let expiry = now + ACK_WAIT_MS;
@@ -101,8 +154,9 @@ impl PlacementAcks {
     /// A fill shortens the wait to `FILL_GRACE_MS`: a venue may drop a filled
     /// order rather than store it, while a partial fill's row may still follow.
     pub fn filled(&mut self, order_id: &str, now: f64) {
-        if let Some(expiry) = self.acked.get_mut(order_id) {
-            *expiry = expiry.min(now + FILL_GRACE_MS);
+        if let Some(expiry) = self.acked.get(order_id) {
+            self.acked
+                .insert(order_id.to_owned(), expiry.min(now + FILL_GRACE_MS));
         }
     }
 
@@ -114,7 +168,7 @@ impl PlacementAcks {
             .filter_map(|id| {
                 [id.as_str(), native(id)]
                     .into_iter()
-                    .filter_map(|key| self.acked.get(key).copied())
+                    .filter_map(|key| self.acked.get(key))
                     .filter(|expiry| *expiry > now)
                     .reduce(f64::max)
             })
@@ -146,7 +200,7 @@ impl PlacementAcks {
 
     fn prune(&mut self, stored: &Stored<'_>, now: f64) {
         self.acked
-            .retain(|id, expiry| *expiry > now && !stored.has(id));
+            .retain(|id, expiry| expiry > now && !stored.has(id));
     }
 
     /// Commands whose ids are now stored or whose wait expired, in arrival order.
@@ -154,7 +208,7 @@ impl PlacementAcks {
     /// when its order count moved (an acknowledged order stored, then removed).
     pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
         if self.held.is_empty() {
-            self.acked.retain(|_, expiry| *expiry > now);
+            self.acked.retain(|_, expiry| expiry > now);
             if !self.acked.is_empty() && store.orders().len() != self.pruned_orders {
                 self.pruned_orders = store.orders().len();
                 self.prune(&Stored::of(store), now);
@@ -174,7 +228,7 @@ impl PlacementAcks {
                 let (command, _) = self.held.remove(index);
                 // An expired wait must not hold the same id again on dispatch.
                 for id in named_ids(&command) {
-                    self.acked.remove(id.as_str());
+                    self.acked.remove(id);
                     self.acked.remove(native(id));
                 }
                 ready.push(command);
@@ -213,5 +267,23 @@ impl PlacementAcks {
                     .map_or(*cap, |until| until.min(*cap))
             })
             .reduce(f64::min)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::result_ids;
+
+    #[test]
+    fn placement_results_track_plain_id_arrays_only() {
+        assert_eq!(
+            result_ids(r#"["7","8"]"#),
+            Some(vec!["7".into(), "8".into()])
+        );
+        assert_eq!(result_ids(" [ \"a-1\" ] "), Some(vec!["a-1".into()]));
+        assert_eq!(result_ids("[]"), Some(Vec::new()));
+        assert_eq!(result_ids(r#"{"orderIds":["7"]}"#), None);
+        assert_eq!(result_ids(r#"["a\"b"]"#), None);
+        assert_eq!(result_ids("[7]"), None);
     }
 }
