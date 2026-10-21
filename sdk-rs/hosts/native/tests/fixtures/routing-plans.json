@@ -5019,6 +5019,24 @@
           "headers": {},
           "tunnelUrl": null
         }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-venue-key"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
       }
     ],
     "sockets": [
@@ -5246,6 +5264,24 @@
           "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
           "headers": {
             "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      },
+      {
+        "request": {
+          "url": "https://fapi.bitunix.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json",
+            "api-key": "fixture-venue-key"
           }
         },
         "expected": {
