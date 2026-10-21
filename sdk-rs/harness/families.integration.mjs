@@ -45,6 +45,12 @@ for (const family of venueFamilies) {
               op: 'fetchOrderBook', command: 1, symbol: '__rest_book_ingress_probe__', limit: 1,
             }), 0), `${venue} advertises a REST book query but its family decoder rejects it`);
           }
+          if (instance && JSON.parse(instance.capabilities()).scheduleCancel) {
+            // Public-only construction refuses signing after decoding; no transport runs.
+            assert.doesNotThrow(() => instance.command(JSON.stringify({
+              op: 'scheduleCancel', command: 2, time: 5_000,
+            }), 0), `${venue} advertises scheduleCancel but its family decoder rejects it`);
+          }
         } else assert.match(String(error?.message), /unsupported venue/, `${family} also contains ${venue}`);
       } finally {
         instance?.free();

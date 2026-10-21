@@ -81,3 +81,17 @@ Remaining integration phase: actual shared landing + #1689; preserve Backpack
 and MEXC precise decoder additions, add schedule probe alongside the family book
 probe, refresh focused checks and exact-head CI before any merge. No API closure
 or caller deployment is inferred from a draft PR.
+
+Integration phase:
+- Genuinely merged actual landing `3db712f04466` (Backpack #1680, MEXC #1681
+  and Hyperliquid harness #1689). Bounded docs/appended-test conflicts preserve
+  both incoming closures and Backpack regression; existing precise book Cargo
+  feature/decoder and family probe stay intact.
+- Added the capability-driven schedule JSON ingress probe to isolated family
+  artifacts, alongside the book probe. It constructs public-only engines and
+  never executes returned transport actions; CI supplies built artifacts.
+- Refreshed 431 native tests, 47 SDK/worker tests, 87 host/wire tests and the
+  combined-host capability fixture pass; typecheck and explicit ESLint pass.
+  Final independent adversarial integration review is clear. Full exact-head CI
+  and a fresh separate guard remain required. The Orderly #1692 priority window
+  holds source merges until the overseer releases it.
