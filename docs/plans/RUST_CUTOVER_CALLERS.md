@@ -154,6 +154,8 @@ refresh checks #1596 at `687fe0c1e08`. Shared public startup reporting checks
 #1615 at `c63acfc19c2`; its required caller visibility work remains open below.
 The Bybit private-row follow-up checks #1620 at `4592d985e8a`; leverage-ACK
 read fencing and history-marker ownership remain separate follow-ups.
+The BingX partial-error follow-up checks #1617 at `4e2f92c2622`, with its
+existing host/worker fields and NX scaled-order consumer rechecked below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -224,6 +226,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1596 / `687fe0c1e` | Bybit `refreshMarkets()` stages enabled public categories atomically, shares concurrent discovery and returns added/removed membership after publication. `marketRefresh` capability uses wire bit15; unsupported engines keep cached behavior. Failed discovery retains the old catalogue; shared-feed consumers must refresh the source and restart provider/accounts. See [Bybit explicit catalogue refresh](#bybit-explicit-catalogue-refresh). |
 | #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; after a prior degraded report, Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
 | #1620 / `4592d985e` | Ordinary Bybit REST/WS order and position rows isolate malformed peers while retaining rejected cached parents/protection or symbol exposure/Greeks. Unknown identity protects absence removal; valid peers can progress, with coherent same-symbol modes. Rejected WS evidence protects pending REST joins and coalesces read repair without globally starving unrelated rows. Warn `row.skipped` uses existing diagnostics; Hyro, execution/wallet/history handling and caller shapes stay separate. |
+| #1617 / `4e2f92c26` | BingX sequential placement failure now retains earlier acknowledged native IDs in existing typed/legacy partial-error details after a later rejection, transport loss or malformed acknowledgement. Existing classification/outcome and unsent-tail behavior remain; reconcile known effects and any uncertain failed step before retrying. No new API or automatic write retry. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -636,6 +639,23 @@ probe as account recovery or switching environments automatically. Credential
 role and deactivation policy stay unchanged. B9's code/field migration still
 applies to the existing NX CLI message-prefix check; no caller method or saved
 configuration shape changes.
+
+#### BingX acknowledged IDs on partial placement failures (#1617)
+
+BingX sequential placement failures now retain earlier acknowledged native IDs
+in the existing `partialOrderIds`/`partialOrderCount` error fields. An empty
+acknowledged set does not invent partial IDs; this helper does not supply a
+total batch count or failed index. The original failure kind/native code stay
+intact. A later definitive rejection does not mark the whole partially
+effective batch `rejected`, while transport loss or malformed acknowledgement
+keeps its `unknown` outcome.
+
+Reconcile acknowledged orders and any uncertain failed step before retrying;
+the remaining tail is not sent or replayed automatically. Worker consumers
+read fields on the reconstructed Error, without relying on `instanceof`.
+NX `apps/web/src/order/createScaledOrder.ts:64-69` at `65e086a3c90` already
+reads the partial count or ID-list length. This adds BingX evidence to the
+existing error contract, without a new caller method.
 
 #### Bitunix classified failures and partial effects (#1589)
 
