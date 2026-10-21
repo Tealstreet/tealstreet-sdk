@@ -46,7 +46,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     accountMarginType: is('blofin', 'kucoinspot'),
     cancelWithSymbols: is('asterdex', 'kucoinspot'),
     amendWithSymbol: is('kucoinspot'),
-    orderBookQuery: is('asterdex', 'polymarket', 'mexc', 'backpack'),
+    orderBookQuery: is('asterdex', 'polymarket', 'mexc', 'backpack', 'grvt'),
     options: false,
     quantityUnits: is('mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot')
       ? 'nativePlacement'

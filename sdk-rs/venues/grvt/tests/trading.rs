@@ -565,11 +565,6 @@ fn foreign_commands_fail_without_bypassing_known_order_cancellation_identity() {
             command: 33,
             mode: StpMode::ExpireBoth,
         },
-        Command::FetchOrderBook {
-            command: 33,
-            symbol: "BTC_USDT_PERP".into(),
-            limit: None,
-        },
     ] {
         let actions = command(&mut e, request);
         assert!(
@@ -1860,5 +1855,65 @@ fn failed_grvt_builder_checks_never_claim_missing_approval() {
                 .iter()
                 .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order")))
         );
+    }
+}
+
+#[test]
+fn public_rest_book_headers_and_rejections_cannot_replace_private_session() {
+    let mut e = boot();
+    for (owner, body) in [
+        (70, r#"{"r":{"b":[],"a":[]}}"#),
+        (71, r#"{"c":1000,"m":"invalid session"}"#),
+    ] {
+        let public = http(
+            command(
+                &mut e,
+                Command::FetchOrderBook {
+                    command: owner,
+                    symbol: "BTC_USDT_PERP".into(),
+                    limit: None,
+                },
+            ),
+            "/lite/v1/book",
+        );
+        assert_eq!(
+            public.headers,
+            vec![("Content-Type", "application/json".into())]
+        );
+        e.handle(NOW + 3.0, Event::HttpResponse { request: public.id, response: Response {
+            status: 200,
+            headers: "Set-Cookie: gravity=foreign-session; Path=/\nX-Grvt-Account-Id: foreign-account",
+            body,
+        }});
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::AccountAuth { .. })
+        )));
+        assert!(actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. }) if *command == owner)));
+        let private = http(
+            command(
+                &mut e,
+                Command::FetchAccount {
+                    command: owner + 10,
+                },
+            ),
+            "/lite/v1/account_summary",
+        );
+        assert!(
+            private
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "X-Grvt-Account-Id" && value == "test-account")
+        );
+        assert!(
+            private
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "Cookie" && value == "rm=true; gravity=test-session")
+        );
+        let actions = reply(&mut e, &private, 200, r#"{"r":{"te":"1000"}}"#);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command,result }) if *command==owner+10 && serde_json::from_str::<serde_json::Value>(result).unwrap()["userId"]=="test-account")));
     }
 }

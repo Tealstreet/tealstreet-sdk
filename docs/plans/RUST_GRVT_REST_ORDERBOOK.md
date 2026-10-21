@@ -45,5 +45,26 @@ Plan audit correction before implementation:
 - This is a documented narrow correction to TS, not new product support. Native
   rate code1006 is RateLimited even on HTTP200; auth-looking public code1000
   must never enter the existing account_refresh path. HTTP status has precedence.
-- All seven original-source regression groups fail through actual venue calls;
-  standalone JSON remains separately exercised before Cargo admission is enabled.
+- All seven original-source regression groups failed through actual venue calls.
+  The final suite separates capability and actual standalone JSON admission.
+
+
+Implementation evidence:
+- Original seven groups reproduce refusal before implementation. Final queries
+  cover live/testnet unsigned POST, native ID/depth50, full/lite mapping and
+  cumulative base totals, zero levels, unknown/empty queries, malformed objects/
+  finances/overflow, concurrent owners, five read retry bounds and native errors.
+- Live subscriptions survive query success/failure and unsubscribe/resubscribe
+  during an outstanding read; the next WS snapshot still works. A bootstrapped
+  private-session regression proves foreign public cookie/account headers and
+  code1000 cannot replace the session used by a subsequent private identity read.
+- Review found malformed nested errors erasing valid root refusal evidence and
+  an empty nested message hiding a root message. A new regression failed before
+  independent extraction corrected both; clean concurrent peers still complete.
+  A second proven-red review regression pins explicit null c/code rejection
+  while missing code keeps its compatibility behavior.
+- Focused checks pass:426 GRVT+Binance native tests before the final two added
+  query groups; all11 final standalone query tests, default combined-host
+  capability fixture,22 SDK bridge tests, typecheck, explicit no-ignore ESLint,
+  strict venue Clippy, format and bans. Two final independent reviews are clear.
+  Actual KCS profile rollback must be integrated before full final CI.
