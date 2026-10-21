@@ -2361,7 +2361,7 @@ response body or inventing a credential rejection. Code-aware diagnostic
 consumers must preserve that distinction rather than infer bad credentials from
 the malformed-control warning.
 
-Both unsuccessful forms retain the existing two-second login retry on the same
+Both unsuccessful forms use the existing two-second login retry policy on the same
 private socket. Repeated controls coalesce without postponing its deadline. A
 typed success clears the pending retry; socket retirement cancels it, and a late
 timer from an old socket cannot send login on a replacement. Authentication
