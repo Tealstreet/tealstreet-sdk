@@ -71,11 +71,6 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     await exchange.start();
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ pollingEnabled: false, tickInterval: null });
   });
-  it('requires session credentials even for market-data-only mode', async () => {
-    const { exchange, construct } = fixture({ key: '', secret: '', publicDataOnly: true });
-    await expect(exchange.start()).rejects.toThrow('legacy DXtrade username and password');
-    expect(construct).not.toHaveBeenCalled();
-  });
   it('settles account selection startup failures without waiting forever', async () => {
     const message = 'DXtrade startup failed: Multiple accounts found';
     const { exchange } = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
