@@ -599,6 +599,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+- ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
+  and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
+  their headers; reset and Retry-After hints extend all waiting category retries
+  without changing attempt counts, bounded by the shared one-hour cap. HTTP403
+  keeps its ten-minute floor; success headers do not manufacture a pause.
 - ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route

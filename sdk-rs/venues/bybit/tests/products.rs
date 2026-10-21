@@ -12,6 +12,35 @@ const OPTION: &str = "BTC-25DEC26-100000-C-USDT";
 const OPTIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTC-25DEC26-100000-C-USDT","status":"Trading","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","optionsType":"Call","deliveryTime":"1798185600000","lotSizeFilter":{"qtyStep":"0.01","minOrderQty":"0.01","maxOrderQty":"100"},"priceFilter":{"tickSize":"5","minPrice":"5"}},{"symbol":"ETH-25DEC26-3000-P-USDT","status":"Trading","baseCoin":"ETH","quoteCoin":"USDT","settleCoin":"USDT","optionsType":"Put","deliveryTime":"1798185600000","lotSizeFilter":{"qtyStep":"0.1","minOrderQty":"0.1","maxOrderQty":"100"},"priceFilter":{"tickSize":"0.5","minPrice":"0.5"}}],"nextPageCursor":""}}"#;
 const QUOTE: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTC-25DEC26-100000-C-USDT","bid1Price":"1000","ask1Price":"1010","markPrice":"1005","lastPrice":"1000","markIv":"0.5","bid1Iv":"0.49","ask1Iv":"0.51","underlyingPrice":"99000","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8"}]}}"#;
 
+#[test]
+fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() {
+    let mut h = Harness::started(options(false));
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
+        .unwrap();
+    let request = h.requests.remove(index);
+    let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+    h.event(Event::HttpResponse {
+        request: request.id,
+        response: safe_cex_engine::Response {
+            status: 200,
+            headers: &headers,
+            body: r#"{"retCode":10006,"retMsg":"Too many visits!","result":{}}"#,
+        },
+    });
+    h.advance(59_999.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("baseCoin=BTC") && r.url.contains("tickers"))
+    );
+    h.advance(1.0);
+    respond(&mut h, "tickers", "option", Some("baseCoin=BTC"), QUOTE);
+}
+
 fn inverse_instruments() -> String {
     support::INSTRUMENTS
         .replace("BTCUSDT", "BTCUSD")
