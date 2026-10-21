@@ -113,3 +113,10 @@ remain the measurement. Other level-3 families may offer similar code-size
 headroom, but their savings and throughput effects are unmeasured and are not
 changed here; families already using size profiles should not be assumed to
 have the same opportunity.
+
+The `s` profile measured 1,370,484 bytes (31,022 bytes above baseline and
+26,996 bytes above budget), SHA-256
+`2d1607a27924b6414d53788d4a01cc1540e5bd57a79d6b40bb60138f4e3719ef`,
+run 39647878514 / Bybit job 119388893518. The hard size gate rejected it
+before replay, so there is no timing or raw-output proof for this candidate.
+The next candidate tests `z`, integrating landing `a8b1cb00a31` cleanly first.
