@@ -846,7 +846,7 @@ impl Bitrue {
                     );
                 } else {
                     cx.store.set_hedged(false);
-                    cx.done(*command, Ok("[]".into()));
+                    cx.done(*command, "[]".into());
                 }
                 return true;
             }
@@ -1049,11 +1049,11 @@ impl Bitrue {
             Some(error) => cx.fail(plan.command, error),
             None => cx.done(
                 plan.command,
-                Ok(if plan.refresh_result || plan.cancel_batch {
+                if plan.refresh_result || plan.cancel_batch {
                     "[]".to_owned()
                 } else {
                     serde_json::to_string(&plan.ids).expect("order ids")
-                }),
+                },
             ),
         }
         if !plan.symbols.is_empty() {

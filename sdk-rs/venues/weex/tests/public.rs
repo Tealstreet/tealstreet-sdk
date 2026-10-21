@@ -183,10 +183,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 7,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, .. })
     )));
 }
 #[test]
@@ -348,7 +345,7 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone {
                 command: 8,
-                result: Ok(s),
+                result: s,
             }) => Some(s),
             _ => None,
         })
@@ -447,7 +444,11 @@ fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message.clone()),
             _ => None,
         })
         .collect();
@@ -517,6 +518,8 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert!(e.store().market("BTCUSDT").is_some());
         assert!(e.store().market("ETHUSDT").is_none(), "{bad}");
         assert!(e.drain_actions().any(|a| matches!(a,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("ETHUSDT"))));
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+                if message.contains("ETHUSDT"))));
     }
 }

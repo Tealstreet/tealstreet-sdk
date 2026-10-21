@@ -35,6 +35,9 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+mod construction;
+pub use construction::PublicMode;
+
 use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -98,7 +101,65 @@ use safe_cex_venue_polymarket::{
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
 use safe_cex_venue_woo::{Options as WooOptions, Woo};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+/// Resolved, non-sensitive account construction choices, available before engine start.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Construction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_sign: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_data_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asterdex_api_version: Option<&'static str>,
+}
+
+impl EngineOptions {
+    pub fn construction(&self, venue: &str) -> Construction {
+        let asterdex_api_version = None;
+        #[cfg(feature = "asterdex")]
+        let asterdex_api_version = if venue == "asterdex" {
+            Some(match self.aster_api_version() {
+                safe_cex_venue_asterdex::sign::Version::V1 => "v1",
+                safe_cex_venue_asterdex::sign::Version::V3 => "v3",
+            })
+        } else {
+            asterdex_api_version
+        };
+        let _ = venue;
+        let mode = construction::resolve(venue, self);
+        Construction {
+            asterdex_api_version,
+            can_sign: mode.as_ref().map(|mode| mode.can_sign),
+            public_data_only: mode.map(|mode| mode.public_data_only),
+        }
+    }
+
+    #[cfg(feature = "asterdex")]
+    fn aster_api_version(&self) -> safe_cex_venue_asterdex::sign::Version {
+        self.aster_version(self.asterdex.api_version)
+    }
+
+    #[cfg(feature = "asterdex")]
+    fn aster_version(
+        &self,
+        configured: Option<safe_cex_venue_asterdex::sign::Version>,
+    ) -> safe_cex_venue_asterdex::sign::Version {
+        fn nonempty(value: &Option<String>) -> Option<&str> {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        }
+        safe_cex_venue_asterdex::sign::resolve_version(
+            configured,
+            nonempty(&self.asterdex.user_address).or_else(|| nonempty(&self.application_id)),
+            nonempty(&self.asterdex.signer_address).or_else(|| nonempty(&self.key)),
+            nonempty(&self.asterdex.private_key).or_else(|| nonempty(&self.secret)),
+        )
+    }
+}
 
 /// Receives the constructed engine; the host decides how to own it.
 pub trait Visit {
@@ -226,10 +287,7 @@ fn asterdex_rules(options: &EngineOptions) -> Result<(), VenueError> {
     let key = options.key.as_deref().unwrap_or_default();
     let secret = options.secret.as_deref().unwrap_or_default();
     if !options.public_data_only
-        && !matches!(
-            options.asterdex.api_version,
-            Some(safe_cex_venue_asterdex::sign::Version::V3)
-        )
+        && options.aster_api_version() != safe_cex_venue_asterdex::sign::Version::V3
         && key
             .strip_prefix("0x")
             .is_some_and(|address| hex_of(address, 40))
@@ -381,6 +439,13 @@ pub fn build<T: Visit>(
 ) -> Result<T::Output, VenueError> {
     if !supported(venue) {
         return Err(invalid(format!("unsupported venue: {venue}")));
+    }
+    if let Some(mode) = construction::resolve(venue, &options) {
+        if let Some(error) = mode.explicit_private_error {
+            return Err(invalid(error));
+        }
+        options.public_data_only = mode.public_data_only;
+        options.account_startup = !mode.public_data_only;
     }
     #[cfg(any(
         feature = "grvt",
@@ -1102,36 +1167,11 @@ pub struct EngineOptions {
     pub testnet: bool,
     #[serde(default)]
     pub public_data_only: bool,
+    /// Raw SDK caller intent; absence preserves legacy native/harness construction.
+    #[serde(default)]
+    pub public_mode: Option<PublicMode>,
     #[serde(default)]
     pub key: Option<String>,
-    #[cfg(any(
-        feature = "grvt",
-        feature = "coinbase",
-        feature = "binance",
-        feature = "bitunix",
-        feature = "apexomni",
-        feature = "asterdex",
-        feature = "breakoutprop",
-        feature = "kucoin",
-        feature = "kucoinspot",
-        feature = "blofin",
-        feature = "bybit",
-        feature = "cryptocom",
-        feature = "bingx",
-        feature = "mexc",
-        feature = "bitget",
-        feature = "bitrue",
-        feature = "backpack",
-        feature = "phemex",
-        feature = "weex",
-        feature = "hyperliquid",
-        feature = "txflow",
-        feature = "kraken",
-        feature = "lighter",
-        feature = "woo",
-        feature = "orderly",
-        feature = "okx"
-    ))]
     #[serde(default)]
     pub secret: Option<String>,
     #[cfg(any(
@@ -1164,10 +1204,8 @@ pub struct EngineOptions {
     /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
     #[serde(default)]
     pub remote_signing: bool,
-    #[cfg(feature = "paradex")]
     #[serde(default)]
     pub paradex_address: Option<String>,
-    #[cfg(feature = "paradex")]
     #[serde(default)]
     pub subkey_address: Option<String>,
     #[cfg(feature = "paradex")]
@@ -1197,17 +1235,8 @@ pub struct EngineOptions {
     #[cfg(feature = "apexomni")]
     #[serde(default)]
     pub omni_key_seed: Option<String>,
-    #[cfg(any(
-        feature = "hyperliquid",
-        feature = "txflow",
-        feature = "asterdex",
-        feature = "orderly",
-        feature = "lighter",
-        feature = "woo"
-    ))]
     #[serde(default)]
     pub application_id: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "txflow"))]
     #[serde(default)]
     pub vault: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -1282,34 +1311,6 @@ impl EngineOptions {
     pub fn erase_secrets(&mut self) {
         use zeroize::Zeroize;
         self.key.zeroize();
-        #[cfg(any(
-            feature = "grvt",
-            feature = "coinbase",
-            feature = "binance",
-            feature = "bitunix",
-            feature = "apexomni",
-            feature = "asterdex",
-            feature = "breakoutprop",
-            feature = "kucoin",
-            feature = "kucoinspot",
-            feature = "blofin",
-            feature = "bybit",
-            feature = "cryptocom",
-            feature = "bingx",
-            feature = "mexc",
-            feature = "bitget",
-            feature = "bitrue",
-            feature = "backpack",
-            feature = "phemex",
-            feature = "weex",
-            feature = "hyperliquid",
-            feature = "txflow",
-            feature = "kraken",
-            feature = "lighter",
-            feature = "woo",
-            feature = "orderly",
-            feature = "okx"
-        ))]
         self.secret.zeroize();
         #[cfg(any(
             feature = "kucoin",

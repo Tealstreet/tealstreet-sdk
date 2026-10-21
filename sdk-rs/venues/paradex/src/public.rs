@@ -1,11 +1,11 @@
 use crate::{Paradex, Pending, wire::*};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -305,8 +305,9 @@ impl Paradex {
             if valid && let Some(sub) = self.public.subscriptions.remove(&id) {
                 self.public.supervisor.received(cx.now);
                 if let Some(error) = message.error {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
                         format!("Paradex subscription failed: {}", error.message),
                     );
                     self.retry_subscription(cx, sub);
@@ -373,7 +374,7 @@ impl Paradex {
             Ok(crate::sbe::Public::Heartbeat) => self.public.supervisor.received(cx.now),
             Ok(crate::sbe::Public::Other) => {}
             Err(error) => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(safe_cex_engine::Level::Warn, code::STREAM_MALFORMED, error);
             }
         }
     }
@@ -879,7 +880,7 @@ impl Paradex {
         match request {
             Request::Markets { .. } | Request::Tickers { .. } => {
                 let markets = matches!(request, Request::Markets { .. });
-                cx.log(LogLevel::Warning, error);
+                cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                 self.public.seed_retry.failed(cx, markets);
             }
             Request::Candles {
@@ -898,9 +899,9 @@ impl Paradex {
                 ..
             } => {
                 if let CandleTarget::Command(command) = target {
-                    cx.done(command, Err(error.into()));
+                    cx.fail(command, error);
                 } else {
-                    cx.log(LogLevel::Warning, error);
+                    cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                     self.finish_candles(cx, target, &symbol, interval, vec![]);
                 }
             }
@@ -981,7 +982,7 @@ impl Paradex {
     ) {
         match target {
             CandleTarget::Command(command) => {
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()))
+                cx.done(command, serde_json::to_string(&rows).unwrap())
             }
             CandleTarget::Poll {
                 generation,
@@ -1107,7 +1108,11 @@ impl Paradex {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
-                    cx.log(LogLevel::Warning, "Unknown Paradex market");
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        code::COMMAND_UNSUPPORTED,
+                        "Unknown Paradex market",
+                    );
                     return None;
                 }
                 let state = self
@@ -1139,8 +1144,9 @@ impl Paradex {
                 if interval_ms(interval).is_none()
                     || (cx.store.loaded().markets && cx.store.market(&symbol).is_none())
                 {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        code::COMMAND_UNSUPPORTED,
                         match interval_ms(interval) {
                             None => interval.unsupported("Paradex"),
                             Some(_) => "Unknown Paradex candle market".into(),
@@ -1204,9 +1210,9 @@ impl Paradex {
                 ..
             } => {
                 if interval_ms(interval).is_none() {
-                    cx.done(command, Err(interval.unsupported("Paradex")));
+                    cx.fail(command, interval.unsupported("Paradex"));
                 } else if cx.store.market(&symbol).is_none() {
-                    cx.done(command, Err("Unknown Paradex candle market".into()));
+                    cx.fail(command, "Unknown Paradex candle market");
                 } else {
                     self.fetch_candles(
                         cx,

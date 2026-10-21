@@ -156,11 +156,11 @@ impl KucoinSpot {
         } else {
             cx.done(
                 job.command,
-                Ok(if job.returns_ids {
+                if job.returns_ids {
                     serde_json::to_string(&job.ids).unwrap()
                 } else {
                     "[]".into()
-                }),
+                },
             );
         }
     }
@@ -372,7 +372,7 @@ impl KucoinSpot {
                     s.buy_leverage = Some(1.0);
                     s.sell_leverage = Some(1.0);
                 });
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
                 return;
             }
             Command::FetchLeverage { command, symbol } => {
@@ -381,16 +381,16 @@ impl KucoinSpot {
                     s.buy_leverage = Some(1.0);
                     s.sell_leverage = Some(1.0);
                 });
-                cx.done(command, Ok("1".into()));
+                cx.done(command, "1".into());
                 return;
             }
             Command::SetMarginType { command, .. } | Command::SetPositionMode { command, .. } => {
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
                 return;
             }
             Command::FetchAccount { command } => {
                 if self.credentials.is_none() {
-                    cx.done(command, Err("KuCoin Spot requires credentials".into()));
+                    cx.fail(command, "KuCoin Spot requires credentials");
                 } else {
                     self.request(
                         cx,

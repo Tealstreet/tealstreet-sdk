@@ -1,15 +1,15 @@
 //! Account reconciliation is split by state domain; failed or stale reads never clear it.
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
-};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, num};
 use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent};
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -252,11 +252,7 @@ fn reject_position(
         cx,
         logged,
         label,
-        if stored {
-            LogLevel::Warning
-        } else {
-            LogLevel::Error
-        },
+        if stored { Level::Warn } else { Level::Error },
         format!("Aster skipped malformed position row {label}"),
     );
     for id in ids {
@@ -268,14 +264,14 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: &str,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key.to_owned()) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 fn hedge_side(text: Option<&str>) -> Option<PositionSide> {
@@ -542,15 +538,17 @@ impl AsterDex {
                     None => match serde_json::from_str::<Identity>(item) {
                         Ok(row) => {
                             let id = row.order_id.to_string();
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Aster skipped malformed open order row {id}"),
                             );
                             rows.reject(Some(id));
                         }
                         Err(_) => {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 "Aster skipped malformed open order row without an id",
                             );
                             rows.reject(None);
@@ -578,9 +576,9 @@ impl AsterDex {
                         ),
                         _ => {
                             let level = if cx.store.positions().is_empty() {
-                                LogLevel::Error
+                                Level::Error
                             } else {
-                                LogLevel::Warning
+                                Level::Warn
                             };
                             log_skip(
                                 cx,
@@ -716,7 +714,10 @@ impl AsterDex {
                             .map_err(|e| e.to_string())
                         })
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Request::ListenKey { epoch } => {
                 if epoch != self.account.key_epoch {
@@ -778,8 +779,7 @@ impl AsterDex {
                     );
                     self.account.mode_failures = self.account.mode_failures.saturating_add(1);
                     let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(Level::Error, code::REQUEST_FAILED,
                         format!(
                             "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {:.1}s",
                             delay / 1_000.0
@@ -905,7 +905,11 @@ impl AsterDex {
             }
         }
         if let Some(error) = error {
-            cx.log(LogLevel::Warning, format!("Aster account read: {error}"));
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("Aster account read: {error}"),
+            );
         }
     }
     fn mode_known(&mut self, cx: &mut Cx<'_, Pending>) {

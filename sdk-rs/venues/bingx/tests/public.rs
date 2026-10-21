@@ -141,9 +141,7 @@ fn candle_rows_sort_by_time_and_use_seconds() {
     let out = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::CommandDone { result, .. }) => {
-                Some(result.unwrap())
-            }
+            Action::Notice(safe_cex_engine::Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
         })
         .unwrap();
@@ -166,10 +164,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
     );
     assert!(e.drain_actions().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::CommandDone {
-            command: 77,
-            result: Err(_)
-        })
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 77, .. })
     )));
 }
 #[test]

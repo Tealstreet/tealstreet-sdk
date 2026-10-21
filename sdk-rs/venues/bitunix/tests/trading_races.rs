@@ -62,7 +62,10 @@ fn done(e: &mut TestEngine, command: u32) -> Result<String, String> {
             Action::Notice(Notice::CommandDone {
                 command: id,
                 result,
-            }) if id == command => Some(result),
+            }) if id == command => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: id, error }) if id == command => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("command completion")
@@ -138,13 +141,11 @@ fn full_position_batch_keeps_whole_batch_caller_id_preflight() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 2,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+    );
 }
 
 #[test]

@@ -96,7 +96,7 @@ impl Venue for FixtureVenue {
         self.book.apply(BookSide::Asks, 101., 0.);
         self.book.apply(BookSide::Asks, 102., amount + 2.);
         cx.book_changed("BTCUSDT");
-        cx.done(command, Ok(self.counters("BTCUSDT")));
+        cx.done(command, self.counters("BTCUSDT"));
     }
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
         match command {
@@ -108,7 +108,7 @@ impl Venue for FixtureVenue {
                 side: _,
             } => {
                 if symbol != "BTCUSDT" || self.pending.is_some() {
-                    cx.done(command, Err("invalid or concurrent fixture update".into()));
+                    cx.fail(command, "invalid or concurrent fixture update");
                     return;
                 }
                 self.writes += 1;
@@ -117,7 +117,7 @@ impl Venue for FixtureVenue {
                 self.pending = Some((cx.set_timer(1.), command, leverage));
             }
             Command::FetchLeverage { command, symbol } => {
-                cx.done(command, Ok(self.counters(&symbol)));
+                cx.done(command, self.counters(&symbol));
             }
             _ => {}
         }

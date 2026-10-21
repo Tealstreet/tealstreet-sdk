@@ -71,7 +71,10 @@ fn result(e: &mut Engine<Bitrue>) -> Result<String, String> {
             Action::Notice(Notice::CommandDone {
                 command: 99,
                 result,
-            }) => Some(result),
+            }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .unwrap()

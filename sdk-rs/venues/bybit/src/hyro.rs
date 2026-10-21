@@ -295,7 +295,7 @@ impl BybitLinear {
             let group = self.trading.hyro.groups.remove(&key).expect("present");
             let result = serde_json::to_string(&group.ids).unwrap_or_default();
             for command in group.waiters {
-                cx.done(command, Ok(result.clone()));
+                cx.done(command, result.clone());
             }
             return;
         }

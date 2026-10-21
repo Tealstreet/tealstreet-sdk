@@ -407,6 +407,6 @@ fn amount_only_stop_amendment_uses_documented_trigger_after_reconciliation() {
         assert_eq!(body["quantity"], 0.02);
         assert_eq!(body["positionEffect"], "CLOSE");
         rig.reply(&replacement, 200, r#"{"orderId":42}"#);
-        assert_eq!(rig.result(90), &Ok("[\"42\"]".into()));
+        assert_eq!(rig.result(90), Ok("[\"42\"]".into()));
     }
 }

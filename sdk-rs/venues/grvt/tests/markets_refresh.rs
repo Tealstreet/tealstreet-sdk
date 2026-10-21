@@ -209,10 +209,11 @@ fn catalog_only_refresh_keeps_rails_and_updates_signing_hash_and_decimal_metadat
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. } | Notice::CommandFailed { .. })
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     let request = actions
         .into_iter()
         .find_map(|a| match a {

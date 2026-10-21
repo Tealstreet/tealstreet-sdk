@@ -45,9 +45,13 @@ impl Harness {
             match a {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.results.push((command, result))
+                    self.results.push((command, Ok(result)))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.results.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
             }
         }

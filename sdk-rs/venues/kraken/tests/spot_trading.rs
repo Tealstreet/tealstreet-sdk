@@ -14,7 +14,10 @@ fn done(
     e.drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
-                Some(result)
+                Some(Ok(result))
+            }
+            Action::Notice(Notice::CommandFailed { command: c, error }) if c == command => {
+                Some(Err(error.legacy_text()))
             }
             _ => None,
         })
@@ -136,13 +139,11 @@ fn caller_ids_bad_brackets_and_zero_trailing_fail_before_any_write() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 2,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
     }
     let mut bad = opts("limit", 99.);
     bad.stop_loss = Some(-1.);
@@ -226,10 +227,11 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
             assert!(r.body.unwrap().contains("trigger_price=97"));
         } else {
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandDone { result: Err(_), .. })
-            )));
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+            );
         }
     }
 }
@@ -267,7 +269,7 @@ fn queues_serialize_brackets_and_independent_commands() {
     assert!(tp.body.as_ref().unwrap().contains("ordertype=take-profit"));
     reply(&mut e, &tp, r#"{"error":[],"result":{"txid":["TP"]}}"#);
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:6,result:Ok(ids)})if ids.contains("ENTRY")&&ids.contains("STOP")&&ids.contains("TP"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:6,result:ids})if ids.contains("ENTRY")&&ids.contains("STOP")&&ids.contains("TP"))));
     assert!(
         actions
             .iter()
@@ -315,13 +317,11 @@ fn uncertain_write_is_never_replayed_but_signature_rejection_resigns_once() {
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+    );
 }
 #[test]
 fn failed_cancel_stops_batch_and_does_not_remove_store_orders() {
@@ -431,13 +431,11 @@ fn queued_amend_rechecks_reconciled_native_kind_before_write() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 41,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, .. })))
+    );
 }
 
 #[test]
@@ -481,7 +479,7 @@ fn zero_disabled_brackets_match_ts_without_a_protective_write() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 43,
-            result: Ok(_)
+            result: _
         })
     )));
 }
@@ -507,7 +505,7 @@ fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 31, result: Err(m) }) if m.contains("Permission denied"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 31, error: m }) if m.legacy_text().contains("Permission denied"))));
 }
 #[test]
 fn market_entry_with_tpsl_names_the_unsupported_legs() {
@@ -523,7 +521,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 44, error: m }) if m.legacy_text().contains("take-profit/stop-loss legs on a market entry"))));
 }
 #[test]
 fn market_entry_with_zero_brackets_places_only_the_entry() {
@@ -541,7 +539,7 @@ fn market_entry_with_zero_brackets_places_only_the_entry() {
     reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: Ok(ids) }) if ids == r#"["ENTRY"]"#)));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: ids }) if ids == r#"["ENTRY"]"#)));
 }
 
 #[test]
@@ -559,7 +557,7 @@ fn trigger_price_is_refused_unless_it_repeats_the_stop_price() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 46, result: Err(m) }) if m.contains("triggerPrice"))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 46, error: m }) if m.legacy_text().contains("triggerPrice"))));
     }
     let (mut e, _, _) = ready(false);
     let mut o = opts("stop_market", 99.);
