@@ -162,7 +162,7 @@ and custom-host requirements below use the actual merge. NX construction roots
 were checked read-only at `65e086a3c90`; shipped NX runtime verification remains
 a cutover requirement, not evidence supplied by this source audit.
 The history-owner batch checks #1628 (`d659c18c3f5`), #1629 (`a3c4e827722`),
-#1630 (`b2092b50aca`), #1631 (`e9049c794c8`), #1632 (`41cd4914a70`) and
+#1630 (`b2092b50aca`), #1631 (`e9049c794c8`), #1632 (`41cd4914a70`),
 #1633 (`a29812d8e49`) and WEEX #1627 (`9a444620376`). Bitunix also makes
 failed reads reject as described below.
 Bitget ordinary private-row repair checks #1625 at `02a0db19f3c`. Focused NX
