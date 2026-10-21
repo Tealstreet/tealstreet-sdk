@@ -113,3 +113,12 @@ it('compiled native and synchronous TS Aster version resolution agree on the sam
     }
   }
 });
+
+
+it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
+  'compiled Paradex rejects raw private intent with missing fields before I/O: %j', (missing) =>
+    startRejects('paradex', {
+      key: '0x1', paradexAddress: '0x123', subkeyAddress: '0x456',
+      ...missing, publicDataOnly: false,
+    }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
+);
