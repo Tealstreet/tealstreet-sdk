@@ -81,8 +81,9 @@ export interface EngineHandlers {
    * retain the same key after a deadline; consumers may merge receipt tuples.
    * Complete events are idempotent and may repeat for duplicate native done. */
   onCommandProgress?(event: CommandProgress): void;
-  /** Structured events at or above the engine's `logLevel` option; Info+ also
-   * reach `onLog` when this is absent. */
+  /** Structured events at or above the engine's `logLevel` option, plus semantic
+   * history.incomplete markers regardless of level; Info+ also reach `onLog`
+   * when this is absent. */
   onEvent?(event: EngineEvent): void;
   /** A socket opened, received its first frame, or closed; never per frame. */
   onSocketChange?(): void;
@@ -216,6 +217,11 @@ export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
    * Host metadata: never sent to the native engine or venue. */
   timeoutMs?: number;
+  /** Command-bound events while this request remains pending, including synchronous
+   * dispatch. Internal fields.command is unchanged; routing hosts translate it.
+   * Installed before dispatch and released on settlement, timeout or disposal.
+   * Observer failures cannot replace the native result. */
+  onEvent?(event: EngineEvent): void;
 }
 
 export interface EngineEvent {
