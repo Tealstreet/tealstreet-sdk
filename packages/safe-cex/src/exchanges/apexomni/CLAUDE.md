@@ -758,3 +758,13 @@ new exposure remains visible with unavailable PnL represented as zero. Realized
 PnL stays separate. Wallet total remains `totalEquityValue - upnl`, with native
 margin-derived free/used values preserved. The dedicated native
 `tests/startup_valuation.rs` covers startup, native updates and omission recovery.
+
+## Rust port-review read corrections
+
+Mapped order remaining and late-fill default amendment sizes preserve operand
+decimal precision without rounding to market lot steps. REST candle history skips
+typed invalid price/volume rows with coded warnings and returns sorted valid peers.
+Malformed fields/timestamps/envelopes and nonempty all-invalid results fail; a
+valid empty symbol array remains empty success. Live candle rules are unchanged.
+Client IDs on protective/multi-leg placement remain rejected before writes, and
+explicit leverage commands continue sending a verified write despite cached equality.

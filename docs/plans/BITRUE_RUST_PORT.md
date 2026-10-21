@@ -208,3 +208,33 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - Progress and prior adversarial findings are committed and posted on PR1314.
   Push this docs-only merge checkpoint and wait for its CI before merging;
   destination remains feat/rust-rewrite. Create fresh follow-up afterwards.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Decode private order conditionOrder/triggerType and classify SL/TP before
+   the generic execution MARKET/LIMIT type. Keep cached protective child
+   direction/identity, price/reference, reduce-only and fill accounting unchanged.
+2. Reproduce uncached stream misclassification; cover numeric/string trigger
+   values, false conditional flags, cached children and interval regressions.
+3. Strike stale catalogue/order-loaded findings; retain malformed account
+   snapshot admission as intentional/RISKY to bypass, with usable state preserved.
+4. Run focused Bitrue/Binance tests, touched fmt/strict Clippy/bans, independent
+   review and exact-head CI; merge only after the overseer's short hold lifts.
+
+- Reproduced uncached conditional MARKET decoded as Market instead of StopLoss.
+  Private OrderEvent now decodes conditionOrder and numeric/string triggerType;
+  explicit native SL/TP wins over execution type. Cached protective child kind,
+  side, parent and reduce-only provenance remain authoritative. Native positive
+  trigger price/recognized reference still precede their cached fallbacks.
+  No price-based guessing, quantity scaling or execution accounting changes.
+- Catalogue and per-symbol order startup findings are stale (existing row
+  isolation and first-attempt sweep completion). Malformed account admission
+  remains an explicit risk to bypass; prior balances/exposure remain intact.
+  Native/TS discriminator schema: https://www.bitrue.com/api_docs_includes_file/futures/index.html
+  The live docs define conditionOrder and triggerType1/2 in order records; the
+  TS private stream uses those exact fields and precedence.
+- Validation: the new classification regression fails before repair;377 focused
+  Bitrue/Binance tests pass, then all35 account tests pass with the extended cached
+  child precedence case. Touched formatting, strict all-target Clippy and bans pass.
+  Independent read-only review found no runtime blocker; corrected its docs note
+  that cached price/reference are fallbacks behind valid native trigger fields.

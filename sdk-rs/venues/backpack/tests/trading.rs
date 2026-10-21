@@ -428,51 +428,58 @@ fn native_pair_correlates_reordered_responses_and_rejects_ambiguous_ids() {
 }
 #[test]
 fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_before_response() {
-    let (mut e, socket) = ready();
-    e.handle(1000.0, Event::WsOpened { socket });
-    let r = requests(&mut e)
-        .into_iter()
-        .find(|r| r.url.ends_with("/orders"))
-        .unwrap();
-    let old = ORDER.replace(
-        "\"orderType\":\"Limit\"",
-        "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\"",
-    );
-    reply(&mut e, &r, 200, &format!("[{old}]"));
-    let cancel = requests(&mut e).pop().unwrap();
-    assert_eq!(cancel.method, Method::Delete);
-    reply(
-        &mut e,
-        &cancel,
-        200,
-        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
-    );
-    let new = requests(&mut e).pop().unwrap();
-    assert!(
-        new.body
-            .as_deref()
-            .unwrap()
-            .contains("\"triggerBy\":\"MarkPrice\"")
-    );
-    assert!(!new.body.as_deref().unwrap().contains("clientId"));
-    ws(
-        &mut e,
-        socket,
-        "account.orderUpdate",
-        r#"{"e":"orderFill","i":"replacement","E":4000000,"X":"Filled","s":"SOL_USDC_PERP","o":"Market","S":"Ask","P":"130","Y":"5","q":"0","z":"5","l":"5","L":"129.5","t":999}"#,
-    );
-    let replacement = old
-        .replace("\"id\":\"123\"", "\"id\":\"replacement\"")
-        .replace(
-            "\"triggerPrice\":\"130\"",
-            "\"triggerPrice\":\"130\",\"triggerBy\":\"MarkPrice\"",
+    for quantity in ["present", "null", "missing"] {
+        let (mut e, socket) = ready();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let r = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/orders"))
+            .unwrap();
+        let old = ORDER.replace(
+            "\"orderType\":\"Limit\"",
+            "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\"",
         );
-    reply(&mut e, &new, 200, &replacement);
-    assert!(e.store().order("123").is_none());
-    assert_eq!(
-        e.store().order("replacement").unwrap().status,
-        safe_cex_engine::model::OrderStatus::Closed
-    );
+        let old = match quantity {
+            "null" => old.replace("\"quantity\":\"5\"", "\"quantity\":null"),
+            "missing" => old.replace(",\"quantity\":\"5\"", ""),
+            _ => old,
+        };
+        reply(&mut e, &r, 200, &format!("[{old}]"));
+        let cancel = requests(&mut e).pop().unwrap();
+        assert_eq!(cancel.method, Method::Delete);
+        reply(
+            &mut e,
+            &cancel,
+            200,
+            r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+        );
+        let new = requests(&mut e).pop().unwrap();
+        assert!(
+            new.body
+                .as_deref()
+                .unwrap()
+                .contains("\"triggerBy\":\"MarkPrice\"")
+        );
+        assert!(!new.body.as_deref().unwrap().contains("clientId"));
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            r#"{"e":"orderFill","i":"replacement","E":4000000,"X":"Filled","s":"SOL_USDC_PERP","o":"Market","S":"Ask","P":"130","Y":"5","q":"0","z":"5","l":"5","L":"129.5","t":999}"#,
+        );
+        let replacement = old
+            .replace("\"id\":\"123\"", "\"id\":\"replacement\"")
+            .replace(
+                "\"triggerPrice\":\"130\"",
+                "\"triggerPrice\":\"130\",\"triggerBy\":\"MarkPrice\"",
+            );
+        reply(&mut e, &new, 200, &replacement);
+        assert!(e.store().order("123").is_none());
+        assert_eq!(
+            e.store().order("replacement").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Closed
+        );
+    }
 }
 
 #[test]
@@ -873,4 +880,37 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
     }
+}
+
+#[test]
+fn malformed_repair_replacement_quantity_does_not_remove_original_identity() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/orders"))
+        .unwrap();
+    let mut row: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+    row["quantity"] = serde_json::Value::Null;
+    row["triggerPrice"] = "130".into();
+    row["triggerQuantity"] = "5".into();
+    reply(&mut e, &read, 200, &format!("[{row}]"));
+    let cancel = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    let replacement = requests(&mut e).pop().unwrap();
+    row["id"] = "replacement".into();
+    row["triggerBy"] = "MarkPrice".into();
+    row.as_object_mut().unwrap().remove("triggerQuantity");
+    reply(&mut e, &replacement, 200, &row.to_string());
+    assert!(e.store().order("123").is_some());
+    assert!(e.store().order("replacement").is_none());
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
 }

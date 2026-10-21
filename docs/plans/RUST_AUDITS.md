@@ -1005,9 +1005,16 @@ No confirmed highs; valid data matches TS.
   fill/order-history/instrument/ticker row fails the read or startup.~~
   Children inherit missing parent fields (snapshot and stream); bad rows are
   skipped keeping stored copies; hidden exposure on unknown markets warns once.
-- Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
-  readback can report a false error; isolated warning; stop without reference
-  price rejects the snapshot.
+- Low: ~~SL trigger falls back to `triggerType`~~ (standalone precedence matches
+  TS); ~~algo reduceOnly default~~ (native default is false; children inherit
+  parent fields); ~~leverage readback can report a false error~~ (exhausted reads
+  now explain accepted write/unconfirmed setting, retain Unknown outcome and
+  never replay the write); ~~isolated warning~~ (one coded warning per symbol,
+  exposure remains visible); ~~stop without reference price rejects the snapshot~~
+  (row isolation and re-read after ticker seed already preserve valid peers).
+  **RISKY — retained:** changing attached-bracket generic trigger fallback
+  without verified per-leg semantics, or guessing SL/TP for a STOP without
+  a reliable reference. Readback confirmation remains required.
 
 ### AsterDEX
 No confirmed highs.
@@ -1020,9 +1027,18 @@ No confirmed highs.
   row's `positionSide`).~~ Mode read retries and holds placement until known;
   unmapped order types keep their fills; bad rows are skipped keeping stored
   copies; hedge amend reuses the recorded `positionSide` (TS bug fixed).
-- Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
-  history fails on one row and refuses >7 day windows; listen-key keepalive
-  omits `listenKey` and tears down on failure; partial balance rows skipped.
+- Low: ~~no credential check at start~~ (missing local credentials intentionally
+  select public mode; formed credentials are checked by signed account startup);
+  ~~ACCOUNT_UPDATE strict on `ep`/`cr`~~ (`cr` already defaults to zero; absent
+  `ep` is now accepted only with an explicitly valid zero amount);
+  ~~fills refuse >7 day windows~~ (bounded symbol reads page seven-day windows,
+  deduplicate execution IDs and normalize cumulative PnL once across the range);
+  ~~listen-key keepalive omits `listenKey` and tears down on failure~~ (official
+  V1/V3 PUT has no business parameters; three transient retries precede an
+  epoch-guarded reconnect). Equal-time saturated fills fail visibly.
+  RISKY retained: skipping malformed financial fills can shift every later
+  cumulative-PnL delta; partial balance rows lack required wallet/free provenance
+  in TS too. Do not invent zero balances or silently return partial execution data.
 
 ### Crypto.com
 Mostly matches TS.
@@ -1051,9 +1067,15 @@ Mostly matches TS.
   leverage bracket read, `lib.rs:758`).~~ Symbol failures retain state and retry
   without blocking the usable initial sweep; both collateral balances and
   authenticated native bracket caps are exposed without silent leverage clamps.
-- Low: one bad contract row blocks startup; stream stops misclassified;
+- Low: ~~one bad contract row blocks startup~~ (public discovery isolates rows);
+  ~~stream stops misclassified~~ (private conditionOrder/triggerType now precede
+  execution MARKET/LIMIT, retaining authoritative cached protection);
   ~~snapshot starvation under load (revision discard, `account.rs:581,1310`)~~;
-  malformed snapshot never sets loaded.
+  ~~malformed order snapshot never sets loaded~~ (each symbol's first attempt
+  finishes the initial sweep; failed symbols retain state and retry independently).
+  RISKY retained: malformed account snapshots do not mark balance/positions loaded;
+  only admitted authoritative financial data can establish complete account state.
+
 - Confirm (TS bugs Rust fixed): TS prices a position at the all-zero placeholder
   ticker before the first quote (private tape: -12000 on a 0.2 BTC long whose
   real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
@@ -1083,9 +1105,16 @@ Signing and payloads match; no confirmed highs.
   omni key seed kills read-only monitoring (`account.rs:504`).~~ Cancels fence by
   version with a 5 s hide (kept orders reappear with a warning); bad rows are
   skipped per row keeping stored copies and fills; a bad seed disables only placement.
-- Low: caller client id rejected on stops/brackets/splits; float remaining size;
-  zero-price candle rejects batch; leverage always sent. Unchecked: private
-  socket via Tealstreet proxy.
+- Low: ~~float remaining size~~ (operand-precision subtraction for mapped
+  orders and default-size amendments after late fills); ~~zero-price candle
+  rejects batch~~ (coded row skip retains sorted valid peers; malformed time,
+  envelopes and nonempty unusable results still fail). RISKY retained: caller
+  IDs on stops/brackets/splits violate the current one-native-order identity
+  contract without per-leg proofs; skipping explicit leverage writes from cached
+  equality can silently leave venue settings wrong. Native private socket routing
+  is host-owned via SocketChannel::Private/proxyConditional (static concern stale);
+  a live proxy lifecycle remains unverified.
+
 - Confirm (TS bugs Rust fixed): TS values positions at an all-zero placeholder
   ticker on startup, showing a fabricated loss (private tape: balance 1300 / upnl
   -300 while the real quote equals the 60000 entry and native PnL is 0) until its
@@ -1177,8 +1206,12 @@ Signing, order payloads (incl. app stop shapes), amend, cancel and positions mat
   the Rust crate. ~~A mark-price failure or one bad ticker row
   blocks startup (`lib.rs:211,787`).~~ Bad rows skipped; startup proceeds on last
   price until marks load.
-- Low: ~~one bad fill row fails fill history (`history.rs:312`).~~ Verify live:
-  open-order rows with `"quantity": null`.
+- Low: ~~one bad fill row fails fill history (`history.rs:312`)~~;
+  ~~open-order rows with `"quantity": null`~~ now admit a missing/null base
+  quantity only when positive native triggerPrice/triggerQuantity and bounded
+  execution prove its amount. Account/history/repair share that guard. Ordinary
+  missing quantity now rejects instead of defaulting to zero; malformed fallback
+  retains prior state and cannot start cancellation. No live-schema claim is made.
 
 ### BreakoutProp (disabled in production)
 App stop payloads accepted; amend stricter than TS.

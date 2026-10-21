@@ -718,3 +718,9 @@ unmappable position invalidates the whole private account snapshot, retaining
 prior state. Per-row private snapshot tolerance is a separate phase.
 `tests/startup_valuation.rs` pins zero/non-finite quote recovery, side changes,
 partial-snapshot refusal and the private-tape startup currency UPnL.
+
+Private Rust order events now decode conditionOrder and triggerType just like
+REST: explicit conditional1/2 selects SL/TP before execution MARKET/LIMIT.
+Cached authoritative protective children still retain kind, side, parent and
+trigger reference; classification never invents reduce-only or closing provenance.
+Absent/false conditions and unknown trigger kinds retain ordinary type mapping.

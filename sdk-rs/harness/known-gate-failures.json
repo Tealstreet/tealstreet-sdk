@@ -52381,26 +52381,6 @@
           ]
         },
         {
-          "divergence": "Actual TS execution metadata is present while the native live-fill frame lacks it.",
-          "keys": [
-            "account fills[0].fee",
-            "checkpoint 1 account.fills[0].fee",
-            "checkpoint 10 account.fills[0].fee",
-            "checkpoint 11 account.fills[0].fee",
-            "checkpoint 12 account.fills[0].fee",
-            "checkpoint 13 account.fills[0].fee",
-            "checkpoint 14 account.fills[0].fee",
-            "checkpoint 2 account.fills[0].fee",
-            "checkpoint 3 account.fills[0].fee",
-            "checkpoint 4 account.fills[0].fee",
-            "checkpoint 5 account.fills[0].fee",
-            "checkpoint 6 account.fills[0].fee",
-            "checkpoint 7 account.fills[0].fee",
-            "checkpoint 8 account.fills[0].fee",
-            "checkpoint 9 account.fills[0].fee"
-          ]
-        },
-        {
           "divergence": "Protective trigger reference is absent or differs; attached TP and SL sources are compared independently.",
           "keys": [
             "checkpoint 7 account.orders[2].stopLossTrigger",

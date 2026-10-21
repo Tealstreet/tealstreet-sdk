@@ -138,6 +138,11 @@ JSON remains a source-build input, now consumed by the Cargo build script.
 The BingX overlap follow-up checks #1604 at `0d4f17a1bdd`, including its
 integration with the landed auth work; publication and read-return semantics
 are documented separately below.
+The rejected-row follow-up checks #1603 at `7fcd7193fe1`; Orderly margin-mode
+row isolation checks #1606 at `363139a6cc7`. Neither adds a caller API or wire
+revision; the observable retention and diagnostic rules are recorded below.
+The Bybit discovery-limit follow-up checks #1608 at `f55918d236b`, with its
+startup cooldown changes separated from private reads and writes.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -196,6 +201,9 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1524 / `b69285f990` | Private snapshots (batch-3 venues) isolate rejected rows while valid peers commit; stored rows protected by rejected identities remain visible, including Bitrue protective children and Kraken open orders. Unidentified rows prevent absence-based removal within their snapshot scope. Coded `row.skipped` / `snapshot.discarded` diagnostics use the existing event/health paths. No new caller shape; see [Private snapshot row isolation](#private-snapshot-row-isolation-1524). |
 | #1599 / `e7f0b3d36` | Rust construction rules are compiled from the shared JSON into a static table by Cargo `build.rs`, replacing runtime JSON decoding. B1 source builds still require the JSON input; compiled engines contain the table. TS rules, parity and caller options/eligibility are unchanged. |
 | #1604 / `0d4f17a1b` | BingX revision/query-generation races and reads issued during pending settings writes fence stale store publication while returning usable cached buy/sell rails, with validated-read fallback independently per missing rail. Overlap alone no longer fails the read or causes `null`; genuine read failures remain possible. Current reads retain atomic leverage/margin publication; caller APIs and write retry behavior stay unchanged. |
+| #1603 / `7fcd7193f` | Migrated Binance, Coinbase and WEEX snapshot order-rejection paths and Kraken Futures order skips (Kraken spot unchanged), plus Coinbase spot holding skips emit `row.skipped` at Error when no stored copy is retained, Warn when one is kept. Bounded identity caches suppress repeats but allow a prior Warn to escalate when its retained copy is lost; mapping/clean reads re-arm reporting. Store retention and caller shapes stay unchanged. |
+| #1606 / `363139a6c` | Orderly margin-mode lists retain a rejected symbol's old default while valid peers commit; an unidentified row protects the old defaults scope. Clean empty lists still clear, structural failures and settings-revision fences still hold, and this path emits Warn-level `row.skipped`. No new caller shape. |
+| #1608 / `f55918d23` | Bybit discovery retains typed HTTP-200 `retCode: 10006` evidence and headers, including missing-list error envelopes, and delays retries using the later usable reset/Retry-After hint and existing deadline. Missing hints fall back to 10 s; hints are bounded by the shared 1 h cap and HTTP403 keeps its 10 min floor. Already-waiting categories are extended without extra attempts. No new caller API or private/write retry behavior. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -457,6 +465,54 @@ suppressed until recovery; emitted levels vary by venue/path (several use Warn
 when retaining a stored copy and Error when none can be kept). Use code and
 level, not message matching or an assumed one-event-per-row count. The B9
 caller migration and snapshot collection requirements remain open.
+
+#### Rejected-row diagnostics and Orderly defaults (#1603, #1606)
+
+#1603 changes severity in the migrated Binance, Coinbase and WEEX snapshot
+order-rejection paths and Kraken Futures orders (Kraken spot unchanged), plus
+Coinbase spot holdings.
+A skip that retains an eligible stored copy warns; a skip that retains none
+errors. Identity/symbol matching and terminal fences still decide whether a
+stored copy can actually be kept. This changes diagnostic severity, not the
+snapshot's retention policy, caller method shape or wire revision.
+
+Their bounded severity-aware identity caches suppress repeat reports. Within
+that cache window, a previously warned identity may escalate to Error once if
+its retained copy is lost; a mapped row or clean snapshot re-arms reporting.
+These events are not an exact count of rejected venue rows. Error-level
+`row.skipped` means missing/unrepresentable data, not an `auth.rejected` event;
+use the existing code-aware B9 integration and metadata-based duplicate handling.
+This severity policy is scoped to the migrated paths, not every venue skip.
+
+#1606 applies row isolation to Orderly's **default margin-mode cache**: a
+rejected row with a recoverable symbol retains that symbol's old default;
+an unidentified row (including an unmappable non-PERP symbol) protects the
+old defaults scope, while valid peers can
+still replace their entries. Valid empty lists clear the cache. Broker suffixes,
+empty mode meaning Cross and accepted duplicate last-wins behavior remain.
+Malformed/failed envelopes and settings-revision races still prevent replacement
+of the whole defaults map. This path reports fixed Warn-level `row.skipped`
+notices, including when no old default exists; it does not adopt #1603's
+Error-without-retention policy. Callers keep their APIs and can see valid peer
+margin defaults refresh while retaining the previous value of a symbol whose
+row was rejected.
+
+#### Bybit discovery cooldowns (#1608)
+
+Markets, tickers and option-seed discovery honor HTTP-200 `retCode: 10006`
+with or without a result list. A finite future `X-Bapi-Limit-Reset-Timestamp`
+(epoch milliseconds) and `Retry-After` extend the cooldown using the later
+usable hint; no usable hint falls back to 10 s. Hints are bounded by the shared
+1 h cap, HTTP403 retains its 10 min floor, and a shorter later hint cannot
+shorten an existing window. A reset header on success or an unrelated business
+error does not create this pause.
+
+The shared discovery deadline extends already-waiting category retries without
+increasing their attempt count or creating retries for idle categories. Callers
+can observe a longer wait for discovery readiness; existing host readiness
+limits still apply. Optional-product degradation, other stream errors, private
+reads and writes retain their handling. This adds no caller argument or new
+transport-wide/write retry gate.
 
 #### Events and worker protocol
 
@@ -1615,6 +1671,16 @@ The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
 and transport dependencies. Generic consumer fixtures do not authorize deleting
 those oracle dependencies or enabling measurement-gated order controls.
 
+### AsterDEX bounded fill reads and flat events
+
+Rust AsterDEX callers can request fill ranges longer than seven days; limit is a
+per-page native limit and no longer caps the final bounded range. Native rows
+are deduplicated across boundaries, then cumulative PnL is normalized over all
+orders before an optional order filter. V3's search precedence cannot override
+caller time bounds. Saturated timestamps and incomplete reads fail visibly.
+Closed hedge legs can omit entry price when their amount is explicitly zero;
+other exposure and balance provenance remain strict. Shapes are unchanged.
+
 ### Orderly port-review display/read corrections
 
 Orderly `fetchOHLCV` callers supplying `from`/`to` now receive native history
@@ -1622,6 +1688,14 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### ApeX Omni decimal remaining and candle row isolation
+
+Order displays/default amendments now preserve native decimal remainder (for
+example0.3-0.2 is0.1) without snapping to market amount precision. REST chart
+reads keep sorted valid candles when a typed zero-price row occurs and emit a
+coded warning; malformed or wholly unusable responses fail. Caller signatures,
+order IDs and explicit leverage-write semantics remain unchanged.
 
 ### BingX port-review metadata and stream recovery
 
@@ -1640,6 +1714,15 @@ No extra polling or write retry is added. Malformed position-stream rows retain 
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
 
+### Backpack nullable trigger quantities
+
+Rust readbacks accept missing/null base quantity only when native trigger fields
+prove a positive amount and consistent execution. Orders remain visible and
+repairable under their real IDs; malformed ordinary quantities preserve prior
+state and fail rather than creating zero-size rows. This applies to account and
+order history reads and repair acknowledgements without changing method shapes,
+placement units, WS fields or cancellation identity.
+
 ### Lighter port-review confirmation and failures
 
 A Rust Lighter reduce-only limit order without matching known exposure now waits
@@ -1651,6 +1734,14 @@ result shapes. HTTP405/429 include neutral guidance with native diagnostics;
 explicit invalid-margin21613 rejection refreshes state without changing cached
 mode by guess or automatically replaying a placement.
 
+
+### Bitrue private conditional display
+
+Newly observed Bitrue conditional orders use native conditionOrder/triggerType
+for SL/TP classification even when execution type is MARKET/LIMIT. Existing
+protective child identity, direction and trigger reference remain authoritative.
+Order overlays and protective controls receive corrected kinds/prices with no
+method, quantity, placement or cancellation contract change.
 
 ### Phemex explicit index triggers and daily cutoff
 
@@ -1684,6 +1775,16 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+### WOO port-review warnings and confirmation
+
+Rust WOO keeps isolated exposure visible and logs one coded warning per symbol
+that isolated margin settings cannot be changed. Exhausted leverage readback
+reports an accepted write with unconfirmed setting and Unknown outcome, keeping
+cached settings until authoritative confirmation. No write is replayed and no
+unconfirmed success is returned. Caller method signatures and quantities remain
+unchanged; native algo reduce-only defaults and protective trigger semantics stay
+as documented.
 
 ## Coded diagnostic caller cutover (PR5)
 
