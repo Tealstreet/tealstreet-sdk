@@ -11,12 +11,69 @@ through exchange-server, (b) run the Rust engine on the device, (c) keep TS
 venues on the device. Companion to [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md)
 (B2), whose decision it depends on.
 
-Sources: SDK `origin/feat/rust-rewrite` `26f58b1303`; tealstreet-next
+Sources: SDK `origin/feat/rust-rewrite` `f98a20e7fe`; tealstreet-next
 `origin/master` `1f19925437` (**NX**); Tealstreet/tealstreet-mobile `master`
 `8377a4f` (**MOB**), read through a shallow clone and the GitHub API. The app
 copies tealstreet-next `packages/*` and parts of `apps/web` into gitignored
 `src/packages`/`src/web` (`yarn sync`), so synced code is cited from NX. Nothing
 was run on a device.
+
+## Live production issues found
+
+These were found while preparing this doc. They affect mobile users today,
+independently of the Rust cutover, and none needs B3 decided to fix.
+
+1. **Bitget, BloFin and Binance inverse accounts cannot be built on the
+   phone's JS thread (traced in code, not run on a device).**
+   - Since NX `ec966018a1` (2026-10-09), safe-cex resolves its transport with
+     `options.transport ?? defaultTransport ?? directTransport`
+     (NX `packages/safe-cex/src/transport/registry.ts`). Only these register a
+     default: `instrumentation-client.ts` (Next.js), `ExchangeServerWorker.ts`
+     and `StoreWorkerEntry.ts` (web workers), plus the CLI, exchange-server,
+     candle-server and scripts. No other file imports `registerTealstreetTransport`
+     or `registerTealstreetRealm`.
+   - On mobile, sync copies `apps/web/src`, but the Hermes thread imports none
+     of those three. Mobile's own `src/web/utils/shim/worker/workerFactories.ts`
+     replaces web's worker setup, and `ExchangeServerWorker` runs only inside
+     the WebView. No tracked mobile file calls `setDefaultTransport` or passes
+     `ExchangeOptions.transport` (MOB `8377a4f`). So the Hermes mirror runs on
+     `directTransport`.
+   - `createExchangeFromAccount.ts:66-69` forces `tealstreetProxy: true` for
+     every `requiresCors` venue. On mobile those are bitget, blofin and
+     binanceinverse (NX `exchangeMetadata.ts` `BitgetMetadata`, `BlofinMetadata`,
+     `BinanceInverseMetadata`).
+   - `directTransport.rest` throws when `tealstreetProxy` or `tealstreetTunnel`
+     is set (NX `transport/direct.ts:15`), and `safeCexAxiosCreate` calls it
+     while building the venue's REST client (NX `safeCexAxiosCreate.ts:280`). The
+     mirror for those accounts therefore throws at construction. On Hermes that
+     means no order writes, warm-start reads or add-account validation for
+     them. Any other account the user set to Tealstreet proxy or tunnel fails
+     the same way.
+   - Hosted streaming is unaffected, because the WebView Worker does register
+     the transport.
+   - **Which builds:** any build synced from tealstreet-next at or after
+     2026-10-09. The synced tree is gitignored and the repo records no source
+     revision, so whether the current store or OTA build includes it is unknown.
+   - **To confirm:** open a Bitget account on a current build, or check the
+     shipped bundle for `registerTealstreetTransport`.
+   - **Fix (outside the SDK):** import `@tealstreet/safe-cex/src/transport/registerTealstreetTransport`
+     once at the mobile app entry, as web's `registerTealstreetRealm.ts` does.
+2. **Lighter orders fail on mobile.** Mobile's Metro config replaces
+   poseidon-crypto with a stub that throws ("Lighter DEX features are
+   unavailable", MOB `src/mobile/shims/poseidon-crypto-stub.js`). Lighter's
+   signer needs it (NX `lighter.signer.ts:4`, `lighter.exchange.ts:737-740`), so
+   every Lighter order write from the phone fails, although Lighter is offered
+   on mobile (`supportedOnMobile: true`). Fix: route Lighter writes through
+   exchange-server (option (a)), ship a Hermes-safe signer, or hide Lighter on
+   mobile until one exists.
+3. **Venue API secrets are stored in plaintext on the phone.** Keys and secrets
+   are in AsyncStorage behind a localStorage shim (MOB
+   `polyfills/localStorage-shim.js`; `syncKeyVaultNative.ts:12-15` says so). The
+   cloud-sync key is also raw bytes in AsyncStorage, and SecureStore/Keychain is
+   not used. At runtime the secrets also live in the WebView Worker's
+   `signingOptions` (NX `signingHost.ts:80-100`). Fix: move the secrets and the
+   sync key into SecureStore/Keychain (an Expo module, so a native build);
+   server-held session keys would remove them from the device entirely.
 
 ## Today
 
@@ -97,14 +154,8 @@ Everything not listed here goes through the hosted session socket.
 The first five rows touch a venue; the order writes and the Hyperliquid
 builder-fee approval are writes. Those are what B3 is about. Listen keys and
 private WS run server-side through `sign-req`; the device opens no public venue
-socket. **Unverified risk:** since NX `ec966018a1` safe-cex falls
-back to `directTransport` unless the host registers a transport. Web does that
-in `registerTealstreetRealm.ts`, but no tracked mobile file imports it, so a
-Hermes mirror with `tealstreetProxy` or `tealstreetTunnel` set may throw
-(`transport/direct.ts:15`).
-`createExchangeFromAccount.ts:66-69` forces `tealstreetProxy` on for
-`requiresCors` venues: bitget, blofin and binanceinverse on mobile. Confirm on a
-built bundle before relying on today's mobile order path.
+socket. The Hermes mirror runs without a registered transport, so bitget,
+blofin and binanceinverse accounts cannot be built there (issue 1 above).
 
 ## Options
 
@@ -209,9 +260,8 @@ would let exchange-server sign locally on the engine without the device.
 
 - **For cutover: (c).** It is under a day and fixes the one hard break (the
   Metro bundle). It keeps mobile on master's behaviour, and B3 stops blocking
-  cutover. Verify the `directTransport` risk above on a built bundle as part of
-  the smoke. Lighter order writes fail on mobile today with or without
-  cutover; fixing them needs (a) or a Hermes-safe Lighter signer.
+  cutover. Fix the live issues at the top of this doc regardless of the option
+  chosen; the transport registration (issue 1) is a one-line app change.
 - **As the direction: (a), tied to session keys.** Route mobile's direct writes
   through exchange-server once the order-latency cost is measured and TS
   forwarding has Rust's timeout and outcome semantics. If session
