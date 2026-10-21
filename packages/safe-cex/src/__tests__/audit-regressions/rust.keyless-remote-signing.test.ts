@@ -43,6 +43,14 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
     expect(runsOnRustEngine('bybit', hosted({ secret: 'local-secret' }))).toBe(true);
     expect(runsOnRustEngine('asterdex', hosted({ auth: { privateKey: '0xabc' } }))).toBe(true);
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust', secret: '' })).toBe(true);
+    // The wallet-key exemption is AsterDEX's own field, not a pass for other venues.
+    expect(runsOnRustEngine('bybit', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
+    // Hosted Paradex sends its signing key in `key` with both addresses, as exchange-server does.
+    const paradex = hosted({ key: '0x' + '1'.repeat(64), paradexAddress: '0xabc', subkeyAddress: '0xdef' });
+    expect(runsOnRustEngine('paradex', paradex)).toBe(true);
+    expect(new RustEngineExchange('paradex', paradex, new DefaultStore()).isPublicDataOnly).toBe(false);
+    // Spot or not, a hosted Hyperliquid account signs through the browser on TS.
+    expect(runsOnRustEngine('hyperliquid', hosted({ enableSpotMarkets: true }))).toBe(false);
   });
 
   it('createExchange builds the TS venue for a hosted account in each opt-in family', async () => {
@@ -82,7 +90,8 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
         exchange.dispose();
       }
     }
-  });
+    // Loads and constructs two dozen venue modules.
+  }, 60_000);
 
   it('a directly built engine refuses a hosted account at startup with the reason', async () => {
     for (const name of ['hyperliquid', 'bybit', 'tealstreet-dex', 'coinbase'] as ExchangeName[]) {
@@ -101,5 +110,5 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
       ['coinbase', 'coinbasespot', 'kodiakfi', 'mode', 'salsadex', 'tealstreet-dex', 'txflow', 'what', 'woofi'].sort(),
     );
     for (const name of engineOnly) expect(isKeylessRemoteSigned(name, hosted()), name).toBe(true);
-  });
+  }, 60_000);
 });

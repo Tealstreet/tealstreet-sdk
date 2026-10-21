@@ -169,7 +169,7 @@ export const isKeylessRemoteSigned = (
 ) =>
   Boolean(options.remoteSigner) &&
   !options.secret &&
-  !options.auth?.privateKey &&
+  !(name === 'asterdex' && options.auth?.privateKey) &&
   !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
 
 /**
