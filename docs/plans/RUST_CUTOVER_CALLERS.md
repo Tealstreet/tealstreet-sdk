@@ -92,7 +92,7 @@ GitHub API. Existing line references retain the original NX audit revision;
 new history-forwarding references below use `fdd2389a825`. Open PR proposals
 are not merged contracts.
 
-Construction follow-up: checked SDK landing `60a3dc1e79e` for #1563, retaining
+Construction follow-ups: checked SDK landing `d06eabae16f` for #1563/#1567, retaining
 those downstream inventory revisions. The existing NX script-editor options
 already declare `extra.asterdexApiVersion?: 'v1' | 'v3'`; no new caller edit.
 
@@ -109,8 +109,8 @@ the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
 
 Initial batch checked landing `3d73437e589`, including the merges after the last refresh
 (#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
-The construction follow-up checks #1563 at `60a3dc1e79e` and the intervening
-#1550 logging merge.
+The construction follow-ups check through #1567 at `d06eabae16f`, including
+#1563, the #1550 logging merge and #1518's internal failure-path refactor.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -135,6 +135,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1560 / `d68a47b7c7` | Orderly bounded OHLCV reads now use native history and preserve caller bounds; trailing-stop display uses the native extreme/callback with BUY adding and SELL subtracting. Candle/order shapes and write contracts are unchanged. The landed display/read note is preserved below. |
 | #1550 / `012e073e4f` | The remaining fifteen venue families use coded log events, completing #1538's migration. Message text and levels remain unchanged; B9's classified-error integration and the native/DO notice contract remain the caller requirements. |
 | #1563 / `60a3dc1e79` | Shared Rust AsterDEX API-version resolution now also supplies optional WASM construction metadata. The wrapper forwards only a valid explicit `extra.asterdexApiVersion` override and adopts the native version for signing eligibility/STP checks after loading. Synchronous pre-host and older-host inference remains parity-tested; account/options/trading call shapes are unchanged. |
+| #1567 / `d06eabae16` | One shared JSON rules table derives signing/public-mode eligibility synchronously in TS and before native validation/startup. Optional raw `publicMode` carries caller intent; `construction()` adds optional `canSign`/`publicDataOnly`, and the WASM module exports no-I/O `resolveConstruction`. Existing application options and legacy native/harness input remain compatible; the explicit-private Paradex refusal moves into the registry. See [Construction metadata and public mode](#construction-metadata-and-public-mode-1563-1567). |
+| #1518 / `8b115cefd7` | Internal `Cx::done` is success-only and `Cx::fail` owns command failures. Hosts still emit the existing `done` error shape with classified detail; message text is unchanged. No caller edit or new wire revision. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -224,14 +226,31 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
 | `Exchange` gains `fetchEngineSnapshot`; #1400 adds `capabilities`/`loadCapabilities` | no `implements Exchange` downstream; only `as Exchange` casts (`apps/cli/src/repl.ts:713,1517-1925`, `cross-trade-daemon.ts:222`, web tests) | | casts still compile | none |
 | #1476/#1519/#1520 construction and clock policy | factory/worker creation and MCP config callers above | TS local-credential check, per-venue options/clock name lists | shared Rust validation, uniform options and engine `hostClock`; no caller edit. Missing secondary-secret errors are now specific; #1531 still narrows payload-signer fallback | RT validation text; same signing clock |
-| AsterDEX API-version construction metadata (#1563) | saved-account/factory/worker callers above; web `components/customModules/monacoTypesString.ts` already declares the override | synchronous `resolveAsterDEXApiVersion` inference | after WASM loading, wrapper `canSign`/STP checks use native `asterdexApiVersion`; pre-host and older-host inference stays. Optional `WasmEngineLike.construction()` returns JSON `EngineConstruction { asterdexApiVersion?: 'v1' \| 'v3' }`; other venues return `{}`. This is separate from frame/engine capabilities | none; optional host API addition |
+| Construction metadata/public mode (#1563/#1567) | saved-account/factory/worker callers above; web `components/customModules/monacoTypesString.ts` already declares the Aster override and `publicDataOnly` | synchronous venue branches and derived public-mode hint | shared rules preserve synchronous getters; after WASM loading they adopt native `canSign`/`publicDataOnly` when present, while Aster STP reads native `asterdexApiVersion`. `WasmEngineLike.construction()` remains optional; missing fields use TS fallback. See the input/compatibility boundaries below | none for application callers; additive host API |
 
-#1563 moves API-version resolution, not all public-mode/signing eligibility
-policy, into Rust. Raw public-mode intent and native `canSign`/`publicDataOnly`
-construction fields remain follow-up work in
-[RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md); they are not part of
-the merged metadata contract above. B2's factory routing for keyless remote
-signing and supported payload signers still applies.
+#### Construction metadata and public mode (#1563, #1567)
+
+`packages/safe-cex/src/exchanges/rust/construction-rules.json` is now the single
+rules table for signing and private-data eligibility. TS `derivePublicMode`
+evaluates it synchronously before WASM loads; `safe-cex-venues` embeds the same
+file with `include_str!` and evaluates it before credential validation/startup.
+Source delivery/builds (B1) must retain that JSON dependency at the registry's
+include path; compiled engines embed the table.
+The compiled parity matrix covers every registered Rust name across 69 input
+combinations, including signer kinds, public intent and venue-specific rules.
+This preserves existing options and eligibility; it does not add remote signing
+to an engine or establish that credentials are valid.
+
+| Host boundary | Landed contract and compatibility |
+| --- | --- |
+| SDK bridge → native `EngineOptions` | Optional `publicMode: { requested: boolean \| null, remoteSigner: boolean, payloadSigner: boolean, apiKeyIndexPresent: boolean }` carries raw intent/presence beside the existing `publicDataOnly` hint. The SDK sends it; application callers keep using `ExchangeOptions.publicDataOnly`, credentials and signer options. With `publicMode`, Rust derives public mode and sets `accountStartup` from it rather than trusting a conflicting derived hint. |
+| `WasmEngineLike.construction?(): string` | JSON `EngineConstruction` now has optional `canSign`, `publicDataOnly` and `asterdexApiVersion` fields. The wrapper adopts available native fields after loading and uses shared synchronous TS rules for missing fields/older hosts. This metadata is separate from frame/engine capabilities and contains no credentials. Without `publicMode`, native/harness construction keeps the legacy `publicDataOnly`/`accountStartup` interpretation and omits the two new metadata fields; non-Aster metadata can still be `{}`. |
+| WASM module `resolveConstruction(venue, optionsJson): string` | New named export returns the same metadata JSON without constructing an engine or performing I/O. `WasmEngineModule` declares it optional, so existing custom loaders need no new method. Resolving metadata is not credential validation or successful startup; the production wrapper still has synchronous TS getters before async loading. |
+| Explicit-private Paradex startup | `publicDataOnly: false` without key, Paradex address or subkey address still rejects `start()` with `Rust Paradex private accounts require a key, Paradex address and subkey address`. The registry now enforces it after WASM loading and before venue I/O, instead of the bridge refusing before loading. Public/automatic mode and the existing private-field requirements stay as before. |
+
+B2's factory routing for keyless remote signing and supported payload signers
+still applies. Further construction moves in
+[RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md) remain separate work.
 
 #### Capability detection
 
@@ -1359,3 +1378,12 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.

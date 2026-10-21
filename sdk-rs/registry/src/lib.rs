@@ -37,6 +37,10 @@ compile_error!(
 
 mod construction;
 pub use construction::PublicMode;
+#[cfg(feature = "bybit")]
+mod hyro;
+#[cfg(feature = "bybit")]
+pub use hyro::HyroConfig;
 
 use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
 #[cfg(feature = "apexomni")]
@@ -446,6 +450,17 @@ pub fn build<T: Visit>(
         }
         options.public_data_only = mode.public_data_only;
         options.account_startup = !mode.public_data_only;
+    }
+    if options.payload_signer && venue != "paradex" && !options.public_data_only {
+        return Err(VenueError::new(format!("Rust {venue} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret."))
+            .kind(ErrorKind::Unsupported)
+            .outcome(safe_cex_engine::Outcome::NotSent));
+    }
+    #[cfg(feature = "bybit")]
+    if venue == "hyrotrader"
+        && let Some(config) = options.hyrotrader.take()
+    {
+        options.endpoints = Some(config.resolve(options.testnet)?);
     }
     #[cfg(any(
         feature = "grvt",
@@ -1208,7 +1223,6 @@ pub struct EngineOptions {
     pub paradex_address: Option<String>,
     #[serde(default)]
     pub subkey_address: Option<String>,
-    #[cfg(feature = "paradex")]
     #[serde(default)]
     pub payload_signer: bool,
     #[cfg(any(
@@ -1267,6 +1281,9 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub endpoints: Option<EndpointOptions>,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    pub hyrotrader: Option<HyroConfig>,
     #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
     #[serde(default)]
     pub tick_interval: Option<f64>,

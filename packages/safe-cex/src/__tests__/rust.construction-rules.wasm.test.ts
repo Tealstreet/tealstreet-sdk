@@ -56,8 +56,7 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-// The Rust local-signing rule (registry tests) backstops these; the bridge refuses
-// keyless remote and payload signers first, so neither reaches the engine.
+// The registry rejects payload signers; keyless remote routing stays in the host.
 it('locally signing venues refuse a payload signer before any I/O', () =>
   startRejects(
     'binance',
@@ -122,3 +121,56 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
       ...missing, publicDataOnly: false,
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
+
+it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood', 'binance', 'bybit'] as const)(
+  'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
+    setWasmEngineLoader(loadNodeEngine);
+    const requests: string[] = [];
+    const transport: Transport = {
+      now: () => Date.now(),
+      connect: (url) => { requests.push(url); throw new Error('No socket expected'); },
+      request: async ({ url }) => { requests.push(url); throw new Error('No HTTP expected'); },
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    setRustEngineTransport(() => transport);
+    let signatures = 0;
+    for (const secret of name.startsWith('lighter') ? ['local'] : ['', 'local']) {
+      const exchange = new RustEngineExchange(name, {
+        key: 'key', secret, apiKeyIndex: '2', testnet: true,
+        payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
+      }, new DefaultStore());
+      running.push(exchange);
+      await expect(exchange.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+      await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: expect.stringContaining(`Rust ${name} does not support payloadSigner`) });
+    }
+    expect(requests).toEqual([]);
+    expect(signatures).toBe(0);
+  },
+);
+
+it('compiled construction retains public payload bypass and Paradex delegation without I/O', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  for (const [venue, options] of [
+    ['binance', { publicDataOnly: true, payloadSigner: true }],
+    ['paradex', { key: 'public-subkey', paradexAddress: '0x1', subkeyAddress: '0x2', payloadSigner: true }],
+  ] as const) {
+    const engine = new WasmEngine(venue, JSON.stringify(options));
+    (engine as unknown as { free(): void }).free();
+  }
+});
+
+it('compiled constructor exposes structured native failure detail', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  let failure: unknown;
+  try {
+    new WasmEngine('binance', JSON.stringify({ payloadSigner: true }));
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  expect(JSON.parse((failure as { venueError: string }).venueError)).toMatchObject({
+    message: expect.stringContaining('Rust binance does not support payloadSigner'),
+    kind: 'unsupported', outcome: 'notSent',
+  });
+});
