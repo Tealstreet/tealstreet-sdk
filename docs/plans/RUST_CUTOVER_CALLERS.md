@@ -1389,6 +1389,16 @@ queued orders. Both Lighter deployments keep their existing placement units and
 result shapes. HTTP405/429 include neutral guidance with native diagnostics;
 explicit invalid-margin21613 rejection refreshes state without changing cached
 mode by guess or automatically replaying a placement.
+
+
+### Phemex explicit index triggers and daily cutoff
+
+Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
+wire value instead of native refusal or TS's mark/last fallback. Default sources
+are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
+keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
+caller signatures are unchanged.
+
 ### Coinbase port-review retained read semantics
 
 Coinbase Rust spot currency balances continue using native total/free and their
