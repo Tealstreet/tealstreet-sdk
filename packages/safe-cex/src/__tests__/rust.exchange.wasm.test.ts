@@ -679,7 +679,7 @@ describe('RustEngineExchange', () => {
       new DefaultStore(),
     );
 
-    await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
+    await expect(exchange.start()).rejects.toThrow('keyless remote-signed accounts run on the TS venue');
     expect(tape.requests).toEqual([]);
   });
 

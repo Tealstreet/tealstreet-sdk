@@ -254,6 +254,13 @@ impl Polymarket {
             || self.skipped_slugs.contains("unknown")
             || (slug.is_empty() && !self.skipped_slugs.is_empty())
     }
+    /// Every catalogue and midpoint seed read has succeeded and none awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        self.public_retry.idle()
+            && self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty()
+    }
     fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
         let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
             .into_iter()
