@@ -655,9 +655,8 @@ impl Venue for Cryptocom {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
                     if skipped.any() {
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "cryptocom.lib:649",
                             "no mappable Crypto.com instrument rows",
                         );
                     } else {
@@ -710,9 +709,8 @@ impl Venue for Cryptocom {
                 skipped.report(cx, "ticker");
                 if rows.is_empty() {
                     if skipped.any() {
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "cryptocom.lib:704",
                             "no mappable Crypto.com ticker rows",
                         );
                     }

@@ -1000,7 +1000,7 @@ impl Venue for Backpack {
             Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
             Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
             Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
-            _ => cx.notice(safe_cex_engine::Level::Error, code::REQUEST_FAILED, error),
+            _ => cx.retried_failure("backpack.lib:990", error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

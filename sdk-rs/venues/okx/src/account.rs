@@ -664,11 +664,7 @@ impl Okx {
                     if cursor.is_empty() || cursors.len() >= 200 || !cursors.insert(cursor.clone())
                     {
                         self.account.orders_in_flight = false;
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
-                            "OKX order paging did not advance",
-                        );
+                        cx.retried_failure("okx.account:664", "OKX order paging did not advance");
                         if self.account.retry.is_none() {
                             self.account.retry = Some(cx.set_timer(5_000.0));
                         }
@@ -841,7 +837,7 @@ impl Okx {
                     self.account.config_read_at = cx.now;
                     cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 } else {
-                    cx.notice(Level::Error, code::REQUEST_FAILED, error);
+                    cx.retried_failure("okx.account:841", error);
                     let pause = std::mem::take(&mut self.account.config_pause_ms);
                     self.account.startup.failed_after(cx, (), pause);
                 }
@@ -852,7 +848,7 @@ impl Okx {
                 return;
             }
         }
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("okx.account:852", error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
