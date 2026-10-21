@@ -905,7 +905,7 @@ fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 7,
-            result: Ok(_)
+            ..
         })
     )));
     e.handle(NOW + 11000.0, Event::TimerFired { timer: timer.0 });

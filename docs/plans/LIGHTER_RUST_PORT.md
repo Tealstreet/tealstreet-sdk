@@ -266,3 +266,7 @@ native/Wasm, JS and Lighter/Binance gates; final CI must cover the merged head.
   cleanup, not merely on the returned error. Corrected that path and regressed
   dependent queued settings. Final independent rereview is clean. Integrating
   landing's new success-only Cx.done API next, then repeating focused checks.
+- Integrated pinned34adfdb71a6, including landing's success-only Cx.done API,
+  through a clean porcelain merge. Adapted the new success-notice assertion;
+  final417 Lighter/Binance tests, strict Clippy/fmt/bans pass again. Independent
+  post-integration review is clean; guard lists seven intended files.
