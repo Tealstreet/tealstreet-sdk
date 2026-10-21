@@ -87,7 +87,7 @@ test('deadline includes admission work and is not reset by intermediate native a
   const result = r.host.command({ op: 'fetchHistoricalOrders', get input() { r.elapse(3); return 'history'; } });
   assert.equal([...r.timers.values()][0].at, 20);
   r.elapse(2);
-  r.host.run('[{"op":"log","level":"info","message":"next history page"}]');
+  r.host.run('[{"op":"event","code":"test.diagnostic","level":"info","message":"next history page"}]');
   const rejected = assert.rejects(result, CommandTimeoutError);
   r.advance(8);
   await rejected;
@@ -407,7 +407,7 @@ test('malformed write success retains identity and unknown outcome rather than c
 });
 
 test('an ordinary callback throwing undefined still rejects the pending command', async () => {
-  const r = rig({}, { command: () => '[{"op":"log","level":"info","message":"notice"}]' }, { onLog() { throw undefined; } });
+  const r = rig({}, { command: () => '[{"op":"event","code":"test.diagnostic","level":"info","message":"notice"}]' }, { onLog() { throw undefined; } });
   const result = await Promise.allSettled([r.host.command({ op: 'getAccount' })]);
   assert.equal(result[0].status, 'rejected');
   assert.equal(result[0].reason, undefined);
@@ -419,7 +419,7 @@ test('an ordinary callback throwing undefined still rejects the pending command'
 test('ordinary callback failures are not reclassified as unknown actions or engine death', async () => {
   const r = rig({}, {}, { onLog() { throw new WebAssembly.RuntimeError('consumer log failure'); } });
   const result = r.host.command({ op: 'getAccount' });
-  assert.throws(() => r.host.run('[{"op":"log","level":"error","message":"notice"},{"op":"done","command":1,"result":"1"}]'), /consumer log failure/);
+  assert.throws(() => r.host.run('[{"op":"event","code":"test.diagnostic","level":"error","message":"notice"},{"op":"done","command":1,"result":"1"}]'), /consumer log failure/);
   assert.equal(r.host.commands.size, 1);
   done(r.host, 1);
   assert.equal(await result, 'done');

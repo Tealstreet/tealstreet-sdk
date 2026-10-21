@@ -6,9 +6,9 @@
 //   -> { op: 'start', venue, options }      options as WasmEngine takes them
 //   -> { op: 'command', id, command }       any EngineHost command
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
-//   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
+//   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'event', level, code, message, fields }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
-//      structured events add { code, fields } to 'log' and may use level 'debug'
+//      levels are debug/info/warn/error; code is stable, message is display data
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -223,18 +223,18 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
       if (!this.clients.has(client) || typeof data !== 'string') return;
       let message;
       try { message = JSON.parse(data); } catch {
-        this.reply(client, { op: 'log', level: 'error', message: 'Invalid engine message' });
+        this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Invalid engine message' });
         return;
       }
       if (!message || typeof message !== 'object' || Array.isArray(message)) return;
       if (message.op === 'start') {
         if (this.host || this.starting) {
-          this.reply(client, { op: 'log', level: 'error', message: 'Engine is already started or starting' });
+          this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine is already started or starting' });
           return;
         }
         if (typeof message.venue !== 'string' || (message.options != null &&
           (typeof message.options !== 'object' || Array.isArray(message.options)))) {
-          this.reply(client, { op: 'log', level: 'error', message: 'Invalid engine options' });
+          this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Invalid engine options' });
           return;
         }
         const attempt = {};
@@ -247,7 +247,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
           if (this.starting !== attempt || !this.clients.has(client)) return;
           if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
             || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
-            this.reply(client, { op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' });
+            this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine routing requires a configured createTransport factory' });
             return;
           }
           const raw = workersTransport();
@@ -263,14 +263,13 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
                 this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
                 this.broadcast(this.startupFailure);
               },
-              onLog: (level, text) => this.notify(level !== 'info', { op: 'log', level, message: text }),
-              // Legacy `log` clients keep working; structured clients also read code and fields.
+              onLog: (level, text) => this.notify(level !== 'info', { op: 'event', level: level === 'warning' ? 'warn' : level, code: 'host.diagnostic', message: text, fields: {} }),
               onEvent: ({ level, code, message, fields }) => {
                 // Command diagnostics are delivered through their owning request below.
                 // Unknown, malformed and retired command IDs must never become broadcasts.
                 if ((fields && Object.prototype.hasOwnProperty.call(fields, 'command')) || code === 'history.incomplete') return;
                 this.notify(level === 'warn' || level === 'error', {
-                  op: 'log', level: level === 'warn' ? 'warning' : level, message, code, fields,
+                  op: 'event', level, message, code, fields,
                 });
               },
             },
@@ -284,7 +283,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         } catch {
           host?.dispose();
           if (this.host === host) this.host = undefined;
-          this.reply(client, { op: 'log', level: 'error', message: 'Engine start failed' });
+          this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine start failed' });
         } finally {
           if (this.starting === attempt) this.starting = undefined;
         }
@@ -301,7 +300,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
             onEvent: ({ level, code, message: text, fields }) => {
               if (this.host !== host) return;
               this.reply(client, {
-                op: 'log', level: level === 'warn' ? 'warning' : level, message: text, code,
+                op: 'event', level, message: text, code,
                 fields: { ...fields, command: message.id },
               });
             },

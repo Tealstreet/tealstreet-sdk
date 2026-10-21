@@ -737,9 +737,6 @@ export class EngineHost {
       case 'startupFailed':
         this.handlers.onStartupFailed?.(action.detail);
         break;
-      case 'log':
-        this.handlers.onLog?.(action.level, action.message);
-        break;
       case 'event': {
         const { level, code, message, fields = {} } = action;
         // Registering the per-call handler before dispatch also covers synchronous events.

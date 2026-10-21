@@ -30,7 +30,7 @@ for (const entry of ['legacy', 'actions', 'bytes']) {
     };
     const actions = JSON.stringify([
       { op: 'wsSend', socket: 7, text: 'first' },
-      { op: 'log', level: 'info', message: 'between' },
+      { op: 'event', code: 'test.diagnostic', level: 'info', message: 'between' },
       { op: 'wsSend', socket: 7, text: 'second' },
     ]);
     if (entry !== 'legacy') engine.wsMessageActions = function (socket, text, now) {
@@ -786,7 +786,7 @@ for (const failure of ['synchronous request', 'asynchronous request', 'response 
       httpStart: () => '', httpChunk: () => '', httpEnd: assert.fail,
       httpFailed(_id, error) {
         delivered.push(error);
-        return JSON.stringify([{ op: 'log', level: 'error', message: error }, { op: 'done', command, error }]);
+        return JSON.stringify([{ op: 'event', code: 'test.diagnostic', level: 'error', message: error }, { op: 'done', command, error }]);
       },
     };
     const host = new EngineHost(engine, {

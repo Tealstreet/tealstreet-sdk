@@ -4,7 +4,7 @@ use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::model::Interval;
-use safe_cex_engine::{Command, Event, Level, LogLevel, Notice, Value, Venue, VenueError};
+use safe_cex_engine::{Command, Event, Level, Notice, Value, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -454,21 +454,6 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         );
                     }
                 }
-                Notice::Log { level, message } => {
-                    let level = match level {
-                        LogLevel::Info => "info",
-                        LogLevel::Warning => "warning",
-                        LogLevel::Error => "error",
-                    };
-                    self.route_log(
-                        None,
-                        level,
-                        level != "info",
-                        |message| encode_notice(ServerNotice::Log { level, message }),
-                        &message,
-                        None,
-                    );
-                }
                 Notice::Event(mut event) => {
                     let owner = if let Some(index) =
                         event.fields.iter().position(|(key, _)| *key == "command")
@@ -610,8 +595,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
             self.config.max_frame_bytes
         );
         eprintln!("safe-cex native server: {message}");
-        let text = encode_notice(ServerNotice::Log {
-            level: "warning",
+        let text = encode_notice(ServerNotice::Event {
+            level: "warn",
+            code: "host.notice_dropped",
+            fields: NoticeFields(&[]),
             message: &message,
         });
         (text.len() <= self.config.max_frame_bytes).then_some(Outgoing::Text(text))
@@ -976,10 +963,6 @@ enum ServerNotice<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         command: Option<u32>,
         error: &'a str,
-    },
-    Log {
-        level: &'a str,
-        message: &'a str,
     },
     Event {
         level: &'a str,
@@ -1909,8 +1892,10 @@ mod tests {
         let (mut a, a_canceled) = peer(&mut actor, 1);
         let (mut b, b_canceled) = peer(&mut actor, 2);
         let huge = "x".repeat(1_000);
-        actor.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
+        actor.broadcast(Outgoing::Text(encode_notice(ServerNotice::Event {
             level: "error",
+            code: "test.diagnostic",
+            fields: NoticeFields(&[]),
             message: &huge,
         })));
         for frames in [&mut a, &mut b] {
@@ -2014,7 +1999,7 @@ mod tests {
                 tickers: None,
             },
         );
-        // Engine-originated notices bypass the venue cap, so the host must bound them.
+        // The engine cap is larger than this client frame limit.
         actor
             .host
             .engine
@@ -2026,7 +2011,7 @@ mod tests {
         };
         assert!(text.len() <= 96, "{} bytes", text.len());
         let notice: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(notice["type"], "log");
+        assert_eq!(notice["type"], "event");
         assert!(
             notice["message"].as_str().unwrap().starts_with("\"é"),
             "{text}"

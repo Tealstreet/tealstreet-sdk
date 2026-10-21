@@ -1201,8 +1201,8 @@ fn unmapped_perpetual_rows_are_skipped_and_protect_only_their_own_identity() {
     // names another market, so this snapshot's omission of BTC removes it.
     assert_eq!(h.e.store().orders(), old_orders);
     assert!(h.e.store().positions().is_empty());
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Paradex skipped position UNKNOWN-USD-PERP on an unknown market")));
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Paradex skipped order 123 on an unknown market")));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Paradex skipped position UNKNOWN-USD-PERP on an unknown market")));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Paradex skipped order 123 on an unknown market")));
     // The next complete, genuinely empty scopes still remove closed exposure.
     h.timer(h.now + 10_000.);
     for path in ["/positions", "/orders"] {
@@ -1267,7 +1267,7 @@ fn exposure_on_a_deliberately_excluded_perpetual_does_not_block_startup_or_strea
     }
     assert!(!h.actions[pending..].iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unmappable market")
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unmappable market")
     )));
     assert_eq!(h.e.store().positions().len(), 1);
     assert_eq!(h.e.store().orders().len(), 1);
@@ -1305,8 +1305,7 @@ fn poll(h: &mut Harness, positions: &[String], orders: &[String]) -> Vec<String>
     h.actions[start..]
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message.clone()),
@@ -1451,8 +1450,7 @@ fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit()
         .actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message.as_str()),

@@ -1,9 +1,9 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::log::{MAX_LOG_BYTES, REDACTED, code};
 use safe_cex_engine::{
-    Action, Command, Cx, Engine, ErrorKind, Event, Health, Level, LogEvent, LogLevel, Method,
-    Notice, Redacted, RequestId, Response, SocketChannel, SocketId, SocketSpec, TimerId, Value,
-    Venue, VenueError,
+    Action, Command, Cx, Engine, ErrorKind, Event, Health, Level, LogEvent, Method, Notice,
+    Redacted, RequestId, Response, SocketChannel, SocketId, SocketSpec, TimerId, Value, Venue,
+    VenueError,
 };
 
 /// Turns each socket message into one notice so tests drive `Cx` directly.
@@ -33,6 +33,7 @@ impl Venue for Logger {
                 };
                 cx.connect(SocketSpec::new("wss://example.test").channel(channel));
             }
+            Some(("skipped", _)) => safe_cex_engine::startup::skipped_row(cx),
             Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
             Some(("deactivate", _)) => cx.deactivate(),
             Some(("retry", "a")) => cx.retried_failure("site.a", "read failed"),
@@ -62,8 +63,8 @@ impl Venue for Logger {
                 message,
                 vec![("command", 77u32.into())],
             ),
-            Some(("log", message)) => cx.log(LogLevel::Info, message),
-            Some(("warn", message)) => cx.log(LogLevel::Warning, message),
+            Some(("log", message)) => cx.notice(Level::Info, code::STARTUP_PROGRESS, message),
+            Some(("warn", message)) => cx.notice(Level::Warn, code::REQUEST_FAILED, message),
             Some((level, message)) => {
                 let level = Level::parse(level).unwrap();
                 cx.event(
@@ -148,13 +149,13 @@ fn events_below_the_host_minimum_are_dropped_but_still_counted() {
 
     engine.set_log_level(Level::Warn);
     assert!(send(&mut engine, "info:hidden").is_empty());
-    assert!(send(&mut engine, "log:shim info is filtered too").is_empty());
+    assert!(send(&mut engine, "log:notice info is filtered too").is_empty());
     assert!(matches!(
-        send(&mut engine, "warn:shim warning passes").as_slice(),
-        [Notice::Log {
-            level: LogLevel::Warning,
+        send(&mut engine, "warn:notice warning passes").as_slice(),
+        [Notice::Event(safe_cex_engine::LogEvent {
+            level: Level::Warn,
             ..
-        }]
+        })]
     ));
 }
 
@@ -162,7 +163,7 @@ fn events_below_the_host_minimum_are_dropped_but_still_counted() {
 fn incomplete_history_marker_survives_an_error_only_threshold() {
     let mut engine = engine();
     engine.set_log_level(Level::Error);
-    assert!(send(&mut engine, "warn:ordinary warning").is_empty());
+    assert!(send(&mut engine, "warn:ordinary coded warning").is_empty());
     assert!(send(&mut engine, "notice:ordinary structured warning").is_empty());
     assert!(send(&mut engine, "info:ordinary structured event").is_empty());
     let notices = send(
@@ -198,10 +199,10 @@ fn messages_and_string_fields_are_capped_on_a_char_boundary_and_redacted_fields_
     assert_eq!(format!("{:?}", Redacted("api-secret")), REDACTED);
     assert!(!format!("{notices:?}").contains("api-secret"));
 
-    let shim = format!("log:{}", "x".repeat(4 * MAX_LOG_BYTES));
-    let notices = send(&mut engine, &shim);
-    let [Notice::Log { message, .. }] = notices.as_slice() else {
-        panic!("expected one shim log")
+    let notice = format!("log:{}", "x".repeat(4 * MAX_LOG_BYTES));
+    let notices = send(&mut engine, &notice);
+    let [Notice::Event(safe_cex_engine::LogEvent { message, .. })] = notices.as_slice() else {
+        panic!("expected one notice log")
     };
     assert!(message.len() <= MAX_LOG_BYTES);
 }
@@ -432,4 +433,36 @@ fn a_retried_read_is_an_error_once_per_quiet_spell_and_per_site() {
         "digits do not make text new"
     );
     assert_eq!(level_at(&mut engine, 103_000., "d"), Level::Error);
+}
+
+#[test]
+fn discovery_row_events_count_even_when_their_warning_is_filtered() {
+    let mut engine = engine();
+    engine.set_log_level(Level::Error);
+    assert!(send(&mut engine, "skipped:row").is_empty());
+    assert_eq!(engine.health().rows_skipped, 1);
+    engine.set_log_level(Level::Warn);
+    let notices = send(&mut engine, "skipped:row");
+    assert!(matches!(
+        notices.as_slice(),
+        [Notice::Event(LogEvent {
+            code: code::ROW_SKIPPED,
+            level: Level::Warn,
+            ..
+        })]
+    ));
+    assert_eq!(engine.health().rows_skipped, 2);
+}
+
+#[test]
+fn engine_public_feed_errors_are_coded_and_capped_without_counting_auth() {
+    let mut engine = engine();
+    engine.report_public_feed_error(&"é".repeat(MAX_LOG_BYTES));
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        matches!(actions.as_slice(), [Action::Notice(Notice::Event(LogEvent {
+        code: code::PUBLIC_FEED_REJECTED, level: Level::Error, message, ..
+    }))] if message.len() <= MAX_LOG_BYTES && message.ends_with('…'))
+    );
+    assert_eq!(engine.health().auth_failures, 0);
 }

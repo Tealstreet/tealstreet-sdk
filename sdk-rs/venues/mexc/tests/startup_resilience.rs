@@ -1,6 +1,6 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
-use safe_cex_engine::{Action, Engine, Event, Notice, Response};
+use safe_cex_engine::{Action, Engine, Event, Response};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::jittered;
 const CATALOGUE: &str = r###"{"success":true,"code":0,"data":[{"broken":true},{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true,"contractSize":0.0001,"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500,"makerFeeRate":0,"takerFeeRate":0.0002}]}"###;
@@ -68,7 +68,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
     assert!(engine.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
