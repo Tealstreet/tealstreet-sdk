@@ -9,7 +9,8 @@ const { values } = parseArgs({
 const REST = 'https://openapi.blofin.com';
 const PUBLIC = 'wss://openapi.blofin.com/ws/public';
 const PRIVATE = 'wss://openapi.blofin.com/ws/private';
-const records = [];
+// Anchor signing and TS fallback fill timestamps to the authored history window.
+const records = [{ t: 0, type: 'meta', private: true, epoch: 1700000000000 }];
 const ok = (data) => ({ code: '0', msg: 'success', data });
 const http = (method, path, query, data, requestBody) =>
   records.push({
