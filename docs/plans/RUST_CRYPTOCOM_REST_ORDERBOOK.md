@@ -31,3 +31,24 @@ prefer its actual merge before publication, or pin/review the exact dependency.
 MEXC #1681 is ordered immediately after Backpack; coordinate shared fixture
 integration before this independent family merges. GRVT builder errors and
 browser evidence remain codex-uufub4's scope. No NX writes or TS deletion.
+
+
+Implementation evidence:
+- Seven original-source groups failed through the real standalone venue path;
+  all pass after implementation. Added separate presence/precedence and bounded
+  Retry-After regressions (HTTP429/native42901, 120s, cap, invalid/nonfinite hints).
+- Live subscribed WS book plus seeded ticker/account stores survive both REST
+  success and failure unchanged; the next WS snapshot still updates the book.
+  Query errors do not emit account-auth rejection, stream actions or read retries.
+- Exact reviewed Backpack dependency was integrated before implementation;
+  GRVT actual #1679 is retained, including its typed-error closure and required
+  NX structural-handler migration. MEXC runtime changes are not a dependency.
+- Independent adversarial review caught Serde named-struct sequence admission:
+  a malformed top-level [0] could become empty success, and arrays could stand in
+  for result/book objects. The new regression failed before correction. Object
+  guards at all three typed boundaries now reject each shape; all ten query
+  groups pass and the reviewer verified closure.
+- Focused local gates pass: 345 Crypto.com+Binance native tests before the added
+  shape regression, all ten final query groups, the default combined-host
+  capability test, 22 SDK bridge tests, typecheck and explicit no-ignore ESLint.
+  Strict venue Clippy, format and bans pass. Full exact-head CI remains required.
