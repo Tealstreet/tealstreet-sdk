@@ -1,5 +1,5 @@
 //! Synchronous SDK and native construction share these declarative conditions.
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::EngineOptions;
 
@@ -24,6 +24,64 @@ struct Rule {
     can_sign: Option<Conditions>,
     private_eligible: Option<Conditions>,
     explicit_private_error: Option<&'static str>,
+    bridge: BridgeRule,
+}
+
+struct BridgeRule {
+    spot: bool,
+    demo: DemoRule,
+    primary_credentials_only: bool,
+    payload_signing: bool,
+    api_key_index_required: bool,
+    isolated_book_subscriptions: bool,
+}
+
+enum DemoRule {
+    Never,
+    Always,
+    HyroMode,
+}
+
+/// Synchronous bridge choices, resolved from the same rules before WASM loads.
+#[derive(Default, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConstruction {
+    pub spot: bool,
+    pub demo: bool,
+    pub primary_credentials_only: bool,
+    pub payload_signing: bool,
+    pub api_key_index_required: bool,
+    pub isolated_book_subscriptions: bool,
+}
+
+pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
+    let rule = &venue_rule(venue).unwrap_or(&DEFAULT_RULE).bridge;
+    let demo = match rule.demo {
+        DemoRule::Never => false,
+        DemoRule::Always => true,
+        DemoRule::HyroMode => {
+            #[cfg(feature = "bybit")]
+            {
+                options
+                    .hyrotrader
+                    .as_ref()
+                    .is_some_and(|config| config.is_demo())
+            }
+            #[cfg(not(feature = "bybit"))]
+            {
+                let _ = options;
+                false
+            }
+        }
+    };
+    BridgeConstruction {
+        spot: rule.spot,
+        demo,
+        primary_credentials_only: rule.primary_credentials_only,
+        payload_signing: rule.payload_signing,
+        api_key_index_required: rule.api_key_index_required,
+        isolated_book_subscriptions: rule.isolated_book_subscriptions,
+    }
 }
 
 include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));

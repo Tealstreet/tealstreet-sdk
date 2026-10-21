@@ -668,6 +668,8 @@ impl Venue for AsterDex {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            stp_controls: true,
+            isolated_book_subscriptions: true,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,

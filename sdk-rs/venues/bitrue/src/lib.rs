@@ -566,6 +566,7 @@ impl Venue for Bitrue {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             order_history: false,

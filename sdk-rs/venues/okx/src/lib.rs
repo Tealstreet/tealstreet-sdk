@@ -792,6 +792,8 @@ impl Venue for Okx {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::Okx,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Okx,
             quantity_units: safe_cex_engine::QuantityUnits::ContractCount,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,

@@ -657,7 +657,7 @@ impl WeexFutures {
         }
         let step = walk.step();
         if matches!(step, Step::Fetch { .. }) && walk.requests > INCOME_BUDGET {
-            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound");
+            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound", vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
             let result = income_json(rows);
             self.history.reads.remove(&command);
             cx.done(command, result);
@@ -670,7 +670,7 @@ impl WeexFutures {
             Step::ChunkDone => *delay = Some(cx.set_timer(PAGE_DELAY)),
             Step::Finished => {
                 if walk.truncated {
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,format!("WEEX income history is INCOMPLETE: {} chunk(s) could not be walked to completion; totals are a lower bound",walk.exhausted_chunks));
+                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,format!("WEEX income history is INCOMPLETE: {} chunk(s) could not be walked to completion; totals are a lower bound",walk.exhausted_chunks), vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
                 }
                 let result = income_json(rows);
                 self.history.reads.remove(&command);
@@ -836,7 +836,7 @@ impl WeexFutures {
                 if has_more {
                     // Span continuation cannot prove it consumed an advertised
                     // opaque cursor, even when a repeated page is short.
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows");
+                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows", vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
                     if let Some(walk) = walk.as_mut() {
                         walk.failed();
                     }
@@ -880,18 +880,20 @@ impl WeexFutures {
         }) = self.history.reads.get_mut(&command)
         {
             walk.failed();
-            cx.notice(
+            cx.event(
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 format!("WEEX income page failed: {error}; history is INCOMPLETE"),
+                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
             );
             *delay = Some(cx.set_timer(PAGE_DELAY));
         } else if self.history.reads.remove(&command).is_some() {
             if matches!(request.kind, Kind::Income) {
-                cx.notice(
+                cx.event(
                     Level::Warn,
                     code::HISTORY_INCOMPLETE,
                     "WEEX income history is INCOMPLETE: query failed",
+                    vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
                 );
             }
             cx.fail(command, error);

@@ -55,6 +55,9 @@ const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
   'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
   'closedPositions', 'balanceInfo', 'hostClock', 'marketRefresh',
+  'stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
+  'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
+  'isolatedBookSubscriptions', 'inverseClosedPositions',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
@@ -62,6 +65,9 @@ const CAPABILITY_ENUMS = [
   ['leverageQuery', ['settings', 'onRead', 'onMetadata', 'onReadAndMetadata']],
   ['maxLeverage', ['market', 'query', 'rails', 'unsupported']],
   ['quantityUnits', QUANTITY_UNITS],
+  ['positionHistory', ['unsupported', 'fillsAccount', 'fillsSymbol', 'bybit', 'okx', 'blofin', 'wooOrders']],
+  ['closedPositionFormat', ['unsupported', 'bybit', 'okx', 'blofin']],
+  ['fillHistoryTime', ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds']],
 ];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
 export const STATUS_FLAG = { HEDGED: 1 };

@@ -501,6 +501,8 @@ impl Venue for Kraken {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::FillsAccount,
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
