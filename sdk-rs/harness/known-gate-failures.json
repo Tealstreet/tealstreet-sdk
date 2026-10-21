@@ -1485,14 +1485,6 @@
             "checkpoint 2 account.orders[2].filled",
             "checkpoint 2 account.orders[2].remaining",
             "checkpoint 2 account.orders[2].status",
-            "checkpoint 3 account.orders.length",
-            "checkpoint 3 account.orders[0].amount",
-            "checkpoint 3 account.orders[0].id",
-            "checkpoint 3 account.orders[0].price",
-            "checkpoint 3 account.orders[0].remaining",
-            "checkpoint 3 account.orders[0].status",
-            "checkpoint 3 account.orders[1]",
-            "checkpoint 3 account.orders[2]",
             "checkpoint 6 account.orders[1].close"
           ]
         }
