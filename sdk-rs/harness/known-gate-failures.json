@@ -39571,15 +39571,6 @@
           ]
         },
         {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
-          "keys": [
-            "checkpoint 9 account.balance.currencies.USDT.free",
-            "checkpoint 9 account.balance.currencies.USDT.used",
-            "checkpoint 9 account.balance.free",
-            "checkpoint 9 account.balance.used"
-          ]
-        },
-        {
           "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS shows it only after its next account read, by checkpoint 12.",
           "keys": [
             "checkpoint 10 account.balance.currencies.USDT.free",
@@ -39589,7 +39580,11 @@
             "checkpoint 11 account.balance.currencies.USDT.free",
             "checkpoint 11 account.balance.currencies.USDT.used",
             "checkpoint 11 account.balance.free",
-            "checkpoint 11 account.balance.used"
+            "checkpoint 11 account.balance.used",
+            "checkpoint 9 account.balance.currencies.USDT.free",
+            "checkpoint 9 account.balance.currencies.USDT.used",
+            "checkpoint 9 account.balance.free",
+            "checkpoint 9 account.balance.used"
           ]
         }
       ]
@@ -39832,15 +39827,6 @@
           ]
         },
         {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
-          "keys": [
-            "checkpoint 9 account.balance.currencies.USDT.free",
-            "checkpoint 9 account.balance.currencies.USDT.used",
-            "checkpoint 9 account.balance.free",
-            "checkpoint 9 account.balance.used"
-          ]
-        },
-        {
           "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS shows it only after its next account read, by checkpoint 12.",
           "keys": [
             "checkpoint 10 account.balance.currencies.USDT.free",
@@ -39850,7 +39836,11 @@
             "checkpoint 11 account.balance.currencies.USDT.free",
             "checkpoint 11 account.balance.currencies.USDT.used",
             "checkpoint 11 account.balance.free",
-            "checkpoint 11 account.balance.used"
+            "checkpoint 11 account.balance.used",
+            "checkpoint 9 account.balance.currencies.USDT.free",
+            "checkpoint 9 account.balance.currencies.USDT.used",
+            "checkpoint 9 account.balance.free",
+            "checkpoint 9 account.balance.used"
           ]
         }
       ]
