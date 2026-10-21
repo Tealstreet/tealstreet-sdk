@@ -150,8 +150,8 @@ The typed-error catch-up checks #1589 at `ef362708305`; the incoming venue
 read/display notes are retained, and #1607/#1610 only change harness proof.
 The envelope-only credential-evidence follow-up checks #1611 at `a07b6b35c87`.
 The Bybit environment hint checks #1590 at `15434894bf5`; explicit market
-refresh checks #1596 at `687fe0c1e08`. The required startup caller changes below
-are prepared for #1615, which is not yet merged in this draft.
+refresh checks #1596 at `687fe0c1e08`. Shared public startup reporting checks
+#1615 at `c63acfc19c2`; its required caller visibility work remains open below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -220,6 +220,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1611 / `a07b6b35c` | For eligible signed BingX/MEXC/WEEX list reads, a typed success response (BingX/MEXC envelope; WEEX root array) with its required list proves Accepted even when rows are skipped, uncatalogued or held. Malformed/missing required envelope data supplies no outcome before grouped auth state changes; typed credential rejection retains precedence. Row diagnostics/financial retention, classifier scope and caller shapes stay unchanged. |
 | #1590 / `15434894b` | A startup fee-read 10003 on eligible built-in live linear/demo Bybit can add an opposite-environment key hint after one bounded signed diagnostic GET using the rejected credential. Failure/timeout retains the original rejection; native code, credential role and deactivation policy stay intact. No automatic environment switch or trading retry. |
 | #1596 / `687fe0c1e` | Bybit `refreshMarkets()` stages enabled public categories atomically, shares concurrent discovery and returns added/removed membership after publication. `marketRefresh` capability uses wire bit15; unsupported engines keep cached behavior. Failed discovery retains the old catalogue; shared-feed consumers must refresh the source and restart provider/accounts. See [Bybit explicit catalogue refresh](#bybit-explicit-catalogue-refresh). |
+| #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -1913,11 +1914,18 @@ as documented.
 ## Required startup degradation visibility
 
 **Required cutover caller work; tealstreet-next remains read-only here.**
-This dependent draft targets #1615 (`fix/rust-shared-startup-retry`), still
-unmerged. Its current contract reports OKX/BloFin/Bitget public startup
-`startup.degraded` at Warn and `startup.recovered` at Info; the caller must key
-on the codes, regardless of level. These receipts describe continuing retries,
-not terminal startup failure.
+#1615 (`c63acfc19c2`) reports OKX/BloFin/Bitget public startup
+`startup.degraded` at Warn once after six failures of one required read, while
+capped retries continue. Fields include `kind`, `read`, `attempts`, and parsed
+`venueCode`/`venueMessage` when available. Info `startup.recovered` follows
+usable markets and tickers, including usable partial catalogues; repair timers
+continue. These use the existing Event wire and do not emit terminal
+`StartupFailed`. Warn preserves SDK `validateAccount` behavior by avoiding its
+Error listeners. Private reads, Bybit and post-loaded recovery keep their policy.
+
+The caller must key on the codes, regardless of level. Keep diagnostic delivery
+at an Info minimum so recovery is not filtered out; the engine defaults to Info.
+Required visible state is independent of a terminal startup failure.
 
 Read-only evidence at NX `65e086a3c90`, with the matching Rust SDK:
 
