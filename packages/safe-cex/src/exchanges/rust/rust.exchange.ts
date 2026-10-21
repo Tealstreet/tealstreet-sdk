@@ -336,10 +336,19 @@ export class RustEngineExchange extends BaseExchange {
   private readonly localSignWsAuth = (this as BaseExchange).signWsAuth;
 
   /** The browser signs hosted accounts; names with no other TS venue sign through the kept one. */
-  private hostedSigner = () => {
+  private hostedSigner = (): Promise<BaseExchange> | undefined => {
     const load = hostedSigningVenues[this.name];
     if (!load) return undefined;
-    return (this.hostedSigningVenue ??= load().then((Venue) => new Venue(this.name, this.options, new DefaultStore())));
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed'));
+    if (!this.hostedSigningVenue) {
+      const venue = load().then((Venue) => new Venue(this.name, this.options, new DefaultStore()));
+      // A failed chunk load must not poison signing for the account's lifetime.
+      venue.catch(() => {
+        if (this.hostedSigningVenue === venue) this.hostedSigningVenue = undefined;
+      });
+      this.hostedSigningVenue = venue;
+    }
+    return this.hostedSigningVenue;
   };
 
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
@@ -418,6 +427,9 @@ export class RustEngineExchange extends BaseExchange {
         if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
       },
       (error: unknown) => {
+        // A hosted account's server worker runs a TS venue (hostedSigningVenues) and has no
+        // engine record; keep the forwarders' defaults instead of retrying forever.
+        if (error instanceof Error && error.message.endsWith('does not support fetchEngineCapabilities')) return;
         this.workerCapabilities = undefined;
         this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
         throw error;
@@ -1943,7 +1955,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
-    void this.hostedSigningVenue?.then((venue) => venue.dispose());
+    void this.hostedSigningVenue?.then(
+      (venue) => venue.dispose(),
+      () => undefined,
+    );
     this.hostedSigningVenue = undefined;
     this.stopWorkerCapabilitySync?.();
     this.stopWorkerCapabilitySync = undefined;

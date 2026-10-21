@@ -1,8 +1,11 @@
 import type { ExchangeName, ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
+import { getPublicKey, verify } from '@noble/ed25519';
 import bs58 from 'bs58';
+import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import '../../exchanges/orderly/orderly.encryption';
 import { hostedSigningVenues } from '../../exchanges/hostedSigningVenues';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
@@ -75,6 +78,12 @@ describe('hosted Coinbase and Orderly accounts sign as they did on master', () =
         expect(signed.error, name).toBeUndefined();
         expect(signed.config?.headers?.['orderly-signature'], name).toBeTruthy();
         expect(signed, name).toEqual(await venue.signHttpRequest(signing));
+        // Golden: the signature verifies against the account key over Orderly's text-sign.
+        const headers = signed.config!.headers!;
+        const seed = bs58.decode(options.secret.split(':')[1]);
+        const signature = Buffer.from(headers['orderly-signature'].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+        expect(headers['orderly-textsign'], name).toBe('1760000000000GET/v1/positions');
+        expect(verify(signature, new TextEncoder().encode(headers['orderly-textsign']), getPublicKey(seed)), name).toBe(true);
       } finally {
         engine.dispose();
         venue.dispose();
@@ -99,6 +108,22 @@ describe('hosted Coinbase and Orderly accounts sign as they did on master', () =
         // The JWT carries a random nonce; everything else must match.
         expect(jwtParts(header(signed)!), name).toEqual(jwtParts(header(reference)!));
         expect(jwtParts(header(signed)!).payload.uri, name).toBe('GET api.coinbase.com/api/v3/brokerage/accounts');
+        const seed = Buffer.from(options.secret, 'base64');
+        const verifies = (jwt: string) => {
+          const [head, body, signature] = jwt.replace(/^Bearer /, '').split('.');
+          return verify(Buffer.from(signature, 'base64url'), new TextEncoder().encode(`${head}.${body}`), getPublicKey(seed));
+        };
+        expect(verifies(header(signed)!), name).toBe(true);
+        // The browser's main-thread WS auth signs Coinbase's JWT through the same venue.
+        const ws = await engine.signWsAuth({
+          id: 'ws-1',
+          type: 'ws-auth',
+          exchangeName: name,
+          wsAuth: { toSign: '', outputFormat: 'coinbase-jwt' },
+        });
+        expect(ws.error, name).toBeUndefined();
+        expect(verifies(ws.wsAuthSignature!), name).toBe(true);
+        expect(jwtParts(ws.wsAuthSignature!).payload).toMatchObject({ sub: options.key, iss: 'cdp' });
       } finally {
         engine.dispose();
         venue.dispose();
@@ -114,7 +139,49 @@ describe('hosted Coinbase and Orderly accounts sign as they did on master', () =
     });
     await expect(
       engine.signWsAuth({ id: 'ws-1', type: 'ws-auth', exchangeName: 'bybit', wsAuth: { toSign: 'x', outputFormat: 'hex' } }),
-    ).resolves.toMatchObject({ id: 'ws-1', wsAuthSignature: expect.any(String) });
+    ).resolves.toEqual({ id: 'ws-1', wsAuthSignature: createHmac('sha256', 's').update('x').digest('hex') });
     engine.dispose();
+  });
+
+  it('a failed signer load is retried and a disposed engine refuses to sign', async () => {
+    const original = hostedSigningVenues['tealstreet-dex']!;
+    let fail = true;
+    hostedSigningVenues['tealstreet-dex'] = () => (fail ? Promise.reject(new Error('chunk load failed')) : original());
+    try {
+      const engine = new RustEngineExchange('tealstreet-dex', orderlyCredentials(), new DefaultStore());
+      const signing = request('tealstreet-dex', 'https://api-evm.orderly.org', '/v1/positions');
+      await expect(engine.signHttpRequest(signing)).rejects.toThrow('chunk load failed');
+      fail = false;
+      await expect(engine.signHttpRequest(signing)).resolves.toMatchObject({ id: 'sign-1' });
+      engine.dispose();
+      await expect(engine.signHttpRequest(signing)).rejects.toThrow('Exchange disposed');
+    } finally {
+      hostedSigningVenues['tealstreet-dex'] = original;
+    }
+  });
+
+  it('a main-thread mirror of a hosted account stops asking its TS worker for engine capabilities', async () => {
+    const main = new RustEngineExchange('tealstreet-dex', orderlyCredentials(), new DefaultStore());
+    const calls: string[] = [];
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      queueMicrotask(() =>
+        main.emitter.emit('callMethod:done', {
+          requestId: event.requestId,
+          success: false,
+          // What CallMethodHandler answers for a method the TS venue lacks.
+          result: { message: 'tealstreet-dex does not support fetchEngineCapabilities' },
+        }),
+      );
+    });
+    try {
+      main.store.update({ loaded: { ...main.store.loaded, markets: true } });
+      await expect(main.loadCapabilities()).resolves.toBeDefined();
+      main.store.update({ loaded: { ...main.store.loaded, tickers: true } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toEqual(['fetchEngineCapabilities']);
+    } finally {
+      main.dispose();
+    }
   });
 });

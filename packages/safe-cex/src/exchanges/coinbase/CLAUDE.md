@@ -9,8 +9,9 @@ with a `remoteSigner` runs the TS venue (`coinbase.exchange.ts`,
 remotely (`docs/plans/RUST_REMOTE_SIGNING.md`). Keep those files byte-for-byte
 master behaviour; they are removed when the engine signs remotely. The engine implementation is `sdk-rs/venues/coinbase/`;
 `docs/plans/RUST_COINBASE.md` records the scope, protocol evidence and gates.
-The frozen Advanced Trade TypeScript adapter lives only in
-`src/__tests__/reference/coinbase/` for independent replay and old regression tests.
+A frozen copy of the TS adapter, with replay-only patches, lives in
+`src/__tests__/reference/coinbase/` for independent replay and old regression
+tests; it is not the hosted-signing runtime above.
 
 ## Runtime contract
 
