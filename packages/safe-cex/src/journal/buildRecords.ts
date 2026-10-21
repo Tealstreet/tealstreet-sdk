@@ -42,12 +42,24 @@ export type BuildRecordsResult = {
   readonly intervals: PositionInterval[];
 };
 
+type HistoricalRows<T> = T[] & { readonly incomplete?: boolean };
+
+const requireCompleteHistory = <T>(rows: HistoricalRows<T>, axis: 'fills' | 'income'): HistoricalRows<T> => {
+  if (rows.incomplete) throw new Error(`journal fold: ${axis} history is incomplete`);
+  return rows;
+};
+
 type FoldableExchange = {
-  fetchHistoricalFills: (opts: { symbol?: string; from: number; to: number; limit: number }) => Promise<Execution[]>;
+  fetchHistoricalFills: (opts: {
+    symbol?: string;
+    from: number;
+    to: number;
+    limit: number;
+  }) => Promise<HistoricalRows<Execution>>;
   fetchIncomeHistoryRange?: (
     from: number,
     to: number,
-  ) => Promise<Array<{ symbol?: string; category?: string; timestamp?: number; income?: number }>>;
+  ) => Promise<HistoricalRows<{ symbol?: string; category?: string; timestamp?: number; income?: number }>>;
 };
 
 export const buildFoldedPositionRecords = async (
@@ -64,7 +76,11 @@ export const buildFoldedPositionRecords = async (
   let incomeFailure: { readonly error: unknown } | undefined;
   if (exchange.fetchIncomeHistoryRange) {
     try {
-      for (const item of await exchange.fetchIncomeHistoryRange(lookbackFrom, options.to)) {
+      const income = requireCompleteHistory(
+        await exchange.fetchIncomeHistoryRange(lookbackFrom, options.to),
+        'income',
+      );
+      for (const item of income) {
         if (item.symbol) symbols.add(String(item.symbol));
         if (item.category === 'funding') {
           fundingRows.push({
@@ -105,12 +121,18 @@ export const buildFoldedPositionRecords = async (
 
   if (options.symbolScoped) {
     for (const symbol of symbols) {
-      const fills = await exchange.fetchHistoricalFills({ symbol, from: lookbackFrom, to: options.to, limit: 1000 });
+      const fills = requireCompleteHistory(
+        await exchange.fetchHistoricalFills({ symbol, from: lookbackFrom, to: options.to, limit: 1000 }),
+        'fills',
+      );
       totalFills += fills.length;
       intervals.push(...reconstructPositionIntervals(fills));
     }
   } else {
-    const fills = await exchange.fetchHistoricalFills({ from: lookbackFrom, to: options.to, limit: 1000 });
+    const fills = requireCompleteHistory(
+      await exchange.fetchHistoricalFills({ from: lookbackFrom, to: options.to, limit: 1000 }),
+      'fills',
+    );
     totalFills = fills.length;
 
     // Split per symbol before folding: an interval reconstruction that mixed symbols would

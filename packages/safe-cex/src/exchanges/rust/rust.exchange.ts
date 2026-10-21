@@ -1120,8 +1120,9 @@ export class RustEngineExchange extends BaseExchange {
       await this.fetchSymbolMaxLeverage(symbol);
       return;
     }
-    if (capabilities.leverageQuery !== 'onMetadata') return;
+    if (capabilities.leverageQuery !== 'onMetadata' && capabilities.leverageQuery !== 'onReadAndMetadata') return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+    this.host?.flush();
     this.applier.applyLeverage(symbol, rails);
   };
 
