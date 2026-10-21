@@ -1192,11 +1192,7 @@ impl Orderly {
                         || m.records_per_page.is_some_and(|n| n > 500)
                 }) {
                     self.account.inflight[2 + i] = false;
-                    cx.notice(
-                        Level::Error,
-                        code::REQUEST_FAILED,
-                        "Orderly inconsistent pagination",
-                    );
+                    cx.retried_failure("orderly.account:1195", "Orderly inconsistent pagination");
                     return;
                 }
                 let more = meta
@@ -1206,9 +1202,8 @@ impl Orderly {
                 if more {
                     if page >= 50 || page_count == 0 {
                         self.account.inflight[2 + i] = false;
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "orderly.account:1209",
                             "Orderly order pagination incomplete",
                         );
                         return;
@@ -1294,7 +1289,7 @@ impl Orderly {
         request: Request,
         error: &str,
     ) {
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("orderly.account:1297", error);
         match request {
             Request::Info => {
                 if self.account.startup_retry.is_none() {

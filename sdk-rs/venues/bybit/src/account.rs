@@ -2213,9 +2213,8 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "bybit.account:2216",
                             format!("Bybit orders: {message}"),
                         );
                         join.failed = true;
@@ -2266,9 +2265,8 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "bybit.account:2269",
                             format!("Bybit positions: {message}"),
                         );
                         join.failed = true;
@@ -2339,9 +2337,8 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.notice(
-                            Level::Error,
-                            code::REQUEST_FAILED,
+                        cx.retried_failure(
+                            "bybit.account:2342",
                             format!("Bybit balance: {message}"),
                         );
                         if self.variant.is_hyro() {
