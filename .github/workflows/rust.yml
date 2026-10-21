@@ -250,8 +250,8 @@ jobs:
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
-      # Five correctness pairs only for the venue's tape-time sweep branch.
-      PRIVATE_REPLAY_RUNS: ${{ (github.head_ref || github.ref_name) == format('wip/harness-tape-time-{0}', matrix.venue) && '5' || '1' }}
+      # Five pairs only for the venue's sweep; Bitget also covers its USDC suite.
+      PRIVATE_REPLAY_RUNS: ${{ ((github.head_ref || github.ref_name) == format('wip/harness-tape-time-{0}', matrix.venue) || (matrix.venue == 'bitgetusdc' && (github.head_ref || github.ref_name) == 'wip/harness-tape-time-bitget')) && '5' || '1' }}
     defaults:
       run:
         working-directory: .

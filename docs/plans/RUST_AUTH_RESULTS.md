@@ -1,7 +1,7 @@
 # Rust account authentication results — Phase 6b plan
 
-Status: **PLAN ONLY. No authentication-result implementation or end-to-end proof
-is claimed by this document.** Phase 6a's scheduler and SDK option propagation
+Status: **The core/host/SDK foundation is implemented and reviewed; venue
+classifiers and end-to-end native credential proof are still pending.** Phase 6a's scheduler and SDK option propagation
 are separate work. Calling Base auth methods manually does not prove native
 credential backoff. Phase 4 getAccount inventory and its future implementation
 batches also remain separate; this plan implements neither getAccount nor
@@ -42,7 +42,7 @@ Keep the selected signer and read scope on the engine's existing in-flight
 request entry. `Cx::tag_account_read(request, credential, scope)` is called at
 dispatch, after signer selection; no credential/header inference or retained
 result ledger. The optional pure venue hook is
-`account_auth_outcome(&self, pending, response) -> Option<AuthOutcome>`.
+`account_auth_outcome(&self, pending, response, now) -> Option<AuthOutcome>`.
 Core emits the captured context plus verdict once before the existing callback,
 with Accepted suppressed for a missing expected streamed list. Transport and
 signature failures remove the same entry without credential evidence.
@@ -289,3 +289,40 @@ is larger, unnecessary work for this phase.
 Only after native classification, all wire boundaries and actual consumer tests
 pass can Phase 6b claim real credential backoff. This document records a plan,
 not that acceptance result.
+
+
+## Time-sensitive acquisition refinement
+
+The classifier receives the current response-event time as a final `now:f64`
+argument. Paradex discards successful acquisition replies older than its native
+five-minute admission window; reporting Accepted for such an unused token would
+incorrectly clear a credential failure. The optional hook remains pure and does
+not gain Store or transport access. Core passes the same event time already
+used by the unchanged response callback. Default/ordinary classifiers ignore it;
+venue session-age predicates share the existing admission rule. Update the
+foundation trait, its four initial WIP implementations and core/native tests,
+then re-run focused/full foundation gates and independent correctness review
+before resuming classifiers. No serialized host contract changes.
+
+
+The time-context foundation passes 207 core/native cases in nine nonempty
+suites, including the new boundary control; strict all-feature core/native/WASM
+Clippy, scoped fmt and bans pass. Independent time-hook review passes. The
+all-venue feature build also caught and fixed the initial Lighter observer name
+collision (the existing token generator is unchanged), and an incoming Orderly
+Warning log's missing LogLevel import. These are compile repairs to preserved
+WIP/integration; no completed classifier coverage is claimed by them. Logs:
+/tmp/bridge-auth-response-time-{tests,clippy-complete,fmt,bans}.log.
+
+## Landing follow-ups (2026-10-21)
+
+- BingX classifies the final answer of the landing's re-signed reads; a first
+  100001 that will be resent is not evidence, and the resend keeps its tag.
+  BingX/WEEX skip undecodable rows individually, so a signed code-0 page is
+  accepted evidence.
+- Polling policy flips re-arm every poll from the moment of change. If one
+  scope alternates accepted/rejected faster than a slower poll's interval, that
+  poll can be postponed repeatedly. Anchoring re-arms to each poll's cycle
+  start fixes it; not yet done because it shifts every venue policy test's
+  expected deadlines.
+

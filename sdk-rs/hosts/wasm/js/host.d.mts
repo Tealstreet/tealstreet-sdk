@@ -68,6 +68,9 @@ export interface EngineHandlers {
   /** Called once after a WASM trap makes this host terminal and releases its I/O. */
   onDead?(error: EngineDeadError): void;
   onDeactivate?(): void;
+  /** Typed native evidence for one configured signer and private-read scope.
+   * No transport/body inference, command ownership or implicit error reporting. */
+  onAccountAuth?(result: AccountAuthResult): void;
   /** Startup cannot complete; the account should fail `start` with this. */
   onStartupFailed?(detail: VenueErrorDetail): void;
   /** One frame per flush; transfer it, don't copy it. */
@@ -87,6 +90,12 @@ export interface EngineHandlers {
   onEvent?(event: EngineEvent): void;
   /** A socket opened, received its first frame, or closed; never per frame. */
   onSocketChange?(): void;
+}
+
+export interface AccountAuthResult {
+  readonly credential: 'primary' | 'secondary';
+  readonly scope: 'account' | 'balance' | 'orders' | 'positions' | 'settings';
+  readonly outcome: 'accepted' | 'rejected';
 }
 
 export interface OrderIdentityReceipt {
