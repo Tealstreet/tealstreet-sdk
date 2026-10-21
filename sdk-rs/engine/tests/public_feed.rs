@@ -50,6 +50,13 @@ impl Feeds {
     }
 }
 impl Venue for Feeds {
+    // Stands in for any private command the venue answers itself.
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         Self::connect(cx);

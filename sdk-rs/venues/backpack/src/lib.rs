@@ -1,6 +1,7 @@
 //! Backpack perpetuals on the sans-I/O engine.
 mod account;
 mod history;
+mod identity;
 mod sign;
 mod trading;
 mod wire;
@@ -40,6 +41,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -533,6 +535,7 @@ impl Venue for Backpack {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
             host_clock: true,
             ..safe_cex_engine::Capabilities::BASE
         }
@@ -632,6 +635,7 @@ impl Venue for Backpack {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let result = match pending {
+            Pending::Identity(_) => return,
             Pending::History(request) => {
                 self.history_item(cx, request, item);
                 return;
@@ -769,6 +773,10 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         if let Pending::History(request) = pending {
             self.history_response(cx, *request, response);
             return;
@@ -979,6 +987,10 @@ impl Venue for Backpack {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Identity(command) = pending {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -1039,6 +1051,10 @@ impl Venue for Backpack {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::SubscribeOrderBook { symbol } => {
                 if let Some(state) = self.books.get_mut(&symbol) {

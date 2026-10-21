@@ -6,7 +6,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, TimerId, json};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -2006,7 +2006,7 @@ impl Hyperliquid {
                     }
                     if fill.dir.contains("Close") {
                         *self.account.realized.entry(key.clone()).or_default() +=
-                            fill.closed_pnl - fill.fee;
+                            fill.closed_pnl.unwrap_or(0.) - fill.fee.unwrap_or(0.);
                         let realized = self.account.realized[&key];
                         cx.store.update_positions(|p| {
                             if p.symbol == symbol && p.side == ps {
@@ -2026,13 +2026,26 @@ impl Hyperliquid {
                 {
                     self.account.notify_fills.remove(&id);
                 }
-                cx.fill(Fill {
+                let event = Fill {
                     order_id: fill.oid.to_string(),
                     symbol: symbol.clone(),
                     side: side(&fill.side),
                     price: fill.px,
                     amount: fill.sz,
-                });
+                };
+                if ps.is_some() && fill.dir.contains("Close") {
+                    // Live execution events use net close PnL; historical
+                    // executions retain their separate gross convention.
+                    cx.fill_with_financials(
+                        event,
+                        FillFinancials {
+                            realized_pnl: fill.closed_pnl.zip(fill.fee).map(|(pnl, fee)| pnl - fee),
+                            fee: fill.fee,
+                        },
+                    );
+                } else {
+                    cx.fill(event);
+                }
                 if self.spot {
                     self.record_spot_fill(&fill, &symbol);
                     let id = fill.oid.to_string();
