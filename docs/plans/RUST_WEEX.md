@@ -205,3 +205,13 @@ four-venue2MiB cap. Raise only the static combined binary budget to2.25MiB
 retain all heap/backing-buffer/WASM components. Workspace checks, SDK wasm17,
 host7 and harness14 tests pass on this combined build. The artifact addition
 is measured rather than inferred from isolated venue builds.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify isolated leverage and fetched rails against current native code and
+   existing regressions; strike stale findings with concrete evidence.
+2. Record why index-source placement, unidentified fills and asset-less income
+   remain risky without independently verified wire/accounting contracts.
+3. Keep this family documentation-only if revalidation finds no safe remaining
+   behavior fix. Independently review the audit disposition, check the diff and
+   use CI before merging; documentation-only PRs are exempt from the code hold.
