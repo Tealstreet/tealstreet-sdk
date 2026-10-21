@@ -173,20 +173,33 @@ export const isKeylessRemoteSigned = (
   !(name === 'asterdex' && options.auth?.privateKey) &&
   !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
 
+/** Only Paradex consumes a payload signer natively; other engine venues would ignore it. */
+const needsTsPayloadSigner = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
+) => Boolean(options.payloadSigner) && name !== 'paradex' && options.publicDataOnly !== true;
+
 /**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
  * account stays on the TS venue, which merges spot markets into the perp account; the
  * engine's perp venue does not, and refuses the option when constructed directly. A
- * keyless remote-signed account stays on TS too, which signs through the browser.
+ * keyless remote-signed account stays on TS too, which signs through the browser, as
+ * does a payload-signed account outside Paradex.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
-  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+  options: Partial<
+    Pick<
+      ExchangeOptions,
+      'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
+    >
+  >,
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
   !(name === 'hyperliquid' && options.enableSpotMarkets) &&
-  !isKeylessRemoteSigned(name, options);
+  !isKeylessRemoteSigned(name, options) &&
+  !needsTsPayloadSigner(name, options);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -628,9 +641,9 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Only Paradex consumes a payload signer natively; elsewhere it would be ignored and
-    // the account would start unsigned or silently public-only, even on venues exempt below.
-    if (this.options.payloadSigner && this.name !== 'paradex' && this.options.publicDataOnly !== true) {
+    // Factories route these to TS; a direct construction would otherwise start unsigned
+    // or silently public-only, even on venues exempt from the credential guard below.
+    if (needsTsPayloadSigner(this.name, this.options)) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
@@ -1326,7 +1339,10 @@ export class RustEngineExchange extends BaseExchange {
             started = true;
             loaded();
           },
-          (error) => onError(String(error?.message ?? error)),
+          (error) =>
+            error instanceof ExchangeError && error.kind
+              ? finish({ error: error.message, kind: error.kind as ExchangeErrorKind })
+              : onError(String(error?.message ?? error)),
         );
     });
   };

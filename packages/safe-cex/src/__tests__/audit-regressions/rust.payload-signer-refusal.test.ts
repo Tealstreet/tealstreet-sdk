@@ -1,10 +1,17 @@
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
+import type { ExchangeName, ExchangeOptions } from '../../types';
+
 import { afterEach, expect, it, vi } from 'vitest';
+
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import {
+  runsOnRustEngine,
+  RustEngineExchange,
+  setRustEngineTransport,
+  setWasmEngineLoader,
+} from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
-import type { ExchangeName, ExchangeOptions } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const running: RustEngineExchange[] = [];
@@ -84,4 +91,39 @@ it('keeps Paradex delegated signing and explicitly public-only accounts', async 
     expect(String((failure as Error)?.message)).not.toContain('does not support payloadSigner');
     expect(transport).toHaveBeenCalled();
   }
+});
+
+it('reports the structured refusal through start and validateAccount', async () => {
+  const { construct, transport } = recordEngine('lighter');
+  // Without apiKeyIndex Lighter would otherwise become public-only and drop the signer silently.
+  const lighter = new RustEngineExchange(
+    'lighter',
+    { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
+    new DefaultStore(),
+  );
+  running.push(lighter);
+  await expect(lighter.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+
+  const coinbase = new RustEngineExchange(
+    'coinbase',
+    { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
+    new DefaultStore(),
+  );
+  running.push(coinbase);
+  await expect(coinbase.validateAccount()).resolves.toMatchObject({
+    kind: 'unsupported',
+    error: expect.stringContaining('Rust coinbase does not support payloadSigner'),
+  });
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+});
+
+it('routes payload-signed accounts to TS before a Rust instance exists', () => {
+  for (const name of ['hyperliquid', 'coinbase', 'lighter', 'binance', 'bybit'] as const) {
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(false);
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(false);
+    expect(runsOnRustEngine(name, { engine: 'rust', payloadSigner, publicDataOnly: true }), name).toBe(true);
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: 's' }), name).toBe(true);
+  }
+  expect(runsOnRustEngine('paradex', { engine: 'rust', payloadSigner })).toBe(true);
 });

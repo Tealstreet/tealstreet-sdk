@@ -633,10 +633,11 @@ the private websocket with this REST signer. Paradex obtains its JWT through
 the payload signer and uses that JWT on its private websocket too.
 The Rust Paradex host returns signatures as typed engine events; callers keep
 the same callback contract. No other Rust venue consumes a payload signer, so
-`RustEngineExchange` refuses one at startup, before any engine or transport
-work, unless the account is explicitly `publicDataOnly`: an `ExchangeError`
-with `kind: 'unsupported'`, `outcome: 'notSent'`. Those accounts must run on
-TS. Tests: `src/__tests__/payload-signer.test.ts`,
+`runsOnRustEngine` keeps those accounts on TS (as it does keyless remote
+signing), and a directly constructed `RustEngineExchange` refuses one at
+startup, before any engine or transport work, unless the account is explicitly
+`publicDataOnly`: an `ExchangeError` with `kind: 'unsupported'`,
+`outcome: 'notSent'`, which `validateAccount` reports with its kind. Tests: `src/__tests__/payload-signer.test.ts`,
 `src/__tests__/paradex.payload-signer.test.ts` and
 `src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
