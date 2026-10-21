@@ -195,6 +195,8 @@ envelope, derived mappings and MCP contract below use that actual merge. NX
 forwarding and ingestion evidence remains read-only at `65e086a3c90`.
 The Bitunix balance-progress follow-up checks #1665 at `8f7b0cee3ff`, including
 the currentness predicate shared by financial publication and auth/recovery.
+The settings/fill-identity batch checks Bitunix #1668 (`7fd70c13e34`) and
+WEEX #1670 (`ce906e1368e`) at their actual merges.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -292,6 +294,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1662 / `501fb664e` | Current Bitunix signed account/settings GETs now supply selected-credential scoped auth evidence. Strict native refusal is distinct from ambiguous failures; grouped order endpoints/settings symbols cannot heal each other. Background reads use bounded backoff and a shared rate pause; a blocked command prerequisite fails once `notSent`, with no write replay. |
 | #1666 / `bba1f4312` | Successful worker replies carry optional request-scoped `data.completeness`; the matching receiver restores the array marker before resolution/observers. SDK derived histories preserve it. Flagged MCP text JSON is `{requestId, rows, completeness}`, while unflagged arrays stay unchanged. Upgrade sender/receiver together and update MCP consumers; NX ingestion/coverage remains open (B11). |
 | #1665 / `8f7b0cee3` | Ordinary Bitunix balance reads can publish current financial state and scoped auth evidence during WS notifications. Reads coalesce around their serial/ten-second dispatch bound; accepted position-mode ACKs fence older responses through a separate write revision. Recovery gates, balance mapping and caller/write-retry APIs stay unchanged. |
+| #1668 / `7fd70c13e` | Bitunix per-symbol leverage/margin metadata and scoped auth/recovery use the current symbol attempt serial plus accepted-settings-write revision, so WS position-ID traffic no longer starves flat-symbol settings. Accepted leverage/margin/mode ACKs still fence older reads; caller APIs and command-owned prerequisites stay unchanged. |
+| #1670 / `ce906e136` | In-scope WEEX fill-history rows with parsed empty `id`/`tradeId`/`fillId` remain skipped without invented identity. Useful peers resolve with one per-query Warn `row.skipped` (`field: id`) and owned `history.incomplete`. Error-only logging retains the semantic marker, while the ordinary row diagnostic is suppressed. Strict parsing and method shapes remain; B11 consumers must not complete coverage for retained partial or flagged-empty rows. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -1395,6 +1399,7 @@ markers rather than broadcast them.
 | Paradex #1632 | Bounded history page-budget exhaustion; unbounded cap and other stalled walks still fail. |
 | Bitunix #1633 | Order/income paging with more rows possible but a cap or stalled progress; complete terminal pages do not get a cap marker. Failed reads reject. |
 | WEEX #1627 | Income lifetime request budget, truncated chunks, advertised additional cursor rows, failed pages and terminal query failure. Existing continuation versus rejection policy remains. |
+| WEEX #1670 | Parsed empty native fill identities after query filters. Valid peers remain; an all-skipped in-scope result is a flagged empty success. |
 
 The six attribution-only patches (#1627–#1632) retain Warn code/text. Their
 markers precede retained-row completion, later window/chunk work, or the
@@ -1415,6 +1420,21 @@ the real native WEEX failure-event fixture to prove delivery to its pending
 caller before rejection and owning-client command translation, keeping a
 concurrent query unflagged. Existing host tests separately cover result-array
 marking. These proofs cover SDK/native-event/DO boundaries, not NX worker/hosted hops.
+
+WEEX #1670 makes skipped empty fill identities visible to the owning query.
+After existing order, symbol and time filters, a parsed empty native `id`
+(including `tradeId`/`fillId` aliases) is skipped without a replacement ID.
+Valid peers remain, and `row.skipped` with `field: id` plus `history.incomplete`
+emit once per query across its pages/windows. All-skipped in-scope rows yield a
+flagged empty success; genuinely empty or out-of-scope-only results are not
+flagged by this repair. Strict typed parsing and existing failure policy remain.
+The semantic marker precedes success and survives Error-only logging; ordinary
+Warn `row.skipped` remains subject to the log threshold. Native-verified fixtures
+prove JS result ownership and Worker command translation, without marking a
+concurrent query. Raw native/DO result messages retain their existing array
+shape, so those consumers correlate the earlier owned event. The SDK #1666
+transport below preserves the resulting array flag where adopted; NX ingestion
+and coverage work remains required, including for flagged empty arrays.
 
 **SDK query-scoped result transport (#1666):** `CallMethodHandler` now adds optional
 `data.completeness: { incomplete: true }` beside the existing `requestId`,
@@ -2481,8 +2501,10 @@ endpoint's refusal; one sibling cannot heal the other. Settings likewise retain
 refusals per symbol, so one successful symbol cannot clear another's rejection.
 Callbacks failing the currentness checks cannot heal current auth evidence
 or reset/extend its failure backoff. Since #1665, ordinary balance reads remain
-current across WS-only generation changes, while serial and accepted-mode-write
-fences still apply. The SDK already consumes this typed channel for isolated
+current across WS-only generation changes; #1668 similarly keeps per-symbol
+settings current during position-ID notifications. Attempt serials and the
+respective accepted-write revisions still fence both paths. The SDK already
+consumes this typed channel for isolated
 credential/scope streaks and polling policy; custom hosts must use it rather
 than infer credential state from diagnostic text.
 
@@ -2528,6 +2550,22 @@ issuance before request allocation; notification repair cannot bypass an
 outstanding failure backoff. Balance mapping, polling controls, caller signatures
 and write retries stay unchanged. Consumers can see fresher balances and scoped
 auth outcomes under busy private traffic; no caller-issued resync is required.
+
+### Bitunix per-symbol settings progress (#1668)
+
+Flat-symbol leverage/margin metadata can now advance during continuous position
+notifications, including traffic on another symbol. Response publication,
+scoped auth evidence and retry/reset decisions share the current symbol attempt
+serial and accepted-position-settings write revision. An accepted leverage,
+margin or mode ACK supersedes older metadata; refused, malformed or
+transport-lost ACKs do not establish an accepted change.
+
+Canonical-market admission, selected credential tags, grouped settings
+refusals, bounded backoff/shared rate pauses and the existing empty margin-mode
+fallback remain. This improves metadata freshness without proving complete
+account state. Command-owned/private prerequisite generation fences remain
+strict, and no write is replayed. Existing caller signatures and readiness
+guidance apply; no caller-issued resync is required.
 
 ### Bitunix private snapshot progress and retention (#1641/#1643/#1645)
 
