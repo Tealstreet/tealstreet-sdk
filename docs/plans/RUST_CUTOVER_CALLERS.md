@@ -161,6 +161,10 @@ The host-entropy follow-up checks #1624 at `0cd8f2b1657`; production defaults
 and custom-host requirements below use the actual merge. NX construction roots
 were checked read-only at `65e086a3c90`; shipped NX runtime verification remains
 a cutover requirement, not evidence supplied by this source audit.
+The history-owner batch checks #1628 (`d659c18c3f5`), #1629 (`a3c4e827722`),
+#1630 (`b2092b50aca`), #1631 (`e9049c794c8`) and #1632 (`41cd4914a70`).
+Bitget ordinary private-row repair checks #1625 at `02a0db19f3c`. Focused NX
+query/result boundaries were rechecked read-only at `65e086a3c90`; B11 remains open.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -234,6 +238,12 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1617 / `4e2f92c26` | BingX sequential placement failure now retains earlier acknowledged native IDs in existing typed/legacy partial-error details after a later rejection, transport loss or malformed acknowledgement. Existing classification/outcome and unsent-tail behavior remain; reconcile known effects and any uncertain failed step before retrying. No new API or automatic write retry. |
 | #1621 / `7adb43c4b` | Ordinary Bybit accepted leverage writes, including native `110043` not-modified acknowledgements, fence older in-flight position joins before publishing the selected leverage. A stale join cannot restore old leverage/settings; an active join coalesces a fresh read after settling. Refused writes leave authoritative reads eligible. Hyro's atomic path, position-mode semantics, caller API and write retries are unchanged. |
 | #1624 / `0cd8f2b16` | Core engine/registry construction requires explicit identity and signing entropy; missing providers fail as typed `invalidInput`. Production WASM/JS hosts bind WebCrypto and native factories bind OS randomness. Optional JS `entropy`/`signingEntropy` overrides are independent, checked and installed before start. Existing SDK factory callers need secure runtime availability proof rather than new account fields or constructor arguments; custom core hosts must supply providers. See [Host entropy and NX construction](#host-entropy-and-nx-construction-1624). |
+| #1625 / `02a0db19f` | Bitget Classic/UTA ordinary private WS order/position rows isolate malformed peers, retain rejected cached identities/protection and coalesce read-only repair. Rejected observations do not renew financial freshness or starve unrelated fresh REST peers; held positions do not republish stale settings. Initial all-rejected traffic does not prove loaded-empty readiness. Financial fill admission and caller shapes stay unchanged. |
+| #1628 / `d659c18c3` | BloFin closed-position page-cap `history.incomplete` now includes the query command before retained rows complete, allowing the existing host to flag that result. Cap, rows and failure policy stay unchanged. |
+| #1629 / `a3c4e8277` | Bybit closed-PnL and order-history page-cap markers carry their query command before retained-row completion/window continuation. Existing pagination, rows and failures stay unchanged. |
+| #1630 / `b2092b50a` | Hyperliquid rolling-retention order-history marker carries its query command before completion; retained rows and transition/time/limit policy stay unchanged. |
+| #1631 / `e9049c794` | OKX closed-position cap and noncomposite history cap/cursor-stall markers carry their query command. EEA composite failures and existing financial/history policy stay unchanged. |
+| #1632 / `41cd4914a` | Paradex bounded history page-budget marker carries its query command before partial completion. Unbounded page-cap and other stall failures stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -557,6 +567,25 @@ suppressed until recovery; emitted levels vary by venue/path (several use Warn
 when retaining a stored copy and Error when none can be kept). Use code and
 level, not message matching or an assumed one-event-per-row count. The B9
 caller migration and snapshot collection requirements remain open.
+
+#### Bitget ordinary private WS row admission (#1625)
+
+Classic/UTA order and position streams now decode ordinary rows independently:
+healthy peers progress while rejected cached order IDs, parent TP/SL protection
+or position identities remain visible. Unidentified position rows hold absence
+removal; partial/mixed position evidence cannot flip the account mode against
+retained exposure. Later authoritative clean snapshots can still clear their
+scope. Callers must not infer cancellation, a closed position or freshness for
+every row from one store update.
+
+Rejected observations protect pending REST joins without becoming a fresh full
+financial snapshot, so repeated malformed traffic does not starve unrelated
+fresh REST rows. Held positions do not republish stale settings; retained plan
+and trailing metadata keep the existing revision/opened/terminal fences.
+All-rejected initial traffic does not manufacture loaded-empty readiness or
+renew useful financial traffic. Existing timers coalesce read-only repair and
+Warn `row.skipped` uses the coded event path. Execution/fill-channel admission
+and accounting remain unchanged; this adds no write retry or caller API.
 
 #### Bybit private-row admission (#1620)
 
@@ -1202,16 +1231,56 @@ track it to carry completeness onward.
 
 **Open cutover work (B11), not a completed caller migration.** In the JS WASM
 host, a `history.incomplete` event with a pending `fields.command` marks that
-command's array result with non-enumerable `incomplete: true`. Currently Kraken
-futures emits it for a saturated 500-row income page that its since-only cursor
-cannot traverse; Binance emits it when an income chunk walk exhausts its bound.
-Available rows remain useful, but totals are lower bounds. An unflagged result
-is not proof that every venue's every history endpoint is exhaustive: other
-`history.incomplete` notices without a command ID do not acquire this flag.
+command's array result with non-enumerable `incomplete: true`. Kraken futures
+emits it for a saturated 500-row income page that its since-only cursor cannot
+traverse; Binance emits it when an income chunk walk exhausts its bound. The
+newly attributed paths below now use the same existing flag. Available rows
+remain useful, but totals are lower bounds. An unflagged result is not proof
+that every venue's every history endpoint is exhaustive; an unattributed notice
+does not mark an arbitrary result. Native/DO hosts drop ownerless coverage
+markers rather than broadcast them.
+
+#### Query ownership added by #1628–#1632
+
+| Venue / merged PR | Newly command-attributed `history.incomplete` path |
+| --- | --- |
+| BloFin #1628 | Closed-position page cap. |
+| Bybit #1629 | Closed-PnL window page cap and order-history page cap. |
+| Hyperliquid #1630 | Rolling-retention limit in order history (2,000 raw rows). |
+| OKX #1631 | Closed-position page cap; noncomposite history page cap and non-advancing cursor. EEA composite paths retain their strict failures. |
+| Paradex #1632 | Bounded history page-budget exhaustion; unbounded cap and other stalled walks still fail. |
+
+These markers retain their Warn code/text and precede the affected completion
+(or, for Bybit windows, subsequent window work). `fields.command` is the
+query's engine command ID, separate from venue/context data and query options.
+These fixes change ownership metadata, not the retained rows, paging bounds or
+failure policy of these five venue patches. No new frame or result schema is
+introduced; producer and existing host behavior now join up for these paths.
+
+**Required NX query association:** consume completeness on the result of the
+specific pending call. A direct JS SDK consumer reads `rows.incomplete` before
+transforming that array. Worker/hosted adapters must carry a serializable
+completeness field alongside the rows and existing `requestId`, restoring it
+on that call's result. The current `callMethod:done` array does not preserve the
+non-enumerable flag across structured clone/JSON; forwarding the event alone
+does not fix that result boundary. This is required caller work, not a schema
+already added by these venue PRs.
+
+For a raw native/DO client, associate `history.incomplete` by the translated
+`fields.command` with that session's pending query before its `done`; retire
+the association when the call settles or the session/engine is disposed. Do
+not match warning text, symbol, arrival time or a global "last query" latch:
+concurrent queries and clients must keep flagged and unflagged results separate.
+The command belongs to the request receipt, not an extra filter to pass to the
+venue. At NX `65e086a3c90`, `collectAccountAxes.ts:117-119` currently labels any
+array `ok`, income enumeration (`:193-198`) and fill aggregation (`:238-243`)
+can lose metadata, and `runHistoricalWindow.ts:101,108-109` completes only `ok`
+windows. Preserve incomplete status through those steps and leave coverage
+uncompleted for that query/window.
 
 The following boundaries still need implementation before affected Rust
 history can claim journal coverage. NX references in this subsection were
-checked at `fdd2389a825`:
+checked at `fdd2389a825`, with query/result handling rechecked at `65e086a3c90`:
 
 | Boundary | Required edit / proof |
 | --- | --- |
