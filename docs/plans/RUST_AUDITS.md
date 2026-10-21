@@ -491,9 +491,14 @@ Remaining resilience and completeness findings are independent of request parity
   streams/envelopes remain failures with sanitized public diagnostics.
 - Medium: one unmappable positions/orders row keeps the previous snapshot forever
   (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
-- Medium: every WS position/order/tpsl event bumps the snapshot generation and the
-  in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
-  events do not update positions; under steady activity positions never commit.
+- Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
+  and postpone reconciliation indefinitely under steady activity~~. Ordinary
+  positions now retain their in-flight serial for a bounded read interval and
+  survive WS-only generation changes, with separate write-ACK revision fencing.
+  Command-owned preflight remains strict; notifications coalesce one follow-up
+  without moving deadlines, and lost reads recover without admitting old replies.
+  Order/TP-SL event generation still fences the entire order snapshot; keyed order
+  reconciliation remains a separate open finding.
 - Medium: ~~history failures return success with empty or partial rows~~.
   Rust now rejects failed first/later pages (transport, HTTP/native, malformed
   rows/envelopes), so a failed read cannot establish complete history. Full

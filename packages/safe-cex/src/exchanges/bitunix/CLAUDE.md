@@ -765,3 +765,12 @@ secondary credentials fail before startup I/O, including public-only engines;
 primary-only configurations keep existing signatures. Account/settings request
 tags name the selected credential slot; history is never account-auth evidence.
 This signing/routing fix does not classify native account-auth outcomes.
+
+Rust ordinary position reconciliation treats private position-ID notifications
+as routing hints rather than newer financial snapshots. Reads retain latest-serial
+and accepted settings/mode write-revision fences, while command-owned preflight
+keeps full generation checks. Position notifications coalesce without postponing
+a read; an in-flight ordinary or owned serial is not superseded by background
+refresh before a 10-second lost-read bound. Only its matching completion/failure
+releases the token, and activity during a read schedules one follow-up. Existing
+REST/WS position-ID routing precedence and all financial mappers are unchanged.
