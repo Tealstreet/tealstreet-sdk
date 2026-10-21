@@ -2,6 +2,8 @@ import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   CommandProgress,
   EngineCapabilities,
+  EngineEvent,
+  EngineHealth,
   EngineHost as EngineHostType,
   Transport,
   WasmEngineLike,
@@ -42,7 +44,7 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport 
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import type { ExchangeErrorKind } from '../../commandOutcome';
-import { exchangeMetadata } from '../../exchangeMetadata';
+import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -65,10 +67,13 @@ import {
   CAPABILITY_METHODS,
   type ExchangeCapabilities,
   markBaseCapabilityFallback,
+  summarizeSocketHealth,
   WORKER_FORWARDED_METHODS,
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import type { BaseWebSocket } from '../base.ws';
+import { RustSocketHandle } from './rustSockets';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -169,19 +174,38 @@ export const isKeylessRemoteSigned = (
   !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
 
 /**
+ * Only Paradex consumes a payload signer natively; other engine venues would ignore it.
+ * Lighter is excluded: its payload-only accounts start public on the engine by contract.
+ */
+const needsTsPayloadSigner = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
+) =>
+  Boolean(options.payloadSigner) &&
+  !['paradex', 'lighter', 'lighter-robinhood'].includes(name) &&
+  options.publicDataOnly !== true;
+
+/**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
  * account stays on the TS venue, which merges spot markets into the perp account; the
  * engine's perp venue does not, and refuses the option when constructed directly. A
- * keyless remote-signed account stays on TS too, which signs through the browser.
+ * keyless remote-signed account stays on TS too, which signs through the browser, as
+ * does a payload-signed account outside Paradex.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
-  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+  options: Partial<
+    Pick<
+      ExchangeOptions,
+      'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
+    >
+  >,
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
   !(name === 'hyperliquid' && options.enableSpotMarkets) &&
-  !isKeylessRemoteSigned(name, options);
+  !isKeylessRemoteSigned(name, options) &&
+  !needsTsPayloadSigner(name, options);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -303,6 +327,7 @@ const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
+const SOCKET_HEALTH_SYNC_MS = 5_000;
 
 /**
  * An exchange account run by the Rust engine. Venue I/O, parsing and state
@@ -374,6 +399,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
+  private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
   /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
   changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
@@ -482,6 +508,12 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
     this.commandTimeoutMs = commandTimeoutMs;
+    // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
+    const socket = (channel: RustSocketHandle['channel']) =>
+      new RustSocketHandle(channel, this) as unknown as BaseWebSocket<any>;
+    this.publicWebsocket = socket('public');
+    this.businessWebsocket = socket('business');
+    if (!this.isPublicDataOnly) this.privateWebsocket = socket('private');
     this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
       exchangeName,
     );
@@ -489,11 +521,7 @@ export class RustEngineExchange extends BaseExchange {
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
-    if (this.name === 'breakoutprop') {
-      this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
-        this.subscriptionCommand({ op: 'setTickInterval', interval: this.getTickInterval() });
-      });
-    }
+    this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
@@ -567,6 +595,42 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
 
+  override recordAuthFailure(): void {
+    super.recordAuthFailure();
+    this.updatePollingPolicy();
+  }
+
+  override recordAuthSuccess(): void {
+    super.recordAuthSuccess();
+    this.updatePollingPolicy();
+  }
+
+  private syncPollingPolicy = (): Promise<void> | undefined => {
+    if (!this.host || this.isDisposed || this.engineFailure) return;
+    const resolved = this.getTickInterval();
+    if (resolved === undefined) return;
+    // Venues keep their own reconcile cadences; the resolved tick (override,
+    // server multiplier, auth backoff) scales them relative to the metadata tick.
+    const reference = getExchangeMetadata(this._exchangeName).tickInterval;
+    const scale = resolved === Number.POSITIVE_INFINITY ? null : reference ? resolved / reference : 1;
+    // The resolved tick still bounds a slowdown (auth backoff and server multiplier
+    // caps), unless a venue's native cadence is already slower.
+    const ceiling = scale === null ? undefined : resolved;
+    if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling) return this.pollingPolicy.promise;
+    // Install before dispatch: native actions can synchronously change policy again.
+    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale, ceiling };
+    this.pollingPolicy = policy;
+    policy.promise = this.command<void>({ op: 'setPollScale', scale, ...(ceiling !== undefined && { ceiling }) }).catch((error) => {
+      if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
+      throw error;
+    });
+    return policy.promise;
+  };
+
+  private updatePollingPolicy = (): void => {
+    void this.syncPollingPolicy()?.catch(() => { /* command() owns error reporting; the next check can retry. */ });
+  };
+
   /** Startup is single-use; metadata factories can replace an already-started instance. */
   get hasStarted(): boolean {
     return this.startup !== undefined;
@@ -608,6 +672,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
+    }
+    // Factories route these to TS. A private engine account would otherwise ignore the
+    // signer and send unsigned requests, even on venues exempt from the guard below.
+    if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
+      const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (
       ![
@@ -702,14 +772,9 @@ export class RustEngineExchange extends BaseExchange {
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
-        ...(orderlyNames.has(this.name) || this.name === 'breakoutprop'
-          ? { tickInterval: this.options.extra?.tickInterval }
-          : {}),
         ...(this.name === 'breakoutprop'
           ? {
               subaccount: this.options.subaccount,
-              tickInterval: this.getTickInterval(),
-              pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY,
             }
           : {}),
         ...(['lighter', 'lighter-robinhood'].includes(this.name)
@@ -769,9 +834,12 @@ export class RustEngineExchange extends BaseExchange {
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
+        onEvent: this.receiveEvent,
+        onSocketChange: this.syncSocketHealthToStore,
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
+          this.recordAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
@@ -929,6 +997,20 @@ export class RustEngineExchange extends BaseExchange {
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
     if (this.onFrame) this.receiveFrame(this.host.snapshot());
+    try {
+      let applied: Promise<void> | undefined;
+      for (;;) {
+        const latest = this.syncPollingPolicy();
+        if (!latest || latest === applied) break;
+        await latest;
+        applied = latest;
+        this.assertEngineAlive();
+      }
+    } catch (error) {
+      this.startupFailure = error instanceof Error ? error : new Error(String(error));
+      this.dispose();
+      throw error;
+    }
     this.host?.start();
     if (this.engineFailure) throw this.engineFailure;
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
@@ -938,7 +1020,12 @@ export class RustEngineExchange extends BaseExchange {
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     const bookMs = (exchangeMetadata[this.name]?.orderbookTickDelay || STORE_FLUSH_MS) * multiplier;
-    this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    this.flushTimers.push(setInterval(() => {
+      this.updatePollingPolicy();
+      this.host?.flush();
+    }, STORE_FLUSH_MS * multiplier));
+    // Staleness has no socket event of its own; re-derive health on a slow clock.
+    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -1192,6 +1279,29 @@ export class RustEngineExchange extends BaseExchange {
     }
   }
 
+  private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'auth.rejected') this.recordAuthFailure();
+    if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
+  };
+
+  get socketHost() {
+    return this.host;
+  }
+
+  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  override syncSocketHealthToStore = () => {
+    if (this.isDisposed) return;
+    const shared = this.sharedPublicFeed
+      ? { isInitialized: this.sharedPublicReady, isHealthy: this.sharedPublicReady }
+      : undefined;
+    const health = summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared);
+    const current = this.store.socketHealth;
+    // A private stream delivering again proves the key; later rejections still count.
+    if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
+    if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key])) return;
+    this.store.updateSocketHealth(health);
+  };
+
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
     if (level === 'error') this.emitAndLogError(message);
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
@@ -1272,7 +1382,10 @@ export class RustEngineExchange extends BaseExchange {
             started = true;
             loaded();
           },
-          (error) => onError(String(error?.message ?? error)),
+          (error) =>
+            error instanceof ExchangeError && error.kind
+              ? finish({ error: error.message, kind: error.kind as ExchangeErrorKind })
+              : onError(String(error?.message ?? error)),
         );
     });
   };
@@ -1411,6 +1524,9 @@ export class RustEngineExchange extends BaseExchange {
   cancelSymbolOrders = async (symbol: string) => {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
+
+  /** Engine health counters; undefined before the engine starts or after disposal. */
+  getHealth = (): EngineHealth | undefined => (this.host && !this.isDisposed ? this.host.health() : undefined);
 
   // Without an engine (a main-thread mirror) the open-order lookup still answers, non-definitively.
   findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>

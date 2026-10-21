@@ -142,6 +142,7 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::StartupFailed { error }) => {
                     self.startup_failures.push(error)
                 }
