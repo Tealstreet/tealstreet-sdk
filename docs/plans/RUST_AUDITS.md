@@ -544,6 +544,11 @@ Remaining resilience and completeness findings are independent of request parity
   position under the documented conditional-order contract.
 
 ### Hyperliquid
+
+- ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
+  actual query command before completion. A native 2,000-row regression checks
+  retained financial rows, Warn ownership/order and Error-only delivery.
+
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3

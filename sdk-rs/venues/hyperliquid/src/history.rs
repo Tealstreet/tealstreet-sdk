@@ -645,10 +645,14 @@ impl Hyperliquid {
             }
             Kind::Orders => {
                 if request.raw_count >= 2000 {
-                    cx.notice(
+                    cx.event(
                         Level::Warn,
                         code::HISTORY_INCOMPLETE,
                         "Hyperliquid order history reached its rolling retention limit",
+                        vec![(
+                            "command",
+                            safe_cex_engine::Value::Num(f64::from(request.command)),
+                        )],
                     );
                 }
                 let mut orders = request
