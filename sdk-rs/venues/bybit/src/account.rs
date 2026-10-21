@@ -31,7 +31,7 @@ const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
 const QUIET_REJECT_REASONS: [&str; 2] = ["EC_PerCancelRequest", "EC_NoError"];
 
 /// Retain rejected identities without treating them as authoritative settings.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RejectedRows {
     keys: HashSet<String>,
     unidentified: bool,
@@ -1777,7 +1777,9 @@ impl BybitLinear {
                     serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
                 else {
                     self.account.orders_stale = true;
-                    self.account.revision = self.account.revision.wrapping_add(1);
+                    if let Some(join) = &mut self.account.orders {
+                        join.rejected.reject(None);
+                    }
                     self.account.orders_follow_up |= self.account.orders.is_some();
                     cx.notice(
                         Level::Warn,
@@ -1819,7 +1821,9 @@ impl BybitLinear {
                     admitted.push((row, mapped.expect("validated mapping")));
                 }
                 if rejected.any() {
-                    self.account.revision = self.account.revision.wrapping_add(1);
+                    if let Some(join) = &mut self.account.orders {
+                        join.rejected.extend(rejected.clone());
+                    }
                     self.account.orders_follow_up |= self.account.orders.is_some();
                 }
                 for (row, mapped) in admitted {
@@ -1873,7 +1877,9 @@ impl BybitLinear {
                 let Ok(frame) =
                     serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
                 else {
-                    self.account.position_version = self.account.position_version.wrapping_add(1);
+                    if let Some(join) = &mut self.account.positions {
+                        join.rejected.reject(None);
+                    }
                     cx.notice(
                         Level::Warn,
                         code::ROW_SKIPPED,
@@ -1901,10 +1907,25 @@ impl BybitLinear {
                     }
                     admitted.push(row);
                 }
-                if rejected.any() {
-                    self.account.position_version = self.account.position_version.wrapping_add(1);
+                if rejected.any()
+                    && let Some(join) = &mut self.account.positions
+                {
+                    join.rejected.extend(rejected.clone());
                 }
-                admitted.retain(|row| !rejected.conflicts(row.symbol.as_ref()));
+                admitted.retain(|row| {
+                    !rejected.conflicts(row.symbol.as_ref())
+                        && (!rejected.unidentified
+                            || !cx.store.positions().iter().any(|old| {
+                                let mode = row.position_idx.map(|idx| {
+                                    if idx == 0 {
+                                        PositionMode::Oneway
+                                    } else {
+                                        PositionMode::Hedged
+                                    }
+                                });
+                                old.symbol == row.symbol.as_ref() && old.position_mode != mode
+                            }))
+                });
                 self.on_position_rows(cx, &admitted);
             }
 
