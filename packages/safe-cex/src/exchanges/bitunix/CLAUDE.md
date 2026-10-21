@@ -824,3 +824,15 @@ command-owned read until its deadline; matching completion/failure alone release
 it. Notifications keep the first one-second repair deadline, and late callbacks
 cannot retire newer reads. This scheduling does not relax generation checks,
 financial admission, initial two-half readiness or command prerequisites.
+
+Rust ordinary order reconciliation admits healthy REST peers across WS-only
+notifications using endpoint serials and a separate command-mutation revision.
+Newer validated WS raw families retain their current visible rows, native metadata,
+fill watermarks and terminal absence over stale REST data. Malformed WS identity
+coverage holds affected families or endpoint absence without blocking healthy
+peers. Sparse unknown execution updates remain eligible for REST metadata repair.
+Both initial halves retain overlap coverage until a complete current pair can
+publish; malformed or overflowed coverage cannot establish readiness. Write
+planning/dispatch, responses (including partial cancel ACKs) and cleanup invalidate
+older ordinary reads. Command-owned prerequisites retain global generation fences;
+no write is retried by reconciliation.
