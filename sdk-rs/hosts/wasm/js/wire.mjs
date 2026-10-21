@@ -33,7 +33,9 @@ export const TICKER_FIELDS = [
 ];
 
 const LEGACY_TICKER_FIELDS = TICKER_FIELDS.slice(0, 11);
-const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS]);
+// The newest revision this reader decodes per section; anything newer fails closed.
+const SECTION_REVISIONS = new Map([[SECTION.MARKETS, 1], [SECTION.TICKERS, 1], [SECTION.TICKER_DELTAS, 1],
+  [SECTION.ORDERS, 1], [SECTION.POSITIONS, 1], [SECTION.FILLS, 2], [SECTION.SETTINGS, 1]]);
 const KNOWN_SECTIONS = new Set(Object.values(SECTION));
 
 export const MARKET_COLUMNS = [
@@ -196,7 +198,7 @@ export class Frame {
       if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
       const revision = header.getUint16(offset + 2, true);
-      if (KNOWN_SECTIONS.has(kind) && revision > (REVISED_SECTIONS.has(kind) ? 1 : 0)) {
+      if (KNOWN_SECTIONS.has(kind) && revision > (SECTION_REVISIONS.get(kind) ?? 0)) {
         throw new Error(`unsupported section ${kind} revision ${revision}`);
       }
       const length = header.getUint32(offset + 4, true);

@@ -90,7 +90,10 @@ fn executions(cx: &mut Cx<'_, ()>) {
             side: OrderSide::Buy,
             price: 101.,
             amount: 0.25,
-            ..Default::default()
+            // Revision 2 details on the tracked execution only; the orphan's stay absent.
+            id: (symbol == "A").then(|| "exec-1".into()),
+            realized_pnl: (symbol == "A").then_some(1.5),
+            fee: (symbol == "A").then_some(0.25),
         });
     }
 }

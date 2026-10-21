@@ -868,3 +868,65 @@ fn malformed_position_row_holds_the_wallet_total() {
     assert_eq!(e.store().balance().total, 1000.0);
     assert_eq!(e.store().balance().used, 40.0);
 }
+
+/// FILLS revision 2: per row `(id reference, [realizedPnl, fee])`.
+fn fill_details(frame: &[u8]) -> Vec<(u32, f64, f64)> {
+    let align8 = |n: usize| n.div_ceil(8) * 8;
+    let mut offset = 16;
+    while offset + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[offset..offset + 2].try_into().unwrap());
+        let revision = u16::from_le_bytes(frame[offset + 2..offset + 4].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            assert_eq!(revision, 2);
+            let start = offset + 8;
+            let count = u32::from_le_bytes(frame[start..start + 4].try_into().unwrap()) as usize;
+            let data = align8(start + 4 + count * 12);
+            let ids = data + count * 20;
+            let extras = align8(ids + count * 4);
+            let f = |at: usize| f64::from_le_bytes(frame[at..at + 8].try_into().unwrap());
+            return (0..count)
+                .map(|i| {
+                    let id = u32::from_le_bytes(frame[ids + i * 4..ids + i * 4 + 4].try_into().unwrap());
+                    (id, f(extras + i * 16), f(extras + i * 16 + 8))
+                })
+                .collect();
+        }
+        offset += 8 + size;
+    }
+    Vec::new()
+}
+#[test]
+fn live_closing_fill_carries_its_execution_id_realized_pnl_and_fee() {
+    let (mut e, s) = ready("disabled");
+    e.take_frame(3000.0);
+    message(
+        &mut e,
+        s,
+        3100.0,
+        r#"{"channel":"userFills","data":{"fills":[{"coin":"BTC","side":"A","px":"100","sz":"2","time":3100,"tid":8,"oid":90,"dir":"Close Long","startPosition":"2","closedPnl":"5","fee":"0.25"}]}}"#,
+    );
+    let frame = e.take_frame(3100.0).unwrap();
+    let details = fill_details(frame);
+    assert_eq!(details.len(), 1);
+    let (id, realized, fee) = details[0];
+    assert_ne!(id, u32::MAX, "the trade id travels with the fill");
+    // As TS: realized PnL is net of the closing execution's fee.
+    assert_eq!(realized, 4.75);
+    assert_eq!(fee, 0.25);
+}
+#[test]
+fn opening_fill_reports_no_realized_pnl_or_fee() {
+    let (mut e, s) = ready("disabled");
+    e.take_frame(3000.0);
+    message(
+        &mut e,
+        s,
+        3100.0,
+        r#"{"channel":"userFills","data":{"fills":[{"coin":"BTC","side":"B","px":"100","sz":"1","time":3100,"tid":9,"oid":91,"dir":"Open Long","startPosition":"2","closedPnl":"0","fee":"0.1"}]}}"#,
+    );
+    let details = fill_details(e.take_frame(3100.0).unwrap());
+    assert_eq!(details.len(), 1);
+    assert_ne!(details[0].0, u32::MAX);
+    assert!(details[0].1.is_nan() && details[0].2.is_nan());
+}

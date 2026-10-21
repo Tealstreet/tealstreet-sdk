@@ -3597,9 +3597,16 @@ mod streaming_tests {
         );
         assert_eq!(
             fills.len(),
-            40,
-            "one fill includes a padded symbol-reference tail"
+            56,
+            "one fill: symbol and id references, then padded [realizedPnl, fee]"
         );
+        assert_eq!(
+            u32::from_le_bytes(fills[36..40].try_into().unwrap()),
+            crate::wire::NONE,
+            "no execution id was reported"
+        );
+        assert!(f64::from_le_bytes(fills[40..48].try_into().unwrap()).is_nan());
+        assert!(f64::from_le_bytes(fills[48..56].try_into().unwrap()).is_nan());
         let reference = u32::from_le_bytes(fills[32..36].try_into().unwrap()) as usize;
         let strings = sections
             .iter()

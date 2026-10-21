@@ -73,6 +73,9 @@ test('Rust revised sections preserve native fields and identity through the SDK'
     assert.deepEqual(store.positions.map((row) => row.symbol), ['A', 'ORPHAN']);
     assert.deepEqual(applier.fills(initial).map((row) => [row.orderId, row.symbol, row.amount]),
       [['tracked-order', 'A', 0.25], ['orphan-order', 'ORPHAN', 0.25]]);
+    // FILLS revision 2: execution id, realized PnL and fee when the venue reports them.
+    assert.deepEqual(applier.fills(initial).map(({ id, realizedPnl, fee }) => ({ id, realizedPnl, fee })),
+      [{ id: 'exec-1', realizedPnl: 1.5, fee: 0.25 }, { id: 'orphan-order', realizedPnl: undefined, fee: undefined }]);
     assert.equal(store.fetchedLeverage.ORPHAN.buyLeverage, 11);
     assert.equal(store.marketsBySymbol.ORPHAN, undefined);
   });
