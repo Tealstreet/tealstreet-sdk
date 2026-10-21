@@ -1320,6 +1320,7 @@ export const VENUES = {
   },
   kraken: {
     rust: 'kraken',
+    virtualPrivateClock: true,
     compareBalanceCoins: true,
     productSubscriptions: true,
     tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),

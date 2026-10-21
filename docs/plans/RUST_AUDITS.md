@@ -1118,9 +1118,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
   native buy/sell rails, not market limits).
   **RISKY — retained:** index-source placement needs a verified native wire
   contract (TS substitutes mark price for IndexPrice, which changes semantics).
-  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query,
-  while an empty identity string is still skipped. Inventing a fill identity is
-  unsafe; the empty-string handling remains a limitation. Income with neither
+  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query.
+  ~~An empty identity silently drops a fill and reports complete history.~~
+  Empty identities remain skipped without invention, but each affected query now
+  emits one coded Warn `row.skipped` naming `id` and an owned `history.incomplete`
+  before completion. Valid peers and financial values remain intact; the warning
+  budget spans windows and resets per query. Native alias/window/isolation and
+  Error-only tests plus a native-verified host/worker fixture cover this boundary.
+  Income with neither
   `asset` nor its `coin` alias rejects the affected page (range walks continue
   with an explicit incomplete marker); assuming USDT without accounting evidence
   can mislabel value.

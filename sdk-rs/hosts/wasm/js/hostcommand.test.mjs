@@ -571,3 +571,22 @@ test('invalid command observers reject before native dispatch', async () => {
   }), /observer getter failed/);
   assert.equal(r.calls.length, 0);
 });
+
+test('native WEEX empty-fill fixture flags retained rows incomplete only for its caller', async () => {
+  const event = JSON.parse(readFileSync(new URL('../../../venues/weex/tests/fixtures/empty-fill-incomplete-query-event.json', import.meta.url), 'utf8'));
+  const observed = [[], []];
+  const r = rig();
+  const first = r.host.command({ op: 'fetchFills' }, { onEvent: (event) => {
+    assert.equal(r.host.commands.size, 2, 'owned marker precedes completion');
+    observed[0].push(event);
+  } });
+  const second = r.host.command({ op: 'fetchFills' }, { onEvent: (event) => observed[1].push(event) });
+  r.host.run(JSON.stringify([event, { op: 'done', command: 1, result: '[{"id":"good","price":69000,"qty":0.01}]' }, { op: 'done', command: 2, result: '[]' }]));
+  const rows = await first;
+  assert.equal(rows.incomplete, true);
+  assert.deepEqual([...rows], [{ id: 'good', price: 69000, qty: 0.01 }]);
+  assert.equal(JSON.stringify(rows), '[{"id":"good","price":69000,"qty":0.01}]');
+  assert.equal((await second).incomplete, undefined);
+  assert.deepEqual(observed, [[{ level: event.level, code: event.code, message: event.message, fields: event.fields }], []]);
+  assert.equal(r.host.commands.size, 0);
+});
