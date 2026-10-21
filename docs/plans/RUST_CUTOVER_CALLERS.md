@@ -1271,9 +1271,10 @@ a false cap warning. Keep query failure, partial retained rows and a complete
 result distinct; an error is not an empty/complete history window.
 A WEEX marker can likewise precede its existing terminal rejection; it does
 not turn that rejection into partial success. The #1627 host regressions use
-the real native WEEX event fixture to prove direct-host array marking and
-owning-client command translation, including a concurrent unflagged request.
-Those proofs cover SDK/native-event/DO boundaries, not NX worker/hosted hops.
+the real native WEEX failure-event fixture to prove delivery to its pending
+caller before rejection and owning-client command translation, keeping a
+concurrent query unflagged. Existing host tests separately cover result-array
+marking. These proofs cover SDK/native-event/DO boundaries, not NX worker/hosted hops.
 
 **Required NX query association:** consume completeness on the result of the
 specific pending call. A direct JS SDK consumer reads `rows.incomplete` before
