@@ -4822,13 +4822,13 @@ mod startup_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(delays[0], 120_000.0);
-        assert_jittered(delays[1], 1_000.0);
-        // A later ban pushes back a read that was already waiting on its own schedule.
+        // A read failing during the ban waits it out too, whatever its own minimum.
+        assert_eq!(delays, [120_000.0, 120_000.0]);
+        // A later, shorter ban neither shortens the window nor reschedules reads already due.
         retry.failed_after(&mut cx, "premium", 90_000.0);
         let actions = std::mem::take(&mut cx.io.actions);
         assert!(
-            actions
+            !actions
                 .iter()
                 .any(|a| matches!(a, Action::ClearTimer { .. }))
         );
@@ -4839,7 +4839,18 @@ mod startup_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(delays, [90_000.0, 90_000.0]);
+        assert_eq!(delays, [120_000.0]);
+        // A longer ban still pushes back every waiting read.
+        retry.failed_after(&mut cx, "funding", 150_000.0);
+        let actions = std::mem::take(&mut cx.io.actions);
+        let delays: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(delays, [150_000.0; 4]);
         let response = |status, headers| Response {
             status,
             headers,
