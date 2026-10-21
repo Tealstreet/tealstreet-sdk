@@ -455,6 +455,9 @@ per-venue canary holding the formerly circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### Bitunix
+- ~~Bitunix's query page-cap ownership omission~~ now carries the actual request
+  command before partial completion, as do duplicate/nonadvancing-page markers.
+  Failed pages reject rather than masquerading as complete empty/partial history.
 Originally reviewed on `feat/rust-bitunix` at `846f285d13`; #1309 merged as
 `3acf9e46392`. Paths below are relative to `sdk-rs/venues/bitunix/src`.
 Remaining resilience and completeness findings are independent of request parity.
@@ -965,16 +968,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
-  ~~Bitunix's query page-cap ownership omission~~ now carries the actual request
-  command before partial completion, as do duplicate/nonadvancing-page markers.
-  Failed pages reject rather than masquerading as complete empty/partial history.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
