@@ -75,7 +75,7 @@ fn failed_or_truncated_streams_cannot_return_unvalidated_history_rows() {
         );
         let r = requests(&mut e).remove(0);
         reply(&mut e, r.id, body);
-        assert_eq!(done(&mut e).unwrap(), "[]");
+        assert!(done(&mut e).is_err(), "unvalidated history must reject");
     }
 }
 fn history_order(id: usize, t: f64) -> String {
@@ -165,18 +165,14 @@ fn income_uses_skip_pages_preserves_net_realized_and_keeps_fee_signs() {
     );
     let r = requests(&mut e).remove(0);
     assert!(r.url.contains("skip=100"));
-    reply(
-        &mut e,
-        r.id,
-        r#"{"code":10001,"msg":"read failed","data":{"tradeList":[{"tradeId":"fake","symbol":"BTCUSDT","ctime":1700000000000,"realizedPNL":"999"}]}}"#,
-    );
+    reply(&mut e, r.id, r#"{"code":0,"data":{"tradeList":[]}}"#);
     let rows: Vec<Income> = serde_json::from_str(&done(&mut e).unwrap()).unwrap();
     assert_eq!(rows.len(), 200);
     assert_eq!(rows[0].income_type, "REALIZED_PNL");
     assert_eq!(rows[0].income, -3.5);
     assert_eq!(rows[1].income_type, "COMMISSION");
     assert_eq!(rows[1].income, -2.0);
-    assert!(!rows.iter().any(|r| r.tran_id.starts_with("fake")));
+    assert!(rows.iter().all(|r| !r.tran_id.is_empty()));
 }
 #[test]
 fn public_trades_preserves_the_ts_unsupported_contract() {
@@ -278,5 +274,307 @@ fn an_id_free_order_page_never_counts_as_paging_progress() {
         actions
             .iter()
             .any(|a| matches!(a,Action::Notice(Notice::CommandDone {result:s,..}) if s=="[]"))
+    );
+}
+
+fn history_query(kind: usize) -> Query {
+    match kind {
+        0 => Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        1 => Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        _ => Query::Income {
+            symbol: Some("BTCUSDT".into()),
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    }
+}
+fn start_history(e: &mut TestEngine, kind: usize) -> safe_cex_engine::HttpRequest {
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 41,
+            query: history_query(kind),
+        }),
+    );
+    requests(e).remove(0)
+}
+fn history_page(kind: usize, page: usize) -> String {
+    let rows = (0..100).map(|i| {
+        let id = page * 100 + i;
+        let time = 1_700_000_000_000.0 - id as f64;
+        if kind == 1 { history_order(id, time) } else { format!(r#"{{"tradeId":"{id}","symbol":"BTCUSDT","ctime":{time},"realizedPNL":"-3.5","fee":"2"}}"#) }
+    }).collect::<Vec<_>>().join(",");
+    let key = if kind == 1 { "orderList" } else { "tradeList" };
+    format!(r#"{{"code":0,"data":{{"{key}":[{rows}]}}}}"#)
+}
+fn fail_history(
+    e: &mut TestEngine,
+    request: safe_cex_engine::RequestId,
+    failure: usize,
+    kind: usize,
+) {
+    let key = if kind == 1 { "orderList" } else { "tradeList" };
+    match failure {
+        0 => e.handle(
+            2.0,
+            Event::HttpFailed {
+                request,
+                error: "connection reset",
+            },
+        ),
+        1 => e.handle(
+            2.0,
+            Event::HttpResponse {
+                request,
+                response: safe_cex_engine::Response {
+                    status: 503,
+                    headers: "",
+                    body: "upstream unavailable",
+                },
+            },
+        ),
+        2 => reply(
+            e,
+            request,
+            r#"{"code":10001,"msg":"read failed","data":{}}"#,
+        ),
+        3 => reply(
+            e,
+            request,
+            &format!(r#"{{"code":0,"data":{{"{key}":[null]}}}}"#),
+        ),
+        _ => reply(
+            e,
+            request,
+            &format!(r#"{{"code":0,"data":{{"{key}":[],"broken":"#),
+        ),
+    }
+}
+fn owned_partial(actions: &[Action], expected_rows: usize) {
+    let (index, marker) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("incomplete history must identify its caller");
+    assert_eq!(marker.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        marker.fields,
+        vec![("command", safe_cex_engine::Value::Num(41.0))]
+    );
+    let (done_index, result) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::CommandDone {
+                command: 41,
+                result,
+            }) => Some((i, result)),
+            _ => None,
+        })
+        .expect("validated retained history");
+    assert!(index < done_index);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(result)
+            .unwrap()
+            .len(),
+        expected_rows
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+    )));
+}
+#[test]
+fn first_page_failures_never_complete_as_empty_history() {
+    for kind in 0..3 {
+        for failure in 0..5 {
+            let (mut e, _) = startup();
+            let request = start_history(&mut e, kind);
+            fail_history(&mut e, request.id, failure, kind);
+            assert!(done(&mut e).is_err(), "kind={kind}, failure={failure}");
+        }
+    }
+}
+#[test]
+fn later_page_failures_never_complete_as_clean_partial_history() {
+    for kind in 1..3 {
+        for failure in 0..5 {
+            let (mut e, _) = startup();
+            let request = start_history(&mut e, kind);
+            reply(&mut e, request.id, &history_page(kind, 0));
+            let request = requests(&mut e).remove(0);
+            fail_history(&mut e, request.id, failure, kind);
+            assert!(done(&mut e).is_err(), "kind={kind}, failure={failure}");
+        }
+    }
+}
+#[test]
+fn duplicate_full_pages_retain_rows_only_with_owned_incomplete_evidence() {
+    for kind in 1..3 {
+        let (mut e, _) = startup();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let request = start_history(&mut e, kind);
+        let page = history_page(kind, 0);
+        reply(&mut e, request.id, &page);
+        let request = requests(&mut e).remove(0);
+        reply(&mut e, request.id, &page);
+        owned_partial(
+            &e.drain_actions().collect::<Vec<_>>(),
+            if kind == 1 { 100 } else { 200 },
+        );
+    }
+}
+#[test]
+fn page_caps_retain_rows_with_owned_warning_before_done() {
+    for kind in 1..3 {
+        let (mut e, _) = startup();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let mut request = start_history(&mut e, kind);
+        let pages = if kind == 1 { 50 } else { 100 };
+        for page in 0..pages {
+            reply(&mut e, request.id, &history_page(kind, page));
+            if page + 1 < pages {
+                request = requests(&mut e).remove(0);
+            }
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        owned_partial(&actions, if kind == 1 { 5000 } else { 20000 });
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains("page cap"))));
+    }
+}
+#[test]
+fn a_valid_empty_end_page_remains_complete_after_retained_rows() {
+    for kind in 1..3 {
+        let (mut e, _) = startup();
+        let request = start_history(&mut e, kind);
+        reply(&mut e, request.id, &history_page(kind, 0));
+        let request = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            request.id,
+            if kind == 1 {
+                r#"{"code":0,"data":{"orderList":[]}}"#
+            } else {
+                r#"{"code":0,"data":{"tradeList":[]}}"#
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a|matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+        let result = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: 41,
+                    result,
+                }) => Some(result),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(result)
+                .unwrap()
+                .len(),
+            if kind == 1 { 100 } else { 200 }
+        );
+    }
+}
+
+#[test]
+fn a_full_fresh_order_page_without_time_progress_is_owned_partial_history() {
+    let (mut e, _) = startup();
+    let request = start_history(&mut e, 1);
+    reply(&mut e, request.id, &history_page(1, 0));
+    let request = requests(&mut e).remove(0);
+    let rows = (100..200)
+        .map(|id| history_order(id, 1_700_000_000_000.0 - 99.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        request.id,
+        &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
+    );
+    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 200);
+}
+#[test]
+fn a_full_order_page_at_the_inclusive_start_cannot_prove_complete_history() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 41,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: Some(1_700_000_000_000.0),
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    let rows = (0..100)
+        .map(|id| history_order(id, 1_700_000_000_000.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        request.id,
+        &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
+    );
+    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 100);
+}
+#[test]
+fn order_rows_before_the_requested_start_prove_the_walk_is_complete() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 41,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: Some(1_700_000_000_000.0),
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    let rows = (0..100)
+        .map(|id| history_order(id, 1_700_000_000_000.0 - 1.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        request.id,
+        &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone {command:41,result}) if result=="[]")
+    ));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Notice(Notice::Event(_))))
     );
 }
