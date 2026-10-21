@@ -210,7 +210,9 @@ and 1.5 s scaled pacing, including the existing throttle cooldown.
 ## Rust snapshot and plan reads
 
 The Rust adapter supports independent `fetchOrderBook(symbol, limit)` public
-snapshots without subscriptions. Default 100, SDK range 1–1000; amounts and
+snapshots without subscriptions. Standalone MEXC builds opt into the precise
+order-book JSON decoder, so the advertised SDK method works without unrelated
+venue features. Default 100, SDK range 1–1000; amounts and
 cumulative totals use base units via captured `contractSize`. Versions remain
 exact strings. A query cannot replace a live book. Public endpoint failures do
 not provide evidence of invalid account credentials. Callers control retries.
