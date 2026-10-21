@@ -87,3 +87,11 @@ configuration; test a narrower combined override of the wasm host alone,
 keeping the engine and dependencies at their existing profiles. This is a
 changed compiler configuration, not a repeat to select around a timing miss.
 The initial 1,230,687-byte saving is therefore not a retained result.
+
+Initial family collection is now complete: all 32 suites, 438 baseline /
+442 candidate raw Rust outputs, zero changed hashes and zero unstable groups.
+Exactly 31 suites meet the per-workload sample-count proof; BloFin alone has
+7 versus 9 performance samples and remains incomplete despite the larger
+aggregate count. WOO alone fails timing. The original combined baseline
+passes all 32 public suites. Final nine-pair collection must close BloFin
+and certify the selected configuration on integrated landing.
