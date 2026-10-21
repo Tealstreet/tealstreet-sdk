@@ -53,7 +53,21 @@ accepted-mode-ACK control passes before and after the repair. The old
 overlap fixture now creates a real ten-second replacement and an accepted mode
 ACK, retaining free700/uPnL0 and failed/malformed response assertions.
 
-This branch is local/CI-only by user instruction and must remain unmerged.
-#1662 account recovery is separate, with required later source integration and
-fresh CI; #1661's actual profile merge must also be integrated before any later
-merge proposal. No live schema or owner-decision behavior was changed.
+The overseer clarified that the local/CI-only restriction applied during #1661's
+source window. That window is released. Actual #1662
+`501fb664edb6769bde4a2337bde56fc44d6b5724` (including actual #1661 build inputs)
+is now integrated by porcelain merge. Three bounded conflicts preserve both audit
+closures, recovery gating before allocation, the shared balance write-revision
+predicate for auth/reset/financial publication, and real deadline/jitter fixtures.
+All incoming files outside the seven own paths match actual landing. Independent
+source/conflict-preservation and adversarial fixture reviews are clear.
+
+Integrated focused checks pass32 account,17 auth/recovery and9 balance groups;
+full Bitunix/Binance native466 and strict Clippy/format/bans pass.
+The added balance case proves native refusal and recovery across WS overlap;
+existing mode controls also require stale auth evidence to remain inert and fresh
+evidence to report Accepted. A precise auth-only disabled-generation control
+fails as intended and passes restored. An actually due2110 notification repair
+cannot bypass the refused read retry due2250..2500. New exact-head CI,
+and a separate fresh seven-file guard are mandatory before merge. No live schema
+or owner-decision behavior changed.

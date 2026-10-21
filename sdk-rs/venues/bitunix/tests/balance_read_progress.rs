@@ -52,6 +52,33 @@ fn answer(e: &mut TestEngine, id: RequestId, at: f64, body: &str) -> Vec<Action>
     );
     e.drain_actions().collect()
 }
+fn first_retry(actions: &[Action], now: f64) -> (TimerId, f64) {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= now + 750.0 && *at_ms <= now + 1000.0 =>
+            {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("actual first jittered balance retry")
+}
+fn balance_auth(actions: &[Action]) -> Vec<safe_cex_engine::AuthOutcome> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::AccountAuth {
+                credential: safe_cex_engine::CredentialSlot::Primary,
+                scope: safe_cex_engine::AccountReadScope::Balance,
+                outcome,
+            }) => Some(*outcome),
+            _ => None,
+        })
+        .collect()
+}
 fn assert_fresh(e: &TestEngine) {
     let b = e.store().balance();
     assert_eq!((b.free, b.used, b.total, b.upnl), (700.0, 10.0, 712.0, 3.0));
@@ -79,7 +106,12 @@ fn current_balance_reply_advances_financial_state_during_continuous_notification
     for at in [1200.0, 1400.0, 1600.0, 1900.0] {
         notify(&mut e, socket, at);
     }
-    answer(&mut e, read.id, 2000.0, FRESH);
+    let actions = answer(&mut e, read.id, 2000.0, FRESH);
+    assert_eq!(
+        balance_auth(&actions),
+        vec![safe_cex_engine::AuthOutcome::Accepted],
+        "WS-only overlap cannot suppress current Balance auth evidence"
+    );
     assert_fresh(&e);
 }
 #[test]
@@ -184,6 +216,10 @@ fn accepted_mode_ack_fences_old_balance_while_refused_or_unproved_writes_do_not(
         )));
         let actions = answer(&mut e, old.id, 1400.0, FRESH);
         if result == "accepted" {
+            assert!(
+                balance_auth(&actions).is_empty(),
+                "pre-mode-ACK read cannot emit accepted credentials or reset recovery"
+            );
             assert!(!e.store().hedged());
             assert_eq!(
                 e.store().balance().free,
@@ -193,7 +229,12 @@ fn accepted_mode_ack_fences_old_balance_while_refused_or_unproved_writes_do_not(
             let repair = timer_at(&actions, 2400.0);
             let actions = fire(&mut e, repair, 2400.0);
             let fresh = balance(&actions).expect("current mode repair");
-            answer(&mut e, fresh.id, 2500.0, &FRESH.replace("HEDGE", "ONE_WAY"));
+            let fresh_actions =
+                answer(&mut e, fresh.id, 2500.0, &FRESH.replace("HEDGE", "ONE_WAY"));
+            assert_eq!(
+                balance_auth(&fresh_actions),
+                vec![safe_cex_engine::AuthOutcome::Accepted]
+            );
             assert_fresh(&e);
             assert!(!e.store().hedged());
         } else {
@@ -231,9 +272,9 @@ fn synchronous_balance_signing_failure_releases_before_the_normal_repair() {
     let actions = notify(&mut e, socket, 100.0);
     let actions = fire(&mut e, timer_at(&actions, 1100.0), 1100.0);
     assert!(balance(&actions).is_none());
-    let retry = timer_at(&actions, 2100.0);
+    let (retry, at) = first_retry(&actions, 1100.0);
     unavailable.store(false, Ordering::SeqCst);
-    let actions = fire(&mut e, retry, 2100.0);
+    let actions = fire(&mut e, retry, at);
     let current =
         balance(&actions).expect("no fabricated ten-second in-flight wait after signing failure");
     answer(&mut e, current.id, 2300.0, FRESH);
@@ -297,5 +338,33 @@ fn private_reconnect_coalesces_against_a_current_balance_read() {
     );
     notify(&mut e, replacement, at + 3.0);
     answer(&mut e, old.id, at + 4.0, FRESH);
+    assert_fresh(&e);
+}
+
+#[test]
+fn current_balance_refusal_and_recovery_survive_ws_overlap_without_bypassing_backoff() {
+    let (mut e, socket) = startup();
+    let read = begin(&mut e, socket);
+    let overlap = notify(&mut e, socket, 1110.0);
+    let notification_repair = timer_at(&overlap, 2110.0);
+    let refused = answer(&mut e, read.id, 1500.0, r#"{"code":10004}"#);
+    assert_eq!(
+        balance_auth(&refused),
+        vec![safe_cex_engine::AuthOutcome::Rejected]
+    );
+    let (timer, at) = first_retry(&refused, 1500.0);
+    notify(&mut e, socket, 1600.0);
+    assert!(
+        balance(&fire(&mut e, notification_repair, 2110.0)).is_none(),
+        "an actually due notification repair cannot bypass the failed-read backoff"
+    );
+    let actions = fire(&mut e, timer, at);
+    let repair = balance(&actions).expect("ordinary retry after actual backoff");
+    notify(&mut e, socket, at + 1.0);
+    let recovered = answer(&mut e, repair.id, at + 2.0, FRESH);
+    assert_eq!(
+        balance_auth(&recovered),
+        vec![safe_cex_engine::AuthOutcome::Accepted]
+    );
     assert_fresh(&e);
 }

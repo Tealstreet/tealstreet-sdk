@@ -125,6 +125,15 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
     let venue = ProbeVenue::new(
         BitunixFutures::new(options()),
         |v: &mut BitunixFutures, cx: &mut Cx<'_, Pending>| {
+            let mut seed = Pending::Markets {
+                rows: vec![],
+                invalid: false,
+            };
+            v.on_item(cx, &mut seed, r#"{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}"#);
+            if let Pending::Markets { rows, .. } = seed {
+                cx.store.set_markets(rows);
+            }
+            assert!(cx.store.market("BTCUSDT").is_some());
             for axis in [
                 account::Axis::Balance,
                 account::Axis::Positions,

@@ -750,19 +750,35 @@ fn balance_request(
     fire_balance_repair(e, at + 1000.0)
 }
 fn fire_balance_repair(e: &mut TestEngine, at: f64) -> safe_cex_engine::RequestId {
-    let timer = e
+    let (timer, due) = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == at => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms >= at - 1000.0 && at_ms <= at => {
+                Some((timer, at_ms))
+            }
             _ => None,
         })
-        .expect("actual balance repair deadline");
-    e.handle(at, Event::TimerFired { timer });
+        .expect("actual first balance repair deadline");
+    e.handle(due, Event::TimerFired { timer });
     requests(e)
         .into_iter()
         .find(|r| r.url.contains("/futures/account?"))
         .unwrap()
         .id
+}
+fn fire_read_retry(e: &mut TestEngine, now: f64) -> safe_cex_engine::RequestId {
+    let (timer, at) = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms >= now + 750.0 && at_ms <= now + 1000.0 => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("actual first failed-read retry");
+    e.handle(at, Event::TimerFired { timer });
+    requests(e).remove(0).id
 }
 #[test]
 fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
@@ -784,7 +800,17 @@ fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
     );
     assert_eq!(e.store().balance().free, 700.0);
     assert_eq!(e.store().balance().upnl, 0.0);
-    reply(&mut e, a, ACCOUNT);
+    e.handle(
+        11102.0,
+        Event::HttpResponse {
+            request: a,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: ACCOUNT,
+            },
+        },
+    );
     assert_eq!(e.store().balance().free, 700.0);
     let old = balance_request(&mut e, s, 11200.0);
     e.store_mut().set_positions(vec![]);
@@ -838,7 +864,7 @@ fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
         },
     );
     assert_eq!(e.store().balance().free, 700.0);
-    let read = fire_balance_repair(&mut e, 14204.0);
+    let read = fire_read_retry(&mut e, 13204.0);
     reply(&mut e, read, r#"{"code":0,"data":{"unexpected":1}}"#);
     assert_eq!(e.store().balance().free, 700.0);
 }
@@ -1169,22 +1195,68 @@ fn subscribe_candles_settings_read(
 }
 
 #[test]
-fn failed_or_malformed_symbol_settings_read_retries_on_next_candle_interest() {
+fn failed_or_malformed_symbol_settings_read_retries_without_interest_bypassing_backoff() {
     use safe_cex_engine::model::Interval;
     let (mut e, _) = startup();
     let read = subscribe_candles_settings_read(&mut e, Interval::M1).expect("first read");
-    reply(&mut e, read, r#"{"code":0,"data":{"leverage":0}}"#);
-    let read = subscribe_candles_settings_read(&mut e, Interval::M5)
-        .expect("a malformed read must be retried");
     e.handle(
-        1.0,
+        2.0,
+        Event::HttpResponse {
+            request: read,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":{"leverage":0}}"#,
+            },
+        },
+    );
+    let pending: Vec<_> = e.drain_actions().collect();
+    assert!(
+        subscribe_candles_settings_read(&mut e, Interval::M5).is_none(),
+        "interest must not bypass failed-read backoff"
+    );
+    let (timer, at) = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= 752.0 && *at_ms <= 1002.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("malformed settings retry");
+    e.handle(at, Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .unwrap()
+        .id;
+    e.handle(
+        at + 1.0,
         Event::HttpFailed {
             request: read,
             error: "network down",
         },
     );
-    let read = subscribe_candles_settings_read(&mut e, Interval::M15)
-        .expect("a failed read must be retried");
+    let pending: Vec<_> = e.drain_actions().collect();
+    assert!(
+        subscribe_candles_settings_read(&mut e, Interval::M15).is_none(),
+        "interest must not bypass second failure's backoff"
+    );
+    let (timer, due) = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= at + 1501.0 && *at_ms <= at + 2001.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("second settings retry");
+    e.handle(due, Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .unwrap()
+        .id;
     reply(
         &mut e,
         read,

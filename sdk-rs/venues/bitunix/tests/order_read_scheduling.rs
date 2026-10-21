@@ -166,8 +166,23 @@ fn lost_endpoint_replacement_and_late_callbacks_leave_the_other_deadline_intact(
         assert!(next[0].url.contains("/tpsl/"));
     }
 }
+fn failed_retry_timers(actions: &[Action], at: f64) -> Vec<(TimerId, f64)> {
+    let mut timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= BASE + at + 750.0 && *at_ms <= BASE + at + 1000.0 =>
+            {
+                Some((*timer, *at_ms - BASE))
+            }
+            _ => None,
+        })
+        .collect();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    timers
+}
 #[test]
-fn failed_reads_release_both_tokens_for_one_coalesced_repair() {
+fn failed_reads_release_both_tokens_for_independent_bounded_repair() {
     for failure in ["transport", "native", "missing", "malformed"] {
         let (mut e, socket) = ready();
         let reads = order_requests(begin(&mut e, socket));
@@ -195,12 +210,19 @@ fn failed_reads_release_both_tokens_for_one_coalesced_repair() {
                 ));
             }
         }
-        let repair = timer_at(&actions, 3000.0);
+        let repairs = failed_retry_timers(&actions, 2000.0);
         assert_eq!(
-            order_requests(fire(&mut e, repair, 3000.0)).len(),
+            repairs.len(),
             2,
-            "{failure}"
+            "one bounded retry per endpoint: {failure}"
         );
+        let mut next = Vec::new();
+        for (timer, at) in repairs {
+            next.extend(order_requests(fire(&mut e, timer, at)));
+        }
+        assert_eq!(next.len(), 2, "{failure}");
+        assert_eq!(next.iter().filter(|r| r.url.contains("/trade/")).count(), 1);
+        assert_eq!(next.iter().filter(|r| r.url.contains("/tpsl/")).count(), 1);
     }
 }
 
@@ -215,9 +237,20 @@ fn synchronous_signing_failure_releases_each_endpoint_before_repair() {
     unavailable.store(true, Ordering::SeqCst);
     let actions = begin(&mut e, socket);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    let repair = timer_at(&actions, 2100.0);
+    let repairs = failed_retry_timers(&actions, 1100.0);
+    assert_eq!(
+        repairs.len(),
+        2,
+        "both signing failures must release their token and retry"
+    );
     unavailable.store(false, Ordering::SeqCst);
-    assert_eq!(order_requests(fire(&mut e, repair, 2100.0)).len(), 2);
+    let mut next = Vec::new();
+    for (timer, at) in repairs {
+        next.extend(order_requests(fire(&mut e, timer, at)));
+    }
+    assert_eq!(next.len(), 2);
+    assert_eq!(next.iter().filter(|r| r.url.contains("/trade/")).count(), 1);
+    assert_eq!(next.iter().filter(|r| r.url.contains("/tpsl/")).count(), 1);
 }
 #[test]
 fn ordinary_refresh_cannot_supersede_owned_order_preflight_or_relax_its_generation_fence() {
