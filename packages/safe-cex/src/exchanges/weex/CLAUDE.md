@@ -252,3 +252,25 @@ remain in their own configuration caches for subsequent order and margin calls.
 (as the TS adapter's `fetchLeverageForSymbol`), so WEEX reports
 `leverageQuery: onRead`. It answers the margin-type rails and commits the
 configuration unless a settings write or newer read landed meanwhile.
+
+
+## Native REST order-book query
+
+Rust fetchOrderBook is an unsigned command-owned GET of the existing Contract V3
+market/depth endpoint, raw encoded symbol with no catalog lookup, limit200 by
+default and explicit caller limit forwarded unchanged. Null-coalesced bids/b and
+asks/a aliases preserve side order, duplicates and zero quantities, with cumulative
+base amount totals; contractVal never rescales the query. lastUpdateId retains
+exact string/integer bytes without floating-point conversion, missing/null becomes
+an empty string, and level IDs are absent.
+
+The query deliberately corrects TS's malformed-price/quantity fallback and prefix
+parsing: invalid/nonfinite finances, malformed non-null structures and cumulative
+overflow fail atomically. It never mutates subscription generations, buffered depth,
+account settings or metadata. Public native/HTTP/transport failures complete only
+their owner with typed NotSent/non-auth evidence; native0/200/absent code succeed.
+Existing get() shared-pause admission and rate::delay HTTP429 header/window policy
+remain in force (bounded60s), including deferred query ownership. There is no new
+failed-request retry, stream recovery or auth invalidation. Standalone decoder and
+native capability are explicit. OnReadAndMetadata settings fences and owned
+empty-fill history markers remain independent.
