@@ -62,6 +62,15 @@ pub(crate) struct Account {
     debounce: Option<TimerId>,
     retry: Option<(TimerId, u32)>,
     auth_failures: u32,
+    /// Backs off the settings reads that gate startup; transient failures never end it.
+    startup: safe_cex_engine::startup::Backoff<StartupRead>,
+    signature_rejections: u8,
+    pub startup_rejected: bool,
+}
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum StartupRead {
+    Margin,
+    Mode,
 }
 impl Account {
     fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
@@ -301,30 +310,101 @@ impl Blofin {
             return;
         }
         if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
-            cx.log(LogLevel::Error, "BloFin requires a passphrase");
+            let error =
+                VenueError::new("BloFin requires a passphrase").kind(ErrorKind::InvalidInput);
+            self.reject_startup(cx, error, false);
             return;
         }
         self.account.session_started = cx.now;
         self.private_connect(cx);
         self.account.tick = Some(cx.set_timer(10_000.0));
-        self.private_read(
-            cx,
-            "/api/v1/account/margin-mode",
-            Request::Margin {
-                revision: self.account.settings_revision,
-            },
-            false,
-        );
-        self.private_read(
-            cx,
-            "/api/v1/account/position-mode",
-            Request::Mode {
-                revision: self.account.settings_revision,
-            },
-            false,
-        );
+        self.read_setting(cx, StartupRead::Margin);
+        self.read_setting(cx, StartupRead::Mode);
+    }
+    fn read_setting(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+        let revision = self.account.settings_revision;
+        let (path, request) = match read {
+            StartupRead::Margin => ("/api/v1/account/margin-mode", Request::Margin { revision }),
+            StartupRead::Mode => ("/api/v1/account/position-mode", Request::Mode { revision }),
+        };
+        self.private_read(cx, path, request, false);
+    }
+    fn setting_loaded(&self, read: StartupRead) -> bool {
+        match read {
+            StartupRead::Margin => self.account.margin.is_some(),
+            StartupRead::Mode => self.account.mode_loaded,
+        }
+    }
+    /// An unloaded setting retries with backoff; the startup gate never fails closed.
+    fn setting_unsettled(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+        if self.setting_loaded(read) {
+            self.account.startup.succeeded(cx, &read);
+        } else if !self.account.startup_rejected {
+            self.account.startup.failed(cx, read);
+        }
+    }
+    /// A refused key can never pass the settings reads, so startup fails instead
+    /// of polling. Only documented key codes count; 152409 after one re-signed resend.
+    fn settings_rejected(&mut self, cx: &mut Cx<'_, Pending>, body: &str) -> bool {
+        let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(body) else {
+            return false;
+        };
+        let Some(kind) = key_rejection(&envelope.code) else {
+            self.account.signature_rejections = 0;
+            return false;
+        };
+        if envelope.code == "152409" {
+            self.account.signature_rejections += 1;
+            if self.account.signature_rejections < 2 {
+                return false;
+            }
+        }
+        let read_key = self.options.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let error = rejection(which, &envelope.code, &envelope.msg, kind);
+        self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid && !read_key);
+        true
+    }
+    /// Fails startup once and retires every private retry, read or socket.
+    fn reject_startup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        error: VenueError,
+        trading_key_refused: bool,
+    ) {
+        if std::mem::replace(&mut self.account.startup_rejected, true) {
+            return;
+        }
+        for read in [StartupRead::Margin, StartupRead::Mode] {
+            self.account.startup.succeeded(cx, &read);
+        }
+        if let Some(timer) = self.account.tick.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some((timer, _)) = self.account.retry.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.supervisor.cancel(cx);
+        self.account.authenticated = false;
+        self.account.connection.open = false;
+        if let Some(socket) = self.account.connection.socket.take() {
+            cx.close(socket);
+        }
+        cx.log(LogLevel::Error, &error.message);
+        cx.startup_failed(error);
+        // As Bybit: a refused trading key also stops the host's login loop.
+        if trading_key_refused {
+            cx.deactivate();
+        }
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.startup_rejected {
+            return;
+        }
         let url = if self.options.testnet {
             "wss://demo-trading-openapi.blofin.com/ws/private"
         } else {
@@ -830,6 +910,16 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if let Err(e) = check(&response) {
+            let gate = match request {
+                Request::Margin { .. } => Some(StartupRead::Margin),
+                Request::Mode { .. } => Some(StartupRead::Mode),
+                _ => None,
+            };
+            if gate.is_some_and(|read| !self.setting_loaded(read))
+                && self.settings_rejected(cx, response.body)
+            {
+                return;
+            }
             if response.body.contains("152401") || response.body.contains("152406") {
                 self.account.auth_failures += 1;
             }
@@ -927,6 +1017,7 @@ impl Blofin {
                 {
                     if !matches!(m.margin_mode.as_ref(), "cross" | "isolated") {
                         cx.log(LogLevel::Error, "Malformed BloFin margin mode");
+                        self.setting_unsettled(cx, StartupRead::Margin);
                         return;
                     }
                     if revision == self.account.settings_revision {
@@ -946,9 +1037,11 @@ impl Blofin {
                                 .update_setting(&symbol, |s| s.margin_type = self.account.margin);
                         }
                     }
+                    self.setting_unsettled(cx, StartupRead::Margin);
                     self.bootstrap_account(cx);
                 } else {
                     cx.log(LogLevel::Error, "Malformed BloFin margin mode");
+                    self.setting_unsettled(cx, StartupRead::Margin);
                 }
             }
             Request::Mode { revision } => {
@@ -957,15 +1050,18 @@ impl Blofin {
                 {
                     if !matches!(m.position_mode.as_ref(), "net_mode" | "long_short_mode") {
                         cx.log(LogLevel::Error, "Malformed BloFin position mode");
+                        self.setting_unsettled(cx, StartupRead::Mode);
                         return;
                     }
                     if revision == self.account.settings_revision {
                         cx.store.set_hedged(m.position_mode == "long_short_mode");
                         self.account.mode_loaded = true;
                     }
+                    self.setting_unsettled(cx, StartupRead::Mode);
                     self.bootstrap_account(cx);
                 } else {
                     cx.log(LogLevel::Error, "Malformed BloFin position mode");
+                    self.setting_unsettled(cx, StartupRead::Mode);
                 }
             }
             Request::Positions {
@@ -1226,7 +1322,8 @@ impl Blofin {
             Request::Positions { .. } | Request::Balance { .. } => {
                 self.account.account_busy = false
             }
-            _ => {}
+            Request::Margin { .. } => self.setting_unsettled(cx, StartupRead::Margin),
+            Request::Mode { .. } => self.setting_unsettled(cx, StartupRead::Mode),
         }
         cx.log(LogLevel::Error, error);
     }
@@ -1247,16 +1344,28 @@ impl Blofin {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        if message.event == "login" {
-            if message.code != "0" {
-                cx.log(
-                    LogLevel::Error,
-                    format!("BloFin login rejected: {}", message.code),
-                );
-                cx.close(socket);
-                self.private_close(cx, socket);
+        // BloFin answers a refused login with `event: "error"` (60009 or a 1524xx code).
+        let login_failed = (message.event == "login" && message.code != "0")
+            || (message.event == "error" && !self.account.authenticated);
+        if login_failed {
+            // Before the account is ready a refused key cannot recover by reconnecting.
+            if !self.account.authenticated
+                && !(cx.store.loaded().balance && cx.store.loaded().orders)
+                && let Some(kind) = key_rejection(&message.code)
+            {
+                let error = rejection("API key login", &message.code, &message.msg, kind);
+                self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
                 return;
             }
+            cx.log(
+                LogLevel::Error,
+                format!("BloFin login rejected: {}", message.code),
+            );
+            cx.close(socket);
+            self.private_close(cx, socket);
+            return;
+        }
+        if message.event == "login" {
             if self.account.authenticated {
                 return;
             }
@@ -1695,28 +1804,12 @@ impl Blofin {
             }
             SocketTick::Handled => return true,
         }
+        if let Some(read) = self.account.startup.on_timer(timer) {
+            self.read_setting(cx, read);
+            return true;
+        }
         if self.account.tick == Some(timer) {
             self.account.tick = None;
-            if self.account.margin.is_none() {
-                self.private_read(
-                    cx,
-                    "/api/v1/account/margin-mode",
-                    Request::Margin {
-                        revision: self.account.settings_revision,
-                    },
-                    false,
-                );
-            }
-            if !self.account.mode_loaded {
-                self.private_read(
-                    cx,
-                    "/api/v1/account/position-mode",
-                    Request::Mode {
-                        revision: self.account.settings_revision,
-                    },
-                    false,
-                );
-            }
             if self.account.margin.is_some() && self.account.mode_loaded {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
@@ -1777,4 +1870,25 @@ fn execution_prefix(
         }
     }
     Ok(true)
+}
+
+/// BloFin key refusals no retry can fix (docs "Error Codes", 1524xx); 152405,
+/// 152407, 152410 (timestamp/nonce) and every other code stay transient.
+fn key_rejection(code: &str) -> Option<ErrorKind> {
+    match code {
+        "152401" | "152408" | "152409" => Some(ErrorKind::AuthInvalid),
+        "152402" => Some(ErrorKind::AuthExpired),
+        "152406" => Some(ErrorKind::AuthPermission),
+        _ => None,
+    }
+}
+
+fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
+    let mut error = VenueError::new(format!("BloFin rejected the {which} ({code}): {msg}"))
+        .kind(kind)
+        .venue_code(code);
+    if !msg.is_empty() {
+        error = error.venue_message(msg);
+    }
+    error
 }

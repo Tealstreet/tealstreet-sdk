@@ -71,6 +71,8 @@ pub struct Message<'a> {
     pub event: Str<'a>,
     #[serde(borrow, default)]
     pub code: Str<'a>,
+    #[serde(borrow, default)]
+    pub msg: Str<'a>,
 }
 #[derive(Deserialize)]
 pub struct Data<T> {
