@@ -14,8 +14,9 @@ Landing history becomes the trusted scan baseline for its feature branches;
 ancestry alone is not proof of a completed scan. If landing already contains
 the pushed head, there are no branch-only commits to scan.
 
-Verify with temporary Git histories covering current/older landing branches,
-landing advancement, master branches, merges from master, ordinary pushes,
-PRs, manual runs, missing landing refs, unrelated histories and Git errors.
+Add a focused CI regression test using temporary Git histories covering
+current/older landing branches, landing advancement, master branches, merges
+from master, ordinary pushes, PRs, manual runs, missing landing refs, unrelated
+histories and Git errors.
 Audit independently and require full green PR-head CI and a separate guard
 before merging this workflow-only change.
