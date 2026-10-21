@@ -880,6 +880,12 @@ writes before retrying` instead of `Timeout callMethodInWorker`.
 
 ### Incomplete history (#1542, #1554)
 
+The SDK journal fold checks the host-style marker before consuming income
+symbols/funding or folding fills. Flagged fills and symbol-scoped income reject;
+complete account-wide fills remain usable while all flagged income enrichment is
+discarded and funding stays unattributed. This protects direct SDK consumers;
+worker/hosted propagation and NX coverage tracking below remain cutover work.
+
 Native sessions and Workers now translate event command IDs through the pending
 owner and send those notices only to that client. Retired, disconnected, malformed
 and unknown owners cannot leak notices to another client. `history.incomplete`
