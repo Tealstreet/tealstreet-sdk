@@ -317,8 +317,8 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
-                result: result.as_ref().ok().map(String::as_str),
-                error: result.as_ref().err().map(|error| error.as_str().into()),
+                result: Some(result.as_str()),
+                error: None,
                 detail: None,
             },
             Action::Notice(Notice::CommandFailed { command, error }) => ActionOut::Done {
@@ -946,7 +946,7 @@ mod tests {
             }),
             Action::Notice(Notice::CommandDone {
                 command: 19,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ]);
         assert_eq!(
@@ -963,14 +963,14 @@ mod tests {
                 command: 19,
                 message: "placement rejected".into(),
             }),
-            Action::Notice(Notice::CommandDone {
+            Action::Notice(Notice::CommandFailed {
                 command: 19,
-                result: Err("placement rejected".into()),
+                error: safe_cex_engine::VenueError::new("placement rejected"),
             }),
         ]);
         assert_eq!(
             encoded,
-            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected"}]"#
+            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected","detail":{"message":"placement rejected"}}]"#
         );
     }
 
@@ -1159,13 +1159,13 @@ mod tests {
                 command: 1,
                 error: safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1),
             }),
-            Action::Notice(Notice::CommandDone {
+            Action::Notice(Notice::CommandFailed {
                 command: 2,
-                result: Err("plain".into()),
+                error: safe_cex_engine::VenueError::new("plain"),
             }),
             Action::Notice(Notice::CommandDone {
                 command: 3,
-                result: Ok("[]".into()),
+                result: "[]".into(),
             }),
         ];
         assert_eq!(
@@ -1174,7 +1174,7 @@ mod tests {
                 r#"[{"op":"done","command":1,"#,
                 r#""error":"{\"message\":\"leg 2 rejected\",\"partialOrderIds\":[\"a\"],\"partialOrderCount\":1,\"totalOrderCount\":2,\"failedOrderIndex\":1}","#,
                 r#""detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}},"#,
-                r#"{"op":"done","command":2,"error":"plain"},"#,
+                r#"{"op":"done","command":2,"error":"plain","detail":{"message":"plain"}},"#,
                 r#"{"op":"done","command":3,"result":"[]"}]"#,
             )
         );

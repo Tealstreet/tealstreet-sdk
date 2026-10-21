@@ -35,7 +35,7 @@ fn unsupported_histories_fail_explicitly_without_network_or_empty_success() {
         e.handle(0.0, Event::Command(Command::Query { command: 1, query }));
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(
-            matches!(&actions[..],[Action::Notice(Notice::CommandDone{command:1,result:Err(error)})] if error.contains("unsupported"))
+            matches!(&actions[..],[Action::Notice(Notice::CommandFailed { command: 1, error })] if error.legacy_text().contains("unsupported"))
         );
     }
 }
@@ -63,7 +63,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         e.handle(0.0, Event::Command(command));
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(
-            matches!(&actions[..],[Action::Notice(Notice::CommandDone{result:Ok(result),..})] if result=="[]")
+            matches!(&actions[..],[Action::Notice(Notice::CommandDone{result,..})] if result=="[]")
         );
         assert!(!e.store().hedged());
     }
@@ -75,7 +75,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         }),
     );
     assert!(
-        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result:Ok(result),..})) if result==r#"{"buyLeverage":1,"sellLeverage":1}"#)
+        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result,..})) if result==r#"{"buyLeverage":1,"sellLeverage":1}"#)
     );
     e.handle(
         0.0,
@@ -88,7 +88,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         }),
     );
     assert!(
-        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result:Ok(result),..})) if result==r#"{"found":false,"definitive":false}"#)
+        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result,..})) if result==r#"{"found":false,"definitive":false}"#)
     );
 }
 
@@ -113,13 +113,7 @@ fn account_uses_signer_identity_and_never_funder_or_private_io() {
         }));
         e.handle(0.0, Event::Command(Command::FetchAccount { command: 7 }));
         let actions: Vec<_> = e.drain_actions().collect();
-        let [
-            Action::Notice(Notice::CommandDone {
-                command: 7,
-                result: Ok(result),
-            }),
-        ] = &actions[..]
-        else {
+        let [Action::Notice(Notice::CommandDone { command: 7, result })] = &actions[..] else {
             panic!("unexpected account actions: {actions:?}");
         };
         assert_eq!(
@@ -143,8 +137,8 @@ fn stp_queries_and_setters_reject_without_network_or_state_mutation() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(matches!(
             &actions[..],
-            [Action::Notice(Notice::CommandDone { command: 8, result: Err(error) })]
-                if error.contains("unsupported")
+            [Action::Notice(Notice::CommandFailed { command: 8, error })]
+                if error.legacy_text().contains("unsupported")
         ));
         assert!(!e.store().loaded().balance);
         assert!(!e.store().loaded().positions);
@@ -223,10 +217,11 @@ fn fetch_book(
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    let [Action::Notice(Notice::CommandDone { command: 9, result })] = &actions[..] else {
-        panic!("unexpected book response actions: {actions:?}");
-    };
-    result.clone()
+    match &actions[..] {
+        [Action::Notice(Notice::CommandDone { command: 9, result })] => Ok(result.clone()),
+        [Action::Notice(Notice::CommandFailed { command: 9, error })] => Err(error.legacy_text()),
+        _ => panic!("unexpected book response actions: {actions:?}"),
+    }
 }
 
 #[test]
@@ -327,10 +322,7 @@ fn invalid_book_requests_reject_before_network() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(matches!(
             &actions[..],
-            [Action::Notice(Notice::CommandDone {
-                command: 10,
-                result: Err(_)
-            })]
+            [Action::Notice(Notice::CommandFailed { command: 10, .. })]
         ));
     }
 }

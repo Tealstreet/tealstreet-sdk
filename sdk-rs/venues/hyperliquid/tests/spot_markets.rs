@@ -283,7 +283,7 @@ fn spot_orders_use_spot_prices_never_reduce_only_and_ignore_leverage() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 3,
-            result: Ok(_)
+            result: _
         })
     )));
     let opts: PlaceOrderOpts = serde_json::from_str(

@@ -144,7 +144,7 @@ impl Harness {
                     );
                     self.requests.push(r);
                 }
-                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
                     self.failures.push(error.clone());
                     self.done.push(Err(error.legacy_text()))

@@ -235,10 +235,7 @@ impl Lighter {
     ) {
         let (read, stage, symbol, order, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Lighter does not support caller client order IDs".into()),
-                );
+                cx.fail(command, "Lighter does not support caller client order IDs");
                 return;
             }
             Query::Fills {
@@ -293,12 +290,9 @@ impl Lighter {
                     Some("COMMISSION_REBATE") => IncomeKind::Rebate,
                     Some("REALIZED_PNL") => IncomeKind::Realized,
                     _ => {
-                        cx.done(
+                        cx.fail(
                             command,
-                            Err(
-                                "Lighter income supports funding, commission and realized PnL"
-                                    .into(),
-                            ),
+                            "Lighter income supports funding, commission and realized PnL",
                         );
                         return;
                     }
@@ -324,18 +318,18 @@ impl Lighter {
             .any(|n| !n.is_finite() || n < 0.0)
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.done(command, Err("Invalid Lighter history time range".into()));
+            cx.fail(command, "Invalid Lighter history time range");
             return;
         }
         if order.as_ref().is_some_and(|s| s.parse::<u64>().is_err()) {
-            cx.done(command, Err("Invalid Lighter native order index".into()));
+            cx.fail(command, "Invalid Lighter native order index");
             return;
         }
         let market = match symbol.as_ref() {
             Some(symbol) => match cx.store.market(symbol) {
                 Some(m) => Some(m.id.clone()),
                 None => {
-                    cx.done(command, Err("Lighter market not found".into()));
+                    cx.fail(command, "Lighter market not found");
                     return;
                 }
             },
@@ -356,12 +350,9 @@ impl Lighter {
                             .is_none_or(str::is_empty)
                         || self.account.account_index.is_some()
                     {
-                        cx.done(command, Ok("[]".into()));
+                        cx.done(command, "[]".into());
                     } else {
-                        cx.done(
-                            command,
-                            Err("Lighter private account identity is unavailable".into()),
-                        );
+                        cx.fail(command, "Lighter private account identity is unavailable");
                     }
                     return;
                 }
@@ -428,7 +419,7 @@ impl Lighter {
             match self.account_auth(cx.now) {
                 Ok(auth) => headers.push(("authorization", auth)),
                 Err(error) => {
-                    cx.done(request.command, Err(error));
+                    cx.fail(request.command, error);
                     return;
                 }
             }
@@ -708,25 +699,22 @@ impl Lighter {
         let envelope = match envelope {
             Ok(e) if response.status < 300 && e.code.0 == "200" => e,
             Ok(e) => {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err(format!(
-                        "Lighter history failed: {} {}",
-                        response.status, e.message
-                    )),
+                    format!("Lighter history failed: {} {}", response.status, e.message),
                 );
                 return;
             }
             Err(e) => {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err(format!("Invalid Lighter history envelope: {e}")),
+                    format!("Invalid Lighter history envelope: {e}"),
                 );
                 return;
             }
         };
         if let Some(error) = request.failed.take() {
-            cx.done(request.command, Err(error));
+            cx.fail(request.command, error);
             return;
         }
         let enough = request
@@ -755,18 +743,18 @@ impl Lighter {
                 return;
             }
             CursorStep::Stalled(_) => {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err("Lighter history cursor did not make progress".into()),
+                    "Lighter history cursor did not make progress",
                 );
                 return;
             }
             CursorStep::Done => {}
         }
         if !enough && request.count >= 100 {
-            cx.done(
+            cx.fail(
                 request.command,
-                Err("Lighter history page saturated without a continuation cursor".into()),
+                "Lighter history page saturated without a continuation cursor",
             );
             return;
         }
@@ -822,13 +810,13 @@ impl Lighter {
             ),
         }
         .map_err(|e| e.to_string());
-        cx.done(request.command, result);
+        match result {
+            Ok(data) => cx.done(request.command, data),
+            Err(error) => cx.fail(request.command, error),
+        };
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(
-            request.command,
-            Err(format!("Lighter history failed: {error}")),
-        );
+        cx.fail(request.command, format!("Lighter history failed: {error}"));
     }
 }
 fn millis(time: f64) -> f64 {

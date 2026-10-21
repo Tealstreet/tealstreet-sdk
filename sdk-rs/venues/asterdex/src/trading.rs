@@ -432,9 +432,8 @@ impl AsterDex {
             }
             _ => cx.done(
                 id,
-                Ok(job
-                    .result
-                    .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default())),
+                job.result
+                    .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default()),
             ),
         }
     }

@@ -32,8 +32,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|action| matches!(
                 action,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("missing-native-order") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("missing-native-order") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -60,7 +60,7 @@ fn an_empty_cancellation_list_remains_a_successful_noop() {
     );
     assert!(actions.iter().any(|action| matches!(
         action,
-        Action::Notice(Notice::CommandDone { command: 992, result: Ok(result) })
+        Action::Notice(Notice::CommandDone { command: 992, result })
             if result == "[]"
     )));
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
@@ -141,10 +141,7 @@ fn invalid_later_split_prevents_every_earlier_plain_or_protection_write() {
         );
         assert!(actions.iter().any(|action| matches!(
             action,
-            Action::Notice(Notice::CommandDone {
-                command: 903,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 903, .. })
         )));
         assert!(
             !e.store()
@@ -159,12 +156,14 @@ fn order(extra: &str) -> PlaceOrderOpts {
 }
 fn done(e: &mut TestEngine, command: u32) -> Result<String, String> {
     e.drain_actions()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { command: c, result }) = a {
-                if c == command { Some(result) } else { None }
-            } else {
-                None
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
+                Some(Ok(result))
             }
+            Action::Notice(Notice::CommandFailed { command: c, error }) if c == command => {
+                Some(Err(error.legacy_text()))
+            }
+            _ => None,
         })
         .expect("command completion")
 }
@@ -183,8 +182,8 @@ fn unsupported_stp_on_final_batch_member_prevents_all_io() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("self-trade prevention")
+            Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.legacy_text().contains("self-trade prevention")
         )));
         assert!(
             !e.store()
@@ -211,13 +210,11 @@ fn unsupported_bybit_controls_on_final_batch_member_prevent_all_io() {
         );
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 1,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
         assert!(
             !e.store()
                 .orders()
@@ -269,10 +266,11 @@ fn native_client_id_is_verbatim_and_whole_batch_rejects_before_writes() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 #[test]
 fn chunks_at_five_with_one_second_cooldown_and_never_retries_unknown_writes() {
@@ -317,10 +315,11 @@ fn chunks_at_five_with_one_second_cooldown_and_never_retries_unknown_writes() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 #[test]
 fn native_amend_preserves_order_identity_and_attached_siblings() {
@@ -438,10 +437,11 @@ fn cancel_item_failure_aborts_replacement_and_keeps_parent_open() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
 }
 #[test]
@@ -530,10 +530,11 @@ fn split_order_rejection_cannot_resend_already_accepted_chunks() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert!(
         !e.store()
             .orders()
@@ -624,10 +625,11 @@ fn incomplete_cancel_ack_never_places_replacement() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
 }
 #[test]

@@ -204,7 +204,7 @@ fn reply(e: &mut Engine<Grvt>, r: &HttpRequest, status: u16, body: &str) -> Vec<
 fn done(actions: &[Action], id: u32) -> Option<Result<String, String>> {
     actions.iter().find_map(|a| match a {
         Action::Notice(Notice::CommandDone { command, result }) => {
-            (*command == id).then(|| result.clone())
+            (*command == id).then(|| Ok(result.clone()))
         }
         Action::Notice(Notice::CommandFailed { command, error }) => {
             (*command == id).then(|| Err(error.legacy_text()))

@@ -446,10 +446,7 @@ impl BitgetFutures {
         } else {
             match job.error.take() {
                 Some(error) => self.trade_fail(cx, &job, error),
-                None => cx.done(
-                    job.id,
-                    Ok(serde_json::to_string(&job.ids).expect("order ids")),
-                ),
+                None => cx.done(job.id, serde_json::to_string(&job.ids).expect("order ids")),
             }
             self.resume_trading(cx);
         }

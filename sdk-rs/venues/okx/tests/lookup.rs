@@ -143,7 +143,11 @@ fn done(out: Vec<Action>) -> Result<Lookup, String> {
             Action::Notice(Notice::CommandDone {
                 command: 991,
                 result,
-            }) => Some(result.map(|text| serde_json::from_str(&text).unwrap())),
+            }) => Some(Ok(serde_json::from_str(&result).unwrap())),
+            Action::Notice(Notice::CommandFailed {
+                command: 991,
+                error,
+            }) => Some(Err(error.legacy_text())),
             _ => None,
         })
         .expect("completed query")
@@ -363,7 +367,7 @@ fn cached_order_lookup_stays_read_only_without_private_credentials() {
     let result = out
         .into_iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.unwrap()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
         })
         .expect("cached completion");

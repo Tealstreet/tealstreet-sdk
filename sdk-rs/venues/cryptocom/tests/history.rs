@@ -6,7 +6,10 @@ fn done(h: &Harness, command: u32) -> Result<&str, &str> {
         .iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: c, result }) if *c == command => {
-                Some(result.as_deref().map_err(String::as_str))
+                Some(Ok(result.as_str()))
+            }
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(Err(error.message.as_str()))
             }
             _ => None,
         })
