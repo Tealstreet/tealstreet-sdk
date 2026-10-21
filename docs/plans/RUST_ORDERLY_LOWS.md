@@ -20,3 +20,19 @@ Branch: `fix/rust-orderly-port-lows`, from current `origin/feat/rust-rewrite`.
 
 Official history contract:
 https://orderly.network/docs/build-on-omnichain/restful-api/public/get-kline-history
+
+## Verification and review
+
+Both bounded-endpoint selection and trailing display regressions failed against
+previous behavior before implementation. Orderly + Binance native tests: 375
+passed. After correcting one-sided bound defaults and adding future/no-data/WS
+cases, the two touched test targets pass all 51 cases. Touched fmt, strict
+all-target Clippy and banned-pattern checks pass; public/private replay,
+whole-repository TypeScript gates and WASM builds run in CI per lane rules.
+
+Independent review found the history API requires both bounds despite docs
+omitting that label. Read-only calls to the configured EVM host confirmed
+from=0 returns newest-N and absent to/from rejects with -1005. Implemented
+from=0 / to=engine-time defaults and empty future-from results; final review
+reports no remaining actionable correctness findings. Trailing display uses
+the official SDK formula instead of TS's incorrect BUY/rate calculation.

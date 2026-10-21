@@ -1248,3 +1248,11 @@ or deliberately extract that helper before deleting the Hyperliquid TS tree.
 The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
 and transport dependencies. Generic consumer fixtures do not authorize deleting
 those oracle dependencies or enabling measurement-gated order controls.
+
+### Orderly port-review display/read corrections
+
+Orderly `fetchOHLCV` callers supplying `from`/`to` now receive native history
+within those bounds rather than a locally filtered latest-only window. Consumers
+keep the same candle shape. Order lists/chart overlays see a real trailing
+trigger derived from native extreme/callback value or rate: BUY adds, SELL
+subtracts. This corrects TS's BUY/rate display, with no write-contract change.
