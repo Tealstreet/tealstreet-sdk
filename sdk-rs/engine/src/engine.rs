@@ -1748,22 +1748,8 @@ impl<V: Venue> Engine<V> {
     fn release_held(&mut self, now: f64) {
         // Bookkeeping reads this event's outcomes here rather than in `Cx`, so
         // venues that do not opt in compile none of it.
-        for action in &self.io.actions {
-            match action {
-                Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.io
-                        .placement_acks
-                        .finished(*command, result.as_deref().ok(), now);
-                }
-                Action::Notice(Notice::CommandFailed { command, .. }) => {
-                    self.io.placement_acks.finished(*command, None, now);
-                }
-                _ => {}
-            }
-        }
-        for fill in &self.io.fills {
-            self.io.placement_acks.filled(&fill.order_id, now);
-        }
+        let io = &mut self.io;
+        io.placement_acks.observe(&io.actions, &io.fills, now);
         let released = self.io.placement_acks.release(&self.store, now);
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.

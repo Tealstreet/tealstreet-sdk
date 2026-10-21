@@ -8,6 +8,7 @@
 //! id it names is stored, or until `ACK_WAIT_MS` passes; it is then dispatched
 //! unchanged, so an id that never appears still fails explicitly at the venue.
 
+use crate::engine::{Action, Fill, Notice};
 use crate::{Command, CommandId, Store};
 
 /// How long an acknowledged id may wait for the store before a command naming
@@ -151,6 +152,26 @@ impl PlacementAcks {
         }
     }
 
+    /// Track this event's placement outcomes and fills. Non-generic and out of
+    /// line, so the opted-in venue engines share one copy in a combined wasm.
+    #[inline(never)]
+    pub fn observe(&mut self, actions: &[Action], fills: &[Fill], now: f64) {
+        for action in actions {
+            match action {
+                Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.finished(*command, result.as_deref().ok(), now);
+                }
+                Action::Notice(Notice::CommandFailed { command, .. }) => {
+                    self.finished(*command, None, now);
+                }
+                _ => {}
+            }
+        }
+        for fill in fills {
+            self.filled(&fill.order_id, now);
+        }
+    }
+
     /// A fill shortens the wait to `FILL_GRACE_MS`: a venue may drop a filled
     /// order rather than store it, while a partial fill's row may still follow.
     pub fn filled(&mut self, order_id: &str, now: f64) {
@@ -178,6 +199,7 @@ impl PlacementAcks {
     /// Whether to hold `command` until its acknowledged ids are stored. A
     /// command naming an id that an earlier held command names waits behind it,
     /// so writes to one order keep their arrival order.
+    #[inline(never)]
     pub fn hold(&mut self, store: &Store, command: &Command, now: f64) -> bool {
         let behind = named_ids(command).iter().any(|id| {
             self.held.iter().any(|(held, _)| {
@@ -206,6 +228,7 @@ impl PlacementAcks {
     /// Commands whose ids are now stored or whose wait expired, in arrival order.
     /// Runs on every engine event, so with nothing held it scans the store only
     /// when its order count moved (an acknowledged order stored, then removed).
+    #[inline(never)]
     pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
         if self.held.is_empty() {
             self.acked.retain(|_, expiry| expiry > now);
@@ -254,6 +277,7 @@ impl PlacementAcks {
     /// When the earliest releasable held command is due, for the engine's
     /// wake-up timer. Commands waiting behind another are released with it.
     /// Always later than `now` after `release`, so the timer cannot spin.
+    #[inline(never)]
     pub fn next_deadline(&self, store: &Store, now: f64) -> Option<f64> {
         if self.held.is_empty() {
             return None;
