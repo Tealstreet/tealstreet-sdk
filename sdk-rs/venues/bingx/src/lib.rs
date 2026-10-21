@@ -381,10 +381,12 @@ impl Bingx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect_channel(
-            paths::PUBLIC_WS.to_owned(),
-            safe_cex_engine::SocketChannel::Public,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS.to_owned())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -729,43 +731,44 @@ impl Venue for Bingx {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
-                match serde_json::from_str::<Contract<'_>>(item) {
-                    Ok(m) => rows.push(Market {
-                        id: m.symbol.to_string(),
-                        symbol: m.symbol.replace('-', ""),
-                        pretty_symbol: None,
-                        base: m.asset.into_owned(),
-                        quote: m.currency.into_owned(),
-                        active: m.status == 1.,
-                        precision: Precision {
-                            amount: 10f64.powi(m.quantity_precision as i32).recip(),
-                            price: 10f64.powi(m.price_precision as i32).recip(),
+                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| Market {
+                    id: m.symbol.to_string(),
+                    symbol: m.symbol.replace('-', ""),
+                    pretty_symbol: None,
+                    base: m.asset.into_owned(),
+                    quote: m.currency.into_owned(),
+                    active: m.status == 1.,
+                    precision: Precision {
+                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                        price: 10f64.powi(m.price_precision as i32).recip(),
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: m.trade_min_limit,
+                            max: f64::INFINITY,
                         },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.trade_min_limit,
-                                max: f64::INFINITY,
+                        leverage: MinMax {
+                            min: 1.,
+                            max: if m.max_long_leverage > 0. {
+                                m.max_long_leverage
+                            } else {
+                                100.
                             },
-                            leverage: MinMax {
-                                min: 1.,
-                                max: if m.max_long_leverage > 0. {
-                                    m.max_long_leverage
-                                } else {
-                                    100.
-                                },
-                            },
-                            price: None,
                         },
-                        contract_size: None,
-                        is_expiring: None,
-                        is_inverse: None,
-                        is_spot: None,
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    }),
-                    Err(_) => {
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_perpetual: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                });
+                match market {
+                    Ok(market) if market.precision.is_tradable() => rows.push(market),
+                    _ => {
                         safe_cex_engine::startup::skipped_row(cx);
                         skipped.push(row_symbol(item).unwrap_or_default().into_owned())
                     }

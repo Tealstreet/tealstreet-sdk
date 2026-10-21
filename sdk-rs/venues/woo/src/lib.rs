@@ -335,10 +335,18 @@ impl Woo {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(
-            format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
-            SocketChannel::Public,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{host}{}",
+                    self.options
+                        .application_id
+                        .as_deref()
+                        .unwrap_or("undefined")
+                ))
+                .channel(SocketChannel::Public),
+            ),
+        );
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
         if let Some(socket) = self.public.socket.filter(|_| self.public.open) {

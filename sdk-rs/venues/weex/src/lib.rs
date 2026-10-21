@@ -304,8 +304,12 @@ impl WeexFutures {
         true
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket =
-            Some(cx.connect_channel(paths::PUBLIC_WS, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS)
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -693,9 +697,10 @@ impl Venue for WeexFutures {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
             Task::Markets(rows) => {
-                match serde_json::from_str::<Symbol<'_>>(item) {
-                    Ok(r) => rows.extend(r.market()),
-                    Err(_) => {
+                match serde_json::from_str::<Symbol<'_>>(item).map(Symbol::market) {
+                    Ok(Some(market)) if market.precision.is_tradable() => rows.push(market),
+                    Ok(None) => {}
+                    _ => {
                         p.skipped.push(row_symbol(item));
                         safe_cex_engine::startup::skipped_row(cx);
                     }

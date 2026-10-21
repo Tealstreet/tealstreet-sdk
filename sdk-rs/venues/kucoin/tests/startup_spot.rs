@@ -395,3 +395,39 @@ fn listed_pair_missing_from_the_ticker_snapshot_is_valued_at_zero_with_one_warni
     warned += count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
     assert_eq!(warned, 1);
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for (valid, bad) in [
+        (r#""priceIncrement":"0.01""#, r#""priceIncrement":"0""#),
+        (r#""baseIncrement":"0.01""#, r#""baseIncrement":"-1""#),
+        (r#""priceIncrement":"0.01""#, r#""priceIncrement":"""#),
+    ] {
+        let body = CATALOGUE.replace(valid, bad);
+        assert_ne!(body, CATALOGUE);
+        let mut engine = public_engine();
+        engine.start(0.0);
+        let request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
+                _ => None,
+            })
+            .expect("catalogue request");
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        assert!(engine.store().market("BTC-USDT").is_some());
+        assert!(engine.store().market("ETH-USDT").is_none(), "{bad}");
+        assert!(engine.drain_actions().any(|action| matches!(action,
+            Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    }
+}

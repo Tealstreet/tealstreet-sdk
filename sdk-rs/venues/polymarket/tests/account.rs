@@ -2,11 +2,51 @@ use safe_cex_engine::model::OrderSide;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions, sign};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 const KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 const SIGNER: &str = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
 const MARKETS: &str = r#"[{"conditionId":"0x123","slug":"election","question":"Who wins?","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":5,"active":true,"closed":false}]"#;
 const ORDER: &str = r#"{"id":"o1","asset_id":"1","side":"BUY","price":"0.5","original_size":"10","size_matched":"2","status":"LIVE","order_type":"GTC","created_at":"1700000000"}"#;
 const POSITIONS: &str = r#"[{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0,"cashPnl":-5,"redeemable":true,"mergeable":false}]"#;
+
+#[test]
+fn periodic_pause_keeps_dirty_snapshot_repair_active() {
+    let mut h = H::new();
+    h.initial();
+    h.event(Event::PollScaleChanged {
+        scale: f64::INFINITY,
+    });
+    // Opening the private stream starts reconciliation; another authenticated
+    // event while it is busy makes the current snapshot dirty.
+    h.ws(r#"{"event_type":"authenticated"}"#);
+    h.initial();
+    let &(timer, at) = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 250.)
+        .expect("urgent dirty repair");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert!(h.http.iter().any(|r| r.url.contains("/balance-allowance")));
+    h.initial();
+    // Ordinary repair completes, then returns to a parked recurring poll.
+    h.e.handle(
+        h.now,
+        Event::PollScaleChanged {
+            scale: 1_500. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> =
+        h.e.drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+    assert_eq!(resumed, [h.now + 1_500.]);
+}
 struct H {
     e: Engine<Polymarket>,
     now: f64,
@@ -16,6 +56,7 @@ struct H {
     opened: bool,
     sends: Vec<String>,
     logs: Vec<String>,
+    errors: Vec<String>,
     timers: Vec<(TimerId, f64)>,
 }
 impl H {
@@ -35,6 +76,7 @@ impl H {
             opened: false,
             sends: vec![],
             logs: vec![],
+            errors: vec![],
             timers: vec![],
         };
         h.e.start(h.now);
@@ -72,7 +114,10 @@ impl H {
                     ..
                 } => self.public = Some(socket),
                 Action::WsSend { text, .. } => self.sends.push(text),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
+                    if level == safe_cex_engine::LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
                     self.logs.push(message)
                 }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -317,7 +362,8 @@ fn malformed_money_and_missing_holding_identity_fail_closed() {
     h.initial();
     h.poll();
     h.response("/balance-allowance", 200, r#"{"balance":"NaN"}"#);
-    h.response("/data/orders", 200, r#"{"data":[{"id":"bad","asset_id":"1","side":"BUY","price":"bogus","original_size":"10"}],"next_cursor":"LTE="}"#);
+    // A malformed known order keeps its stored copy; the identity-less holding keeps all.
+    h.response("/data/orders", 200, r#"{"data":[{"id":"o1","asset_id":"1","side":"BUY","price":"bogus","original_size":"10"}],"next_cursor":"LTE="}"#);
     h.response(
         "/positions",
         200,
@@ -366,6 +412,168 @@ fn malformed_position_row_keeps_its_known_holding_while_other_rows_commit() {
         h.response("/positions", 200, "[]");
         assert!(h.e.store().positions().is_empty());
     }
+}
+#[test]
+fn one_malformed_order_and_holding_keep_their_stored_copies_while_peers_commit() {
+    let o2 = ORDER.replace("o1", "o2").replace("\"BUY\"", "\"SELL\"");
+    let read = |h: &mut H, orders: &[&str], positions: &str| {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{}],"next_cursor":"LTE="}}"#, orders.join(",")),
+        );
+        h.response("/positions", 200, positions);
+    };
+    let mut h = H::new();
+    h.initial();
+    let no = r#"{"asset":"2","size":3,"avgPrice":0.4,"curPrice":0.5,"mergeable":true}"#;
+    read(
+        &mut h,
+        &[ORDER, &o2],
+        &format!(r#"[{},{no}]"#, &POSITIONS[1..POSITIONS.len() - 1]),
+    );
+    assert_eq!(h.e.store().positions().len(), 2);
+    assert_eq!(h.e.store().orders().len(), 2);
+    h.logs.clear();
+
+    let o1 = ORDER.replace("\"price\":\"0.5\"", "\"price\":\"0.6\"");
+    let bad_o2 = o2.replace("\"price\":\"0.5\"", "\"price\":\"bogus\"");
+    read(
+        &mut h,
+        &[&o1, &bad_o2],
+        r#"[{"asset":"1","size":12,"avgPrice":0.5,"curPrice":0.5},{"asset":"2","size":"NaN","avgPrice":0.4}]"#,
+    );
+    let store = h.e.store();
+    let contracts = |symbol: &str| {
+        store
+            .positions()
+            .iter()
+            .find(|p| p.symbol == symbol)
+            .map(|p| p.contracts)
+    };
+    assert_eq!(contracts("election-Yes"), Some(12.0));
+    assert_eq!(contracts("election-No"), Some(3.0));
+    let holdings = store.prediction_holdings().unwrap();
+    assert!(holdings.iter().any(|h| h.market == 1 && h.mergeable));
+    assert!(holdings.iter().any(|h| h.market == 0 && !h.redeemable));
+    assert_eq!(store.order("o1").unwrap().price, 0.6);
+    assert_eq!(store.order("o2").unwrap().price, 0.5);
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l == "Polymarket skipped unmappable order o2")
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l == "Polymarket skipped malformed holding 2")
+    );
+    assert!(
+        !h.logs
+            .iter()
+            .any(|l| l.contains("bogus") || l.contains("NaN"))
+    );
+
+    read(
+        &mut h,
+        &[&o1],
+        r#"[{"asset":"1","size":12,"avgPrice":0.5,"curPrice":0.5}]"#,
+    );
+    let store = h.e.store();
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.prediction_holdings().unwrap().len(), 1);
+    assert!(store.order("o2").is_none());
+    assert_eq!(store.orders().len(), 1);
+}
+#[test]
+fn upnl_sums_committed_holdings_and_an_unstored_rejected_holding_is_an_error() {
+    let mut h = H::new();
+    h.initial();
+    assert_eq!(h.e.store().balance().upnl, -5.0);
+    let held = |pnl: i32| {
+        format!(r#"{{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0.5,"cashPnl":{pnl}}}"#)
+    };
+    let balance = |h: &mut H| {
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+    };
+    let orders = |h: &mut H| {
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+        );
+    };
+
+    // A new holding with an unreadable size has no stored copy: skipped as an error,
+    // and only its unknown PnL leaves the sum.
+    h.poll();
+    balance(&mut h);
+    orders(&mut h);
+    h.response(
+        "/positions",
+        200,
+        &format!(
+            r#"[{},{{"asset":"2","size":"NaN","avgPrice":0.4}}]"#,
+            held(-3)
+        ),
+    );
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().balance().upnl, -3.0);
+    assert!(
+        h.errors
+            .iter()
+            .any(|m| m == "Polymarket skipped malformed holding 2")
+    );
+
+    // The next balance read and a clean snapshot keep deriving from committed rows.
+    h.poll();
+    balance(&mut h);
+    assert_eq!(h.e.store().balance().upnl, -3.0);
+    orders(&mut h);
+    h.response("/positions", 200, &format!("[{}]", held(-1)));
+    assert_eq!(h.e.store().balance().upnl, -1.0);
+}
+#[test]
+fn a_repeated_holding_skip_logs_once() {
+    let mut h = H::new();
+    h.initial();
+    let snapshot = |h: &mut H| {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+        );
+        h.response(
+            "/positions",
+            200,
+            r#"[{"asset":"2","size":"NaN","avgPrice":0.4}]"#,
+        );
+    };
+    snapshot(&mut h);
+    snapshot(&mut h);
+    let skipped = |h: &H| {
+        h.logs
+            .iter()
+            .filter(|m| *m == "Polymarket skipped malformed holding 2")
+            .count()
+    };
+    assert_eq!(skipped(&h), 1);
 }
 #[test]
 fn unusable_current_price_still_commits_the_fresh_holding_size() {
@@ -679,6 +887,7 @@ fn unknown_owned_token_is_visible_failure_and_retains_previous_holdings() {
         h.poll();
         h.response("/positions", 200, &owned);
         assert_eq!(h.e.store().positions(), before, "{unknown}");
+        // With nothing stored, an unfinished catalogue cannot prove the account flat.
         let mut h = skipped_catalogue();
         h.response("/positions", 200, &owned);
         assert!(!h.e.store().loaded().positions, "{unknown}");
@@ -756,12 +965,24 @@ fn bbo_only_peer_never_uses_placeholder_zero_to_value_funded_holdings() {
             200,
             r#"[{"asset":"2","size":10,"avgPrice":0.5}]"#,
         );
-        assert!(!h.e.store().loaded().positions);
-        assert!(
-            h.logs
-                .iter()
-                .any(|message| message.contains("owned holding price unavailable"))
-        );
+        assert!(h.e.store().positions().is_empty());
+        if partial_seed {
+            // The seed settled without a price: the holding is skipped, visibly.
+            assert!(h.e.store().loaded().positions);
+            assert!(
+                h.errors
+                    .iter()
+                    .any(|m| m == "Polymarket skipped owned holding 2: price unavailable")
+            );
+        } else {
+            // The seed is still loading, so the snapshot holds.
+            assert!(!h.e.store().loaded().positions);
+            assert!(
+                h.logs
+                    .iter()
+                    .any(|message| message.contains("owned holding price unavailable"))
+            );
+        }
     }
 }
 
@@ -773,4 +994,126 @@ fn user_supervisor_bounds_handshake_and_backs_off_without_changing_subscriptions
     let socket = h.private.unwrap();
     h.event(Event::WsOpened { socket });
     socket_checks::flaps(h.e, socket, h.now);
+}
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let mut h = H::new();
+    h.initial();
+    let mut e = h.e;
+    let now = 1_700_000_001_000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.contains("/balance-allowance")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.contains("/balance-allowance") {
+                r#"{"balance":"12345678","allowances":{}}"#
+            } else if r.url.contains("/data/orders") {
+                r#"{"data":[],"next_cursor":"LTE="}"#
+            } else {
+                POSITIONS
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
