@@ -310,7 +310,7 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
         warnings,
         [
             "Crypto.com skipped 2 unmappable instrument rows (first: XRPUSD-PERP)",
-            "Public discovery read failed; retry scheduled",
+            "Startup read failed; retry scheduled",
             "Crypto.com skipped 1 unmappable ticker rows (first: ETHUSD-PERP)"
         ]
     );
