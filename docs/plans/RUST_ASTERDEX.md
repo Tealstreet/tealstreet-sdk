@@ -353,3 +353,19 @@ clippy, safe-cex typecheck, shellsyntax/fmt pass. Merged harness256/256 passes,
 including oracle-loading isolation. Root audited incoming frame units and
 KuCoin-only request corrections: Aster's currency/orphan and strict oracles stay
 unchanged. Final post-integration gate chain and green exact-head PR CI follow.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Revalidate startup credentials, ACCOUNT_UPDATE ep/cr, long fills, keepalive
+   and balance findings. Strike stale findings and record risky relaxations.
+2. Permit absent entry price only for explicitly valid zero position amount;
+   preserve strict present values, nonzero exposure, timestamps and hedge-leg close.
+3. Page explicitly bounded symbol fill history across seven-day windows using
+   RangeWalk and bounded delays/budgets, deduplicate native execution identity,
+   normalize cumulative PnL once over all native rows before filtering invalid
+   sizes and any requested order. Never return a plausible partial on failure.
+   Respect orderId precedence by applying bounded order filtering locally;
+   preserve unbounded reads and equal-bound semantics.
+4. Reproduce safe gaps, test edge/page/PnL/failure cases, run focused Aster/Binance
+   tests and touched fmt/strict Clippy/bans, independent review and exact-head CI.
+   Update audit, package spec and affected callers, merge under lane guards.
