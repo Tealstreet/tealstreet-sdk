@@ -156,8 +156,10 @@ Medium:
    under a compiled TS/Rust parity matrix. Public-mode/signing rules now come
    from one JSON table embedded by Rust and synchronously imported by TS;
    raw `publicMode` intent lets the registry own Paradex's explicit-private
-   rule. CI checks every registered name. Follow-ups: HyroTrader endpoints and
-   the payload-signer name branch in `createHost`.
+   rule. CI checks every registered name. The registry also selects HyroTrader
+   endpoints from raw config and refuses private non-Paradex payload signers;
+   the WASM constructor bridge preserves typed error classification. Factory
+   routing exceptions and native/harness polling inputs remain supported.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:
    `model::Interval` decoded at the command boundary; AsterDEX, Kraken and
