@@ -2,7 +2,7 @@
 //! back off and retry forever; a documented key refusal fails startup exactly once.
 mod support;
 
-use safe_cex_engine::{ErrorKind, Event, ReadCredentials};
+use safe_cex_engine::{ErrorKind, Event, ReadCredentials, Response};
 use safe_cex_venue_bitget::Options;
 use support::*;
 
@@ -70,11 +70,8 @@ fn run_for(h: &mut Harness, ms: f64) {
 fn transient_probe_failures_back_off_and_the_account_still_loads() {
     let mut h = Harness::private_started();
     let failures: [(u16, &str); 7] = [
-        (
-            429,
-            r#"{"code":"429","msg":"Too Many Requests","data":null}"#,
-        ),
-        (429, "Too Many Requests"),
+        (400, "Bad Request"),
+        (404, "Not Found"),
         (
             503,
             r#"{"code":"40015","msg":"System is abnormal","data":null}"#,
@@ -308,4 +305,32 @@ fn generic_socket_login_failure_reconnects() {
     }
     assert!(private_connects(&h) > 1, "reconnects");
     assert!(h.startup_failures.is_empty());
+}
+
+#[test]
+fn rate_limited_probe_waits_out_the_rest_pause() {
+    // The probe shares the private REST pause: Retry-After, else 30 s.
+    let limited = r#"{"code":"429","msg":"Too Many Requests","data":null}"#;
+    for (status, headers, body, wait) in [
+        (429, "Retry-After: 120", limited, 120_000.),
+        (418, "", "I'm a teapot", 30_000.),
+        (429, "", limited, 30_000.),
+    ] {
+        let mut h = Harness::private_started();
+        let probe = h.take(SETTINGS);
+        h.event(Event::HttpResponse {
+            request: probe.id,
+            response: Response {
+                status,
+                headers,
+                body,
+            },
+        });
+        let from = h.now;
+        run_for(&mut h, wait - 1.);
+        assert!(!has(&h, SETTINGS), "{status} {headers:?}: retried early");
+        until_requested(&mut h, SETTINGS).expect("probe retried");
+        assert_eq!(h.now - from, wait, "{status} {headers:?}");
+        assert!(h.startup_failures.is_empty());
+    }
 }

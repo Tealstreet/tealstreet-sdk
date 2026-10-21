@@ -58,6 +58,9 @@ impl Rig {
                         };
                         reply_at(&mut self.engine, &request, self.now, 200, &body);
                     }
+                    Action::WsConnect { headers, .. } if !headers.is_empty() => {
+                        panic!("unexpected authenticated upgrade")
+                    }
                     Action::WsConnect {
                         socket,
                         url,
@@ -76,9 +79,6 @@ impl Rig {
                         self.timers.retain(|(pending, _)| *pending != timer)
                     }
                     Action::Notice(_) => {}
-                    Action::WsConnectWithHeaders { .. } => {
-                        panic!("unexpected authenticated upgrade")
-                    }
                     Action::SignPayload { .. } => {
                         panic!("unexpected delegated signing request")
                     }

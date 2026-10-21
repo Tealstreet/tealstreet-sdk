@@ -371,7 +371,9 @@ impl Bitrue {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(safe_cex_engine::SocketSpec::new(PUBLIC).channel(SocketChannel::Public)),
+        );
     }
     fn subscription(
         &self,

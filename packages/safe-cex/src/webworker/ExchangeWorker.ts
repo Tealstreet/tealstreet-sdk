@@ -8,7 +8,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
-import { exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, exchangeErrorTags } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
@@ -244,6 +244,7 @@ export class ExchangeWorker {
           {
             sendToSentry: effectiveSendToSentry,
             suppressConsoleLog,
+            classified: classifiedError(error),
             sentryData: {
               error: serializableError,
               tags: {
@@ -1101,6 +1102,7 @@ export class ExchangeWorker {
         'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
       name: 'EngineDeadError',
       code: 'ENGINE_DEAD',
+      kind: 'internal',
     });
     // Stop TWAPs while their handler context is still current, so the final
     // completed state reaches the main thread that persists and resumes them.

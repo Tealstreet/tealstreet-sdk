@@ -31,6 +31,7 @@ it('keeps native interrupted-write identity in the correlated failure reply', as
         success: false,
         result: expect.objectContaining({
           code: 'ENGINE_DEAD',
+          kind: 'internal',
           outcome: 'unknown',
           clientOrderId: 'client-1',
           clientOrderIds: ['client-1', 'client-2'],

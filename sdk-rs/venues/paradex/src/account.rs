@@ -520,7 +520,13 @@ impl Account {
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
-            self.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Private));
+            self.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(self.ws())
+                        .channel(SocketChannel::Private)
+                        .binary(),
+                ),
+            );
             self.supervisor.connecting(cx);
         }
     }

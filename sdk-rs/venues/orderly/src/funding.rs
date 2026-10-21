@@ -40,12 +40,13 @@ impl Orderly {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             connection.supervisor.connecting(cx);
         }
-        connection.socket = Some(cx.connect_feed(
-            url,
-            safe_cex_engine::SocketChannel::Public,
-            format!("funding-{index}"),
-            connection.recover,
-        ));
+        connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(safe_cex_engine::SocketChannel::Public)
+                    .feed(format!("funding-{index}"), connection.recover),
+            ),
+        );
         connection.payload_at = cx.now;
     }
     fn funding_drop(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {

@@ -1020,10 +1020,12 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            "wss://advanced-trade-ws-user.coinbase.com",
-            SocketChannel::Private,
-        ));
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
+                    .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
