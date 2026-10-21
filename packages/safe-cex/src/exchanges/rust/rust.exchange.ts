@@ -446,9 +446,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
-    const ignoredCoinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName) &&
-      [options.secondary_key, options.secondary_secret, options.secondary_passphrase].some((value) => value !== undefined);
-    if (ignoredCoinbaseReadOptions) {
+    const coinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName)
+      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
+      : [];
+    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
+    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
+    if (coinbaseReadOptions.some((value) => value !== undefined)) {
       // The native JWT signer uses primary credentials; its egress must use the same account policy.
       const {
         secondary_key: _readKey,

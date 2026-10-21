@@ -61,11 +61,12 @@ fn started(read: bool) -> (Engine<MexcFutures>, Vec<Action>) {
     let r = http(&a, "contract/detail");
     let a = reply(&mut e, &r, 200, MARKETS);
     assert!(auth(&a).is_empty());
-    let r = http(&a, "contract/ticker");
-    let a = reply(&mut e, &r, 200, TICKERS);
+    // The position mode read leaves with the ticker seed.
+    let ticker = http(&a, "contract/ticker");
+    let mode = http(&a, "position_mode");
+    let a = reply(&mut e, &ticker, 200, TICKERS);
     assert!(auth(&a).is_empty());
-    let r = http(&a, "position_mode");
-    let a = reply(&mut e, &r, 200, r#"{"success":true,"code":0,"data":2}"#);
+    let a = reply(&mut e, &mode, 200, r#"{"success":true,"code":0,"data":2}"#);
     assert_eq!(
         auth(&a),
         vec![(
@@ -152,4 +153,31 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
             "{status} {body}"
         );
     }
+}
+
+#[test]
+fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_reads() {
+    let (mut e, a) = started(false);
+    let ok = r#"{"success":true,"code":0,"data":[]}"#;
+    let refused = r#"{"success":false,"code":701,"message":"Access denied"}"#;
+    let orders = |a: &[Action]| -> Vec<AuthOutcome> {
+        auth(a)
+            .into_iter()
+            .filter(|(_, scope, _)| *scope == AccountReadScope::Orders)
+            .map(|(_, _, outcome)| outcome)
+            .collect()
+    };
+    let regular = http(&a, "order/list/open_orders");
+    let plan = http(&a, "planorder/list/orders");
+    let stop = http(&a, "stoporder/list/orders");
+    assert_eq!(
+        orders(&reply(&mut e, &regular, 200, ok)),
+        [AuthOutcome::Accepted]
+    );
+    assert_eq!(
+        orders(&reply(&mut e, &plan, 200, refused)),
+        [AuthOutcome::Rejected]
+    );
+    // Plan orders still refuse the key, so stop orders' success is no evidence.
+    assert!(orders(&reply(&mut e, &stop, 200, ok)).is_empty());
 }

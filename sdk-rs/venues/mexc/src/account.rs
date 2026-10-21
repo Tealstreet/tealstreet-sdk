@@ -1441,7 +1441,24 @@ fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
     })
 }
 impl MexcFutures {
+    /// One order endpoint's rejection holds back its siblings' acceptance.
     pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let outcome = self.account_auth_evidence(pending, response);
+        match pending {
+            Pending::Account(Request::Snapshot(s)) => match s.scope {
+                Scope::Regular => self.orders_auth.report(0, outcome),
+                Scope::Plan => self.orders_auth.report(1, outcome),
+                Scope::Stop => self.orders_auth.report(2, outcome),
+                Scope::Assets | Scope::Positions => outcome,
+            },
+            _ => outcome,
+        }
+    }
+    fn account_auth_evidence(
         &self,
         pending: &Pending,
         response: &Response<'_>,

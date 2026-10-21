@@ -163,7 +163,8 @@ it.each(aliases)(
       await r.exchange.start();
       expect(r.construct).toHaveBeenCalledOnce();
       expect(r.exchange.options).not.toHaveProperty('secondaryProxyUrl');
-      expect(r.logs).toHaveBeenCalledOnce();
+      // An empty saved field is no read key: it is dropped without a warning.
+      expect(r.logs).toHaveBeenCalledTimes(Object.values(saved).some(Boolean) ? 1 : 0);
       r.exchange.dispose();
     }
   },

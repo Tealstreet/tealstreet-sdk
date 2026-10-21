@@ -5,9 +5,11 @@
 // Clients open a WebSocket to the object and speak JSON:
 //   -> { op: 'start', venue, options }      options as WasmEngine takes them
 //   -> { op: 'command', id, command }       any EngineHost command
+//   -> { op: 'accountAuth' }                opts this client in to accountAuth evidence
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
+//      | { op: 'accountAuth', credential, scope, outcome }  (opted-in clients only)
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -184,6 +186,8 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
     constructor(state) {
       this.state = state;
       this.clients = new Set();
+      // Clients that predate accountAuth may reject an unknown op, so it is opt-in.
+      this.accountAuthClients = new Set();
       this.host = undefined;
       this.timers = [];
     }
@@ -207,6 +211,10 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
     async receive(client, data) {
       if (typeof data !== 'string') return;
       const message = JSON.parse(data);
+      if (message.op === 'accountAuth') {
+        this.accountAuthClients.add(client);
+        return;
+      }
       if (message.op === 'start' && !this.host) {
         const { WasmEngine } = await loadEngine(message.venue);
         if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
@@ -227,6 +235,10 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
               this.broadcast(this.startupFailure);
             },
             onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
+            onAccountAuth: (result) => {
+              const text = JSON.stringify({ op: 'accountAuth', ...result });
+              for (const optedIn of this.accountAuthClients) optedIn.send(text);
+            },
           },
         );
         this.host.start();
@@ -249,6 +261,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
     /** The last client leaving stops the engine and drops its credentials. */
     leave(client) {
       this.clients.delete(client);
+      this.accountAuthClients.delete(client);
       if (this.clients.size > 0) return;
       this.timers.forEach(clearInterval);
       this.timers = [];

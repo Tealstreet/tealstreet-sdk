@@ -59,6 +59,8 @@ pub struct MexcFutures {
     options: Options,
     credentials: Option<sign::Credentials>,
     account: account::Account,
+    /// Regular, plan and stop order reads share the orders scope.
+    orders_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::Trading,
     public: Connection,
     public_supervisor: Supervisor,
@@ -87,6 +89,7 @@ impl MexcFutures {
             options,
             credentials,
             account: account::Account::new(),
+            orders_auth: Default::default(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             public_supervisor: Supervisor::new(Config {

@@ -135,6 +135,9 @@ pub struct WeexFutures {
     active_symbols: HashSet<String>,
     deferred_gets: Vec<DeferredGet>,
     account: account::State,
+    /// Normal/Algo order reads and Config/Metadata settings reads share a scope.
+    orders_auth: safe_cex_engine::MergedScopeAuth,
+    settings_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
@@ -188,6 +191,8 @@ impl WeexFutures {
             active_symbols: HashSet::new(),
             deferred_gets: Vec::new(),
             account: account::State::new(),
+            orders_auth: Default::default(),
+            settings_auth: Default::default(),
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,

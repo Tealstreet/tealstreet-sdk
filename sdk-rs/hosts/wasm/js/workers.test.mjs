@@ -141,6 +141,30 @@ test('the Durable Object runs an engine and streams frames to its clients', asyn
   assert.equal(object.host, undefined, 'the last client leaving stops the engine');
 });
 
+test('the Durable Object sends accountAuth evidence only to clients that opted in', async () => {
+  const EngineObject = createEngineObject({ loadEngine, flush: { store: 20, books: 20 } });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const connect = async () => {
+    const client = (await object.fetch({ headers: new Map([['Upgrade', 'websocket']]) })).webSocket;
+    const received = [];
+    client.addEventListener('message', (event) => received.push(event.data));
+    return { client, received };
+  };
+  const optedIn = await connect();
+  const legacy = await connect();
+  optedIn.client.send(JSON.stringify({ op: 'accountAuth' }));
+  optedIn.client.send(JSON.stringify({ op: 'start', venue: 'binance', options: { publicDataOnly: true } }));
+  await until(() => object.host);
+  object.host.handlers.onAccountAuth({ credential: 'primary', scope: 'orders', outcome: 'rejected' });
+  const auth = (received) => received.filter((m) => typeof m === 'string' && m.includes('accountAuth'));
+  assert.deepEqual(auth(optedIn.received).map((m) => JSON.parse(m)), [
+    { op: 'accountAuth', credential: 'primary', scope: 'orders', outcome: 'rejected' },
+  ]);
+  assert.deepEqual(auth(legacy.received), []);
+  optedIn.client.close();
+  legacy.client.close();
+});
+
 test('Workers derives private upgrade capability from its transport', async () => {
   let options;
   const loaded = [];

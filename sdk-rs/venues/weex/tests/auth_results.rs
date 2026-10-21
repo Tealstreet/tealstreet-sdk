@@ -154,3 +154,28 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
         )]
     );
 }
+
+#[test]
+fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_read() {
+    let (mut e, a) = started(false);
+    let orders = |a: &[Action]| -> Vec<AuthOutcome> {
+        auth(a)
+            .into_iter()
+            .filter(|(_, scope, _)| *scope == AccountReadScope::Orders)
+            .map(|(_, _, outcome)| outcome)
+            .collect()
+    };
+    let algo = http(&a, "openAlgoOrders");
+    let normal = http(&a, "/openOrders");
+    assert_eq!(
+        orders(&reply(
+            &mut e,
+            &algo,
+            200,
+            r#"{"code":40014,"msg":"Permission denied"}"#
+        )),
+        [AuthOutcome::Rejected]
+    );
+    // Algo orders still refuse the key, so normal orders' success is no evidence.
+    assert!(orders(&reply(&mut e, &normal, 200, "[]")).is_empty());
+}
