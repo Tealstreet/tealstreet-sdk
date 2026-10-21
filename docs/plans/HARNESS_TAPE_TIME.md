@@ -405,3 +405,26 @@ CI five-pair proof, both mandatory cases and zero unexpected/unused private
 declarations. Merge on full green CI with a fresh dependency guard separate
 from the merge call, then audit actual parents/files and report before
 Hyperliquid. Production, entropy, validators and ordinary CI defaults stay intact.
+
+## Hyperliquid perp and embedded Spot phase
+
+Enable VENUES.hyperliquid tape time for both the perp private tape and the
+spot-enabled account tape. Standalone Hyperliquid Spot is already covered
+separately. Preserve both configs, HIP-3/Spot state, staged reads, cloids,
+fills, poll pacing, command receipts and all fixture bytes. The generator
+has fixed event timestamps but no epoch metadata; add none unless repeated
+raw outputs demonstrate variance and a minimal reviewed fix is required.
+
+Use an authentic fingerprint-matching CI engine for five private pairs per
+tape, comparing all twenty complete outputs except measured metrics. Narrow
+only exact unobserved tape-bound declarations, reviewing new diagnostics and
+causes without broadening coverage. Require independent plan/code/raw reviews,
+focused harness tests, fresh current-head CI proof, all three mandatory cases,
+zero unexpected/unused private declarations and full green CI. Guard separately
+from merge, audit actual parents/files and report before Orderly.
+
+Verification gap: this catalog has no independent request validator; its
+existing request normalization removes action nonce/signature. This phase
+proves repeatability of the existing harness, not fresh cryptographic request
+verification. Preserve that policy and document the gap; no validator expansion,
+production change, entropy change or new output exclusion is part of this PR.
