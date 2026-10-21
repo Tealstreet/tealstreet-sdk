@@ -34,3 +34,21 @@ MARKETS flags. Its `applyBooks` switch controls forwarding, not venue policy.
 
 Overseer approved runtime capabilities plus shared pre-engine construction
 rules, with no second name fallback. No downstream application/deployment writes.
+
+Implementation batches: construction policy committed in `f36a4cba763` (22 bridge
+and 20 native construction tests, SDK typecheck/lint and registry Clippy pass).
+Runtime policies append nine flags and three enums to unused bits/nibbles of the
+existing eight-byte capability record. Baseline predicate count 36 now reaches
+zero; FrameApplier is byte-for-byte unchanged.
+
+Caller audit found NX can publish cached market state before worker startup
+completes. Overseer refined the contract: public capability calls wait for the
+existing pending startup, preserve immediate dispatch once ready, and reject
+no-start/failed-start calls with typed method-specific `invalidInput`/`notSent`
+errors and once-only notification. Startup's own commands never await themselves.
+Queued undispatched writes retain `notSent` on disposal or a native startup trap.
+Explicit worker-aware readiness is recommended; handling typed rejection is
+required. The caller-doc lane records source evidence; no NX edits are included.
+
+Merge ordering: hold this PR until Bybit harness #1622 lands, then integrate its
+actual landing as required by the lane rules. Keep CI running in the meantime.

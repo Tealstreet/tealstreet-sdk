@@ -41,4 +41,23 @@ fi
 random_sources=$(ls -d engine/src crypto/src venues/*/src)
 ban 'ambient randomness outside host adapters' 'getrandom::|rand::|uuid::(uuid\(|Uuid)|new_v4\(|\b(OsRng|ThreadRng|thread_rng)\b' $random_sources
 
+# Bridge behavior comes from capabilities/construction rules, never venue lists.
+if ! python3 - <<'PY'
+import pathlib, re
+path = pathlib.Path('../packages/safe-cex/src/exchanges/rust/rust.exchange.ts')
+source = path.read_text()
+patterns = [
+    r"\b(?:this\.name|exchangeName)\s*(?:===|!==)\s*['\"]",
+    r"\.includes\(\s*(?:this\.name|exchangeName)\s*,?\s*\)",
+    r"\.has\(\s*this\.name\s*\)",
+]
+hits = [match for pattern in patterns for match in re.finditer(pattern, source)]
+for match in hits:
+    print(f'BANNED: venue-name bridge policy: {path}:{source.count(chr(10), 0, match.start()) + 1}')
+raise SystemExit(bool(hits))
+PY
+then
+  status=1
+fi
+
 exit $status

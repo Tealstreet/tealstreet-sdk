@@ -1031,14 +1031,37 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     balanceInfo: false,
     hostClock: true,
     marketRefresh: false,
+    stpControls: false,
+    bybitExecutionControls: false,
+    rejectClientSlippage: false,
+    finiteCommandNumbers: false,
+    finiteHistoryBounds: false,
+    rejectOrderHistoryFilters: false,
+    publicCatalogueValidation: false,
+    isolatedBookSubscriptions: false,
+    inverseClosedPositions: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',
     maxLeverage: 'unsupported',
     quantityUnits: 'inverseContractSized',
+    positionHistory: 'unsupported',
+    closedPositionFormat: 'unsupported',
+    fillHistoryTime: 'asProvided',
   });
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
   assert.equal(capabilities(0, 3 << 8).leverageQuery, 'onReadAndMetadata');
+  const bridge = capabilities(0x1ff << 16, (6 << 20) | (3 << 24) | (2 << 28));
+  for (const name of ['stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
+    'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
+    'isolatedBookSubscriptions', 'inverseClosedPositions']) assert.equal(bridge[name], true, name);
+  assert.equal(bridge.positionHistory, 'wooOrders');
+  assert.equal(bridge.closedPositionFormat, 'blofin');
+  assert.equal(bridge.fillHistoryTime, 'nonnegativeSecondsOrMilliseconds');
+  assert.equal(bridge.quantityUnits, 'base');
+  assert.throws(() => capabilities(0, 7 << 20), /unknown capability positionHistory/);
+  assert.throws(() => capabilities(0, 4 << 24), /unknown capability closedPositionFormat/);
+  assert.throws(() => capabilities(0, 3 << 28), /unknown capability fillHistoryTime/);
   assert.throws(() => capabilities(0, 4 << 8), /unknown capability leverageQuery/);
   assert.throws(() => capabilities(0, 9), /unknown capability account/);
   assert.equal(numericFrame([]).capabilities(), undefined);

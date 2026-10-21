@@ -178,14 +178,20 @@ Medium:
    Kraken Spot fallbacks removed.
 
 Bridge (contract change):
-8. Engine-reported capabilities replace 76 venue-name branches in
-   `rust.exchange.ts` and `FrameApplier` positional booleans. Capability
+8. ~~Engine-reported capabilities replace 76 venue-name branches in
+   `rust.exchange.ts` and `FrameApplier` positional booleans.~~ The remaining
+   36 explicit predicates (21 comparisons, 11 array memberships, four set
+   memberships) now use runtime capability policies or the shared synchronous
+   construction rules. CI bans their reintroduction. FrameApplier's venue
+   booleans were already removed; its sizing computations remain unchanged. Capability
    record: done (`Venue::capabilities()`, `exchange.capabilities`); market
    quantity units in the frame: done (MARKETS flag bits, snapshot
    `CAPABILITIES` section for frame consumers). tealstreet-next:
    `collectAccountAxes.ts`, `ClosedPositions.tsx`, `symbolScopedFills.ts`.
-   Keep `contractsNative`/`remainingNative` names (**risky** if their
-   computation moves).
+   `contractsNative`/`remainingNative` names and computation stay unchanged
+   (**risky** if their computation moves). Calls during pending startup wait
+   that lifecycle; unavailable/failed startup rejects with a typed method-specific
+   error. Caller readiness and error handling are documented with this contract.
 
 Risky, after live-smoke captures:
 9. `num::whole` for leverage (five serialisations today, incl. truncation and

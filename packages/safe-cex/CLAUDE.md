@@ -183,6 +183,22 @@ venue whose record says `unsupported` is refused before the venue runs, so a
 venue answering identity for only some products (Binance USD-M/PM, Bybit
 except HyroTrader) reports it per product.
 
+Journal adapters, closed-position formats, history-bound normalization, filter
+refusals, STP/execution controls, numeric validation and book callback isolation
+also use engine policies. Capability flags and enum fields append to the existing
+two-word snapshot record without changing quantity units or older discriminants.
+
+Capability-dependent calls made during startup wait for that existing startup
+before validating or dispatching. Internal startup commands do not wait on
+themselves, and ready accounts retain immediate placement/cancel-all dispatch.
+With no capability record and no pending startup, or after failed startup, calls
+reject with a method-specific `ExchangeError` (`invalidInput`, `notSent`) and
+exactly-once reporting. A queued write that never dispatched remains `notSent`
+even if startup traps. Worker forwarding still runs before local policy checks;
+never start a second mirror engine to obtain capabilities. Explicit worker-aware
+readiness is recommended before local history/preflight work; cached markets
+alone do not establish it. Callers must handle typed readiness failures.
+
 ## Rust main-thread trading
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's
