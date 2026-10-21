@@ -502,9 +502,11 @@ struct Page {
 #[serde(rename_all = "camelCase")]
 struct BalanceRow {
     available_balance: Number,
+    // An omitted secondary field reads as zero, as TS; equity and free stay required.
+    #[serde(default)]
     order_margin: Number,
     account_equity: Number,
-    #[serde(rename = "unrealisedPNL")]
+    #[serde(default, rename = "unrealisedPNL")]
     unrealised_pnl: Number,
 }
 #[derive(Deserialize)]
@@ -1151,7 +1153,13 @@ impl Kucoin {
                 .entry(orders[0].id.clone())
                 .or_default();
             *watermark = watermark.max(row.filled_size.get());
-            if row.match_size.get() > 0.0 && row.match_price.get() > 0.0 {
+            // Like TS, a match without matchPrice executes at the order price.
+            let match_price = if row.match_price.get() > 0.0 {
+                row.match_price.get()
+            } else {
+                row.price.get()
+            };
+            if row.match_size.get() > 0.0 && match_price > 0.0 {
                 let key = if row.trade_id.is_empty() {
                     #[derive(Deserialize)]
                     struct Stamp<'a> {
@@ -1168,7 +1176,7 @@ impl Kucoin {
                             s.get().trim_matches('"'),
                             row.filled_size.get(),
                             row.match_size.get(),
-                            row.match_price.get()
+                            match_price
                         )
                     })
                 } else {
@@ -1187,7 +1195,7 @@ impl Kucoin {
                         order_id: orders[0].id.clone(),
                         symbol: orders[0].symbol.clone(),
                         side: orders[0].side,
-                        price: row.match_price.get(),
+                        price: match_price,
                         amount: base_amount(
                             row.match_size.get(),
                             contract_size(cx.store, &orders[0].symbol),

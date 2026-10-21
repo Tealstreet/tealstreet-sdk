@@ -429,6 +429,10 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -556,15 +560,20 @@ impl Venue for Cryptocom {
                     return;
                 }
                 match serde_json::from_str::<Instrument>(item) {
-                    Ok(row) => {
-                        if let Some(market) = row.market() {
+                    Ok(row) => match row.market() {
+                        Some(market) if market.precision.is_tradable() => {
                             indexes.insert(
                                 market.id.clone(),
                                 row.underlying_symbol.unwrap_or_default().into(),
                             );
                             rows.push(market);
                         }
-                    }
+                        Some(market) => {
+                            skipped.add(Some(row.symbol));
+                            malformed.insert(market.symbol);
+                        }
+                        None => {}
+                    },
                     Err(_) => {
                         let symbol = key.ok().and_then(|k| k.symbol);
                         skipped.add(symbol);

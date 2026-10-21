@@ -16,6 +16,7 @@ pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
 pub mod paging;
+mod placement_acks;
 pub mod public_feed;
 pub mod socket;
 pub mod startup;

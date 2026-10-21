@@ -699,8 +699,8 @@ impl WeexFutures {
         }
         if matches!(request.kind, Kind::Config | Kind::Metadata) {
             self.account.settings_failures += 1;
-            self.account.settings_retry_at =
-                cx.now + Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
+            let delay = Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
+            self.account.settings_retry_at = cx.now + cx.jittered(delay);
             self.account_finished(cx, false);
             return;
         }
@@ -762,7 +762,9 @@ impl WeexFutures {
                 self.account.failures = 0;
             }
             let not_before_ms = self.paused_until.max(if self.account.failed {
-                cx.now + Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.failures)
+                // Only a failed refresh retries with jitter; the pause floor is never shortened.
+                cx.now
+                    + cx.jittered(Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.failures))
             } else {
                 f64::NEG_INFINITY
             });

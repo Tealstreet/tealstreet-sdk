@@ -335,6 +335,8 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
+        // Book resync stays on its nominal schedule: its timing decides which buffered
+        // deltas apply to the snapshot, and it is per symbol, not a shared retry herd.
         state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {
@@ -440,10 +442,14 @@ impl MexcFutures {
         {
             return Ok(None);
         }
-        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || raw.price_unit <= 0.0 {
+        let step = (raw.contract_size * raw.vol_unit).max(raw.contract_size);
+        let precision = Precision {
+            amount: step,
+            price: raw.price_unit,
+        };
+        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || !precision.is_tradable() {
             return Err(());
         }
-        let step = (raw.contract_size * raw.vol_unit).max(raw.contract_size);
         Ok(Some(Market {
             symbol: compact(&raw.symbol),
             pretty_symbol: Some(raw.symbol.to_string()),
@@ -451,10 +457,7 @@ impl MexcFutures {
             base: raw.base_coin.into_owned(),
             quote: raw.quote_coin.into_owned(),
             active: true,
-            precision: Precision {
-                amount: step,
-                price: raw.price_unit,
-            },
+            precision,
             limits: Limits {
                 amount: MinMax {
                     min: (raw.min_vol * raw.contract_size).max(step),
@@ -559,6 +562,10 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

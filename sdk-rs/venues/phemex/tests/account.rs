@@ -466,8 +466,8 @@ fn execution_fills_deduplicate_individually_even_after_terminal_row() {
         .replace("\"execPriceRp\":\"69000\"", "\"execPriceRp\":\"69100\"");
     push_orders(&mut e, s, "incremental", 2, &format!("{first},{second}"));
     push_orders(&mut e, s, "incremental", 3, &format!("{first},{second}"));
-    assert!(e.take_market_frame(NOW).is_none());
-    let frame = e.take_frame(NOW).unwrap();
+    // Fills travel with their orders: the book-cadence flush carries both.
+    let frame = e.take_market_frame(NOW).unwrap();
     let data = execution_rows(frame, 2);
     assert_eq!(f64::from_le_bytes(data[..8].try_into().unwrap()), 69000.);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
@@ -1034,8 +1034,8 @@ fn late_unique_execution_after_terminal_emits_fill_without_reopening_order() {
     push_orders(&mut e, s, "incremental", 3, &late);
     push_orders(&mut e, s, "incremental", 4, &late);
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
-    assert!(e.take_market_frame(NOW).is_none());
-    let frame = e.take_frame(NOW).unwrap();
+    // Fills travel with their orders: the book-cadence flush carries both.
+    let frame = e.take_market_frame(NOW).unwrap();
     let data = execution_rows(frame, 2);
     assert_eq!(f64::from_le_bytes(data[..8].try_into().unwrap()), 69100.);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.2);
@@ -1337,6 +1337,8 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         );
     }
     engine.drain_actions().for_each(drop);
+    // The jittered failure floor is fixed once and must survive every policy change.
+    let mut floor = None;
     for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
             now + 1_500.0 + offset,
@@ -1354,7 +1356,14 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 3_500.0]);
+            let at = *times.first().expect("one rearmed poll");
+            assert_eq!(times, vec![at]);
+            let delay = at - (now + 1_500.0);
+            assert!(
+                (0.75 * 2_000.0..=2_000.0).contains(&delay),
+                "jittered failure backoff {delay}"
+            );
+            assert_eq!(*floor.get_or_insert(at), at);
         }
     }
 }

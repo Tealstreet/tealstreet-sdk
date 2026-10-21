@@ -833,13 +833,10 @@ impl Coinbase {
             && *attempt < 3
         {
             *attempt += 1;
-            *timer = Some(
-                cx.set_timer(
-                    Backoff::new(1_000.0, 3, f64::INFINITY)
-                        .delay(u32::from(*attempt))
-                        .max(self.account.backoff_until - cx.now),
-                ),
-            );
+            let delay = cx
+                .jittered(Backoff::new(1_000.0, 3, f64::INFINITY).delay(u32::from(*attempt)))
+                .max(self.account.backoff_until - cx.now);
+            *timer = Some(cx.set_timer(delay));
             return;
         }
         let rows = self.take_deferred(id);
@@ -2061,11 +2058,12 @@ impl Coinbase {
             Request::Portfolios | Request::Probe { .. } | Request::DetectCfm { .. } => {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 5 {
                     self.account.startup_failures += 1;
-                    let t = cx.set_timer(
-                        Backoff::new(1_000.0, 5, f64::INFINITY)
-                            .delay(u32::from(self.account.startup_failures))
-                            .max(self.account.backoff_until - cx.now),
-                    );
+                    let nominal = Backoff::new(1_000.0, 5, f64::INFINITY)
+                        .delay(u32::from(self.account.startup_failures));
+                    let delay = cx
+                        .jittered(nominal)
+                        .max(self.account.backoff_until - cx.now);
+                    let t = cx.set_timer(delay);
                     self.account.startup_retry = Some((t, req));
                 } else if self.account.startup_retry.is_none() {
                     cx.retried_failure(
@@ -2082,11 +2080,12 @@ impl Coinbase {
             Request::KeyPermissions { .. } => {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 3 {
                     self.account.startup_failures += 1;
-                    let t = cx.set_timer(
-                        Backoff::new(1_000.0, 5, f64::INFINITY)
-                            .delay(u32::from(self.account.startup_failures))
-                            .max(self.account.backoff_until - cx.now),
-                    );
+                    let nominal = Backoff::new(1_000.0, 5, f64::INFINITY)
+                        .delay(u32::from(self.account.startup_failures));
+                    let delay = cx
+                        .jittered(nominal)
+                        .max(self.account.backoff_until - cx.now);
+                    let t = cx.set_timer(delay);
                     self.account.startup_retry = Some((t, req));
                 } else if self.account.startup_retry.is_none() {
                     self.read_key_unverified(cx, &format!("could not be verified ({error})"));

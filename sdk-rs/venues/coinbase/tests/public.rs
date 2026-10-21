@@ -1149,10 +1149,7 @@ fn valid_catalogue_with_rejected_quotes_starts_markets_and_retries_without_clear
         let timer = e
             .drain_actions()
             .find_map(|action| match action {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 2000.0,
-                } => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - 1000., 1000.) => Some(timer),
                 _ => None,
             })
             .unwrap();

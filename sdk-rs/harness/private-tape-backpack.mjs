@@ -14,9 +14,11 @@ const BTC = 'BTC_USDC_PERP';
 const BASE = 1765805280000;
 const records = [];
 let clock = 0;
-const http = (method, path, body, requestBody) =>
+let commands = 0;
+const http = (method, path, body, requestBody, afterCommand) =>
   records.push({
     t: 0,
+    ...(afterCommand === undefined ? {} : { afterCommand }),
     type: 'http',
     method,
     url: `${REST}${path}`,
@@ -26,7 +28,7 @@ const http = (method, path, body, requestBody) =>
   });
 const ws = (stream, data) =>
   records.push({ t: (clock += 400), type: 'ws', url: WS, text: JSON.stringify({ stream, data }) });
-const command = (data) => records.push({ t: (clock += 400), type: 'command', ...data });
+const command = (data) => { commands++; records.push({ t: (clock += 400), type: 'command', ...data }); };
 const market = (symbol, step, tick) => ({
   symbol,
   marketType: 'PERP',
@@ -235,7 +237,9 @@ for (const [id, price] of [
   http('POST', '/api/v1/order', placed(id, exit), exit);
 }
 command({ op: 'cancelSymbolOrders', symbol: SYMBOL });
-http('DELETE', '/api/v1/orders', [], { symbol: SYMBOL });
+http('DELETE', '/api/v1/orders', [], { symbol: SYMBOL }, commands);
+// Once the cancel-all is acknowledged, the venue lists no open orders.
+http('GET', '/api/v1/orders', [], undefined, commands);
 ws('account.orderUpdate', order('100', { e: 'orderCancelled', X: 'Cancelled', p: '130', q: '5', c: 42, y: true }));
 ws(
   'account.orderUpdate',

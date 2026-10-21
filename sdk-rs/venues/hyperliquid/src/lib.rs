@@ -654,7 +654,20 @@ fn market_rows(
         } else {
             format!("{}|{}-PERP", dex.to_uppercase(), base.to_uppercase())
         };
+        // Bounded first: the decimal arithmetic below overflows on extreme counts.
+        if !(0..=18).contains(&meta.sz_decimals) {
+            safe_cex_engine::startup::skipped_row(cx);
+            return;
+        }
         let step = 10f64.powi(-meta.sz_decimals);
+        let precision = Precision {
+            amount: step,
+            price: 10f64.powi(-price_decimals(price, meta.sz_decimals)),
+        };
+        if !precision.is_tradable() {
+            safe_cex_engine::startup::skipped_row(cx);
+            return;
+        }
         markets.push(Market {
             id: id.clone(),
             symbol: symbol.clone(),
@@ -662,10 +675,7 @@ fn market_rows(
             base: base.into(),
             quote: "USDC".into(),
             active: true,
-            precision: Precision {
-                amount: step,
-                price: 10f64.powi(-price_decimals(price, meta.sz_decimals)),
-            },
+            precision,
             limits: Limits {
                 amount: MinMax {
                     min: step,
@@ -780,7 +790,19 @@ fn spot_rows(
         };
         let id = native.name.clone();
         let symbol = format!("{}/{}", token.name, quote.name);
+        if !(0..=18).contains(&token.sz_decimals) {
+            safe_cex_engine::startup::skipped_row(cx);
+            continue;
+        }
         let step = 10f64.powi(-token.sz_decimals);
+        let precision = Precision {
+            amount: step,
+            price: 10f64.powi(-spot_price_decimals(price, token.sz_decimals)),
+        };
+        if !precision.is_tradable() {
+            safe_cex_engine::startup::skipped_row(cx);
+            continue;
+        }
         let mark = if ctx.context.mark_px > 0.0 {
             ctx.context.mark_px
         } else {
@@ -793,10 +815,7 @@ fn spot_rows(
             base: token.name.clone(),
             quote: quote.name.clone(),
             active: true,
-            precision: Precision {
-                amount: step,
-                price: 10f64.powi(-spot_price_decimals(price, token.sz_decimals)),
-            },
+            precision,
             limits: Limits {
                 amount: MinMax {
                     min: step,
@@ -844,6 +863,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

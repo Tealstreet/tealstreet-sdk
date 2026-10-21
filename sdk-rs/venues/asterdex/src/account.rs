@@ -771,13 +771,14 @@ impl AsterDex {
                     cx.store.set_hedged(value);
                     self.mode_known(cx);
                 } else {
-                    let delay =
-                        Backoff::new(1_000.0, 5, f64::INFINITY).delay(self.account.mode_failures);
+                    let delay = cx.jittered(
+                        Backoff::new(1_000.0, 5, f64::INFINITY).delay(self.account.mode_failures),
+                    );
                     self.account.mode_failures = self.account.mode_failures.saturating_add(1);
                     let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
                     cx.retried_failure("asterdex.account:778",
                         format!(
-                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {}s",
+                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {:.1}s",
                             delay / 1_000.0
                         ));
                     if self.account.mode_timer.is_none() {

@@ -667,6 +667,10 @@ impl Grvt {
     }
 }
 impl Venue for Grvt {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -684,6 +688,19 @@ impl Venue for Grvt {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        // GRVT itself refuses an untagged signer; a stale configured address must not block trading.
+        if let (Some(secret), Some(expected)) = (
+            self.options.secret.as_deref(),
+            self.options.signer_address.as_deref(),
+        ) && let Ok(signer) = sign::signer_address(secret)
+            && !signer.eq_ignore_ascii_case(expected)
+        {
+            cx.notice(Level::Warn, code::CONFIG_INVALID,
+                format!(
+                    "Provided signer address ({expected}) does not match wallet address ({signer}). Make sure {signer} is tagged to your API key in the GRVT UI."
+                ),
+            );
+        }
         self.fetch_markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {

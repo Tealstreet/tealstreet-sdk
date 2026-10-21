@@ -613,8 +613,8 @@ impl Bitrue {
                 if let Some(timer) = backoff.retry.take() {
                     cx.clear_timer(timer);
                 }
-                backoff.retry =
-                    Some(cx.set_timer(ORDER_RETRY.delay(backoff.failures.saturating_sub(1))));
+                let delay = cx.jittered(ORDER_RETRY.delay(backoff.failures.saturating_sub(1)));
+                backoff.retry = Some(cx.set_timer(delay));
             }
         }
         if self.account.initial_orders.is_empty() {

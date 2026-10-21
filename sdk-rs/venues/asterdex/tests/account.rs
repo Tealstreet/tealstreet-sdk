@@ -772,6 +772,28 @@ fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
     assert!(h.take("/order").url.contains("positionSide=SHORT"));
 }
 #[test]
+fn position_mode_read_retries_are_jittered_below_their_nominal_backoff() {
+    let mut h = H::pending_mode();
+    let mut delays = vec![];
+    for nominal in [1_000.0, 2_000.0, 4_000.0, 8_000.0] {
+        let before = h.timers.len();
+        h.reply("/positionSide/dual", r#"{"code":-1000,"msg":"busy"}"#);
+        let added = &h.timers[before..];
+        assert_eq!(added.len(), 1, "one mode retry timer: {added:?}");
+        let (timer, at) = added[0];
+        let delay = at - h.now;
+        assert!(
+            (0.75 * nominal..=nominal).contains(&delay),
+            "{delay} outside jittered {nominal}"
+        );
+        delays.push((delay, nominal));
+        h.timers.retain(|(id, _)| *id != timer);
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+    }
+    assert!(delays.iter().any(|(delay, nominal)| delay < nominal));
+}
+#[test]
 fn unmapped_liquidation_order_type_still_delivers_its_fill() {
     let mut h = H::new();
     let _ = fill_rows(&mut h);
