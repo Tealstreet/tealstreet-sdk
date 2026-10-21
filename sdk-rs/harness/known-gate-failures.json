@@ -3782,13 +3782,6 @@
       "tape": "sdk-rs/harness/tapes/bitgetusdc-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "A TS-supported command returns different data or a native rejection; this remains a command parity failure.",
-          "keys": [
-            "command results[4].error",
-            "command results[4].ok"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
             "account orders[0].clientOrderId",
@@ -3843,23 +3836,7 @@
             "checkpoint 5 account.orders[2].remaining",
             "checkpoint 5 account.orders[2].status",
             "checkpoint 5 account.orders[2].symbol",
-            "checkpoint 5 account.orders[3]",
-            "checkpoint 6 account.orders.length",
-            "checkpoint 6 account.orders[0].amount",
-            "checkpoint 6 account.orders[0].id",
-            "checkpoint 6 account.orders[0].price",
-            "checkpoint 6 account.orders[0].remaining",
-            "checkpoint 6 account.orders[0].status",
-            "checkpoint 6 account.orders[0].symbol",
-            "checkpoint 6 account.orders[1]",
-            "checkpoint 6 account.orders[2]",
-            "checkpoint 6 account.orders[3]"
-          ]
-        },
-        {
-          "divergence": "The actual TS/native request or subscription workload differs; a matching final store cannot prove transport parity.",
-          "keys": [
-            "requests run 1"
+            "checkpoint 5 account.orders[3]"
           ]
         }
       ]

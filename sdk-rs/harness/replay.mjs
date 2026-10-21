@@ -4,6 +4,7 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -106,7 +107,9 @@ const initializeReplay = async () => {
   // public accounts); running them would preload dependencies such as ethers.
   if (values.performance) return;
   await venue.prepareReplay?.({ isPrivate, options });
-  await venue.initializeReplay?.(values.impl, options);
+  await venue.initializeReplay?.(values.impl, options, {
+    isPrivate, tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
+  });
 };
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */

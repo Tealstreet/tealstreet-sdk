@@ -178,15 +178,26 @@ pub struct AccountState {
     zero_valued_assets: HashSet<String>,
     native_asset_marks: HashMap<String, f64>,
     /// Position ids (or "" for an unidentified row) whose skipped row was already logged.
-    position_skip_logged: HashSet<String>,
+    position_skip_logged: HashMap<String, bool>,
     /// Order ids whose skipped row was already logged.
-    order_skip_logged: HashSet<String>,
+    order_skip_logged: HashMap<String, bool>,
 }
 
-/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+impl AccountState {
+    fn order_terminal(&self, order: &Order) -> bool {
+        self.terminal_algo_ids.contains(&order.id)
+            || order.id.parse().is_ok_and(|native: u64| {
+                self.native_executed
+                    .get(&(order.symbol.clone(), native))
+                    .is_some_and(|(_, terminal)| *terminal)
+            })
+    }
+}
+
+/// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut HashMap<String, bool>,
     key: String,
     level: Level,
     message: impl Into<String>,
@@ -194,9 +205,12 @@ fn log_skip(
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
-    if logged.insert(key) {
-        cx.notice(level, code::ROW_SKIPPED, message);
+    let error = level == Level::Error;
+    if logged.get(&key).is_some_and(|&errored| errored || !error) {
+        return;
     }
+    logged.insert(key, error);
+    cx.notice(level, code::ROW_SKIPPED, message);
 }
 
 pub fn order_type(text: &str) -> Option<OrderType> {
@@ -1430,13 +1444,7 @@ impl BinanceFutures {
             self.bind_strategy_native(&symbol, &client, native);
         }
         for current in cx.store.orders() {
-            let terminal = self.account.terminal_algo_ids.contains(&current.id)
-                || current.id.parse().is_ok_and(|native: u64| {
-                    self.account
-                        .native_executed
-                        .get(&(current.symbol.clone(), native))
-                        .is_some_and(|(_, terminal)| *terminal)
-                });
+            let terminal = self.account.order_terminal(current);
             // A rejected row on another symbol is a different order reusing the id.
             let same_order = join
                 .rejected_symbols
@@ -1465,22 +1473,32 @@ impl BinanceFutures {
         generation: u32,
         rows: Vec<(String, String, String)>,
     ) {
-        let Some(join) = self
+        if self
             .account
             .orders
-            .as_mut()
-            .filter(|j| j.generation == generation)
-        else {
+            .as_ref()
+            .is_none_or(|j| j.generation != generation)
+        {
             return;
-        };
+        }
         for (id, symbol, message) in rows {
+            let kept = cx.store.orders().iter().any(|o| {
+                o.id == id
+                    && (symbol.is_empty() || o.symbol == symbol)
+                    && o.status == OrderStatus::Open
+                    && !self.account.order_terminal(o)
+            });
+            let level = if kept { Level::Warn } else { Level::Error };
             log_skip(
                 cx,
                 &mut self.account.order_skip_logged,
                 id.clone(),
-                Level::Warn,
+                level,
                 message,
             );
+            let Some(join) = self.account.orders.as_mut() else {
+                return;
+            };
             join.rejected_symbols
                 .entry(id.clone())
                 .or_default()
