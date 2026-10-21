@@ -416,7 +416,10 @@ describe('RustEngineExchange', () => {
   });
 
   it('keeps WOO journal PnL on the order axis when fills have no PnL', async () => {
+    setWasmEngineLoader(loadNodeEngine);
     exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    await exchange.loadCapabilities();
+    expect(exchange.hasStarted).toBe(false);
     const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([
       { id: 'open', symbol: 'ETHUSDT', side: OrderSide.Buy, type: OrderType.Limit, status: OrderStatus.Closed,
         price: 99, averagePrice: 100, amount: 1, filled: 1, reduceOnly: false,
@@ -873,7 +876,7 @@ describe('RustEngineExchange', () => {
     exchange.dispose();
     const symbol = venue === 'weex' ? 'BTCUSDT' : 'BTCUSD-PERP';
     store.update({ markets: [{ ...market, id: symbol, symbol }] });
-    exchange = new RustEngineExchange(venue, { key: 'k', secret: 's' }, store);
+    exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'fixture-passphrase' }, store);
     const opts = {
       symbol,
       type: OrderType.Limit,
@@ -913,6 +916,8 @@ describe('RustEngineExchange', () => {
       definitive: false,
     });
     if (venue === 'bitget' || venue === 'bitgetusdc') {
+      await exchange.loadCapabilities();
+      expect(exchange.hasStarted).toBe(false);
       for (const invalid of ['', 'invalid@id', 'a'.repeat(33)]) {
         await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow(
           'clientOrderId must match',
