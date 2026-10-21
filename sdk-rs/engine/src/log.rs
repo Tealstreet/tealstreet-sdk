@@ -144,6 +144,10 @@ pub mod code {
     pub const COMMAND_DUPLICATE: &str = "command.duplicate";
     /// Startup is still missing required data after its watchdog deadline.
     pub const STARTUP_INCOMPLETE: &str = "startup.incomplete";
+    /// Repeated public startup failures; retries continue without intervention.
+    pub const STARTUP_DEGRADED: &str = "startup.degraded";
+    /// Both required public sections loaded after startup degradation.
+    pub const STARTUP_RECOVERED: &str = "startup.recovered";
     /// A trusted public-feed update was rejected by validation.
     pub const PUBLIC_FEED_REJECTED: &str = "public_feed.rejected";
 

@@ -12,6 +12,7 @@ use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
@@ -150,7 +151,7 @@ pub struct Okx {
     products: HashMap<String, Product>,
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
-    startup: safe_cex_engine::startup::Backoff<bool>,
+    startup: PublicRetries,
     /// Discovery retries wait out a rate-limit window the venue announced.
     discovery_paused_until: f64,
     catalogue_incomplete: bool,
@@ -163,7 +164,40 @@ pub struct Okx {
     catalogue_partial: bool,
 }
 
+fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
+    let envelope = serde_json::from_str::<wire::Envelope<'_>>(response.body).ok();
+    let rejection = envelope.as_ref().filter(|e| e.code != "0");
+    safe_cex_engine::startup::public_response_error(
+        response.status,
+        rejection.map(|e| e.code),
+        rejection.map(|e| e.msg),
+    )
+}
+
 impl Okx {
+    fn public_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        markets: bool,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if !markets {
+            self.ticker_reading = false;
+            self.ticker_refresh_pending = false;
+        }
+        let pause = self.discovery_paused_until - cx.now;
+        self.startup.failed_after(
+            cx,
+            if markets {
+                DiscoveryRead::Markets
+            } else {
+                DiscoveryRead::Tickers
+            },
+            pause,
+            error,
+        );
+    }
+
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
@@ -737,13 +771,11 @@ impl Okx {
             cx.command_error(command, error);
             cx.done(command, "[]".into());
         } else {
-            let markets = matches!(pending, Pending::Markets { .. });
-            if !markets {
-                self.ticker_reading = false;
-                self.ticker_refresh_pending = false;
-            }
-            let pause = self.discovery_paused_until - cx.now;
-            self.startup.failed_after(cx, markets, pause);
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            );
         }
     }
 }
@@ -1141,6 +1173,14 @@ impl Venue for Okx {
             Err(format!("OKX HTTP {}: {}", response.status, response.body))
         };
         if let Err(error) = result {
+            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Markets { .. }),
+                    discovery_error(&response),
+                );
+                return;
+            }
             self.request_failed(cx, pending, &error);
             return;
         }
@@ -1163,12 +1203,25 @@ impl Venue for Okx {
                     return;
                 }
                 self.catalogue_incomplete = incomplete;
+                if rows.is_empty() && !cx.store.loaded().markets {
+                    self.public_failed(
+                        cx,
+                        true,
+                        safe_cex_engine::VenueError::new("Empty OKX catalogue")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
+                    return;
+                }
                 // A partial catalogue commits so private reads start, and is re-read.
                 if incomplete || self.catalogue_partial {
-                    let pause = self.discovery_paused_until - cx.now;
-                    self.startup.failed_after(cx, true, pause);
+                    self.public_failed(
+                        cx,
+                        true,
+                        safe_cex_engine::VenueError::new("Incomplete OKX catalogue")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
                 } else {
-                    self.startup.succeeded(cx, &true);
+                    self.startup.succeeded(cx, DiscoveryRead::Markets);
                 }
                 if rows.is_empty() && incomplete {
                     return;
@@ -1185,6 +1238,7 @@ impl Venue for Okx {
                     }
                 }
                 cx.store.set_markets(merged);
+                self.startup.ready(cx);
                 let mut skipped = std::mem::take(&mut self.skipping_instruments);
                 skipped.retain(|id| cx.store.market_by_id(id).is_none());
                 self.skipped_instruments = skipped;
@@ -1236,10 +1290,14 @@ impl Venue for Okx {
                 self.ticker_reading = false;
                 let refresh = std::mem::take(&mut self.ticker_refresh_pending);
                 if incomplete {
-                    let pause = self.discovery_paused_until - cx.now;
-                    self.startup.failed_after(cx, false, pause);
+                    self.public_failed(
+                        cx,
+                        false,
+                        safe_cex_engine::VenueError::new("Incomplete OKX tickers")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
                 } else {
-                    self.startup.succeeded(cx, &false);
+                    self.startup.succeeded(cx, DiscoveryRead::Tickers);
                 }
                 if rows.is_empty() && incomplete {
                     if refresh {
@@ -1259,6 +1317,7 @@ impl Venue for Okx {
                     self.live_tickers.finish(cx.store, &mut rows);
                 }
                 cx.store.set_tickers(rows);
+                self.startup.ready(cx);
                 self.price_tickers = price_ticker_indexes(cx.store);
                 self.account_prices(cx);
                 if self.connections[PUBLIC].socket.is_none() {
@@ -1307,6 +1366,49 @@ impl Venue for Okx {
         }
     }
 
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                safe_cex_engine::startup::public_response_error(status, None, None),
+            );
+        } else {
+            self.on_request_failed(cx, pending, error);
+        }
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                discovery_error(&response),
+            );
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            );
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(account::Request::Config { .. }) = &pending {
             self.config_unanswered();
@@ -1315,10 +1417,10 @@ impl Venue for Okx {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if let Some(markets) = self.startup.on_timer(timer) {
-            if markets && cx.store.loaded().markets {
+        if let Some(read) = self.startup.on_timer(timer) {
+            if read == DiscoveryRead::Markets && cx.store.loaded().markets {
                 self.load_catalogue(cx);
-            } else if markets {
+            } else if read == DiscoveryRead::Markets {
                 self.start(cx);
             } else {
                 self.ticker_seed(cx, false);

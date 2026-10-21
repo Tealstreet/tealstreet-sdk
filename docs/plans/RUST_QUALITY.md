@@ -137,9 +137,13 @@ Low risk, do first:
    spelling and AsterDEX's raw-value query stay venue-specific.
 3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
    Migrate with constants unchanged, then jitter~~ (done: one schedule shared
-   with `engine::socket::Supervisor`, reconnects jittered); then one
-   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget),
-   landing with the public-startup PR.
+   with `engine::socket::Supervisor`, reconnects jittered); ~~then one
+   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget)~~.
+   Public discovery already retries; `startup::PublicRetries` now reports one
+   typed-cause `startup.degraded` warning after six failures, keeps capped
+   retries running, and emits `startup.recovered` once markets and tickers load.
+   Aggregate empty OKX catalogues retry too. Private reads, Bybit and
+   post-loaded recovery retain their policy. See [the plan](RUST_STARTUP_RETRY.md).
 4. ~~`engine::time`: ISO/civil-date math in 9 venues.~~ Done: civil math,
    month arithmetic and ISO formatting shared; venue text grammars stay local.
 

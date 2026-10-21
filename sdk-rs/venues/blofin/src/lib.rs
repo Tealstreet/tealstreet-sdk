@@ -11,6 +11,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
     Venue, VenueError, num,
@@ -83,7 +84,7 @@ pub struct Blofin {
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
-    startup: safe_cex_engine::startup::Backoff<bool>,
+    startup: PublicRetries,
     // Instrument ids rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
@@ -137,7 +138,30 @@ fn candle(row: &[Number]) -> Option<Candle> {
 fn round_usd(v: f64) -> f64 {
     num::adjust(v, 0.01)
 }
+fn discovery_error(response: &Response<'_>) -> VenueError {
+    let envelope = serde_json::from_str::<wire::Envelope<'_>>(response.body).ok();
+    let rejection = envelope.as_ref().filter(|e| e.code != "0");
+    safe_cex_engine::startup::public_response_error(
+        response.status,
+        rejection.map(|e| e.code.as_ref()),
+        rejection.map(|e| e.msg.as_ref()),
+    )
+}
+
 impl Blofin {
+    fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, markets: bool, error: VenueError) {
+        self.startup.failed_after(
+            cx,
+            if markets {
+                DiscoveryRead::Markets
+            } else {
+                DiscoveryRead::Tickers
+            },
+            0.0,
+            error,
+        );
+    }
+
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
@@ -728,6 +752,14 @@ impl Venue for Blofin {
             other => other,
         };
         if let Err(error) = check(&response) {
+            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Markets { .. }),
+                    discovery_error(&response),
+                );
+                return;
+            }
             self.on_request_failed(cx, pending, &error);
             return;
         }
@@ -747,9 +779,14 @@ impl Venue for Blofin {
                 let after = self.malformed_markets.len();
                 // A partial catalogue commits so private reads start, then re-reads.
                 if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
-                    self.startup.failed(cx, true);
+                    self.public_failed(
+                        cx,
+                        true,
+                        VenueError::new("Incomplete BloFin catalogue")
+                            .kind(ErrorKind::VenueUnavailable),
+                    );
                 } else {
-                    self.startup.succeeded(cx, &true);
+                    self.startup.succeeded(cx, DiscoveryRead::Markets);
                 }
                 if refresh {
                     return;
@@ -766,9 +803,9 @@ impl Venue for Blofin {
                 self.private_start(cx);
             }
             Pending::Tickers { mut rows, failed } if !failed || !rows.is_empty() => {
-                self.startup.succeeded(cx, &false);
                 self.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
+                self.startup.succeeded(cx, DiscoveryRead::Tickers);
             }
             Pending::Candles {
                 command,
@@ -778,7 +815,53 @@ impl Venue for Blofin {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(command, serde_json::to_string(&rows).unwrap());
             }
+            other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
+                cx,
+                matches!(other, Pending::Markets { .. }),
+                discovery_error(&response),
+            ),
             other => self.on_request_failed(cx, other, "Malformed BloFin response"),
+        }
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                safe_cex_engine::startup::public_response_error(status, None, None),
+            );
+        } else {
+            self.on_request_failed(cx, pending, error);
+        }
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                discovery_error(&response),
+            );
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            );
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -805,13 +888,16 @@ impl Venue for Blofin {
         if let Pending::Candles { command, .. } = pending {
             cx.fail(command, error.to_string());
         } else {
-            self.startup
-                .failed(cx, matches!(pending, Pending::Markets { .. }));
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Markets { .. }),
+                VenueError::new(error).kind(ErrorKind::Network),
+            );
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if let Some(markets) = self.startup.on_timer(timer) {
-            if markets {
+        if let Some(read) = self.startup.on_timer(timer) {
+            if read == DiscoveryRead::Markets {
                 self.start(cx);
             } else {
                 self.read(
