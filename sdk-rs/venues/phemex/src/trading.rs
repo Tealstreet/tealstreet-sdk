@@ -156,7 +156,7 @@ fn trigger(t: StopTriggerType) -> Result<&'static str, String> {
     match t {
         StopTriggerType::MarkPrice => Ok("ByMarkPrice"),
         StopTriggerType::LastPrice => Ok("ByLastPrice"),
-        _ => Err("Phemex index-price triggers are unsupported".into()),
+        StopTriggerType::IndexPrice => Ok("ByIndexPrice"),
     }
 }
 fn plain(o: &PlaceOrderOpts) -> bool {

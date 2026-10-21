@@ -742,7 +742,7 @@ impl Backpack {
         pending: Request,
         error: &str,
     ) {
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("backpack.account:613", error);
         let next = match pending {
             Request::Info { .. } => Next::Positions,
             Request::Positions { next, .. } => next,

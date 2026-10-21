@@ -1077,7 +1077,7 @@ impl Venue for KucoinSpot {
                 if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT)
                     && let Err(e) = self.account_balance(cx, data)
                 {
-                    cx.notice(Level::Error, code::REQUEST_FAILED, e);
+                    cx.retried_failure("kucoin.spot.mod:1001", e);
                 }
                 if !current {
                     self.heal(cx, true);
@@ -1092,7 +1092,7 @@ impl Venue for KucoinSpot {
                         .collect::<VecDeque<_>>(),
                     Err(e) => {
                         self.orders_loading = false;
-                        cx.notice(Level::Error, code::REQUEST_FAILED, e.to_string());
+                        cx.retried_failure("kucoin.spot.mod:1016", e.to_string());
                         return;
                     }
                 };

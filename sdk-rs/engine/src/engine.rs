@@ -866,6 +866,8 @@ struct Io<P> {
     sockets: SocketRoles,
     /// One rejection often arrives as an auth-kind failure plus `deactivate`.
     auth_failure_counted: bool,
+    /// Each retried read's latest Error time and digit-normalised text, by call site.
+    retried_failures: HashMap<&'static str, (f64, String)>,
 }
 
 impl<P> Default for Io<P> {
@@ -900,6 +902,7 @@ impl<P> Default for Io<P> {
             health: Health::default(),
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
+            retried_failures: HashMap::new(),
         }
     }
 }
@@ -1236,6 +1239,30 @@ impl<P> Cx<'_, P> {
     /// [`Cx::event`] without fields.
     pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
         self.event(level, code, message, Vec::new());
+    }
+
+    /// A `request.failed` read the venue retries on its own schedule. A repeat
+    /// of the same failure inside [`RETRIED_FAILURE_ERROR_EVERY_MS`] of the site's
+    /// last Error is a warning; otherwise, and whenever the failure text changes,
+    /// it is an Error. The app's auth badge and reload latch need an Error at
+    /// least that often while a key stays rejected.
+    pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
+        let message = message.into();
+        let shape: String = message
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .collect();
+        let now = self.now;
+        let level = match self.io.retried_failures.get(site) {
+            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
+                Level::Warn
+            }
+            _ => {
+                self.io.retried_failures.insert(site, (now, shape));
+                Level::Error
+            }
+        };
+        self.notice(level, log_code::REQUEST_FAILED, message);
     }
 
     /// Counted in [`Health`] whatever the host's minimum level.
@@ -2532,6 +2559,10 @@ fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, messag
         }));
     }
 }
+
+/// The longest a repeating retried-read failure goes without an Error. Below the
+/// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
+pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]

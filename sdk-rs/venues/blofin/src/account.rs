@@ -1124,7 +1124,7 @@ impl Blofin {
                     }
                     let pause = rate_limit_pause_ms(&response, RATE_LIMIT_PAUSE_MS);
                     self.setting_retry(cx, read, pause);
-                    cx.notice(Level::Error, code::REQUEST_FAILED, e);
+                    cx.retried_failure("blofin.account:977", e);
                 }
                 return;
             }
@@ -1597,7 +1597,7 @@ impl Blofin {
             Request::Margin { .. } => self.setting_unsettled(cx, StartupRead::Margin),
             Request::Mode { .. } => self.setting_unsettled(cx, StartupRead::Mode),
         }
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("blofin.account:1402", error);
     }
     pub(crate) fn private_message(
         &mut self,

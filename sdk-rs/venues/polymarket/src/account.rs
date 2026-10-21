@@ -525,9 +525,8 @@ impl Polymarket {
         }
     }
     pub(crate) fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.notice(
-            Level::Error,
-            code::REQUEST_FAILED,
+        cx.retried_failure(
+            "polymarket.account:528",
             "Polymarket private snapshot failed; preserving state",
         );
         match request {

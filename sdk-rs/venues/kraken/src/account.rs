@@ -685,7 +685,7 @@ impl Kraken {
             };
             if let Err(error) = result {
                 self.account.inflight.remove(&key);
-                cx.notice(Level::Error, code::REQUEST_FAILED, error);
+                cx.retried_failure("kraken.account:634", error);
             }
         }
     }
@@ -1386,9 +1386,8 @@ impl Kraken {
         }
         if !wire::success(response) || !request.valid {
             self.account.read_failures = self.account.read_failures.saturating_add(1);
-            cx.notice(
-                Level::Error,
-                code::REQUEST_FAILED,
+            cx.retried_failure(
+                "kraken.account:1266",
                 "Kraken account reconciliation failed",
             );
             self.account_schedule_heal(cx);
@@ -1476,9 +1475,8 @@ impl Kraken {
     ) {
         self.account.inflight.remove(&(request.scope as u8));
         self.account.read_failures = self.account.read_failures.saturating_add(1);
-        cx.notice(
-            Level::Error,
-            code::REQUEST_FAILED,
+        cx.retried_failure(
+            "kraken.account:1343",
             "Kraken account reconciliation transport failure",
         );
         self.account_schedule_heal(cx);

@@ -511,7 +511,7 @@ impl Cryptocom {
             return;
         }
         self.account.order_rows = None;
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("cryptocom.account:471", error);
         self.schedule_reconcile(cx);
     }
     pub(crate) fn account_item(

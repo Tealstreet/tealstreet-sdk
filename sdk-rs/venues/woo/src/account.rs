@@ -579,7 +579,7 @@ impl Woo {
             Pending::Account(req),
         ) {
             self.account.info_pending = false;
-            cx.notice(Level::Error, code::REQUEST_FAILED, e);
+            cx.retried_failure("woo.account:579", e);
         }
     }
     fn account_positions_read(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -604,7 +604,7 @@ impl Woo {
             Ok(id) => cx.stream_response(id, ArrayAt::Path(&["data", "positions"])),
             Err(e) => {
                 self.account.positions_pending = false;
-                cx.notice(Level::Error, code::REQUEST_FAILED, e);
+                cx.retried_failure("woo.account:604", e);
             }
         }
     }
@@ -650,7 +650,7 @@ impl Woo {
             ),
             Err(e) => {
                 self.account.orders = None;
-                cx.notice(Level::Error, code::REQUEST_FAILED, e);
+                cx.retried_failure("woo.account:650", e);
             }
         }
     }
@@ -1604,7 +1604,7 @@ impl Woo {
                 }
             }
         }
-        cx.notice(Level::Error, code::REQUEST_FAILED, error);
+        cx.retried_failure("woo.account:1597", error);
     }
     fn account_schedule_fill_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.refresh.is_some() || self.account.refresh_attempt >= 4 {
