@@ -665,7 +665,11 @@ is how a host opts in; the web main thread registers one in
 `hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
 import a telemetry client or POST to a Tealstreet route from this package** —
 call `reportException` / `reportEvent` and let the host decide. Workers still
-ship errors through the `sendToSentry` op, not the sink.
+ship errors through the `sendToSentry` op, not the sink. `emitAndLogError` (the path every command rejection takes,
+in the worker, main thread and exchange-server) and `ExchangeWorker.logError`
+tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
+and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
+the kind rather than venue text.
 
 ## Proxy & Tunnel Architecture
 
