@@ -487,6 +487,8 @@ pub enum Action {
 /// Venue-specific actions outside the shared trading surface.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VenueAction {
+    /// Atomically refresh public instrument discovery without restarting the account.
+    RefreshMarkets,
     /// Lighter: the cached account tier as a JSON string, or `null`.
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).

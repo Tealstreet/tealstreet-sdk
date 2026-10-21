@@ -966,6 +966,18 @@ that reports an account lookup). No tealstreet-next file outside the mirrored
 packages uses either. #1411's market quantity units travel as frame flag bits
 and need no tealstreet-next edit.
 
+### Bybit explicit catalogue refresh
+
+Existing `refreshMarkets()` callers now request atomic native public discovery
+and receive added/removed membership after host publication; `markets:changed`
+reports that same delta once. Cached `fetchMarkets`/`fetchTickers` remain reads.
+The native capability flag is `marketRefresh` (wire bit15), false for other
+venues; unsupported engines retain cached refresh behavior. Worker refresh runs
+on the authoritative engine as a read. Shared consumers cannot refresh alone:
+refresh the direct source and restart provider/accounts through their existing
+catalogue-identity contract. New symbol fee discovery and degraded optional
+startup categories require restart; account/trading state is preserved.
+
 ### Warm start skips Rust accounts (B4)
 
 `apps/web/src/utils/exchange/eagerExchangeWarmStart.ts:123-124`: keep

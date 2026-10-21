@@ -6,6 +6,7 @@ mod hyro;
 mod identity;
 mod options;
 mod paths;
+mod refresh;
 mod sign;
 mod trading;
 mod wire;
@@ -140,6 +141,7 @@ pub enum Then {
         rejected: bool,
     },
     Fees(HashMap<String, (f64, f64)>),
+    RefreshMarkets(refresh::Page),
     /// Diagnostic only: bypass ordinary retries, startup and account success handling.
     EnvironmentProbe,
     Tickers(Vec<Ticker>),
@@ -298,6 +300,7 @@ pub struct BybitLinear {
     history: history::HistoryState,
     /// The raw first account of the last good REST wallet read: TS `balance.info`.
     balance_info: Option<String>,
+    market_refresh: refresh::State,
 }
 
 /// Bybit kline interval codes.
@@ -525,6 +528,7 @@ impl BybitLinear {
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
             balance_info: None,
+            market_refresh: refresh::State::default(),
         }
     }
 
@@ -1022,6 +1026,9 @@ impl BybitLinear {
         rejected: bool,
         response: Result<Response<'_>, &str>,
     ) {
+        if self.market_refresh.retired_startup {
+            return;
+        }
         if prelaunch && (self.startup.markets_loaded || self.startup.prelaunch.is_some()) {
             return;
         }
@@ -1171,30 +1178,7 @@ impl BybitLinear {
                 markets.extend(self.catalogs.get(&category).into_iter().flatten().cloned());
             }
             cx.store.set_markets(markets);
-            let classifications = cx
-                .store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    let mut row = self.classification.get(&market.symbol)?.clone();
-                    row.market = index as u32;
-                    Some(row)
-                })
-                .collect();
-            cx.store.set_instrument_classifications(classifications);
-            let derivatives = cx
-                .store
-                .markets()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, market)| {
-                    let mut row = self.derivatives.get(&market.symbol)?.clone();
-                    row.market = index as u32;
-                    Some(row)
-                })
-                .collect();
-            cx.store.set_derivative_products(derivatives);
+            publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
             let category = self.category;
             for other in self.categories() {
@@ -1685,7 +1669,7 @@ fn on_item_public(
             Then::Markets {
                 markets, rejected, ..
             } => {
-                let Ok(m) = serde_json::from_str::<Instrument>(item) else {
+                let Ok(m) = decode_instrument(item) else {
                     *rejected = true;
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
@@ -1777,6 +1761,10 @@ impl BybitLinear {
             }
         }
         match then {
+            Then::RefreshMarkets(page) => match response {
+                Ok(response) => self.refresh_response(cx, page, response),
+                Err(error) => self.refresh_failed(cx, page, error),
+            },
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
             Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets {
@@ -1937,6 +1925,53 @@ fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
             volume * last
         },
     }
+}
+
+// Startup and explicit refresh use one decoder without sharing their admission policy.
+#[inline(never)]
+fn decode_instrument(item: &str) -> serde_json::Result<Instrument<'_>> {
+    serde_json::from_str(item)
+}
+
+#[inline(never)]
+fn classification_from_wire(row: &Instrument<'_>) -> InstrumentClassification {
+    InstrumentClassification {
+        market: 0,
+        symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
+        market_region: row.market_region.as_ref().map(ToString::to_string),
+        underlying_ticker: row.underlying_ticker.as_ref().map(ToString::to_string),
+    }
+}
+
+// Keep metadata aligned with the just-published market table in both discovery paths.
+#[inline(never)]
+fn publish_product_metadata(
+    store: &mut safe_cex_engine::Store,
+    classifications: &HashMap<String, InstrumentClassification>,
+    derivatives: &HashMap<String, DerivativeProduct>,
+) {
+    let classifications = store
+        .markets()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, market)| {
+            let mut row = classifications.get(&market.symbol)?.clone();
+            row.market = index as u32;
+            Some(row)
+        })
+        .collect();
+    store.set_instrument_classifications(classifications);
+    let derivatives = store
+        .markets()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, market)| {
+            let mut row = derivatives.get(&market.symbol)?.clone();
+            row.market = index as u32;
+            Some(row)
+        })
+        .collect();
+    store.set_derivative_products(derivatives);
 }
 
 fn market_from_wire(m: &Instrument<'_>, variant: Variant, category: Category) -> Market {
@@ -2128,6 +2163,7 @@ impl Venue for BybitLinear {
             },
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
+            market_refresh: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2238,6 +2274,14 @@ impl Venue for BybitLinear {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if matches!(&pending.then, Then::RefreshMarkets(_)) {
+            self.select_category(pending.category);
+            let Then::RefreshMarkets(page) = pending.then else {
+                unreachable!()
+            };
+            self.refresh_response(cx, page, response);
+            return;
+        }
         if matches!(&pending.then, Then::EnvironmentProbe) {
             let confirmed = (200..300).contains(&response.status)
                 && serde_json::from_str::<EnvironmentProbeStatus>(response.body)
@@ -2262,10 +2306,10 @@ impl Venue for BybitLinear {
         pending: Pending,
         response: Response<'_>,
     ) {
-        // Fee rejections and discovery limits can carry `result: {}`. Keep
-        // typed rate-limit evidence and headers, without accepting a missing
-        // list on an otherwise successful discovery response.
-        if matches!(pending.then, Then::Fees(_))
+        // Fee, refresh and discovery-limit failures can carry `result: {}`.
+        // Preserve typed limit evidence and headers; successful discovery still
+        // requires its streamed list.
+        if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_))
             || (matches!(
                 pending.then,
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
@@ -2285,25 +2329,19 @@ impl Venue for BybitLinear {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
+        if self.market_refresh.retired_startup && matches!(&pending.then, Then::Markets { .. }) {
+            return;
+        }
         match &mut pending.then {
+            Then::RefreshMarkets(page) => self.refresh_item(page, item),
             Then::Account(request) => self.on_account_item(cx, request, item),
             Then::Options(request) => options::on_item(request, item),
             then => {
                 if matches!(then, Then::Markets { .. })
-                    && let Ok(row) = serde_json::from_str::<Instrument>(item)
+                    && let Ok(row) = decode_instrument(item)
                 {
-                    self.classification.insert(
-                        row.symbol.to_string(),
-                        InstrumentClassification {
-                            market: 0,
-                            symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
-                            market_region: row.market_region.as_ref().map(ToString::to_string),
-                            underlying_ticker: row
-                                .underlying_ticker
-                                .as_ref()
-                                .map(ToString::to_string),
-                        },
-                    );
+                    self.classification
+                        .insert(row.symbol.to_string(), classification_from_wire(&row));
                     if let Some(product) = derivative_from_wire(&row, self.category) {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }
@@ -2314,6 +2352,13 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(&pending.then, Then::RefreshMarkets(_)) {
+            let Then::RefreshMarkets(page) = pending.then else {
+                unreachable!()
+            };
+            self.refresh_failed(cx, page, error);
+            return;
+        }
         if matches!(&pending.then, Then::EnvironmentProbe) {
             self.finish_environment_probe(cx, false);
             return;
@@ -2333,6 +2378,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.refresh_timer(cx, timer) {
+            return;
+        }
         if self
             .environment_probe
             .as_ref()
@@ -2354,6 +2402,7 @@ impl Venue for BybitLinear {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx, command),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

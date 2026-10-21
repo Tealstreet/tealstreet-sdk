@@ -11,6 +11,9 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    RefreshMarkets {
+        command: u32,
+    },
     #[cfg(feature = "command-options")]
     FetchOptionChain {
         command: u32,
@@ -310,6 +313,10 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            CommandIn::RefreshMarkets { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::RefreshMarkets,
+            },
             CommandIn::FetchAccountTier { command } => Self::Venue {
                 command,
                 action: crate::VenueAction::FetchAccountTier,
@@ -1019,4 +1026,16 @@ mod tests {
             assert!(decode_subscription(&subscribe).is_err(), "{bad}");
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn market_refresh_json_is_an_explicit_read_venue_action() {
+    assert!(matches!(
+        decode_command(r#"{"op":"refreshMarkets","command":41}"#).unwrap(),
+        Command::Venue {
+            command: 41,
+            action: crate::VenueAction::RefreshMarkets
+        }
+    ));
 }

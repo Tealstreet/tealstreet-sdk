@@ -1996,3 +1996,15 @@ and replacement errors remain visible. Missing-mark and standalone inverse
 amount-only fallbacks retain their distinct TS fields. Shared-family success
 requests authoritative order reconciliation even with a healthy private socket;
 it never restores the old canceled row to mimic a local TS lifecycle state.
+
+### Native explicit catalogue refresh
+
+Rust `refreshMarkets()` issues a bounded public catalogue walk across all enabled
+categories, commits atomically, then flushes the host before returning one
+added/removed delta. Account/order/settings/book/candle/ticker state and known
+symbol fees survive. It never starts signed reconciliation or restarts sockets.
+`fetchMarkets()` and `fetchTickers()` remain cached. New symbol fees need startup
+fee discovery after restart; degraded optional products also require restart.
+Shared consumers must refresh their source then restart provider/accounts through
+the existing identity-change contract. Hyro retains its USDT perpetual filter
+and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.

@@ -70,9 +70,11 @@ price (the TS fallback could create a duplicate).
 
 ## Scope
 
-This lane ports linear USDT/USDC contracts. Inverse, spot and demo remain separate
-lanes. TS stays available as the replay oracle and as the base class of those
-unported variants; it cannot yet be deleted without breaking them.
+This document began with linear USDT/USDC contracts. The native registry now
+also selects inverse, spot, demo and Hyro variants, with optional inverse/option
+categories on linear accounts. Explicit refresh follows each instance's enabled
+categories. TS remains the replay oracle and must follow the shared deletion
+blockers before removal; this refresh does not authorize deleting variants.
 
 The shared harness now compares normalized outbound reads and subscriptions.
 It requires the native execution/wallet feeds in addition to TS's order/position
@@ -113,3 +115,50 @@ TS site-forwarding cases, package typecheck, touched ESLint, Rust fmt/strict
 Clippy and bans. Registry checks use the Bybit-only feature build and select
 the relevant construction test; unselected venue construction cases require
 the full feature matrix in CI.
+
+## Explicit market refresh and Hyro supervision (2026-10-21)
+
+The native `refreshMarkets` command stages every enabled category before one
+catalogue commit. Public Trading/PreLaunch pages are bounded by cursor progress,
+a page budget and a 30 s deadline. Concurrent callers share the walk. Required
+Trading-option terms are strict; a failed category or malformed row retains the
+whole prior catalogue. Spot has no cursor/limit, options use documented `All`,
+and Hyro retains its own USDT perpetual filter.
+
+Account state, orders, settings, books, candles, tickers and known symbol fees
+survive discovery. Metadata/classification/product indices are rebuilt together;
+new symbols subscribe on their existing category socket. New symbol fees remain
+unknown until startup fee discovery after a restart. Refresh does no signing,
+account reconciliation or socket restart. A degraded optional startup category
+must recover through restart before refresh can proceed.
+
+SDK refresh coalesces callers, flushes native state before comparing one
+added/removed delta, and emits `markets:changed` when membership changes. Worker
+requests execute on the authoritative engine with read timeout semantics.
+`fetchMarkets`/`fetchTickers` remain cached reads. Unsupported engines keep their
+cached refresh behavior. Shared consumers must refresh the direct source and
+restart provider/accounts under the existing catalogue-identity contract.
+
+Hyro's early-ping finding was stale: 5 s watch wakes retain the absolute 10 s
+ping deadline. An existing-code regression verifies early, consumed and active
+cleared timer callbacks cannot ping early or rearm after close. Demo-key
+mismatch diagnostics remain separate in #1590.
+
+Primary instrument contract: https://bybit-exchange.github.io/docs/v5/market/instrument
+Independent adversarial review is clear after strict option-term validation and
+corrected inverse-category fixture/preconditions.
+
+Startup and explicit refresh share one Instrument decoder and one metadata
+publication traversal to avoid retaining duplicate generated code. Their row
+admission and error policies remain separate; refresh keeps its strict envelope
+and atomic catalogue validation. CI measures the optimized WASM and replay costs.
+
+Refresh shares startup's discovery cooldown helper: HTTP 200 `retCode:10006`
+fails the coalesced callers once and retains the catalogue. A later explicit
+refresh is refused until the later valid reset timestamp or `Retry-After` hint; success
+headers alone do not pause discovery. Refresh does not retry the failed walk.
+
+A completed refresh moves its staged rows and product metadata into the commit
+assembly. Each category/status list is consumed once, preserving duplicate
+precedence and atomic publication while avoiding redundant deep clones. The
+catalogue copy retained alongside the published store still owns its rows.
