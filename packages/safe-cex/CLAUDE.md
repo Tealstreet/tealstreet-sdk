@@ -146,6 +146,13 @@ Aster API-version metadata. `resolveConstruction` exposes the same resolution
 without engine construction or I/O. CI compares both evaluators for every
 registered name. Explicit-private Paradex validation belongs to the registry.
 
+The table's compact `bridge` policy also resolves spot/demo identity, primary-only
+read credentials, payload-signing transport, API-index validation and isolated
+book subscriptions before WASM loads. Native `construction().bridge` reports the
+same choices; runtime behavior uses the engine capability record. Do not add a
+venue-name fallback for either path. FrameApplier quantity units continue to
+come from MARKETS flags; native sizing computations remain unchanged.
+
 The bridge forwards raw Hyro mode and production/simulator URL maps; the
 registry selects network endpoints. Native callers can retain explicit
 `endpoints` when the raw `hyrotrader` config is absent. Private non-Paradex

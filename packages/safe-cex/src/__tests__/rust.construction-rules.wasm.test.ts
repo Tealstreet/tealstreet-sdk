@@ -5,12 +5,24 @@ import { afterEach, expect, it } from 'vitest';
 
 import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE, resolveAsterDEXApiVersion } from '../exchanges/asterdex/asterdex.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
+import { deriveBridgeConstruction } from '../exchanges/rust/construction';
+import { RUST_VENUES } from '../exchanges/rust/rust.exchange';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 
 const WALLET = '0x1111111111111111111111111111111111111111';
 const PRIVATE_KEY = `0x${'22'.repeat(32)}`;
 const running: RustEngineExchange[] = [];
+
+it('compiled and synchronous construction policies agree before startup for every venue and Hyro mode', async () => {
+  const { resolveConstruction } = await loadNodeEngine();
+  expect(resolveConstruction).toBeTypeOf('function');
+  for (const name of RUST_VENUES) for (const mode of [undefined, 'demo', 'production']) {
+    const options = { key: '', secret: '', extra: { hyrotraderMode: mode } } as ExchangeOptions;
+    const native = JSON.parse(resolveConstruction!(name, JSON.stringify({ hyrotrader: { mode } })));
+    expect(native.bridge, `${name}/${mode}`).toEqual(deriveBridgeConstruction(name, options));
+  }
+});
 
 afterEach(() => {
   for (const exchange of running.splice(0)) exchange.dispose();

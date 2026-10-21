@@ -3,6 +3,7 @@ import type {
   AccountAuthResult,
   CommandProgress,
   EngineCapabilities,
+  EngineBridgeConstruction,
   EngineConstruction,
   EngineEvent,
   EngineHealth,
@@ -78,7 +79,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { derivePublicMode } from './construction';
+import { deriveBridgeConstruction, derivePublicMode } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
@@ -421,6 +422,7 @@ export class RustEngineExchange extends BaseExchange {
   private sharedPublicReady = false;
   private nativeLoaded = 0;
   private readonly commandTimeoutMs: number;
+  private readonly bridgeConstruction: EngineBridgeConstruction;
   private publicDemandReady = false;
   private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
@@ -561,7 +563,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
-    const coinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName)
+    const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];
     // Empty saved fields are stripped too, but only an actual read key is worth a warning.
@@ -581,6 +584,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
+    this.bridgeConstruction = bridgeConstruction;
     this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
     // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
@@ -589,11 +593,8 @@ export class RustEngineExchange extends BaseExchange {
     this.publicWebsocket = socket('public');
     this.businessWebsocket = socket('business');
     if (!this.isPublicDataOnly) this.privateWebsocket = socket('private');
-    this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
-      exchangeName,
-    );
-    this.isDemo =
-      exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    this.isSpot = bridgeConstruction.spot;
+    this.isDemo = bridgeConstruction.demo;
     this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
@@ -775,7 +776,7 @@ export class RustEngineExchange extends BaseExchange {
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     let transport = createEngineTransport(this.name, this.options, engineTransport());
-    if (this.name === 'paradex') {
+    if (this.bridgeConstruction.payloadSigning) {
       transport = paradexSigningTransport(this.options, transport);
       if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
     }
@@ -1362,7 +1363,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Valid once the account's balance loads; the engine's first error says why not. */
   validateAccount = (): Promise<ValidateAccountResult> => {
-    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+    if (this.bridgeConstruction.apiKeyIndexRequired) {
       const index = parseLighterApiKeyIndex(this.options.apiKeyIndex);
       if (index === undefined || index < 0 || index > 255) {
         return Promise.resolve({ error: 'Invalid API key index. Expected an integer from 0 to 255.' });
@@ -2117,7 +2118,7 @@ export class RustEngineExchange extends BaseExchange {
       this.bookListeners.set(symbol, listeners);
     }
     const listenerId =
-      (this.name !== 'asterdex' ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
+      (!this.bridgeConstruction.isolatedBookSubscriptions ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
       ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
     if (first) this.bookDemand(symbol, true);

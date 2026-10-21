@@ -25,6 +25,28 @@ struct Rule {
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
+    #[serde(default)]
+    bridge: BridgeRule,
+}
+
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+struct BridgeRule {
+    spot: bool,
+    demo: DemoRule,
+    primary_credentials_only: bool,
+    payload_signing: bool,
+    api_key_index_required: bool,
+    isolated_book_subscriptions: bool,
+}
+
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum DemoRule {
+    #[default]
+    Never,
+    Always,
+    HyroMode,
 }
 
 #[derive(Deserialize)]
@@ -58,8 +80,18 @@ fn rule(value: &Rule) -> String {
         Some(error) => format!("Some({error:?})"),
         None => "None".into(),
     };
+    let bridge = &value.bridge;
+    let bridge = format!(
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {} }}",
+        bridge.spot,
+        bridge.demo,
+        bridge.primary_credentials_only,
+        bridge.payload_signing,
+        bridge.api_key_index_required,
+        bridge.isolated_book_subscriptions
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )

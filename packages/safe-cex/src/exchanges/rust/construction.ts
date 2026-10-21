@@ -1,10 +1,26 @@
-import type { EngineConstruction } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineBridgeConstruction, EngineConstruction } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
-type Rule = { canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string };
+type Rule = {
+  canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
+  bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
+};
+
+/** Construction-time policy from the same declarations the native registry reports. */
+export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOptions): EngineBridgeConstruction => {
+  const policy = (rules.venues as Record<string, Rule>)[name]?.bridge;
+  return {
+    spot: policy?.spot === true,
+    demo: policy?.demo === 'always' || (policy?.demo === 'hyroMode' && options.extra?.hyrotraderMode === 'demo'),
+    primaryCredentialsOnly: policy?.primaryCredentialsOnly === true,
+    payloadSigning: policy?.payloadSigning === true,
+    apiKeyIndexRequired: policy?.apiKeyIndexRequired === true,
+    isolatedBookSubscriptions: policy?.isolatedBookSubscriptions === true,
+  };
+};
 
 /** The same declarative conditions native construction reads, before async WASM loading. */
 export const derivePublicMode = (

@@ -285,7 +285,17 @@ export interface EngineHealth {
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */
+export interface EngineBridgeConstruction {
+  spot: boolean;
+  demo: boolean;
+  primaryCredentialsOnly: boolean;
+  payloadSigning: boolean;
+  apiKeyIndexRequired: boolean;
+  isolatedBookSubscriptions: boolean;
+}
+
 export interface EngineConstruction {
+  bridge?: EngineBridgeConstruction;
   canSign?: boolean;
   publicDataOnly?: boolean;
   asterdexApiVersion?: 'v1' | 'v3';
