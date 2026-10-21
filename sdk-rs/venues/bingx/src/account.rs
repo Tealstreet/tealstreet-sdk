@@ -37,6 +37,7 @@ pub enum Request {
         symbol: String,
         revision: u64,
         generation: u64,
+        publish: bool,
         leverage: Option<(f64, f64)>,
     },
     ListenKey {
@@ -304,6 +305,7 @@ impl Account {
         credentials: Option<&Credentials>,
         command: u32,
         symbol: String,
+        publish: bool,
     ) {
         let Some(credentials) = credentials else {
             cx.fail(
@@ -330,6 +332,7 @@ impl Account {
                 symbol,
                 revision: self.settings_revision,
                 generation: *generation,
+                publish,
                 leverage: None,
             },
             false,
@@ -404,7 +407,8 @@ impl Account {
                 ArrayAt::EnvelopeField("data")
             }
         });
-        crate::issue(
+        let scope = auth_scope(&request);
+        let id = crate::issue(
             cx,
             Some(credentials),
             method,
@@ -413,6 +417,9 @@ impl Account {
             at,
             Pending::Account(request),
         );
+        if let Some(scope) = scope {
+            tag_read(cx, id, method, credentials, scope);
+        }
     }
 
     fn fetch_key(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -841,20 +848,17 @@ impl Account {
                 symbol,
                 revision,
                 generation,
+                publish,
                 leverage,
             } => {
-                if revision != self.settings_revision
-                    || self.metadata_generations.get(&symbol) != Some(&generation)
-                {
-                    cx.fail(
-                        command,
-                        metadata_error(
-                            "BingX settings changed during metadata read; refresh metadata",
-                        ),
-                    );
-                    return;
-                }
+                let current = publish
+                    && revision == self.settings_revision
+                    && self.metadata_generations.get(&symbol) == Some(&generation);
                 if let Some((buy, sell)) = leverage {
+                    if !current {
+                        current_metadata(cx, command, &symbol, (buy, sell));
+                        return;
+                    }
                     let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
                     let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
                         Ok("ISOLATED") => MarginType::Isolated,
@@ -885,6 +889,15 @@ impl Account {
                         cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
                         return;
                     };
+                    if !current {
+                        current_metadata(
+                            cx,
+                            command,
+                            &symbol,
+                            (rails.long_leverage, rails.short_leverage),
+                        );
+                        return;
+                    }
                     let Some(market) = cx.store.market(&symbol) else {
                         cx.fail(
                             command,
@@ -903,6 +916,7 @@ impl Account {
                             symbol,
                             revision,
                             generation,
+                            publish,
                             leverage: Some((rails.long_leverage, rails.short_leverage)),
                         },
                         false,
@@ -1637,6 +1651,96 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
+}
+
+/// A superseded read still answers without publishing stale settings.
+fn current_metadata(cx: &mut Cx<'_, Pending>, command: u32, symbol: &str, read: (f64, f64)) {
+    let setting = cx.store.setting(symbol);
+    let valid = |value: &f64| value.is_finite() && *value > 0.0;
+    let buy = setting
+        .and_then(|s| s.buy_leverage)
+        .filter(valid)
+        .unwrap_or(read.0);
+    let sell = setting
+        .and_then(|s| s.sell_leverage)
+        .filter(valid)
+        .unwrap_or(read.1);
+    cx.done(
+        command,
+        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
+    );
+}
+
+/// Tag an account read with the credential slot that actually signs it.
+pub(crate) fn tag_read(
+    cx: &mut Cx<'_, Pending>,
+    id: safe_cex_engine::RequestId,
+    method: Method,
+    credentials: &Credentials,
+    scope: safe_cex_engine::AccountReadScope,
+) {
+    let slot = if method == Method::Get && credentials.read.is_some() {
+        safe_cex_engine::CredentialSlot::Secondary
+    } else {
+        safe_cex_engine::CredentialSlot::Primary
+    };
+    cx.tag_account_read(id, slot, scope);
+}
+
+pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match request {
+        Request::PositionMode { .. } => Settings,
+        Request::Balance { .. } => Balance,
+        Request::Positions { .. } => Positions,
+        Request::OpenOrders { .. } => Orders,
+        _ => return None,
+    })
+}
+impl crate::Bingx {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        // A first signature rejection is re-signed once; only the final answer counts.
+        let pending = match pending {
+            Pending::Signed(signed)
+                if !signed.resent && crate::signature_rejected(response.body) =>
+            {
+                return None;
+            }
+            Pending::Signed(signed) => &signed.inner,
+            pending => pending,
+        };
+        let Pending::Account(request) = pending else {
+            return None;
+        };
+        auth_scope(request)?;
+        #[derive(serde::Deserialize)]
+        struct Evidence {
+            code: i64,
+        }
+        let evidence: Evidence = serde_json::from_str(response.body).ok()?;
+        if matches!(evidence.code, 100001 | 100004 | 100413 | 100419) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || evidence.code != 0 {
+            return None;
+        }
+        let valid = match request {
+            Request::PositionMode { .. } => {
+                serde_json::from_str::<ModeEnvelope>(response.body).is_ok()
+            }
+            Request::Balance { failed, .. } => !failed,
+            // Undecodable rows are skipped individually; a signed code-0 page
+            // still proves the credential was accepted.
+            Request::Positions { .. } | Request::OpenOrders { .. } => true,
+            _ => false,
+        };
+        valid.then_some(Accepted)
+    }
 }
 
 /// Metadata reads do not submit a trading effect, including failed confirmations.
