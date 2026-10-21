@@ -411,8 +411,8 @@ Hyperliquid. Production, entropy, validators and ordinary CI defaults stay intac
 Enable VENUES.hyperliquid tape time for both the perp private tape and the
 spot-enabled account tape. Standalone Hyperliquid Spot is already covered
 separately. Preserve both configs, HIP-3/Spot state, staged reads, cloids,
-fills, poll pacing, command receipts and all fixture bytes. The generator
-has fixed event timestamps but no epoch metadata; add none unless repeated
+fills, poll pacing, command receipts and all wire payloads/times/ordinals.
+The generator has fixed event timestamps but no epoch metadata; add none unless repeated
 raw outputs demonstrate variance and a minimal reviewed fix is required.
 
 Use an authentic fingerprint-matching CI engine for five private pairs per
@@ -428,3 +428,18 @@ existing request normalization removes action nonce/signature. This phase
 proves repeatability of the existing harness, not fresh cryptographic request
 verification. Preserve that policy and document the gap; no validator expansion,
 production change, entropy change or new output exclusion is part of this PR.
+
+Timer pumping exposed order3002 during command1 before its placement command3.
+The synthetic fixture previously gated frontendOpenOrders only by elapsed time.
+Stage each frontendOpenOrders snapshot and exchange ACK with the current command
+index so existing Tape.readStage fencing hides future state until that command's
+ACK. This fixture-only repair is explicitly approved by the overseer. Rebind
+only the two affected tape SHAs; do not declare the four false future-state
+paths. Stripping only afterCommand reproduces the original perp SHA
+a44f3bf62cb55f571d3fa6eb7f617a5499137d2e24b37ad49d29e038c9a4daa4
+and embedded Spot SHA
+4d735e68ad388c615fcdb85fc0fabeec9eecbfccc573077b62a25d61419902e2
+exactly, including all 53/62 records. Regression tests exercise actual Tape
+reads before/after every ACK and before issuing the next command, with elapsed
+time beyond future snapshots, across core/HIP-3 and the embedded Spot lifecycle.
+The original generator fails both causal regressions; wire-identity checks pass.
