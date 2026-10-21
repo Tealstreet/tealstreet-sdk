@@ -95,6 +95,15 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     await expect(exchange.start()).rejects.toThrow(message);
     expect(deactivated).toHaveBeenCalledOnce();
   });
+  it('keeps the startup failure kind for start() and validateAccount', async () => {
+    const message = 'Bybit rejected the API key (10003): API key is invalid.';
+    const detail = { message, kind: 'authInvalid', venueCode: '10003' };
+    const started = fixture({}, [{ op: 'startupFailed', detail }], false);
+    await expect(started.exchange.start()).rejects.toMatchObject({ message, kind: 'authInvalid', venueCode: '10003' });
+    // Venues log the reason just before StartupFailed in the same batch.
+    const validated = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail }], false);
+    await expect(validated.exchange.validateAccount()).resolves.toEqual({ error: message, kind: 'authInvalid' });
+  });
   it('settles definitive login rejection through the shared deactivation contract', async () => {
     const { exchange } = fixture({}, [{ op: 'deactivate' }], false);
     await expect(exchange.start()).rejects.toThrow('credentials were rejected');
