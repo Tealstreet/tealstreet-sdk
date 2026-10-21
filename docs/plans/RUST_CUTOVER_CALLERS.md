@@ -185,6 +185,8 @@ The Bitunix host-clock/login batch checks #1648 (`205ceb3fe8d`) and #1649
 below use the merged source.
 The Bitunix explicit-route follow-up checks #1650 at `b2059cce998`; existing NX
 flag forwarding was checked read-only at `65e086a3c90`.
+The Bitunix order-repair batch checks #1655 (`ba3d5bc69ee`) and #1658
+(`67e81cfc13b`), including the exact 44 terminal-retention replay keys.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -276,6 +278,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1648 / `205ceb3fe` | Bitunix advertises the existing `hostClock` capability, so the SDK supplies synchronized virtual-clock time before first engine start and later callbacks, including private login. REST/login timestamp units and signing formats stay unchanged; callers add no account field or constructor argument. |
 | #1649 / `fc5ab9224` | Missing/null/malformed private login results now emit sanitized Warn `stream.malformed`; explicit boolean false retains Error `auth.rejected`. The existing two-second same-socket login retry coalesces repeated failures; success/retirement cancel it and stale timers cannot sign on a replacement. Deactivation and trading retry policy stay unchanged. |
 | #1650 / `b2059cce9` | With a routing-capable transport, explicit Bitunix `tealstreetWsRoute: true` selects each channel's declared fallback proxy from the first connection and on reconnect. False/unset keeps the existing two-attempt direct-first policy. A direct-only provider stays direct and warns; callers must choose a routing-capable provider to force proxy use. Existing options and native routing-plan schema stay unchanged. |
+| #1655 / `ba3d5bc69` | Bitunix regular/TP-SL reads keep independent serials and ten-second lost-read deadlines; ordinary notifications coalesce without postponing the first one-second repair. Earlier reconciliation can retire venue-terminal orders sooner than TS. The private replay declaration adds exactly 44 tape-pinned terminal-removal/index-shift paths; other checks and all prior declarations stay intact. |
+| #1658 / `67e81cfc1` | Ordinary Bitunix order snapshots admit healthy REST peers while preserving newer WS native families/terminal absence and bounded malformed-row scope. A separate write revision fences stale publication across placement/cancel/ACK/cleanup, including partial cancellation failure. Initial halves remain atomic, command-owned prerequisites stay strict, and no trading write is retried. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2339,13 +2343,57 @@ execution baselines, preserving held rows' pending fill accounting.
 Consumers can therefore see newly admitted peers beside retained older rows;
 row skipping does not prove a full refresh. Partial initial position/order
 snapshots do not establish readiness. Initial orders require both current
-regular/TP-SL serials and generations. A partial command-owned read can update
+regular/TP-SL serials and write revisions; command-owned prerequisites also
+require the global generation checks (#1658). A partial command-owned read can update
 healthy UI peers but cannot approve a trading prerequisite: the command rejects
 without sending the dependent write. Malformed/failed envelopes retain the
 previous snapshot rather than publishing a parsed prefix. Keep readiness and
 existing command-error handling; method signatures, quantities and worker error
-fields are unchanged. Order/TP-SL WS reconciliation scheduling and global
-generation fencing remain separate from these REST row-admission changes.
+fields are unchanged. Subsequent #1655/#1658 address order/TP-SL WS scheduling
+and keyed reconciliation; see [Bitunix order reconciliation](#bitunix-order-reconciliation-1655-1658).
+
+### Bitunix order reconciliation (#1655, #1658)
+
+Regular and TP-SL REST reads now have independent serials and ten-second
+lost-read deadlines. Ordinary refreshes coalesce around an active read, and later
+notifications do not postpone the first one-second repair deadline. Only the
+matching completion/failure releases its token, including synchronous signing
+failure; a lost endpoint is replaced independently of the other endpoint.
+
+Ordinary snapshots use the endpoint serial and a separate command-mutation
+revision rather than discard every peer after any WS generation change. Newer
+validated WS native-order families, their routing metadata and terminal absence
+survive older REST rows while healthy peers advance. Malformed WS identities
+retain the affected raw family; unknown identity protects endpoint absence.
+Bounded overlap coverage holds conservatively when exhausted. Superseded or
+quarantined families do not consume execution baselines, while sparse unknown
+execution updates can still obtain REST metadata for pending fills.
+
+Command mutation revisions cover optimistic placement/cancel, actual write
+dispatch, responses before partial-ACK error exits, and cleanup. Older snapshots
+cannot reopen an accepted cancellation or restore a removed temporary order.
+Command-owned prerequisites retain global generation/serial checks and the write
+fence for store publication, even when the prerequisite rejects. Both complete
+initial halves keep their WS overlap until atomic publication; malformed or
+overflowed coverage cannot establish readiness. Caller signatures, quantities
+and error fields are unchanged; no trading write is replayed.
+
+Live `store.orders` can retire orders already reported terminal sooner than TS,
+shifting subsequent array positions. Consumers must use order IDs and status,
+rather than array index or a terminal-row retention window. At NX `65e086a3c90`,
+`apps/web/src/utils/order/getOpenOrders.ts:16-17` filters open status and keys by
+ID; its optimistic merge deduplicates by ID and removes closed/canceled rows
+(`:149-150`). These reviewed helpers need no edit for earlier terminal removal.
+This focused source check does not prove every downstream consumer.
+
+#1655 adds exactly 44 private known-gate paths for terminal removals and their
+array shifts, pinned to tape SHA
+`e8d90edafa93fabcbd9cefb0e84be32a077399e0e3a2f4a906999d9d48a3850c`.
+The archived CI comparison has identical common-ID rows at all 16 checkpoints,
+13 command outcomes and seven writes; removed rows are closed/canceled. The 90
+previous declarations are unchanged. Read counts differ, so this is not a claim
+of identical transport receipts. Other fields/tapes remain checked; no comparator,
+threshold, tape or integrity rule was relaxed.
 
 ### Bitunix host time and login controls (#1648/#1649)
 
