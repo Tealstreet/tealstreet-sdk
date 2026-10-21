@@ -1931,8 +1931,7 @@ fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
 
 /// OKX WebSocket login codes for a missing or refused key or passphrase (60xxx).
 fn socket_key_rejection(code: &str) -> Option<ErrorKind> {
-    matches!(code, "60001" | "60003" | "60005" | "60024" | "60032")
-        .then_some(ErrorKind::AuthInvalid)
+    matches!(code, "60005" | "60024" | "60032").then_some(ErrorKind::AuthInvalid)
 }
 
 fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {

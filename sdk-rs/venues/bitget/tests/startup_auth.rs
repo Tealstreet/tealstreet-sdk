@@ -336,3 +336,65 @@ fn rate_limited_probe_waits_out_the_rest_pause() {
         assert!(h.startup_failures.is_empty());
     }
 }
+
+#[test]
+fn only_exact_documented_bitget_key_and_passphrase_codes_end_startup() {
+    for code in ["30011", "30012"] {
+        for encoded in [code.to_owned(), format!(r#""{code}""#)] {
+            for event in ["error", "login"] {
+                let mut h = to_login(keyed());
+                h.private_message(&format!(
+                    r#"{{"event":"{event}","code":{encoded},"msg":"refused"}}"#
+                ));
+                assert_eq!(h.startup_failures.len(), 1, "{event} {encoded}");
+                assert_eq!(h.startup_failures[0].venue_code.as_deref(), Some(code));
+                assert_eq!(h.deactivations, 1);
+            }
+        }
+    }
+    for code in [
+        "30011.5", "30012.5", "30005", "30006", "30007", "30013", "30014", "30015", "30033",
+    ] {
+        let mut h = to_login(keyed());
+        h.private_message(&format!(
+            r#"{{"event":"error","code":{code},"msg":"retryable or unknown"}}"#
+        ));
+        for _ in 0..50 {
+            if private_connects(&h) > 1 {
+                break;
+            }
+            fire_next(&mut h);
+        }
+        assert!(private_connects(&h) > 1, "{code}");
+        assert!(h.startup_failures.is_empty(), "{code}");
+        assert_eq!(h.deactivations, 0);
+    }
+}
+
+#[test]
+fn fractional_socket_codes_that_round_to_terminal_codes_still_reconnect() {
+    for code in [
+        "30010.999999999999999",
+        "30011.000000000000001",
+        "30011.999999999999999",
+        "30012.000000000000001",
+    ] {
+        for encoded in [code.to_owned(), format!(r#""{code}""#)] {
+            for event in ["error", "login"] {
+                let mut h = to_login(keyed());
+                h.private_message(&format!(
+                    r#"{{"event":"{event}","code":{encoded},"msg":"retryable or unknown"}}"#
+                ));
+                for _ in 0..50 {
+                    if private_connects(&h) > 1 {
+                        break;
+                    }
+                    fire_next(&mut h);
+                }
+                assert!(private_connects(&h) > 1, "{event} {encoded}");
+                assert!(h.startup_failures.is_empty(), "{event} {encoded}");
+                assert_eq!(h.deactivations, 0, "{event} {encoded}");
+            }
+        }
+    }
+}

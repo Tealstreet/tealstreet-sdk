@@ -19,9 +19,13 @@ All five landed on `feat/rust-rewrite` (2026-10-21).
 
 ## WebSocket login-code verification (2026-10-21)
 
-Plan: verify OKX and Bitget terminal startup login codes against current primary
-venue tables. Remove obsolete unverified OKX terminal codes; reject fractional
-Bitget lookalikes before floating-point conversion. Preserve transient retry,
-clock/signature handling, established accounts and native diagnostics. Add
-startup/reconnect regressions, run both venues plus Binance and strict gates,
-and obtain independent review before green CI and merge.
+OKX terminal key/passphrase codes are 60005, 60024 and 60032 in the current
+[primary WS error table](https://www.okx.com/docs-v5/en/#error-code-websocket-error-code).
+60001/60003 are absent there and no longer trigger terminal key rejection.
+Bitget's [primary WS table](https://www.bitget.com/docs/uta/error-code/websocket)
+lists 30011/30012 for key/passphrase rejection. Only exact integer numeric tokens
+or canonical quoted codes admit those meanings; fractional lookalikes cannot
+be rounded into permanent credential failure. Generic signature/clock/rate and
+unknown codes retain reconnect behavior. Established-account and success paths
+are unchanged. Startup and reconnect regressions cover numeric/quoted near-integer
+fractions; independent review is clear.
