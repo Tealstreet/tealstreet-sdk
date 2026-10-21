@@ -209,7 +209,7 @@ as it does today against Rust transferring frames:
 - Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
   reservation; never clamp releases to zero. Each measured run must reproduce
   its implementation's audited output and transport receipt.
-- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
+- Shipped combined WASM: at most 14,155,776 bytes (13.5 MiB). Standalone builds
   use the 1,343,488-byte family budget (RUST_WASM_FAMILIES.md). Check browser and Node artifacts before overwrite.
 
 Peak memory and browser cold-start remain cutover requirements; this replay
@@ -574,7 +574,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. [Explicit product decision](GRVT_PRODUCTS_DECISION.md) retires unexposed mapper-only Future/Call/Put paths: TS discovery defaults to perpetuals, explicit non-perpetual public catalogs were empty, and generic dispatch does not establish their lifecycle support. Keep TS/reference sources and public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
-| `bitunix` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `bitunix` | Opt-in USDT futures; streamed discovery/ticker seeds, full-snapshot depth, signed private reconciliation, guarded trading and native history queries. `realizedPNL` is already net of fees and funding and remains verbatim. Live public and documented private replay are separate evidence; default cutover and credentialed lifecycle proof remain later gates. Preserve [port scope and gate evidence](RUST_BITUNIX.md). |
 
 #### Known consumer blockers and replacement order
 

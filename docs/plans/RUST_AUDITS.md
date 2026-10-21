@@ -450,17 +450,18 @@ per-venue canary holding the formerly circular-evidence venues last.
 Reviewed on `feat/rust-bitunix` at `846f285d13` (PR #1309, not yet merged); paths
 are relative to `sdk-rs/venues/bitunix/src`. REST and WS signing match TS byte for
 byte; positions, aggregate balance and history paging are at parity.
-- High: app stop payloads are rejected. `trading.rs:265` refuses any order with
+- High: ~~app stop payloads are rejected. `trading.rs:265` refuses any order with
   `trigger_price`, including StopLoss/TakeProfit sent with `triggerPrice == price`
   (TS places them from `price`, `bitunix.exchange.ts` `formatTPSLOrder`), so a
   dragged SL/TP leaves the position unprotected. Accept protective kinds whose
-  trigger equals the price (as Orderly does).
-- High: the futures socket (books, candles) is tagged `SocketChannel::Public`
+  trigger equals the price (as Orderly does).~~ (accepted via
+  `redundant_protective_trigger`; distinct triggers still reject)
+- High: ~~the futures socket (books, candles) is tagged `SocketChannel::Public`
   (`lib.rs:127`), so the host applies the public route; its fallback is the public
   proxy, not `bitunixFutures` (`routingTable.ts` `business`). After two silent
   connects or a watchdog recover the socket sticks to an endpoint that ignores
   depth/kline subscriptions while still answering pings: books and live candles go
-  dead with no log. Tag it `SocketChannel::Business`.
+  dead with no log. Tag it `SocketChannel::Business`.~~ (tagged Business)
 - Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
   network speed across futures, private and every ticker shard.
 - Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
