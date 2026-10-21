@@ -18,6 +18,8 @@ pub struct Store {
     quantity_units: u32,
     #[cfg(any(test, feature = "product-semantics"))]
     instrument_classifications: Option<Vec<InstrumentClassification>>,
+    #[cfg(any(test, feature = "underlying-tokens"))]
+    underlying_tokens: Option<Vec<crate::model::UnderlyingToken>>,
     #[cfg(any(test, feature = "product-semantics"))]
     derivative_products: Option<Vec<DerivativeProduct>>,
     #[cfg(any(test, feature = "product-semantics"))]
@@ -179,6 +181,10 @@ impl Store {
             self.instrument_classifications = None;
             self.derivative_products = None;
         }
+        #[cfg(any(test, feature = "underlying-tokens"))]
+        {
+            self.underlying_tokens = None;
+        }
         #[cfg(feature = "prediction")]
         {
             let had_prediction_markets = self.prediction_markets.take().is_some();
@@ -213,6 +219,20 @@ impl Store {
     ) {
         if self.instrument_classifications.as_ref() != Some(&classifications) {
             self.instrument_classifications = Some(classifications);
+            self.changes.markets = true;
+        }
+    }
+
+    #[cfg(any(test, feature = "underlying-tokens"))]
+    pub fn underlying_tokens(&self) -> Option<&[crate::model::UnderlyingToken]> {
+        self.underlying_tokens.as_deref()
+    }
+
+    /// Replace underlying tokens after `set_markets`; indices belong to that snapshot.
+    #[cfg(any(test, feature = "underlying-tokens"))]
+    pub fn set_underlying_tokens(&mut self, tokens: Vec<crate::model::UnderlyingToken>) {
+        if self.underlying_tokens.as_ref() != Some(&tokens) {
+            self.underlying_tokens = Some(tokens);
             self.changes.markets = true;
         }
     }
@@ -720,6 +740,8 @@ impl Store {
                 self.write_instrument_classifications(w);
                 self.write_derivative_products(w);
             }
+            #[cfg(any(test, feature = "underlying-tokens"))]
+            self.write_underlying_tokens(w);
             #[cfg(feature = "prediction")]
             self.write_prediction_markets(w);
         }
@@ -837,6 +859,24 @@ impl Store {
                     .as_deref()
                     .map(|s| w.string(s))
                     .unwrap_or(wire::NONE),
+            ];
+            w.u32s(refs);
+        }
+        w.end();
+    }
+
+    #[cfg(any(test, feature = "underlying-tokens"))]
+    fn write_underlying_tokens<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(rows) = &self.underlying_tokens else {
+            return;
+        };
+        w.begin(section::UNDERLYING_TOKENS);
+        w.u32(rows.len() as u32);
+        w.u32s(rows.iter().map(|row| row.market));
+        for row in rows {
+            let refs = [
+                w.string(&row.name),
+                w.optional_string(row.full_name.as_deref()),
             ];
             w.u32s(refs);
         }
@@ -1814,6 +1854,39 @@ mod tests {
             last_update: None,
         }]);
         store
+    }
+
+    #[test]
+    fn underlying_tokens_ride_their_own_section_and_reset_with_the_market_table() {
+        let mut store = market_position_store();
+        let legacy = balance_frame(&mut store);
+        let token = crate::model::UnderlyingToken {
+            market: 0,
+            name: "UBTC".into(),
+            full_name: None,
+        };
+        store.set_underlying_tokens(vec![token.clone()]);
+        let frame = balance_frame(&mut store);
+        let payload = |bytes: &[u8], kind| {
+            wire::sections(bytes)
+                .find(|(k, _)| *k == kind)
+                .unwrap()
+                .1
+                .to_vec()
+        };
+        assert_eq!(
+            payload(&legacy, section::MARKETS),
+            payload(&frame, section::MARKETS)
+        );
+        let words = payload(&frame, section::UNDERLYING_TOKENS);
+        let word = |at| u32::from_le_bytes(words[at..at + 4].try_into().unwrap());
+        assert_eq!((word(0), word(4)), (1, 0));
+        assert_ne!(word(8), wire::NONE);
+        assert_eq!(word(12), wire::NONE, "an absent full name stays absent");
+        store.set_underlying_tokens(vec![token]);
+        assert!(!store.take_pending().changes.markets);
+        store.set_markets(store.markets.clone());
+        assert!(store.underlying_tokens().is_none());
     }
 
     #[test]

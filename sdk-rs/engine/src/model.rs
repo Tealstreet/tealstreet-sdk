@@ -323,6 +323,15 @@ pub struct InstrumentClassification {
     pub underlying_ticker: Option<String>,
 }
 
+/// The venue token behind a market whose display name differs from it, such as
+/// Hyperliquid's Unit-bridged `UBTC` behind `BTC/USDC`: a risk disclosure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnderlyingToken {
+    pub market: u32,
+    pub name: String,
+    pub full_name: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProductKind {
