@@ -78,8 +78,11 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    data/refusals fail. A precise shared decoder feature admits standalone JSON
    requests without unrelated venue commands. Crypto.com now uses unsigned live/UAT
    GET with fixed depth50, typed first-book mapping and independent query ownership;
-   native price IDs/order/zero totals survive without stream mutation. GRVT,
-   Paradex and WEEX remain parity gaps; streaming subscriptions are separate. MEXC's existing
+   native price IDs/order/zero totals survive without stream mutation. GRVT now
+   issues independent unsigned MDG lite queries using the documented i/d fields
+   and full/lite response aliases; native side order, zero rows and cumulative
+   base totals are preserved without stream/session mutation. Paradex and WEEX
+   remain parity gaps; streaming subscriptions are separate. MEXC's existing
    standalone JSON decoder omission is repaired by opting into the precise book
    feature, with a JSON-to-native-HTTP/result regression; native book semantics
    stay unchanged. Add each remaining native query/capability without synthesizing

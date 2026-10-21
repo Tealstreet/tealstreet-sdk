@@ -885,3 +885,24 @@ TS class prototype is not reconstructed. NX's existing class-only modal handler
 must migrate deliberately. Pending/unknown checks and exhausted network or
 malformed-list failures remain ordinary errors. Existing validation order,
 missing/unreadable-cap policy, retry budget, FIFO and write outcomes stay intact.
+
+
+### Native REST order-book query
+
+Rust exposes public SDK fetchOrderBook through an unsigned MDG POST on live and
+testnet, using the stored native instrument ID. The [official lite book schema](https://api-docs.grvt.io/market_data_api/#orderbook-levels)
+requires {i:nativeId,d:50}; this deliberately corrects TS's legacy instrument_id
+body and long-only response mapping. Caller limit stays ignored. Lite r/b/a/p/s
+and full result/bids/asks/price/size aliases map directly to numeric price and base
+amount, cumulative amount totals per side, native order and zero quantity rows;
+no price IDs, sequence metadata or decimal/contract scaling is introduced.
+
+Unknown markets, missing/null result and missing/null sides retain TS's empty
+book behavior. Present malformed structures, invalid/nonfinite financial rows
+and cumulative overflow fail the complete query. Named record boundaries require
+objects. This command never publishes subscription books or account/session
+headers, including on public code1000 or responses with cookies/account IDs.
+HTTP/native failures do not retry or refresh auth; transport uses the existing
+five bounded read reissues, then a typed owned Network/NotSent failure. Public
+rate1006/HTTP429 retains bounded usable Retry-After metadata without account-auth
+classification. The standalone family explicitly enables its JSON book decoder.
