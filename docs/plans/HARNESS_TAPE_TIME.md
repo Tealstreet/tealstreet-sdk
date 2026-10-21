@@ -101,9 +101,13 @@ randomness; an explicit native host entropy hook is a separate follow-up.
 
 ## Blofin phase
 
-Enable Blofin's virtual private clock without changing the authored tape,
-protocol validators or production behavior. Generate the unchanged CI fixture
-and use a fingerprint-matching CI engine for five focused private pairs.
+Enable Blofin's virtual private clock without changing wire payloads,
+protocol validators or production behavior. The first raw proof found that
+the tape lacks an epoch and TS live fill rows use Date.now as a fallback.
+Add one metadata frame anchored to the authored history window, preserving
+all existing wire and command records. Rebind only the active exact-key
+declaration to the new tape SHA; preserve the historical declaration.
+Use a fingerprint-matching CI engine for five focused private pairs.
 Inspect complete outputs, including client IDs, lifecycle checkpoints and
 transport receipts; compare all nonmetric fields within each implementation.
 Remove only exact unobserved declarations bound to this tape SHA, and review
