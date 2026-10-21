@@ -752,15 +752,15 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
 #[test]
 fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_backpack::Backpack::new(
-        safe_cex_venue_backpack::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
             read_credentials: None,
             public_data_only: false,
             key: Some("test-public-key".into()),
             secret: Some(STANDARD.encode([7u8; 32])),
             recv_window: None,
-        },
-    ));
+        }),
+    );
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, 200, MARKETS);

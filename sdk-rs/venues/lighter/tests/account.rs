@@ -488,10 +488,10 @@ fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_f
 }
 #[test]
 fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
-    use safe_cex_engine::{Engine, SocketChannel};
+    use safe_cex_engine::SocketChannel;
     use safe_cex_venue_lighter::Lighter;
     let mut timers = Timers::new();
-    let mut e = Engine::new(Lighter::new(options()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
     e.start(NOW);
     let meta = requests(&mut e).pop().unwrap();
     reply(&mut e, &meta, 200, META);
@@ -609,7 +609,9 @@ fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_ar
 #[test]
 fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
     for pnl in [true, false] {
-        let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
+        let mut e = safe_cex_engine::test_support::seeded_engine(
+            safe_cex_venue_lighter::Lighter::new(options()),
+        );
         e.start(NOW);
         let mut bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
         if !pnl {

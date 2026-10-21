@@ -22,7 +22,7 @@ fn seeded() -> (Engine<Lighter>, SocketId) {
     (engine, socket)
 }
 fn seeded_with_poll() -> (Engine<Lighter>, SocketId, safe_cex_engine::TimerId) {
-    let mut e = Engine::new(Lighter::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -216,7 +216,7 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
 }
 #[test]
 fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
-    let mut e = Engine::new(Lighter::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -261,7 +261,7 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
 }
 #[test]
 fn metadata_failure_falls_back_but_invalid_success_never_clears() {
-    let mut e = Engine::new(Lighter::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
     e.start(1_000.0);
     let id = e
         .drain_actions()
@@ -282,7 +282,7 @@ fn metadata_failure_falls_back_but_invalid_success_never_clears() {
 
 #[test]
 fn subscription_can_be_cancelled_before_markets_arrive() {
-    let mut e = Engine::new(Lighter::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -358,7 +358,7 @@ fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
 
 #[test]
 fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors() {
-    let mut e = Engine::new(Lighter::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
     e.start(0.);
     for delay in [1000., 2000., 4000.] {
         for _ in 0..2 {

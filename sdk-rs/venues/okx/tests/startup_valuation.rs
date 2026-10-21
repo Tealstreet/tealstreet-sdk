@@ -7,7 +7,7 @@ use safe_cex_venue_okx::{Okx, Options};
 use support::*;
 
 fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Action>) {
-    let mut engine = Engine::new(Okx::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),

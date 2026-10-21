@@ -569,7 +569,7 @@ mod tests {
                 }
             };
             let mut h = Self {
-                engine: Engine::new(Probe {
+                engine: safe_cex_engine::test_support::seeded_engine(Probe {
                     inner: AsterDex::new(options),
                     method,
                     streamed: false,
@@ -841,7 +841,7 @@ mod tests {
     impl PublicHarness {
         fn new() -> Self {
             let mut h = Self {
-                engine: Engine::new(AsterDex::new(Options {
+                engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
                     public_data_only: true,
                     ..Options::default()
                 })),

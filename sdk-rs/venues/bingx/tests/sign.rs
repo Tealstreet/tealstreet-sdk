@@ -107,7 +107,7 @@ fn secondary_get_keeps_primary_posted_reads_and_mutations() {
 
 #[test]
 fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account() {
-    use safe_cex_engine::{Action, Engine, ReadCredentials};
+    use safe_cex_engine::{Action, ReadCredentials};
     use safe_cex_venue_bingx::{Bingx, Options};
     for public_data_only in [true, false] {
         let options = Options {
@@ -119,7 +119,7 @@ fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account
             }),
             ..Options::default()
         };
-        let mut engine = Engine::new(Bingx::new(options));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(options));
         engine.start(1700000000000.0);
         assert!(
             !engine

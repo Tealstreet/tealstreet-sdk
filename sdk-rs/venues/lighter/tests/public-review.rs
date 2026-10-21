@@ -17,7 +17,7 @@ fn reply(e: &mut Engine<Lighter>, r: &HttpRequest, t: f64, body: &str) {
     );
 }
 fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
-    let mut e = Engine::new(Lighter::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

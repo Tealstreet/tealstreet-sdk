@@ -40,19 +40,45 @@ class AccountAuthCallbackError extends Error {
 }
 let nextReceiptSession = 0;
 
-function receiptSession() {
-  const sequence = ++nextReceiptSession;
+const entropyFailure = (message) => new ExchangeError(message, { kind: 'invalidInput' });
+
+function checkedEntropy(source, name) {
+  if (typeof source !== 'function') throw entropyFailure(`${name} entropy provider must be a function`);
+  return (length) => {
+    try {
+      if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff)
+        throw new Error('Invalid entropy length');
+      const bytes = source(length);
+      if (!(bytes instanceof Uint8Array) || bytes.length !== length)
+        throw new Error('Invalid entropy bytes');
+      // A provider may retain and reuse its storage; neither host nor engine owns it.
+      return new Uint8Array(bytes);
+    } catch {
+      throw entropyFailure(`${name} entropy provider failed`);
+    }
+  };
+}
+
+function productionEntropy() {
   try {
-    if (typeof globalThis.crypto?.randomUUID === 'function') return `${globalThis.crypto.randomUUID()}:${sequence}`;
-  } catch { /* Correlation must also work in native hosts without Web Crypto. */ }
-  const bytes = new Uint8Array(16);
-  try {
-    if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new Error('Web Crypto unavailable');
-    globalThis.crypto.getRandomValues(bytes);
+    const crypto = globalThis.crypto;
+    const fill = crypto?.getRandomValues;
+    if (typeof fill !== 'function') throw new Error('Web Crypto unavailable');
+    return checkedEntropy((length) => {
+      const bytes = new Uint8Array(length);
+      // Web Crypto limits each call to 65536 bytes.
+      for (let offset = 0; offset < length; offset += 65536)
+        fill.call(crypto, bytes.subarray(offset, Math.min(offset + 65536, length)));
+      return bytes;
+    }, 'Identity');
   } catch {
-    // This is an opaque correlation token, never an authentication token.
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    throw entropyFailure('Cryptographic host identity entropy is unavailable');
   }
+}
+
+function receiptSession(fill) {
+  const bytes = fill(16);
+  const sequence = ++nextReceiptSession;
   bytes[6] = (bytes[6] & 15) | 64;
   bytes[8] = (bytes[8] & 63) | 128;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -171,6 +197,24 @@ export class EngineDeadError extends Error {
 export class EngineHost {
   constructor(engine, transport, handlers = {}, options = {}) {
     this.commandTimeoutMs = commandTimeout(options.commandTimeoutMs === undefined ? DEFAULT_COMMAND_TIMEOUT_MS : options.commandTimeoutMs);
+    const identity = options.entropy === undefined ? productionEntropy() : checkedEntropy(options.entropy, 'Identity');
+    const signing = options.signingEntropy === undefined ? undefined : checkedEntropy(options.signingEntropy, 'Signing');
+    for (const [source, setter, name] of [
+      [options.entropy === undefined ? undefined : identity, 'setEntropy', 'identity'],
+      [signing, 'setSigningEntropy', 'signing'],
+    ]) {
+      if (source !== undefined && typeof engine[setter] !== 'function')
+        throw entropyFailure(`Engine does not support ${name} entropy injection`);
+    }
+    for (const [source, setter] of [
+      [options.entropy === undefined ? undefined : identity, 'setEntropy'],
+      [signing, 'setSigningEntropy'],
+    ]) {
+      if (source === undefined) continue;
+      try { engine[setter](source); }
+      catch { throw entropyFailure('Engine entropy must be configured before startup'); }
+    }
+    this.entropy = identity;
     this.engine = engine;
     this.transport = transport;
     this.handlers = handlers;
@@ -240,9 +284,12 @@ export class EngineHost {
       : this.nextCommand++;
     const clientOrderIds = reply !== undefined && Array.isArray(command.orders)
       ? command.orders.map((order) => order?.clientOrderId).filter((id) => typeof id === 'string') : undefined;
-    const identity = reply === undefined ? undefined : { op: command.op,
-      clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
-      receiptKey: `${this.receiptSession ??= receiptSession()}:${reply}`, commandId: reply, orderIdentities: [] };
+    let identity;
+    try {
+      identity = reply === undefined ? undefined : { op: command.op,
+        clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
+        receiptKey: `${this.receiptSession ??= receiptSession(this.entropy)}:${reply}`, commandId: reply, orderIdentities: [] };
+    } catch (error) { return Promise.reject(error); }
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));

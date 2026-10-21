@@ -1,11 +1,11 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, SocketChannel};
+use safe_cex_engine::{Action, Command, Event, Notice, SocketChannel};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::*;
 
 #[test]
 fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -42,7 +42,7 @@ fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
 #[test]
 fn error_seed_does_not_commit_partial_markets() {
     let body = MARKETS.replace("\"code\":0", "\"code\":20016");
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -127,7 +127,7 @@ fn malformed_depth_is_atomic_and_unknown_topics_are_ignored() {
 }
 #[test]
 fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_role() {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -372,7 +372,7 @@ fn depth_gap_recovers_snapshot_and_ignores_duplicates_and_pre_snapshot_deltas() 
 fn secondary_trade_uses_decimal_quote_conversion_and_rollover_without_backflow() {
     // A credential-less exchange still has the public-only guard internally;
     // the option controls whether recent trades supplement subscribed candles.
-    let mut other = Engine::new(ApexOmni::new(Options::default()));
+    let mut other = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options::default()));
     other.start(0.0);
     let request = requests(&mut other).remove(0);
     response(&mut other, &request, 10.0, MARKETS);

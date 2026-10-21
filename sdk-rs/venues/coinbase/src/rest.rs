@@ -93,7 +93,11 @@ impl Coinbase {
             };
             credentials
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
-                .and_then(|credentials| credentials.headers(request.method, &request.path, cx.now))
+                .and_then(|credentials| {
+                    credentials.headers(request.method, &request.path, cx.now, |bytes| {
+                        cx.fill_signing_entropy(bytes)
+                    })
+                })
         };
         let mut request = request;
         if let Pending::Account(_, signed) = &mut request.pending {

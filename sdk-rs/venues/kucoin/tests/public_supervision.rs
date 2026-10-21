@@ -23,7 +23,7 @@ struct Sim<V: Venue> {
 
 impl<V: Venue> Sim<V> {
     fn start(venue: V, policy: PublicFeedPolicy) -> Self {
-        let mut e = Engine::new(venue);
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.set_public_feed_policy(policy).unwrap();
         let mut sim = Self {
             e,

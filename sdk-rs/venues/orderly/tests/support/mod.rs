@@ -125,7 +125,7 @@ fn ready_full(
     algos: &str,
     positions: &str,
 ) -> (Driver, SocketId, Option<TimerId>, Vec<String>) {
-    let mut e = Engine::new(Orderly::new(options()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
     let mut logs = vec![];
