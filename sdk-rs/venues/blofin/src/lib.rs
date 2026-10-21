@@ -175,7 +175,9 @@ impl Blofin {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Public),
+        ));
     }
     fn public_close(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = None;

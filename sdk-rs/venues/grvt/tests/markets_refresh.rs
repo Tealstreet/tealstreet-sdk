@@ -41,8 +41,12 @@ fn boot_with(positions: &str) -> (Engine<Grvt>, TimerId, Option<safe_cex_engine:
     let mut refresh = None;
     let mut private = None;
     while let Some(action) = pending.pop_front() {
-        if let Action::WsConnectWithHeaders { socket, .. } = action {
-            private = Some(socket);
+        if let Action::WsConnect {
+            socket, headers, ..
+        } = &action
+            && !headers.is_empty()
+        {
+            private = Some(*socket);
             continue;
         }
         if let Action::SetTimer { timer, at_ms } = action {

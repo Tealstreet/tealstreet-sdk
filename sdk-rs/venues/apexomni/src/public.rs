@@ -423,13 +423,15 @@ impl ApexOmni {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(
-            format!(
-                "wss://{host}/realtime_public?v=2&timestamp={}&requestId=rust-{}",
-                cx.now as u64, cx.now as u64
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "wss://{host}/realtime_public?v=2&timestamp={}&requestId=rust-{}",
+                    cx.now as u64, cx.now as u64
+                ))
+                .channel(SocketChannel::Public),
             ),
-            SocketChannel::Public,
-        ));
+        );
     }
     fn public_topics(&self) -> Vec<String> {
         let mut topics = vec!["instrumentInfo.all".to_owned()];

@@ -304,7 +304,9 @@ impl AsterDex {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
 
@@ -1211,28 +1213,11 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
 
 fn reset_pending(pending: &mut Pending) {
     match pending {
-        Pending::Account(account::Request::Positions {
-            rows,
-            settings,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
+        Pending::Account(account::Request::Positions { rows, settings, .. }) => {
+            *rows = Default::default();
             settings.clear();
-            skipped.clear();
-            *invalid = false;
         }
-        Pending::Account(account::Request::Orders {
-            rows,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
-            skipped.clear();
-            *invalid = false;
-        }
+        Pending::Account(account::Request::Orders { rows, .. }) => *rows = Default::default(),
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
         Pending::ExchangeInfo { rows, skipped } => {

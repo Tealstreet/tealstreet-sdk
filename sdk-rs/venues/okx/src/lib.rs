@@ -418,13 +418,12 @@ impl Okx {
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
         }
-        let socket = cx.connect_channel(
-            self.socket_url(channel),
-            match channel {
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new(self.socket_url(channel)).channel(match channel {
                 PUBLIC => safe_cex_engine::SocketChannel::Public,
                 BUSINESS => safe_cex_engine::SocketChannel::Business,
                 _ => safe_cex_engine::SocketChannel::Private,
-            },
+            }),
         );
         let c = &mut self.connections[channel];
         c.socket = Some(socket);
@@ -1129,6 +1128,10 @@ impl Venue for Okx {
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.account.config_pause_ms =
+                safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
         }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())

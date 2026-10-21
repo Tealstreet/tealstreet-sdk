@@ -1,5 +1,6 @@
 //! Atomic private snapshots, socket healing and execution identity.
 use crate::{ApexOmni, Pending, private_wire as wire, sign};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -20,55 +21,38 @@ pub enum Request {
     Positions {
         generation: Option<u64>,
         revision: u64,
-        rows: Vec<Position>,
-        skipped: Skipped,
+        rows: SnapshotBuilder<String, Position>,
     },
     Orders {
         generation: Option<u64>,
         revision: u64,
-        rows: Vec<Order>,
-        skipped: Skipped,
+        rows: SnapshotBuilder<String, Order>,
     },
     Balance,
 }
 
-/// Rows a snapshot could not map; their last known state is retained.
-#[derive(Default)]
-pub struct Skipped {
-    keys: Vec<String>,
-    unidentified: bool,
-}
-
-impl Skipped {
-    fn note(&mut self, key: &str) {
-        match key.trim() {
-            "" => self.unidentified = true,
-            key => self.keys.push(key.to_owned()),
-        }
-    }
-
-    fn keeps(&self, key: &str) -> bool {
-        self.unidentified || self.keys.iter().any(|kept| kept == key)
-    }
-
-    fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
-        if self.keys.is_empty() && !self.unidentified {
-            return;
-        }
-        let mut labels = self.keys.join(", ");
-        if self.unidentified {
-            labels.push_str(if labels.is_empty() {
-                "unidentified"
-            } else {
-                ", unidentified"
-            });
-        }
+/// Rejects a row the snapshot could not map; its stored copies keep their last known state.
+fn reject<T>(
+    cx: &mut Cx<'_, Pending>,
+    rows: &mut SnapshotBuilder<String, T>,
+    kind: &str,
+    key: &str,
+    ids: Vec<String>,
+) {
+    if key.trim().is_empty() {
         cx.log(
             LogLevel::Warning,
-            format!(
-                "ApeX skipped malformed {kind} rows ({labels}); keeping their last known state"
-            ),
+            format!("ApeX skipped malformed {kind} row without an identity; keeping the last known state"),
         );
+        rows.reject(None);
+        return;
+    }
+    cx.log(
+        LogLevel::Warning,
+        format!("ApeX skipped malformed {kind} row {key}; keeping its last known state"),
+    );
+    for id in ids {
+        rows.reject(Some(id));
     }
 }
 
@@ -96,14 +80,8 @@ mod tests {
 impl Request {
     pub(crate) fn reset(&mut self) {
         match self {
-            Self::Positions { rows, skipped, .. } => {
-                rows.clear();
-                *skipped = Skipped::default();
-            }
-            Self::Orders { rows, skipped, .. } => {
-                rows.clear();
-                *skipped = Skipped::default();
-            }
+            Self::Positions { rows, .. } => *rows = SnapshotBuilder::default(),
+            Self::Orders { rows, .. } => *rows = SnapshotBuilder::default(),
             Self::Balance | Self::Identity { .. } => {}
         }
     }
@@ -619,13 +597,15 @@ impl ApexOmni {
         self.account.generation += 1;
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            format!(
-                "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                cx.now as u64, self.account.generation
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
+                    cx.now as u64, self.account.generation
+                ))
+                .channel(SocketChannel::Private),
             ),
-            SocketChannel::Private,
-        ));
+        );
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -744,8 +724,7 @@ impl ApexOmni {
         let pending = Request::Positions {
             generation,
             revision: self.account.revision,
-            rows: vec![],
-            skipped: Skipped::default(),
+            rows: SnapshotBuilder::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -764,8 +743,7 @@ impl ApexOmni {
         let pending = Request::Orders {
             generation,
             revision: self.account.revision,
-            rows: vec![],
-            skipped: Skipped::default(),
+            rows: SnapshotBuilder::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -809,7 +787,7 @@ impl ApexOmni {
             self.note_unlisted(cx, &wire::row_key(item).symbol, kind);
         }
         match request {
-            Request::Positions { rows, skipped, .. } => {
+            Request::Positions { rows, .. } => {
                 match serde_json::from_str::<wire::PositionRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| {
@@ -829,12 +807,16 @@ impl ApexOmni {
                             .store
                             .market_by_id(&key.symbol)
                             .or_else(|| cx.store.market(&key.symbol))
-                            .map_or(key.symbol.as_str(), |market| market.symbol.as_str());
-                        skipped.note(symbol);
+                            .map_or(key.symbol.as_str(), |market| market.symbol.as_str())
+                            .to_owned();
+                        let legs = [PositionSide::Long, PositionSide::Short]
+                            .map(|side| position_id(&symbol, side))
+                            .into();
+                        reject(cx, rows, "position", &symbol, legs);
                     }
                 }
             }
-            Request::Orders { rows, skipped, .. } => {
+            Request::Orders { rows, .. } => {
                 match serde_json::from_str::<wire::OrderRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| {
@@ -846,8 +828,12 @@ impl ApexOmni {
                         map_order(cx.store, &raw, cx.now)
                     })
                 {
-                    Ok(mapped) => rows.extend(mapped),
-                    Err(_) => skipped.note(&wire::row_key(item).id),
+                    Ok(mapped) => mapped.into_iter().for_each(|order| rows.push(order)),
+                    Err(_) => {
+                        let id = wire::row_key(item).id;
+                        let ids = vec![id.clone()];
+                        reject(cx, rows, "order", &id, ids);
+                    }
                 }
             }
             Request::Balance | Request::Identity { .. } => {}
@@ -895,8 +881,7 @@ impl ApexOmni {
             Request::Positions {
                 generation,
                 revision,
-                mut rows,
-                skipped,
+                rows,
             } => {
                 self.account.positions_pending = false;
                 let metadata = data
@@ -907,14 +892,7 @@ impl ApexOmni {
                     self.snapshot_failed(cx, generation, "invalid account snapshot");
                     return;
                 };
-                skipped.report(cx, "position");
-                for current in cx.store.positions() {
-                    if skipped.keeps(&current.symbol)
-                        && !rows.iter().any(|row| row.id == current.id)
-                    {
-                        rows.push(current.clone());
-                    }
-                }
+                let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                 let fees = metadata
                     .contract_account
                     .map(|f| (f.maker_fee_rate, f.taker_fee_rate))
@@ -945,8 +923,7 @@ impl ApexOmni {
             Request::Orders {
                 generation,
                 revision,
-                mut rows,
-                skipped,
+                rows,
             } => {
                 self.account.orders_pending = false;
                 if revision < self.account.snapshot_floor {
@@ -961,14 +938,10 @@ impl ApexOmni {
                     self.snapshot_failed(cx, generation, "invalid orders snapshot");
                     return;
                 }
-                skipped.report(cx, "order");
-                for current in cx.store.orders() {
-                    if skipped.keeps(base_id(&current.id))
-                        && !rows.iter().any(|row| row.id == current.id)
-                    {
-                        rows.push(current.clone());
-                    }
-                }
+                // Bracket children share their parent's identity.
+                let rows = rows.commit(cx.store.orders().iter().cloned(), |o| {
+                    base_id(&o.id).to_owned()
+                });
                 if let Some(generation) = generation {
                     if let Some(snapshot) = self
                         .account

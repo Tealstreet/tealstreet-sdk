@@ -161,8 +161,12 @@ impl KrakenSpot {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket =
-            Some(cx.connect_channel("wss://ws.kraken.com/v2", SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://ws.kraken.com/v2")
+                    .channel(SocketChannel::Public),
+            ),
+        );
         self.public.open = false;
     }
     fn subscribe(

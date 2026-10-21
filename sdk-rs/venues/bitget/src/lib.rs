@@ -227,16 +227,20 @@ impl BitgetFutures {
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        connection.socket = Some(cx.connect_feed(
-            url,
-            if index == 3 {
-                safe_cex_engine::SocketChannel::Private
-            } else {
-                safe_cex_engine::SocketChannel::Public
-            },
-            ["primary", "secondary-1", "secondary-2", "private"][index],
-            recover,
-        ));
+        connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(if index == 3 {
+                        safe_cex_engine::SocketChannel::Private
+                    } else {
+                        safe_cex_engine::SocketChannel::Public
+                    })
+                    .feed(
+                        ["primary", "secondary-1", "secondary-2", "private"][index],
+                        recover,
+                    ),
+            ),
+        );
         connection.open = false;
         if index == 3 {
             self.account.authenticated = false;

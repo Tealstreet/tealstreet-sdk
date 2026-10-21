@@ -138,11 +138,6 @@ impl Harness {
                     socket,
                     channel: Some(c),
                     ..
-                }
-                | Action::WsConnectWithHeaders {
-                    socket,
-                    channel: Some(c),
-                    ..
                 } if *c == role => Some(*socket),
                 _ => None,
             })

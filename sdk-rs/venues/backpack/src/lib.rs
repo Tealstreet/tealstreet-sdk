@@ -160,8 +160,12 @@ impl Backpack {
             if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                 self.public.supervisor.connecting(cx);
             }
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+            self.public.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(WS)
+                        .channel(safe_cex_engine::SocketChannel::Public),
+                ),
+            );
         }
     }
     fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {

@@ -50,6 +50,7 @@ import {
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
+  StoreData,
   Ticker,
   Timeframe,
   UpdateOrderOpts,
@@ -134,6 +135,60 @@ export const summarizeSocketDiagnostics = <K extends 'public' | 'private'>(
   } as Record<`${K}CloseCode`, number | undefined> &
     Record<`${K}CloseCountTotal` | `${K}CloseStreak`, number> &
     Record<`${K}ReconnectPaused`, boolean>;
+};
+
+interface SocketHealthSource extends SocketDiagnosticsSource {
+  isInitialized: boolean;
+  isHealthy: boolean;
+  lastMessageTimestamp?: number;
+  isRecoveryComplete?: boolean;
+}
+
+interface PublicDataSource {
+  isInitialized: boolean;
+  isHealthy: boolean;
+  lastMessageTimestamp?: number;
+}
+
+/**
+ * The store's `socketHealth` from an exchange's sockets. A gateway provider
+ * feeds public data without a socket of its own and still counts as a source.
+ */
+export const summarizeSocketHealth = (
+  publicSockets: readonly SocketHealthSource[],
+  privateSockets: readonly SocketHealthSource[],
+  gatewayProvider?: PublicDataSource,
+): NonNullable<StoreData['socketHealth']> => {
+  const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
+  const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
+  const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
+  const publicHealthy =
+    !hasInitializedPublicSource ||
+    initializedPublicSockets.some((s) => s.isHealthy) ||
+    initializedGatewayProvider?.isHealthy === true;
+  const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
+  if (initializedGatewayProvider) {
+    publicTimestamps.push(initializedGatewayProvider.lastMessageTimestamp || 0);
+  }
+  const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
+
+  const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
+  const privateHealthy =
+    privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
+    (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
+  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
+
+  return {
+    publicHealthy,
+    privateHealthy,
+    publicInitialized: hasInitializedPublicSource,
+    privateInitialized: initializedPrivateSockets.length > 0,
+    publicLastMessage,
+    privateLastMessage,
+    ...summarizeSocketDiagnostics(publicSockets, 'public'),
+    ...summarizeSocketDiagnostics(privateSockets, 'private'),
+  };
 };
 
 // 7 doublings caps a 500ms tick at 60s; the streak stops growing there so a
@@ -2214,42 +2269,9 @@ export class BaseExchange implements Exchange {
    * true via the no-source branch below, so stale public data could not go red.
    */
   private syncSocketHealthToStoreInternal = () => {
-    const publicSockets = this.getPublicSockets();
-    const privateSockets = this.getPrivateSockets();
-
-    const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
-    const gatewayProvider = this.externalPublicDataProvider;
-    const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
-    const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
-    const publicHealthy =
-      !hasInitializedPublicSource ||
-      initializedPublicSockets.some((s) => s.isHealthy) ||
-      initializedGatewayProvider?.isHealthy === true;
-    const publicInitialized = hasInitializedPublicSource;
-    const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
-    if (initializedGatewayProvider) {
-      publicTimestamps.push(initializedGatewayProvider.lastMessageTimestamp || 0);
-    }
-    const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
-
-    const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
-    const privateHealthy =
-      privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
-      (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-    const privateInitialized = initializedPrivateSockets.length > 0;
-    const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
-    const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
-
-    this.store.updateSocketHealth({
-      publicHealthy,
-      privateHealthy,
-      publicInitialized,
-      privateInitialized,
-      publicLastMessage,
-      privateLastMessage,
-      ...summarizeSocketDiagnostics(publicSockets, 'public'),
-      ...summarizeSocketDiagnostics(privateSockets, 'private'),
-    });
+    this.store.updateSocketHealth(
+      summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), this.externalPublicDataProvider),
+    );
   };
 
   public fetchLastLogsFromWebsockets = (): string[] => {

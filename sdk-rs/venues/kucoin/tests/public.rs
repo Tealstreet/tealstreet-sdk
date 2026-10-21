@@ -148,6 +148,7 @@ fn snapshot_pool_stays_under_session_and_frame_limits() {
                 url,
                 channel,
                 context,
+                ..
             } = a
             {
                 assert!(!binary, "KuCoin sockets use the text protocol");

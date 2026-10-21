@@ -2,6 +2,7 @@
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -13,6 +14,8 @@ use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent}
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -52,6 +55,8 @@ pub struct AccountState {
     mode_timer: Option<TimerId>,
     mode_failures: u32,
     order_position_sides: HashMap<String, PositionSide>,
+    /// Position ids, symbols or empty (unidentified) whose skipped row was already logged.
+    skip_logged: HashSet<String>,
 }
 
 /// Hedge routing depends on the account mode; placements wait for its first read.
@@ -98,16 +103,12 @@ pub enum Request {
     },
     Positions {
         version: u64,
-        rows: Vec<Position>,
+        rows: SnapshotBuilder<String, Position>,
         settings: Vec<(String, MarketSetting)>,
-        skipped: Vec<String>,
-        invalid: bool,
     },
     Orders {
         version: u64,
-        rows: Vec<Order>,
-        skipped: Vec<String>,
-        invalid: bool,
+        rows: SnapshotBuilder<String, Order>,
     },
 }
 
@@ -228,12 +229,53 @@ fn side(ps: &str, amount: f64) -> PositionSide {
         PositionSide::Long
     }
 }
-/// The skipped leg's position id when its side is readable, else its symbol (every leg).
-fn skipped_position_key(symbol: &str, position_side: Option<&str>) -> String {
-    match position_side {
-        Some("LONG") => position_id(symbol, PositionSide::Long, PositionMode::Hedged),
-        Some("SHORT") => position_id(symbol, PositionSide::Short, PositionMode::Hedged),
-        _ => symbol.to_owned(),
+/// Rejects a malformed position row: its leg when the side is readable, else every leg.
+/// Every caller's row is owned or of unreadable size, so one with no stored copy is an error.
+fn reject_position(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    rows: &mut SnapshotBuilder<String, Position>,
+    symbol: &str,
+    position_side: Option<&str>,
+) {
+    let ids = match hedge_side(position_side) {
+        Some(side) => vec![position_id(symbol, side, PositionMode::Hedged)],
+        None => [PositionSide::Long, PositionSide::Short]
+            .map(|side| position_id(symbol, side, PositionMode::Hedged))
+            .into_iter()
+            .chain([symbol.to_owned()])
+            .collect(),
+    };
+    let label = if ids.len() == 1 { &ids[0] } else { symbol };
+    let stored = ids.iter().any(|id| cx.store.position(id).is_some());
+    log_skip(
+        cx,
+        logged,
+        label,
+        if stored {
+            LogLevel::Warning
+        } else {
+            LogLevel::Error
+        },
+        format!("Aster skipped malformed position row {label}"),
+    );
+    for id in ids {
+        rows.reject(Some(id));
+    }
+}
+/// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.log(level, message);
     }
 }
 fn hedge_side(text: Option<&str>) -> Option<PositionSide> {
@@ -434,10 +476,8 @@ impl AsterDex {
             Query::new(),
             Pending::Account(Request::Positions {
                 version: self.account.position_version,
-                rows: Vec::new(),
+                rows: SnapshotBuilder::default(),
                 settings: Vec::new(),
-                skipped: Vec::new(),
-                invalid: false,
             }),
         );
     }
@@ -453,9 +493,7 @@ impl AsterDex {
             Query::new(),
             Pending::Account(Request::Orders {
                 version: self.account.order_revision,
-                rows: Vec::new(),
-                skipped: Vec::new(),
-                invalid: false,
+                rows: SnapshotBuilder::default(),
             }),
         );
     }
@@ -485,12 +523,7 @@ impl AsterDex {
         item: &str,
     ) {
         match request {
-            Request::Orders {
-                rows,
-                skipped,
-                invalid,
-                ..
-            } => {
+            Request::Orders { rows, .. } => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Identity {
@@ -507,18 +540,25 @@ impl AsterDex {
                         rows.push(order);
                     }
                     None => match serde_json::from_str::<Identity>(item) {
-                        Ok(row) => skipped.push(row.order_id.to_string()),
-                        Err(_) => *invalid = true,
+                        Ok(row) => {
+                            let id = row.order_id.to_string();
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Aster skipped malformed open order row {id}"),
+                            );
+                            rows.reject(Some(id));
+                        }
+                        Err(_) => {
+                            cx.log(
+                                LogLevel::Warning,
+                                "Aster skipped malformed open order row without an id",
+                            );
+                            rows.reject(None);
+                        }
                     },
                 }
             }
-            Request::Positions {
-                rows,
-                settings,
-                skipped,
-                invalid,
-                ..
-            } => {
+            Request::Positions { rows, settings, .. } => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Identity<'a> {
@@ -529,17 +569,40 @@ impl AsterDex {
                 }
                 let Ok(p) = serde_json::from_str::<RestPosition>(item) else {
                     match serde_json::from_str::<Identity>(item) {
-                        Ok(row) if !row.symbol.is_empty() => skipped.push(skipped_position_key(
+                        Ok(row) if !row.symbol.is_empty() => reject_position(
+                            cx,
+                            &mut self.account.skip_logged,
+                            rows,
                             &row.symbol,
                             row.position_side.as_deref(),
-                        )),
-                        _ => *invalid = true,
+                        ),
+                        _ => {
+                            let level = if cx.store.positions().is_empty() {
+                                LogLevel::Error
+                            } else {
+                                LogLevel::Warning
+                            };
+                            log_skip(
+                                cx,
+                                &mut self.account.skip_logged,
+                                "",
+                                level,
+                                "Aster skipped malformed position row without a symbol",
+                            );
+                            rows.reject(None);
+                        }
                     }
                     return;
                 };
                 let r = p.row;
                 let Some(amount) = parse_decimal(&r.position_amt) else {
-                    skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
+                    reject_position(
+                        cx,
+                        &mut self.account.skip_logged,
+                        rows,
+                        &r.symbol,
+                        Some(&r.position_side),
+                    );
                     return;
                 };
                 let leverage = r
@@ -570,7 +633,13 @@ impl AsterDex {
                 ]
                 .map(parse_decimal);
                 let [Some(entry), Some(upnl), Some(notional), Some(liquidation)] = values else {
-                    skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
+                    reject_position(
+                        cx,
+                        &mut self.account.skip_logged,
+                        rows,
+                        &r.symbol,
+                        Some(&r.position_side),
+                    );
                     return;
                 };
                 let mode = if r.position_side == "BOTH" || r.position_side.is_empty() {
@@ -580,6 +649,7 @@ impl AsterDex {
                 };
                 let side = side(&r.position_side, amount);
                 let id = position_id(&r.symbol, side, mode);
+                self.account.skip_logged.remove(&id);
                 rows.push(Position {
                     id: id.clone(),
                     symbol: r.symbol.to_string(),
@@ -668,10 +738,15 @@ impl AsterDex {
                     if let Some(old) = self.account.socket.take() {
                         cx.close(old);
                     }
-                    self.account.socket = Some(cx.connect_channel(
-                        format!("{base}/ws/{}", key.listen_key),
-                        SocketChannel::Private,
-                    ));
+                    self.account.socket = Some(
+                        cx.connect(
+                            safe_cex_engine::SocketSpec::new(format!(
+                                "{base}/ws/{}",
+                                key.listen_key
+                            ))
+                            .channel(SocketChannel::Private),
+                        ),
+                    );
                     if let Some(t) = self.account.keepalive.take() {
                         cx.clear_timer(t);
                     }
@@ -766,27 +841,17 @@ impl AsterDex {
             }
             Request::Positions {
                 version,
-                mut rows,
+                rows,
                 settings,
-                skipped,
-                invalid,
             } => {
                 self.account.positions_in_flight = false;
                 self.account.last_positions = cx.now;
-                log_skipped(cx, "position", &skipped, invalid && valid);
-                if valid && !invalid && version == self.account.position_version {
+                if valid && version == self.account.position_version {
+                    if rows.rejected() == 0 {
+                        self.account.skip_logged.clear();
+                    }
                     // A skipped row cannot prove its leg flat; keep what the store knows.
-                    let kept = cx
-                        .store
-                        .positions()
-                        .iter()
-                        .filter(|p| {
-                            skipped.iter().any(|key| *key == p.id || *key == p.symbol)
-                                && !rows.iter().any(|row| row.id == p.id)
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    rows.extend(kept);
+                    let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     cx.store.set_positions(rows);
                     for (symbol, setting) in settings {
                         cx.store.update_setting(&symbol, |s| *s = setting);
@@ -797,22 +862,18 @@ impl AsterDex {
                     self.account.positions_timer = Some(cx.set_timer(1_000.0));
                 }
             }
-            Request::Orders {
-                version,
-                mut rows,
-                skipped,
-                invalid,
-            } => {
+            Request::Orders { version, rows } => {
                 self.account.orders_in_flight = false;
                 self.account.last_orders = cx.now;
-                log_skipped(cx, "open order", &skipped, invalid && valid);
-                if valid && !invalid {
+                if valid {
                     if version != self.account.order_revision {
                         // A snapshot predating a stream event cannot overwrite any order domain.
                         if self.account.orders_timer.is_none() {
                             self.account.orders_timer = Some(cx.set_timer(1_000.0));
                         }
                     } else {
+                        let mut rows =
+                            rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         self.account
                             .terminal
                             .retain(|_, (at, _)| cx.now - *at < 60_000.0);
@@ -826,15 +887,6 @@ impl AsterDex {
                         for (_, terminal) in self.account.terminal.values() {
                             rows.retain(|o| o.id != terminal.id);
                             rows.push(terminal.clone());
-                        }
-                        for id in &skipped {
-                            if !rows.iter().any(|o| &o.id == id)
-                                && let Some(known) = cx.store.order(id)
-                                && (known.status != OrderStatus::Open
-                                    || !self.account.canceled_ids.contains_key(id))
-                            {
-                                rows.push(known.clone());
-                            }
                         }
                         self.account
                             .native_order_times
@@ -1342,25 +1394,6 @@ impl AsterDex {
         if multi && self.account.balance_timer.is_none() {
             self.account.balance_timer = Some(cx.set_timer(1000.0));
         }
-    }
-}
-/// One summary per read; an unidentifiable row withholds the whole snapshot.
-fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String], unidentified: bool) {
-    if !skipped.is_empty() {
-        cx.log(
-            LogLevel::Warning,
-            format!(
-                "Aster skipped {} malformed {kind} row(s): {}",
-                skipped.len(),
-                skipped.join(", ")
-            ),
-        );
-    }
-    if unidentified {
-        cx.log(
-            LogLevel::Warning,
-            format!("Aster {kind} snapshot kept previous state: a row had no identity"),
-        );
     }
 }
 #[derive(Deserialize)]

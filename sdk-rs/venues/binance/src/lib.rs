@@ -437,9 +437,13 @@ impl BinanceFutures {
                 Channel::SpotTicker(index) => format!("spot-ticker-{index}"),
                 _ => "spot-books".to_owned(),
             };
-            cx.connect_feed(url, role, feed, false)
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(role)
+                    .feed(feed, false),
+            )
         } else {
-            cx.connect_channel(url, role)
+            cx.connect(safe_cex_engine::SocketSpec::new(url).channel(role))
         };
         let connection = self.connection(channel);
         connection.socket = Some(socket);

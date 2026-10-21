@@ -8,6 +8,7 @@
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
+//      structured events add { code, fields } to 'log' and may use level 'debug'
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -262,7 +263,11 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
                 this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
                 this.broadcast(this.startupFailure);
               },
-              onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
+              onLog: (level, text) => this.notify(level !== 'info', { op: 'log', level, message: text }),
+              // Legacy `log` clients keep working; structured clients also read code and fields.
+              onEvent: ({ level, code, message, fields }) => this.notify(level === 'warn' || level === 'error', {
+                op: 'log', level: level === 'warn' ? 'warning' : level, message, code, fields,
+              }),
             },
           );
           if (this.starting !== attempt || !this.clients.has(client)) { host.dispose(); return; }
@@ -299,6 +304,12 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
       for (const client of this.clients) {
         try { client.send(message); } catch { this.leave(client); }
       }
+    }
+
+    /** With no client attached, Warn+ goes to the console instead of being dropped. */
+    notify(warn, notice) {
+      if (this.clients.size > 0) this.broadcast(JSON.stringify(notice));
+      else if (warn) console.warn(`safe-cex ${notice.level} ${notice.code ?? 'log'}: ${notice.message}`);
     }
 
     /** The last client leaving stops the engine and drops its credentials. */

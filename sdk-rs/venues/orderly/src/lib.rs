@@ -206,12 +206,13 @@ impl Orderly {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_feed(
-            self.public_url(),
-            safe_cex_engine::SocketChannel::Public,
-            "market",
-            self.public.recover,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.public_url())
+                    .channel(safe_cex_engine::SocketChannel::Public)
+                    .feed("market", self.public.recover),
+            ),
+        );
     }
     fn drop_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(socket) = self.public.socket {

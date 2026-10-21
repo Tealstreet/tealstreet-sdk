@@ -33,8 +33,14 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   all-notice credential/URL regressions. Current reqwest body-stream errors
   already omit URLs; that path is regression coverage, not a reproduced fix.
   Ordinary business rejection messages remain actionable.
-- Native and Durable Object hosts drop logs with no client attached; an
-  oversized native broadcast disconnects every peer (`server.rs:386`).
+- ~~Native and Durable Object hosts drop logs with no client attached.~~ Fixed:
+  Warn+ goes to stderr/console with no client, and log notices are cut to fit
+  before broadcast. ~~An oversized native broadcast disconnects every peer
+  (`server.rs:386`).~~ An oversized delta frame is sent as ordered segments
+  that share its string table; other oversized notices are replaced by a bounded
+  warning, and an oversized completion settles its command with an error. Only
+  a single section larger than the limit still makes peers resnapshot, and that
+  is logged.
 
 ## Error handling
 
@@ -77,7 +83,8 @@ classifies `kind`/`outcome`/`venueCode`); ~~(3) TS toast on rejection~~;
 (validateAccount carries the startup `kind`; the `'error'` event carries
 `classified` and Sentry tags `error_kind`/`error_category`/`error_outcome`/
 `venue_code`); (6) app and chaser read `kind`/`outcome` (tealstreet-next);
-(7) wasm panic disposes the engine and surfaces `Internal`.
+~~(7) wasm panic disposes the engine and surfaces `Internal`~~
+(`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),
@@ -101,8 +108,10 @@ closes, reconnects, auth failures, HTTP failures, rate limited, snapshots
 discarded, rows skipped, last private message) exposed via `getHealth()`.
 Hosts forward events and write Warn+ to stderr/console with no client.
 
-PRs: (1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
-HTTP failure, no-client fallback; ~~(2) redaction sweep with a test that fails on
+PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
+HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`,
+`logLevel` engine option, `EngineHost.health()`/`onEvent`, native `event` notices,
+DO `log` notices with `code` and `fields`); ~~(2) redaction sweep with a test that fails on
 secrets in any notice~~ (every private replay checks every notice); (3) engine-level ws and auth counting; (4) venue batches
 assigning codes and fixing levels (keep message text stable); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.
@@ -159,7 +168,8 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`), one `SocketSpec`.
+(done: `engine::test_support`), ~~one `SocketSpec`~~ (done: `Cx::connect` takes
+a `SocketSpec`; one `Action::WsConnect` carries headers).
 ~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
 `windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,

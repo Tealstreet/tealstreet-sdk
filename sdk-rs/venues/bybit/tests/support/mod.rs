@@ -105,6 +105,9 @@ impl Harness {
                 Action::SignPayload { .. } => {
                     panic!("Bybit signs requests locally")
                 }
+                Action::WsConnect { headers, .. } if !headers.is_empty() => {
+                    panic!("Bybit authenticates sockets with an auth message")
+                }
                 Action::WsConnect {
                     socket,
                     url,
@@ -113,9 +116,6 @@ impl Harness {
                 } => {
                     self.sockets.push((socket, url));
                     self.socket_channels.push((socket, channel));
-                }
-                Action::WsConnectWithHeaders { .. } => {
-                    panic!("Bybit authenticates sockets with an auth message")
                 }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
@@ -142,6 +142,7 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::StartupFailed { error }) => {
                     self.startup_failures.push(error)
                 }

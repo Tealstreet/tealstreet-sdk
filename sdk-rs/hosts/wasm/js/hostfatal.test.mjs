@@ -73,6 +73,7 @@ for (const method of methods) {
     assert.equal(r.deaths.length, 1);
     assert.equal(r.deaths[0], r.host.deadError);
     assert.equal(r.host.deadError.cause, trap);
+    assert.equal(r.host.deadError.kind, 'internal');
     assert.equal(r.host.wsScratchBusy, false);
     const count = r.calls.length;
     callbacks.onOpen(); callbacks.onMessage('late'); callbacks.onBinary(new Uint8Array([2])); callbacks.onClose();
@@ -88,6 +89,19 @@ for (const method of methods) {
     assert.equal(r.host.signings.size, 0);
   });
 }
+
+test('a native stack overflow (V8 RangeError) is contained like a trap', async () => {
+  // wasm stack overflow surfaces as RangeError, not RuntimeError; it unwinds the
+  // engine mid-mutation with its wasm-bindgen borrow held, so it cannot be reused.
+  const overflow = new RangeError('Maximum call stack size exceeded');
+  const r = rig({ command() { throw overflow; } });
+  await assert.rejects(r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'c-1' }] }), (error) =>
+    error instanceof EngineDeadError && error.kind === 'internal' && error.outcome === 'unknown');
+  assert.equal(r.host.dead, true);
+  assert.equal(r.host.deadError.cause, overflow);
+  assert.equal(r.deaths.length, 1);
+  await assert.rejects(r.host.command({ op: 'getAccount' }), EngineDeadError);
+});
 
 test('real WASM unreachable is contained without poisoning a sibling host', async () => {
   // (module (func (export "trap") unreachable)); no compiler or production panic API.
@@ -138,6 +152,8 @@ test('fatal cleanup settles all pending operations with unknown write outcomes d
   r.host.start();
   const results = await pending;
   assert.ok(results.every((result) => result.status === 'rejected' && result.reason instanceof EngineDeadError));
+  // A trap is the engine's own fault, never the venue's: callers branch on `kind`.
+  assert.ok(results.every((result) => result.reason.kind === 'internal'));
   assert.equal(results[0].reason.outcome, 'unknown');
   assert.equal(results[0].reason.clientOrderId, 'caller-1');
   assert.deepEqual(results[1].reason.clientOrderIds, ['caller-2', 'caller-3']);

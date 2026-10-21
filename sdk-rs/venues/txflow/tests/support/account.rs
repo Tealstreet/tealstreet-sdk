@@ -49,6 +49,12 @@ pub fn bootstrap() -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
 pub fn bootstrap_with_wallet(
     wallet: &str,
 ) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
+    bootstrap_with_meta(wallet, META)
+}
+pub fn bootstrap_with_meta(
+    wallet: &str,
+    meta: &str,
+) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
     let mut e = Engine::new(TxFlow::new(Options {
         testnet: true,
         application_id: Some(wallet.into()),
@@ -57,7 +63,7 @@ pub fn bootstrap_with_wallet(
     }));
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, META);
+    reply(&mut e, &r, meta);
     let mut actions = e.drain_actions().collect::<Vec<_>>();
     let index = actions
         .iter()
