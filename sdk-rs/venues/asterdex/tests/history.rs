@@ -154,16 +154,16 @@ fn documented_execution_fields_fees_identity_and_seconds_are_preserved() {
         Query::Fills {
             symbol: Some("BTCUSDT".into()),
             order_id: Some("25851813".into()),
-            from_ms: Some(1569514978000.0),
-            to_ms: Some(1569514979000.0),
+            from_ms: None,
+            to_ms: None,
             limit: Some(5000),
         },
     );
     let request = h.take("/userTrades");
     assert_eq!(field(&request, "symbol"), Some("BTCUSDT"));
     assert_eq!(field(&request, "orderId"), Some("25851813"));
-    assert_eq!(field(&request, "startTime"), Some("1569514978000"));
-    assert_eq!(field(&request, "endTime"), Some("1569514979000"));
+    assert_eq!(field(&request, "startTime"), None);
+    assert_eq!(field(&request, "endTime"), None);
     assert_eq!(field(&request, "limit"), Some("1000"));
     assert!(request.body.is_none());
     h.reply(
@@ -422,9 +422,8 @@ fn required_symbol_checks_and_v3_account_wide_order_history_follow_native_versio
 #[test]
 fn invalid_ranges_fail_before_io_instead_of_silently_shortening() {
     for query in [
-        Query::Fills {
+        Query::OrderHistory {
             symbol: Some("BTCUSDT".into()),
-            order_id: None,
             from_ms: Some(0.0),
             to_ms: Some(604800001.0),
             limit: None,
@@ -591,4 +590,243 @@ fn income_range_failure_after_collected_rows_returns_error_and_dense_ties_are_ex
         );
     }
     assert!(h.result(1).unwrap_err().contains("could not be exhausted"));
+}
+
+fn bounded_fills(from: f64, to: f64, limit: u32) -> Query {
+    Query::Fills {
+        symbol: Some("BTCUSDT".into()),
+        order_id: None,
+        from_ms: Some(from),
+        to_ms: Some(to),
+        limit: Some(limit),
+    }
+}
+
+#[test]
+fn bounded_fills_walk_seven_day_chunks_before_normalizing_cumulative_pnl() {
+    for v3 in [false, true] {
+        let mut h = if v3 { Harness::v3() } else { Harness::new() };
+        h.query(1, bounded_fills(0.0, 604801000.0, 5));
+        let first = h.take("/userTrades");
+        assert!(first.url.contains(if v3 { "/v3/" } else { "/v1/" }));
+        assert_eq!(field(&first, "endTime"), Some("604800000"));
+        let boundary = fill(2, 604800000, "10", "1", "BTCUSDT", "LONG");
+        h.reply(
+            first,
+            200,
+            &json!([fill(1, 1, "5", "1", "BTCUSDT", "LONG"), boundary.clone()]).to_string(),
+        );
+        let edge = h.take("/userTrades");
+        h.reply(edge, 200, &json!([boundary.clone()]).to_string());
+        h.fire(2000.0);
+        let second = h.take("/userTrades");
+        assert_eq!(field(&second, "startTime"), Some("604800000"));
+        h.reply(
+            second,
+            200,
+            &json!([boundary, fill(3, 604801000, "15", "1", "BTCUSDT", "LONG")]).to_string(),
+        );
+        let edge = h.take("/userTrades");
+        h.reply(
+            edge,
+            200,
+            &json!([fill(3, 604801000, "15", "1", "BTCUSDT", "LONG")]).to_string(),
+        );
+        let result = h.result(1).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 3);
+        assert_eq!(result[0]["realizedPnl"], 0.0);
+        assert_eq!(result[1]["realizedPnl"], 5.0);
+        assert_eq!(result[2]["realizedPnl"], 5.0);
+    }
+}
+
+#[test]
+fn bounded_order_filter_uses_other_orders_and_invalid_sizes_as_pnl_baselines() {
+    let mut h = Harness::v3();
+    h.query(
+        1,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: Some("42".into()),
+            from_ms: Some(1000.0),
+            to_ms: Some(2000.0),
+            limit: Some(10),
+        },
+    );
+    let request = h.take("/userTrades");
+    assert_eq!(field(&request, "orderId"), None);
+    assert_eq!(field(&request, "fromId"), None);
+    let mut target = fill(11, 1500, "15", "1", "BTCUSDT", "LONG");
+    target["orderId"] = json!(42);
+    // Same native millisecond and reverse wire ordering: numeric id decides PnL.
+    h.reply(
+        request,
+        200,
+        &json!([target, fill(10, 1500, "10", "0", "BTCUSDT", "LONG")]).to_string(),
+    );
+    let request = h.take("/userTrades");
+    h.reply(request, 200, "[]");
+    let request = h.take("/userTrades");
+    h.reply(request, 200, "[]");
+    let rows = h.result(1).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "11");
+    assert_eq!(rows[0]["realizedPnl"], 5.0);
+}
+
+#[test]
+fn bounded_fills_failure_after_a_page_and_saturated_milliseconds_never_return_partial() {
+    let mut h = Harness::new();
+    h.query(1, bounded_fills(0.0, 10000.0, 2));
+    let first = h.take("/userTrades");
+    h.reply(
+        first,
+        200,
+        &json!([fill(1, 1000, "5", "1", "BTCUSDT", "LONG")]).to_string(),
+    );
+    let next = h.take("/userTrades");
+    h.reply(next, 200, r#"[{"id":"malformed"}]"#);
+    assert!(h.result(1).unwrap_err().contains("Malformed"));
+
+    for limit in [1, 2] {
+        let mut h = Harness::new();
+        h.query(1, bounded_fills(1000.0, 1000.0, limit));
+        let request = h.take("/userTrades");
+        assert_eq!(field(&request, "startTime"), Some("1000"));
+        assert_eq!(field(&request, "endTime"), Some("1000"));
+        h.reply(
+            request,
+            200,
+            &json!([fill(1, 1000, "5", "1", "BTCUSDT", "LONG")]).to_string(),
+        );
+        if limit == 1 {
+            assert!(h.result(1).unwrap_err().contains("saturated"));
+        } else {
+            assert_eq!(h.result(1).unwrap().as_array().unwrap().len(), 1);
+        }
+        assert!(h.requests.is_empty());
+    }
+}
+
+#[test]
+fn bounded_fills_refuse_dense_ties_wrong_symbols_and_out_of_window_rows() {
+    let mut h = Harness::new();
+    h.query(1, bounded_fills(0.0, 10000.0, 2));
+    for _ in 0..50 {
+        if !h.done.is_empty() {
+            break;
+        }
+        let request = h.take("/userTrades");
+        let includes_tie = field(&request, "startTime")
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+            <= 1000.0
+            && field(&request, "endTime").unwrap().parse::<f64>().unwrap() >= 1000.0;
+        let rows = if includes_tie {
+            json!([
+                fill(1, 1000, "5", "1", "BTCUSDT", "LONG"),
+                fill(2, 1000, "10", "1", "BTCUSDT", "LONG")
+            ])
+        } else {
+            json!([])
+        };
+        h.reply(request, 200, &rows.to_string());
+    }
+    assert!(h.result(1).unwrap_err().contains("could not be exhausted"));
+    for row in [
+        fill(1, 1000, "5", "1", "ETHUSDT", "LONG"),
+        fill(1, 3000, "5", "1", "BTCUSDT", "LONG"),
+    ] {
+        let mut h = Harness::new();
+        h.query(1, bounded_fills(1000.0, 2000.0, 2));
+        let request = h.take("/userTrades");
+        h.reply(request, 200, &json!([row]).to_string());
+        assert!(h.result(1).unwrap_err().contains("Malformed"));
+    }
+}
+
+#[test]
+fn bounded_fills_retry_discards_partial_page_but_retains_prior_pnl_baseline() {
+    let mut h = Harness::new();
+    h.query(1, bounded_fills(0.0, 10000.0, 5));
+    let request = h.take("/userTrades");
+    h.reply(
+        request,
+        200,
+        &json!([fill(1, 1000, "5", "1", "BTCUSDT", "LONG")]).to_string(),
+    );
+    let request = h.take("/userTrades");
+    h.event(Event::HttpStart {
+        request: request.id,
+        status: 200,
+        headers: "",
+    });
+    let partial = format!("[{},", fill(99, 1500, "500", "1", "BTCUSDT", "LONG"));
+    h.event(Event::HttpChunk {
+        request: request.id,
+        data: partial.as_bytes(),
+    });
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "connection reset",
+    });
+    let index = h
+        .timers
+        .iter()
+        .position(|(_, at)| *at - h.now >= 750.0 && *at - h.now <= 1000.0)
+        .unwrap();
+    let (timer, at) = h.timers.remove(index);
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let request = h.take("/userTrades");
+    assert_eq!(field(&request, "startTime"), Some("1000"));
+    h.reply(
+        request,
+        200,
+        &json!([
+            fill(1, 1000, "5", "1", "BTCUSDT", "LONG"),
+            fill(2, 2000, "10", "1", "BTCUSDT", "LONG")
+        ])
+        .to_string(),
+    );
+    let request = h.take("/userTrades");
+    h.reply(
+        request,
+        200,
+        &json!([fill(2, 2000, "10", "1", "BTCUSDT", "LONG")]).to_string(),
+    );
+    let request = h.take("/userTrades");
+    assert_eq!(field(&request, "endTime"), Some("1000"));
+    h.reply(
+        request,
+        200,
+        &json!([fill(1, 1000, "5", "1", "BTCUSDT", "LONG")]).to_string(),
+    );
+    let result = h.result(1).unwrap();
+    assert_eq!(result.as_array().unwrap().len(), 2);
+    assert_eq!(result[1]["realizedPnl"], 5.0);
+}
+
+#[test]
+fn bounded_fills_empty_optional_order_id_still_returns_all_orders() {
+    let mut h = Harness::new();
+    h.query(
+        1,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: Some(String::new()),
+            from_ms: Some(1000.0),
+            to_ms: Some(1000.0),
+            limit: Some(10),
+        },
+    );
+    let request = h.take("/userTrades");
+    assert_eq!(field(&request, "orderId"), None);
+    h.reply(
+        request,
+        200,
+        &json!([fill(1, 1000, "5", "1", "BTCUSDT", "LONG")]).to_string(),
+    );
+    assert_eq!(h.result(1).unwrap().as_array().unwrap().len(), 1);
 }

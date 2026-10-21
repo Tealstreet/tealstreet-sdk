@@ -1671,6 +1671,16 @@ The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
 and transport dependencies. Generic consumer fixtures do not authorize deleting
 those oracle dependencies or enabling measurement-gated order controls.
 
+### AsterDEX bounded fill reads and flat events
+
+Rust AsterDEX callers can request fill ranges longer than seven days; limit is a
+per-page native limit and no longer caps the final bounded range. Native rows
+are deduplicated across boundaries, then cumulative PnL is normalized over all
+orders before an optional order filter. V3's search precedence cannot override
+caller time bounds. Saturated timestamps and incomplete reads fail visibly.
+Closed hedge legs can omit entry price when their amount is explicitly zero;
+other exposure and balance provenance remain strict. Shapes are unchanged.
+
 ### Orderly port-review display/read corrections
 
 Orderly `fetchOHLCV` callers supplying `from`/`to` now receive native history
