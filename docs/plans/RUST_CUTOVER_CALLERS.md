@@ -710,6 +710,13 @@ writes before retrying` instead of `Timeout callMethodInWorker`.
 
 ### Incomplete history (#1542, #1554)
 
+Host follow-up plan (2026-10-21): translate event command IDs through the
+existing pending owner in native sessions and Workers, target only that owner,
+and preserve history coverage markers at an Error minimum level. Regressions
+must cover overlapping IDs, disconnect/retirement, event-before-done ordering,
+and semantic markers surviving log filtering. Run focused engine/native/JS
+host gates and independent review before CI and merge.
+
 **Open cutover work (B11), not a completed caller migration.** In the JS WASM
 host, a `history.incomplete` event with a pending `fields.command` marks that
 command's array result with non-enumerable `incomplete: true`. Currently Kraken
