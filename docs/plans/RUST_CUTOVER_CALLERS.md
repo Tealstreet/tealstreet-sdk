@@ -126,6 +126,8 @@ and mobile `8377a4f3f1e` unchanged; its caller inventory remains cutover work.
 The OKX port follow-up checks #1588 at `447134dbf24`; mirror `origin/master`
 `1f91dfe4dcb` still has the old 8443 URLs. Live-master/hot-patch status below is
 the overseer's 2026-10-21 report, not evidence of a deployed change.
+The coded-only host follow-up checks #1586 at `ef68c4ba563`; its landed PR6
+protocol/deployment section above is retained as cutover work.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -177,8 +179,9 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 | #1430 / `3002a22646` | Account reads synchronize authoritative native state without a network refresh or new streaming freshness observation; worker mirrors forward the reads. Native identity lookup expands by capability. Live fills add optional `realizedPnl`/`fee` tails under the existing revision-1 header, and native nuke batches closes without automatic retry. See [Native account reads, identities and fills](#native-account-reads-identities-and-fills-1430) for caller and host requirements. |
 | #1522 / `faad41cfba` | BingX/WEEX `fetchLeverageForSymbol` now makes fresh native symbol reads (`leverageQuery: 'onRead'`), retaining `account: 'query'` in the combined capability records. The metadata-refreshed bridge issues a native command for uncached symbols instead of returning a cache miss immediately; valid published rails remain cached. Existing UI calls and `FetchedLeverage \| null` shape stay unchanged. |
-| #1583 / `916585a30f` | SDK `engine-event` and the same worker op expose received coded diagnostics. Legacy Error and Info/Warn delivery retains event metadata for caller-controlled duplicate suppression; Error telemetry adds scalar `event_code`. `ExchangeHealthMonitor.processEvent` classifies codes/optional typed detail, and `processHealth` copies authoritative engine counters. Downstream handlers still need migration; preserve the [coded diagnostic caller inventory](#coded-diagnostic-caller-cutover-pr5). PR6 protocol cleanup remains pending. |
+| #1583 / `916585a30f` | SDK `engine-event` and the same worker op expose received coded diagnostics. Legacy Error and Info/Warn delivery retains event metadata for caller-controlled duplicate suppression; Error telemetry adds scalar `event_code`. `ExchangeHealthMonitor.processEvent` classifies codes/optional typed detail, and `processHealth` copies authoritative engine counters. Downstream handlers still need migration; preserve the [coded diagnostic caller inventory](#coded-diagnostic-caller-cutover-pr5). #1586 removes the engine log shim; host protocol and deployment requirements are recorded above. |
 | #1588 / `447134dbf2` | Rust/TS OKX public/private/business WebSocket URLs use default TLS 443 across global/EEA live/demo, preserving host/path; relay upstream metadata changes the global live private/business targets. SDK arguments stay unchanged. Proxy upstreams and live master need a separate owner-run port migration before the public-internet 8443 deadline; see [OKX operations prerequisite](#okx-websocket-port-operations-prerequisite-1588). |
+| #1586 / `ef68c4ba56` | Removes `Cx::log`, `LogLevel`, `Notice::Log`, WASM `log` actions and native `log` notices. Diagnostics use coded `event` envelopes; DO changes from `op: 'log'` to `op: 'event'` with `warn`, preserving its host `onLog` callbacks as coded host events. Deploy compatible safe-cex-server before native clients receive Info+ venue events; DO clients must accept the new envelope before host adoption. Sam owns that deployment. See [Log shim removal](#log-shim-removal-pr6). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -380,7 +383,7 @@ TP/SL-specific trigger fields; no caller signature changes.
 | Partial-batch fields across the worker | web `order/createScaledOrder.ts:64-71` (`partialOrderCount`, `partialOrderIds`) | TS venue errors | preserved across the worker by `serializeCommandError` (#1375, landed) | none |
 | Packed ticker delta adds `midPrice` | exchange-server `public-virtual-worker-context.ts:4,200-235` (imports `PACKED_TICKER_FIELDS`) | | follows the imported constant | none |
 | `exec-result`/`updatePositions:done` gain `errorDetails` (#1375) | web CLI `components/cli/CLI.tsx:306`, `cliChainRunner.ts:454-479`, `runCliLine.ts:77-78` | `{reqId, success, error}` | additive | add |
-| #1388 (merged) `event` notice on native sessions; DO `log` messages gain optional `code`/`fields` | no tealstreet-next consumer (`NativeFrameSession` unused) | | #1538 emits coded venue events; native-session validator must understand `event`. #1554's `history.incomplete` uses an engine command ID, requiring translation if a server remaps IDs | none for current NX hosts; native consumers must update |
+| Native/DO diagnostic protocol (#1388/#1586) | no current NX `NativeFrameSession` consumer found; native/DO host adopters | native `event` plus legacy `log`; DO `op: 'log'` with optional code/fields | #1586 diagnostics use native `type: 'event'` / DO `op: 'event'`, levels debug/info/warn/error. Deploy compatible safe-cex-server before native Info+ events; upgrade DO clients before host adoption. #1554's command-correlated `history.incomplete` still needs ID translation when a server remaps commands | host compatibility/deployment prerequisite; Sam's call |
 | #1527 fill/store frame ordering | web fill listeners, provisional positions and SDK chasers | fills could flush before already-pending orders by up to 250 ms | a fill-bearing flush carries pending store sections; existing appliers publish them before fill events. Venue execution-before-order delivery can still occur | none; no new FILLS revision |
 | Coded diagnostics (#1583) | web worker dispatcher `exchangeAccountController.ts:2715-2727`; web/CLI health/error listeners in the [caller inventory](#coded-diagnostic-caller-cutover-pr5) | only legacy `error`/`log` paths handled | add worker `op: 'engine-event', data: [event]` dispatch and code-aware listeners; legacy Error `opts.engineEvent` / Info-Warn third `log` argument identifies duplicates. Debug has only structured delivery when received | additive SDK/worker API; caller migration required |
 
@@ -772,8 +775,12 @@ Use either `engine-event` or the event attached to a legacy notification for
 that diagnostic. Metadata-bearing legacy Error/Info/Warn is compatibility
 delivery, not evidence of another failure. Keep ordinary command/host errors
 without metadata. See the [caller inventory](#coded-diagnostic-caller-cutover-pr5)
-for web/CLI listeners, worker dispatch and telemetry migration. #1583 adds no
-native notice format; PR6's protocol cleanup and any deployment remain separate.
+for web/CLI listeners, worker dispatch and telemetry migration. #1583 added no
+native notice format; #1586 now removes legacy engine `log` actions/notices and
+changes the DO diagnostic envelope to coded `op: 'event'`. Upgrade matching
+WASM/JS hosts and DO clients together, and deploy compatible safe-cex-server
+before native Info+ events. The [PR6 section](#log-shim-removal-pr6) records the
+protocol; the deployment remains Sam's decision.
 
 | File | Old call | New call |
 | --- | --- | --- |
