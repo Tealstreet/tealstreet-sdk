@@ -262,10 +262,12 @@ fn request_preserves_caller_id_and_confirm_executed_but_ack_never_fabricates_oid
         200,
         r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
     );
-    assert!(
-        !e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
-    );
+    assert!(!e.drain_plain().any(|a| matches!(
+        a,
+        Action::Notice(
+            Notice::CommandDone { command: 7, .. } | Notice::CommandFailed { command: 7, .. }
+        )
+    )));
     assert!(e.store().orders().is_empty());
 }
 #[test]

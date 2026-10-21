@@ -1110,7 +1110,11 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
         if attempt < 3 {
             assert!(!h.actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandError { .. } | Notice::CommandDone { .. })
+                Action::Notice(
+                    Notice::CommandError { .. }
+                        | Notice::CommandDone { .. }
+                        | Notice::CommandFailed { .. }
+                )
             )));
             snapshot = h.take("/account");
         }
