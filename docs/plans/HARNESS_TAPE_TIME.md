@@ -387,3 +387,21 @@ The focused proof retains eleven exact keys per private tape. Remove only
 checkpoint-0 balance.total and balance.upnl on each, preserving every other
 manifest entry and both fixture byte streams. The Robinhood collision case
 passes with the extended hook and fails under the prior Lighter-only hook.
+
+## Bitrue phase
+
+Enable Bitrue private tape time using the existing epoch1700000000000.
+Preserve fixture bytes, exact HMAC signing and freshness, listen-key socket
+roles, both heartbeat forms, the signature-rejection resend, caller-ID lookup,
+cancellation targets, lossless large IDs, cumulative fills and staged reads.
+Use a matching authentic CI engine for five focused private pairs and compare
+all ten complete outputs except measured metrics. Narrow only exact unused
+keys for the active generated tape SHA, preserving the historical declaration.
+Review any new diagnostic and cause without broadening coverage. Keep strict
+FAIL results and existing creation-ID canonicalization unchanged.
+
+Require independent plan/code/raw review, focused harness tests, fresh own-head
+CI five-pair proof, both mandatory cases and zero unexpected/unused private
+declarations. Merge on full green CI with a fresh dependency guard separate
+from the merge call, then audit actual parents/files and report before
+Hyperliquid. Production, entropy, validators and ordinary CI defaults stay intact.
