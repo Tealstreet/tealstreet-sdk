@@ -66,8 +66,10 @@ not a deployed-runtime or npm-publication claim.
   `updateSymbolMetadata` and Hyperliquid `enableSpotMarkets`.~~ Implemented
   through native capability policies and #1445/#1447/#1453/#1501; preserve
   supported-product limits and explicit unsupported-axis refusals (B8).
-  **Still SDK-owned:** REST `fetchOrderBook` for Backpack/Crypto.com/GRVT/
-  Paradex/WEEX.
+  ~~Backpack REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
+  snapshot query, native price IDs/order/zero totals and a standalone JSON decoder;
+  malformed snapshots/refusals reject without mutating subscription books.
+  **Still SDK-owned:** REST `fetchOrderBook` for Crypto.com/GRVT/Paradex/WEEX.
   ~~Hyperliquid `scheduleCancel`~~ now has native signed arm/clear, safe UTC-ms
   admission/dispatch checks, synchronized clock, vault/network signing vectors,
   append-only capability and worker/host uncertain-write ownership.

@@ -29,14 +29,26 @@ for (const family of venueFamilies) {
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
     for (const venue of venues) {
       let error;
+      let instance;
       try {
-        new engine.WasmEngine(venue, JSON.stringify({ publicDataOnly: true })).free();
+        instance = new engine.WasmEngine(venue, JSON.stringify({ publicDataOnly: true }));
       } catch (thrown) {
         error = thrown;
       }
-      if (venueFamily(venue) === family)
-        assert.doesNotMatch(String(error?.message ?? ''), /unsupported venue/, `${venue} is missing from ${family}`);
-      else assert.match(String(error?.message), /unsupported venue/, `${family} also contains ${venue}`);
+      try {
+        if (venueFamily(venue) === family) {
+          assert.doesNotMatch(String(error?.message ?? ''), /unsupported venue/, `${venue} is missing from ${family}`);
+          if (instance && JSON.parse(instance.capabilities()).orderBookQuery) {
+            // All-feature native tests can hide a missing standalone JSON decoder.
+            // This is sans-I/O: returned requests are never dispatched.
+            assert.doesNotThrow(() => instance.command(JSON.stringify({
+              op: 'fetchOrderBook', command: 1, symbol: '__rest_book_ingress_probe__', limit: 1,
+            }), 0), `${venue} advertises a REST book query but its family decoder rejects it`);
+          }
+        } else assert.match(String(error?.message), /unsupported venue/, `${family} also contains ${venue}`);
+      } finally {
+        instance?.free();
+      }
     }
   });
 }

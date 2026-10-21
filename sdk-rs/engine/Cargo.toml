@@ -15,9 +15,10 @@ command-tracking = []
 # Hyperliquid signed account-wide dead-man switch decoder.
 command-schedule-cancel = []
 book-deltas = []
-command-asterdex = []
+command-order-book = []
+command-asterdex = ["command-order-book"]
 command-apexomni = []
-command-polymarket = []
+command-polymarket = ["command-order-book"]
 command-kucoinspot = []
 # Bitunix opts in; other single-venue WASM builds omit the versioned-envelope selector.
 any-field-envelope = []
