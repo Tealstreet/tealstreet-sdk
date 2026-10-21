@@ -294,6 +294,25 @@ fn saturated_descending_ledger_returns_the_newest_page_marked_truncated() {
         .expect("truncated, not failed");
     let rows: Vec<Value> = serde_json::from_str(&rows).unwrap();
     assert!(!rows.is_empty(), "the cash legs read are returned");
+    let read = rows.len();
+    // A caller whose limit the page already satisfies gets a complete answer and no warning.
+    let (mut e, _) = ready();
+    let mut capped = income();
+    if let Query::Income { limit, .. } = &mut capped {
+        *limit = Some(1);
+    }
+    let r = query(&mut e, capped);
+    let page: Vec<_> = (0..500)
+        .map(|i| ledger(&i.to_string(), "2023-11-14T22:13:20Z"))
+        .collect();
+    answer(&mut e, &r, "logs", page);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Event(_))))
+    );
+    assert!(read > 1);
 }
 #[test]
 fn saturated_ascending_ledger_overlaps_newest_boundary_and_detects_stall() {

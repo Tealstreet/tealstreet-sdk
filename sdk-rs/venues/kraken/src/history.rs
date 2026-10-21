@@ -893,15 +893,17 @@ impl Kraken {
                 {
                     None
                 } else if !request.ascending || request.oldest == request.newest {
-                    // Only `since` reaches the venue, so rows older than a full newest-first page
-                    // are unreachable. Like TS, return what was read and say it is truncated.
-                    cx.notice(
-                        safe_cex_engine::Level::Warn,
-                        safe_cex_engine::log::code::HISTORY_INCOMPLETE,
-                        format!(
-                            "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; older rows in the window are missing and any total is a lower bound."
-                        ),
-                    );
+                    // Only `since` reaches the venue, so a full page that cannot advance leaves
+                    // rows unread. Like TS, return what was read and say it is truncated.
+                    if request.rows.len() < request.limit {
+                        cx.notice(
+                            safe_cex_engine::Level::Warn,
+                            safe_cex_engine::log::code::HISTORY_INCOMPLETE,
+                            format!(
+                                "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; some rows in the window are missing and any total is a lower bound."
+                            ),
+                        );
+                    }
                     None
                 } else if request.newest > request.to {
                     None
