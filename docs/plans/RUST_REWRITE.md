@@ -131,7 +131,11 @@ extensions (all absent optional numbers are NaN and strings are `0xFFFFFFFF`):
   (TP low byte, SL next byte, zero absent, trigger enum plus one), and
   `u32 symbol[n]`.
 - POSITIONS appends mandatory `u32 positionId[n]`, then `u32 symbol[n]`.
-- FILLS appends `u32 symbol[n]` after its execution rows.
+- FILLS appends `u32 symbol[n]` after its execution rows, then pads to 8 bytes.
+  If any execution reports financial metadata, append f64 realizedPnl[n] and
+  fee[n] after that padding; NaN means unreported. Symbol-only revision-one
+  frames preserve their existing bytes, and readers retain legacy revision-zero
+  layouts with or without financial columns.
 - SETTINGS appends mandatory f64 buyLeverage/sellLeverage columns, then
   `u32 symbol[n]`.
 
