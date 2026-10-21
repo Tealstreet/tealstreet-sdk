@@ -283,6 +283,14 @@ fn ticker_rate_limit_retry_waits_for_retry_after() {
 }
 
 #[test]
+fn an_overflowing_retry_after_resumes_after_a_day_instead_of_never() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 418, "Retry-After: 1e308", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 86_400_000.0);
+}
+
+#[test]
 fn catalogue_ip_ban_without_retry_after_waits_the_weight_pause() {
     let mut h = public_harness();
     let request = h.take("/fapi/v1/exchangeInfo").id;
