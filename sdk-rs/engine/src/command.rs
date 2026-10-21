@@ -449,7 +449,12 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 pub enum HostInput {
     Command(Command),
     PublicFeedUpdate(crate::PublicFeedUpdate),
-    TickIntervalChanged { interval_ms: f64 },
+    /// Factor on each venue poll's own cadence; infinity pauses polling. The
+    /// optional ceiling is the host's absolute bound on slowed polls.
+    PollScaleChanged {
+        scale: f64,
+        ceiling_ms: Option<f64>,
+    },
 }
 
 /// Decode startup subscriptions without compiling the trading/query parser.
@@ -523,29 +528,41 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         }));
     }
     #[cfg(feature = "polling-control")]
-    if header.op == "setTickInterval" {
+    if header.op == "setPollScale" {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum Interval {
-            Millis(f64),
+        enum Scale {
+            Factor(f64),
             Paused(()),
         }
         #[derive(Deserialize)]
         struct Control {
-            interval: Interval,
+            scale: Scale,
+            #[serde(default)]
+            ceiling: Option<f64>,
         }
         let control: Control = serde_json::from_str(json)?;
-        let interval_ms = match control.interval {
-            Interval::Millis(ms) => ms,
-            Interval::Paused(()) => f64::INFINITY,
+        let scale = match control.scale {
+            Scale::Factor(factor) => factor,
+            Scale::Paused(()) => f64::INFINITY,
         };
-        if interval_ms.is_nan() || interval_ms <= 0.0 {
+        if scale.is_nan() || scale <= 0.0 {
             return Err(serde::de::Error::custom(
-                "Polling interval must be positive or null to pause",
+                "Polling scale must be positive or null to pause",
             ));
         }
-        let interval_ms = crate::engine::bounded_tick_interval(interval_ms);
-        return Ok(HostInput::TickIntervalChanged { interval_ms });
+        if control
+            .ceiling
+            .is_some_and(|ms| !ms.is_finite() || ms <= 0.0)
+        {
+            return Err(serde::de::Error::custom(
+                "Polling ceiling must be a positive number of milliseconds",
+            ));
+        }
+        return Ok(HostInput::PollScaleChanged {
+            scale,
+            ceiling_ms: control.ceiling,
+        });
     }
     decode_command(json).map(HostInput::Command)
 }
@@ -784,27 +801,90 @@ mod tests {
     #[test]
     #[cfg(not(feature = "polling-control"))]
     fn polling_controls_are_excluded_from_ordinary_command_parsers() {
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":4}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":null}"#).is_err());
     }
 
     #[test]
     #[cfg(feature = "polling-control")]
-    fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
+    fn host_configuration_accepts_a_positive_scale_and_explicit_pause() {
         assert_eq!(
-            decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
-            HostInput::TickIntervalChanged {
-                interval_ms: 1_000.0
+            decode_host_input(r#"{"op":"setPollScale","scale":1.5}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 1.5,
+                ceiling_ms: None
             }
         );
         assert_eq!(
-            decode_host_input(r#"{"op":"setTick\u0049nterval","interval":null}"#).unwrap(),
-            HostInput::TickIntervalChanged {
-                interval_ms: f64::INFINITY
+            decode_host_input(r#"{"op":"setPoll\u0053cale","scale":null}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: f64::INFINITY,
+                ceiling_ms: None,
             }
         );
     }
 
+    #[test]
+    #[cfg(feature = "polling-control")]
+    fn host_configuration_carries_an_optional_positive_ceiling() {
+        assert_eq!(
+            decode_host_input(r#"{"op":"setPollScale","scale":60,"ceiling":30000}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 60.,
+                ceiling_ms: Some(30_000.)
+            }
+        );
+        for json in [
+            r#"{"op":"setPollScale","scale":2,"ceiling":0}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":-5}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":"1000"}"#,
+        ] {
+            assert!(decode_host_input(json).is_err(), "must reject {json}");
+        }
+    }
+
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    #[cfg(feature = "polling-control")]
+    struct PollVenue;
+    #[cfg(feature = "polling-control")]
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    #[cfg(feature = "polling-control")]
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351's decode bound: the host's absolute interval, sent as a scale
+    // of the native cadence, still cannot flood a venue or overflow a timer.
     #[test]
     #[cfg(feature = "polling-control")]
     fn polling_intervals_cannot_create_request_floods_or_overflow_timers() {
@@ -814,28 +894,41 @@ mod tests {
             (2_000.0, 2_000.0),
             (1e300, 120_000.0),
         ] {
-            let json = format!(r#"{{"op":"setTickInterval","interval":{input}}}"#);
-            assert_eq!(
-                decode_host_input(&json).unwrap(),
-                HostInput::TickIntervalChanged {
-                    interval_ms: expected
-                }
-            );
+            let json = format!(r#"{{"op":"setPollScale","scale":{}}}"#, input / 2_000.0);
+            let HostInput::PollScaleChanged { scale, ceiling_ms } =
+                decode_host_input(&json).unwrap()
+            else {
+                panic!("{json} must decode as a polling control")
+            };
+            let armed = armed_after(|engine| {
+                engine.handle(0.0, crate::Event::PollCeilingChanged { ceiling_ms });
+                engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+            });
+            assert_eq!(armed, [expected], "{json}");
         }
+        // A finite scale whose product overflows is still capped; it never pauses.
+        let json = r#"{"op":"setPollScale","scale":1e308}"#;
+        let HostInput::PollScaleChanged { scale, .. } = decode_host_input(json).unwrap() else {
+            panic!("{json} must decode as a polling control")
+        };
+        let armed = armed_after(|engine| {
+            engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+        });
+        assert_eq!(armed, [120_000.0], "overflowing product takes the cap");
     }
 
     #[test]
-    fn host_configuration_requires_a_typed_positive_interval_or_null() {
+    fn host_configuration_requires_a_typed_positive_scale_or_null() {
         for json in [
-            r#"{"op":"setTickInterval"}"#,
-            r#"{"op":"setTickInterval","interval":0}"#,
-            r#"{"op":"setTickInterval","interval":-0.0}"#,
-            r#"{"op":"setTickInterval","interval":-1}"#,
-            r#"{"op":"setTickInterval","interval":"1000"}"#,
-            r#"{"op":"setTickInterval","interval":false}"#,
-            r#"{"op":"setTickInterval","interval":{}}"#,
-            r#"{"op":"setTickInterval","interval":NaN}"#,
-            r#"{"op":"setTickInterval","interval":1e309}"#,
+            r#"{"op":"setPollScale"}"#,
+            r#"{"op":"setPollScale","scale":0}"#,
+            r#"{"op":"setPollScale","scale":-0.0}"#,
+            r#"{"op":"setPollScale","scale":-1}"#,
+            r#"{"op":"setPollScale","scale":"4"}"#,
+            r#"{"op":"setPollScale","scale":false}"#,
+            r#"{"op":"setPollScale","scale":{}}"#,
+            r#"{"op":"setPollScale","scale":NaN}"#,
+            r#"{"op":"setPollScale","scale":1e309}"#,
         ] {
             assert!(decode_host_input(json).is_err(), "must reject {json}");
         }
@@ -857,7 +950,7 @@ mod tests {
         );
         assert!(decode_host_input(r#"{"op":"setLeverage","command":"37"}"#).is_err());
         assert!(decode_host_input(r#"{"op":"unknown"}"#).is_err());
-        assert!(decode_command(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
+        assert!(decode_command(r#"{"op":"setPollScale","scale":4}"#).is_err());
     }
 
     #[test]

@@ -120,8 +120,11 @@ pub struct LogEvent {
     pub fields: Vec<(&'static str, Value)>,
 }
 
-/// Codes counted in [`Health`]. The engine counts socket closes and HTTP
-/// failures itself; venues emit the rest through `Cx::event`.
+/// Codes counted in [`Health`]. The engine counts socket closes, reconnects
+/// on a declared socket role, HTTP failures, and auth failures it sees
+/// (`deactivate`, and auth-kind startup or command failures); venues emit the
+/// rest through `Cx::event`, and `auth.rejected` only for rejections they do
+/// not report through those paths.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
@@ -144,6 +147,9 @@ pub struct Health {
     pub rate_limited: u32,
     pub snapshots_discarded: u32,
     pub rows_skipped: u32,
+    /// Engine clock time of the newest frame on a private-role socket. Venues
+    /// that carry public feeds on that socket (Hyperliquid) advance it with them.
+    pub last_private_message_ms: Option<f64>,
 }
 
 impl Health {
