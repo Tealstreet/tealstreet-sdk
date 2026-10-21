@@ -604,8 +604,10 @@ impl Bitrue {
                     .or_default();
                 backoff.failures += 1;
                 if backoff.error != error {
-                    cx.retried_failure(
-                        "bitrue.account:607",
+                    // Already reported once per distinct error and reset on recovery.
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
                         format!("Bitrue order read for {symbol} failed: {error}"),
                     );
                     backoff.error = error;
