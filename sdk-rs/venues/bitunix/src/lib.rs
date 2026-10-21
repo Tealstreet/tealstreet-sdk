@@ -7,6 +7,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
+use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, Cx, Method, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
@@ -82,7 +83,7 @@ pub struct BitunixFutures {
     sockets: Vec<Socket>,
     books: HashMap<String, BookState>,
     candles: HashSet<(String, Interval)>,
-    retry: Option<TimerId>,
+    discovery: PublicRetries,
     funding_times: HashMap<String, f64>,
 }
 impl BitunixFutures {
@@ -108,7 +109,7 @@ impl BitunixFutures {
             sockets: Vec::new(),
             books: HashMap::new(),
             candles: HashSet::new(),
-            retry: None,
+            discovery: PublicRetries::default(),
             funding_times: HashMap::new(),
         }
     }
@@ -123,6 +124,48 @@ impl BitunixFutures {
                 invalid: false,
             },
         );
+    }
+    fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
+        cx.request_streamed(
+            Method::Get,
+            format!("{REST}{TICKERS}"),
+            self.headers(),
+            json::ArrayAt::EnvelopeField("data"),
+            Pending::Tickers {
+                rows: Vec::new(),
+                invalid: false,
+            },
+        );
+    }
+    fn public_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: DiscoveryRead,
+        error: safe_cex_engine::VenueError,
+        pause: f64,
+    ) {
+        cx.retried_failure("bitunix.lib:1", &error.message);
+        self.discovery.failed_after(cx, read, pause, error);
+    }
+    fn public_response_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: DiscoveryRead,
+        response: &Response<'_>,
+    ) {
+        let error = error::response_data(response, false)
+            .err()
+            .unwrap_or_else(|| {
+                safe_cex_engine::startup::public_response_error(response.status, None, None)
+            });
+        let pause = if matches!(response.status, 418 | 429) {
+            safe_cex_engine::startup::rate_limit_pause_ms(response, 60_000.0)
+        } else if error.kind == Some(safe_cex_engine::ErrorKind::RateLimited) {
+            60_000.0
+        } else {
+            0.0
+        };
+        self.public_failed(cx, read, error, pause);
     }
     fn headers(&self) -> Vec<(&'static str, String)> {
         if self.options.testnet {
@@ -459,7 +502,10 @@ impl Venue for BitunixFutures {
                         });
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Pending::Tickers { rows, invalid } => match serde_json::from_str::<Daily<'_>>(item) {
                 Ok(t) => {
@@ -483,7 +529,10 @@ impl Venue for BitunixFutures {
                         });
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             _ => {}
         }
@@ -522,6 +571,17 @@ impl Venue for BitunixFutures {
             }
             other => other,
         };
+        let public_read = match &pending {
+            Pending::Markets { .. } => Some(DiscoveryRead::Markets),
+            Pending::Tickers { .. } => Some(DiscoveryRead::Tickers),
+            _ => None,
+        };
+        if let Some(read) = public_read
+            && error::response_data(&response, false).is_err()
+        {
+            self.public_response_failed(cx, read, &response);
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.on_request_failed(cx, pending, &format!("Bitunix HTTP {}", response.status));
             return;
@@ -533,31 +593,18 @@ impl Venue for BitunixFutures {
             return;
         }
         match pending {
-            Pending::Markets {
-                mut rows,
-                invalid: false,
-            } => {
+            Pending::Markets { mut rows, .. } if !rows.is_empty() => {
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
+                self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 self.connect(cx, Feed::Futures);
-                cx.request_streamed(
-                    Method::Get,
-                    format!("{REST}{TICKERS}"),
-                    self.headers(),
-                    json::ArrayAt::EnvelopeField("data"),
-                    Pending::Tickers {
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                );
+                self.tickers(cx);
+                self.private_start(cx);
             }
-            Pending::Tickers {
-                mut rows,
-                invalid: false,
-            } => {
+            Pending::Tickers { mut rows, .. } if !rows.is_empty() => {
                 rows.shrink_to_fit();
                 cx.store.set_tickers(rows);
-                self.private_start(cx);
+                self.discovery.succeeded(cx, DiscoveryRead::Tickers);
                 let count = cx.store.markets().len();
                 for start in (0..count).step_by(300) {
                     for channel in ["ticker", "price"] {
@@ -583,7 +630,68 @@ impl Venue for BitunixFutures {
                     Err(error) => cx.fail(command, error),
                 };
             }
+            Pending::Markets { invalid, .. } | Pending::Tickers { invalid, .. } => {
+                self.public_failed(
+                    cx,
+                    public_read.unwrap(),
+                    safe_cex_engine::VenueError::new(if invalid {
+                        "Malformed Bitunix public seed contains no usable rows"
+                    } else {
+                        "Bitunix public seed contains no eligible rows"
+                    })
+                    .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    0.0,
+                );
+            }
             other => self.on_request_failed(cx, other, "malformed Bitunix list"),
+        }
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        let read = match &pending {
+            Pending::Markets { .. } => Some(DiscoveryRead::Markets),
+            Pending::Tickers { .. } => Some(DiscoveryRead::Tickers),
+            _ => None,
+        };
+        if let Some(read) = read {
+            self.public_response_failed(cx, read, &response);
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            );
+        }
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        let read = match &pending {
+            Pending::Markets { .. } => Some(DiscoveryRead::Markets),
+            Pending::Tickers { .. } => Some(DiscoveryRead::Tickers),
+            _ => None,
+        };
+        if let Some(read) = read {
+            let response = Response {
+                status,
+                headers,
+                body: "",
+            };
+            self.public_response_failed(cx, read, &response);
+        } else {
+            self.on_request_failed(cx, pending, error);
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -606,10 +714,18 @@ impl Venue for BitunixFutures {
                 self.account.symbol_settings.remove(&symbol);
                 cx.notice(Level::Warn, code::REQUEST_FAILED, error);
             }
-            _ => {
-                cx.retried_failure("bitunix.lib:1", error);
-                self.retry = Some(cx.set_timer(5_000.0));
-            }
+            Pending::Markets { .. } => self.public_failed(
+                cx,
+                DiscoveryRead::Markets,
+                error::transport(error, false),
+                0.0,
+            ),
+            Pending::Tickers { .. } => self.public_failed(
+                cx,
+                DiscoveryRead::Tickers,
+                error::transport(error, false),
+                0.0,
+            ),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -619,21 +735,10 @@ impl Venue for BitunixFutures {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.retry == Some(timer) {
-            self.retry = None;
-            if cx.store.loaded().markets {
-                cx.request_streamed(
-                    Method::Get,
-                    format!("{REST}{TICKERS}"),
-                    self.headers(),
-                    json::ArrayAt::EnvelopeField("data"),
-                    Pending::Tickers {
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                );
-            } else {
-                self.markets(cx);
+        if let Some(read) = self.discovery.on_timer(timer) {
+            match read {
+                DiscoveryRead::Markets => self.markets(cx),
+                DiscoveryRead::Tickers => self.tickers(cx),
             }
             return;
         }

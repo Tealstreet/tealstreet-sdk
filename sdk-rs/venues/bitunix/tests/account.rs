@@ -707,8 +707,6 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
     let r = requests(&mut e)
         .into_iter()
         .find(|r| r.url.contains("marginCoin"))
@@ -982,8 +980,6 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
     let mut timers = vec![];
     loop {
         let actions: Vec<_> = e.drain_actions().collect();
@@ -994,7 +990,9 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
             match a {
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 Action::Http(r) => {
-                    let body = if r.url.contains("get_pending_positions") {
+                    let body = if r.url.ends_with("/tickers") {
+                        TICKERS
+                    } else if r.url.contains("get_pending_positions") {
                         POSITIONS
                     } else if r.url.contains("/tpsl/") {
                         TPSL
