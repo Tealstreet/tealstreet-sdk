@@ -60,7 +60,7 @@ pub fn ready_with_catalogue(
     Vec<(safe_cex_engine::TimerId, f64)>,
 ) {
     let public_only = options.public_data_only;
-    let mut e = Engine::new(Kraken::new(options));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(options));
     e.start(NOW);
     let mut private = None;
     let mut public = None;

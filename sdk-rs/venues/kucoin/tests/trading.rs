@@ -23,12 +23,19 @@ fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Act
 
 impl Harness {
     fn new() -> Self {
-        let mut engine = Engine::new(Kucoin::new(Options {
-            key: Some("documented-test-key".into()),
-            secret: Some("documented-test-secret".into()),
-            passphrase: Some("documented-test-passphrase".into()),
-            ..Default::default()
-        }));
+        Self::with_source(17)
+    }
+    fn with_source(seed: u64) -> Self {
+        let mut engine = Engine::new(
+            Kucoin::new(Options {
+                key: Some("documented-test-key".into()),
+                secret: Some("documented-test-secret".into()),
+                passphrase: Some("documented-test-passphrase".into()),
+                ..Default::default()
+            }),
+            Some(safe_cex_engine::test_support::seeded_entropy(seed)),
+        )
+        .unwrap();
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -969,8 +976,9 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
 #[test]
 fn generated_client_ids_do_not_collide_across_instances_at_the_same_timestamp() {
     let mut ids = std::collections::HashSet::new();
-    for _ in 0..16 {
-        let mut h = Harness::new();
+    // Model the independent entropy of production hosts with distinct explicit sources.
+    for seed in 1..=16 {
+        let mut h = Harness::with_source(seed);
         let mut o = order();
         o.client_order_id = None;
         place(&mut h, vec![o]);

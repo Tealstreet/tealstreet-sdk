@@ -30,7 +30,7 @@ fn reply(e: &mut Driver, r: &HttpRequest, body: &str) {
     );
 }
 fn seed() -> (Driver, SocketId) {
-    let mut e = Engine::new(Backpack::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -375,7 +375,7 @@ fn documented_ticker_uses_open_price_and_uppercase_quote_volume_and_empty_quotes
 
 #[test]
 fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
-    let mut e = Engine::new(Backpack::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -465,7 +465,7 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
 
 #[test]
 fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() {
-    let mut e = Engine::new(Backpack::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

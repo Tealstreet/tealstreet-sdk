@@ -1,5 +1,5 @@
 //! Replayable socket liveness and retry policy; wire protocols remain venue-owned.
-use crate::backoff::{Backoff, jitter};
+use crate::backoff::Backoff;
 use crate::{Cx, TimerId};
 
 #[derive(Clone, Copy, Debug)]
@@ -61,7 +61,6 @@ pub struct Supervisor {
     watch: Option<TimerId>,
     retry: Option<TimerId>,
     failures: u32,
-    jitter: u64,
 }
 
 impl Default for Supervisor {
@@ -92,7 +91,6 @@ impl Supervisor {
             watch: None,
             retry: None,
             failures: 0,
-            jitter: 0x9e37_79b9_7f4a_7c15,
         }
     }
 
@@ -103,9 +101,6 @@ impl Supervisor {
         self.since = cx.now;
         self.received = cx.now;
         self.arm(cx);
-        if let Some(timer) = self.watch {
-            self.mix(cx.now.to_bits() ^ u64::from(timer.0));
-        }
     }
 
     pub fn opened<P>(&mut self, cx: &mut Cx<'_, P>) {
@@ -175,8 +170,7 @@ impl Supervisor {
         let nominal = Backoff::new(self.config.backoff_base_ms, 31, self.config.backoff_cap_ms)
             .delay(self.failures);
         self.failures = self.failures.saturating_add(1);
-        let bits = self.mix(cx.now.to_bits() ^ u64::from(self.failures));
-        let delay = jitter(nominal, bits).max(minimum_ms.max(0.0));
+        let delay = cx.jittered(nominal).max(minimum_ms.max(0.0));
         self.phase = Phase::Waiting;
         self.retry = Some(cx.set_timer(delay));
     }
@@ -260,17 +254,6 @@ impl Supervisor {
         };
         let deadline = self.next_ping.map_or(deadline, |ping| deadline.min(ping));
         self.watch = Some(cx.set_timer((deadline - cx.now).clamp(0.0, 5_000.0)));
-    }
-
-    fn mix(&mut self, salt: u64) -> u64 {
-        self.jitter = self
-            .jitter
-            .wrapping_add(salt)
-            .wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut z = self.jitter;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
     }
 }
 
@@ -370,12 +353,19 @@ mod tests {
 
     impl Harness {
         fn new(config: Config, now: f64) -> Self {
+            Self::with_seed(config, now, 17)
+        }
+        fn with_seed(config: Config, now: f64, seed: u64) -> Self {
             let mut h = Self {
-                engine: Engine::new(Probe {
-                    supervisor: Supervisor::new(config),
-                    socket: None,
-                    ticks: Vec::new(),
-                }),
+                engine: Engine::new(
+                    Probe {
+                        supervisor: Supervisor::new(config),
+                        socket: None,
+                        ticks: Vec::new(),
+                    },
+                    Some(crate::test_support::seeded_entropy(seed)),
+                )
+                .unwrap(),
                 now,
                 timers: HashMap::new(),
                 closed: Vec::new(),
@@ -561,14 +551,17 @@ mod tests {
     }
 
     #[test]
-    fn jitter_is_replayable_and_varies_with_clock() {
+    fn jitter_is_replayable_independently_of_clock() {
         let fail = |now| {
             let mut h = Harness::new(Config::default(), now);
             h.message("fail");
             h.retry_delay()
         };
         assert_eq!(fail(100.0), fail(100.0));
-        assert_ne!(fail(100.0), fail(101.0));
+        assert_eq!(fail(100.0), fail(101.0));
+        let mut other = Harness::with_seed(Config::default(), 100.0, 18);
+        other.message("fail");
+        assert_ne!(fail(100.0), other.retry_delay());
     }
 
     #[test]

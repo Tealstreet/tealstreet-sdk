@@ -39,7 +39,7 @@ impl Harness {
     }
     fn with_policy(feed: Feed, policy: PublicFeedPolicy) -> Self {
         let private = feed == Feed::Private;
-        let mut engine = Engine::new(WeexFutures::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
             public_data_only: !private,
             key: private.then(|| "key".into()),
             secret: private.then(|| "secret".into()),

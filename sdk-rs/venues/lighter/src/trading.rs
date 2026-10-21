@@ -509,8 +509,9 @@ impl Lighter {
                 .signer
                 .as_ref()
                 .unwrap()
-                .sign(&tx, nonce, cx.now as u64)
-            {
+                .sign(&tx, nonce, cx.now as u64, |bytes| {
+                    cx.fill_signing_entropy(bytes).map_err(|_| ())
+                }) {
                 Ok(tx) => signed.push(tx),
                 Err(error) => {
                     self.trading.next_nonce = None;
@@ -1065,11 +1066,11 @@ impl Lighter {
         true
     }
 
-    fn mint_id(&mut self, now: f64) -> Result<u64, String> {
+    fn mint_id(&mut self, cx: &Cx<'_, Pending>) -> Result<u64, String> {
         if self.trading.next_id == 0 {
             let mut random = [0; 2];
-            getrandom::getrandom(&mut random).map_err(|e| e.to_string())?;
-            self.trading.next_id = ((now as u64).saturating_mul(100)
+            cx.fill_entropy(&mut random)?;
+            self.trading.next_id = ((cx.now as u64).saturating_mul(100)
                 + u64::from(u16::from_le_bytes(random)) % 100)
                 % MAX_CLIENT_INDEX;
         }
@@ -1306,7 +1307,7 @@ impl Lighter {
             if scaled_amount == 0 {
                 return Err("Lighter amount rounds to zero".into());
             }
-            let id = self.mint_id(cx.now)?;
+            let id = self.mint_id(cx)?;
             let order = Order {
                 id: id.to_string(),
                 parent_id: None,

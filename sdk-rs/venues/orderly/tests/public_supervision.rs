@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    Action, Command, Event, PublicFeedPolicy, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_orderly::{Options, Orderly};
 use support::{Clock, Driver, POSITIONS, options};
@@ -31,7 +31,7 @@ struct Harness {
 
 impl Harness {
     fn public(policy: PublicFeedPolicy) -> Self {
-        let mut e = Engine::new(Orderly::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
             public_data_only: true,
             ..Default::default()
         }));
@@ -47,7 +47,7 @@ impl Harness {
     }
     fn private() -> Self {
         let mut h = Self {
-            e: Engine::new(Orderly::new(options())),
+            e: safe_cex_engine::test_support::seeded_engine(Orderly::new(options())),
             clock: Clock::new(1000.0),
             log: vec![],
         };

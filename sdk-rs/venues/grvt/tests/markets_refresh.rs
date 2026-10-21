@@ -30,7 +30,7 @@ fn boot() -> (Engine<Grvt>, TimerId) {
 }
 /// Boots with a positions snapshot; also returns the private socket.
 fn boot_with(positions: &str) -> (Engine<Grvt>, TimerId, Option<safe_cex_engine::SocketId>) {
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         key: Some("fixture-key".into()),
         secret: Some(KEY.into()),
         trading_account_id: Some("777".into()),

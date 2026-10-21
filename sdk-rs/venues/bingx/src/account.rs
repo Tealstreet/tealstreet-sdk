@@ -1756,7 +1756,7 @@ pub(crate) fn metadata_error(message: impl Into<String>) -> safe_cex_engine::Ven
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_engine::{Action, Command, Engine, Event, Venue, book::Book, wire};
+    use safe_cex_engine::{Action, Command, Event, Venue, book::Book, wire};
 
     #[derive(Default)]
     struct PlacementVenue {
@@ -1808,7 +1808,8 @@ mod tests {
             ("LIMIT", "PARTIALLY_FILLED", true),
             ("LIMIT", "PARTIALLY_FILLED", false),
         ] {
-            let mut engine = Engine::new(PlacementVenue::default());
+            let mut engine =
+                safe_cex_engine::test_support::seeded_engine(PlacementVenue::default());
             engine.start(0.0);
             let request = engine
                 .drain_actions()
@@ -1865,7 +1866,8 @@ mod tests {
     #[test]
     fn late_placement_ack_preserves_private_partial_and_terminal_tombstone() {
         for terminal in [false, true] {
-            let mut engine = Engine::new(PlacementVenue::default());
+            let mut engine =
+                safe_cex_engine::test_support::seeded_engine(PlacementVenue::default());
             engine.start(0.0);
             let request = engine
                 .drain_actions()

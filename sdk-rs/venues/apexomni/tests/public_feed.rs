@@ -1,8 +1,6 @@
 mod support;
 
-use safe_cex_engine::{
-    Action, Engine, Event, HttpRequest, PublicFeedPolicy, SocketChannel, SocketId,
-};
+use safe_cex_engine::{Action, Event, HttpRequest, PublicFeedPolicy, SocketChannel, SocketId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::*;
 
@@ -10,7 +8,7 @@ const ACCOUNT: &str = r#"{"code":0,"data":{"id":"611779989544632629","positions"
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn pending(policy: PublicFeedPolicy) -> (TestEngine, SocketId, Option<SocketId>, Vec<HttpRequest>) {
-    let mut engine = Engine::new(ApexOmni::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),

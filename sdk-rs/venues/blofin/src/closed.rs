@@ -119,7 +119,13 @@ impl Blofin {
             params.push(format!("after={}", encode(after)));
         }
         let path = format!("/api/v1/account/positions-history?{}", params.join("&"));
-        match self.headers(&path, Method::Get, cx.now, "") {
+        match self.headers(
+            |bytes| cx.fill_signing_entropy(bytes),
+            &path,
+            Method::Get,
+            cx.now,
+            "",
+        ) {
             Ok(headers) => {
                 cx.request_streamed(
                     Method::Get,

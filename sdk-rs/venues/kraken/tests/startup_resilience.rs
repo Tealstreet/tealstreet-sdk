@@ -1,4 +1,4 @@
-use safe_cex_engine::{Action, Engine, Event, Response};
+use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_kraken::{Kraken, Options};
 
 /// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
@@ -10,7 +10,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
-    let mut engine = Engine::new(Kraken::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -74,7 +74,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
 
 #[test]
 fn private_start_is_independent_of_ticker_seed_responses() {
-    let mut engine = Engine::new(Kraken::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kraken::new(Options {
         key: Some("replay-key".into()),
         secret: Some("cmVwbGF5LXNlY3JldA==".into()),
         ..Options::default()

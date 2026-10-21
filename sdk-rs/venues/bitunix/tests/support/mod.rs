@@ -36,7 +36,7 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         .collect()
 }
 pub fn startup() -> (TestEngine, SocketId) {
-    let mut e = Engine::new(BitunixFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         ..Options::default()

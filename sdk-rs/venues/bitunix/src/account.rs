@@ -174,7 +174,13 @@ impl BitunixFutures {
             self.fail_private(cx, pending, "Bitunix credentials required");
             return;
         };
-        let mut headers = match sign::headers(c, &params, body.as_deref().unwrap_or(""), cx.now) {
+        let mut headers = match sign::headers(
+            |bytes| cx.fill_signing_entropy(bytes),
+            c,
+            &params,
+            body.as_deref().unwrap_or(""),
+            cx.now,
+        ) {
             Ok(h) => h,
             Err(e) => {
                 self.fail_private(cx, pending, &e);
@@ -357,7 +363,7 @@ impl BitunixFutures {
         let Some(c) = &self.credentials else {
             return;
         };
-        match safe_cex_crypto::uuid::uuid() {
+        match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_signing_entropy(bytes)) {
             Ok(nonce) => {
                 let timestamp = safe_cex_engine::num::format(cx.now.floor());
                 let trimmed = sign::Credentials {

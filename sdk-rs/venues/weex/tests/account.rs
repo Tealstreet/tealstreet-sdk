@@ -46,7 +46,7 @@ fn request(actions: &[Action], path: &str) -> RequestId {
         .id
 }
 fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
-    let mut e = Engine::new(WeexFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
@@ -1245,7 +1245,7 @@ fn failed_settings_read_backs_off_only_settings() {
 }
 #[test]
 fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
-    let mut e = Engine::new(WeexFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1279,7 +1279,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
 }
 #[test]
 fn ticker_seed_failure_does_not_block_private_start() {
-    let mut e = Engine::new(WeexFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),

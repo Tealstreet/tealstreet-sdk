@@ -13,3 +13,6 @@ time = { version = "0.3", default-features = false, features = ["parsing", "form
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

@@ -439,6 +439,7 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
 pub fn build<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     if !supported(venue) {
@@ -539,23 +540,26 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(BreakoutProp::new(BreakoutOptions {
-                    key: options.key.take().unwrap_or_default(),
-                    secret: options.secret.take().unwrap_or_default(),
-                    subaccount: options.subaccount.take(),
-                    public_data_only: options.public_data_only,
-                    tick_interval: if options.polling_enabled == Some(false) {
-                        f64::INFINITY
-                    } else {
-                        safe_cex_engine::engine::bounded_tick_interval(
-                            options.tick_interval.take().unwrap_or(2_000.0),
-                        )
-                    },
-                    timeout_ms: options
-                        .recv_window
-                        .unwrap_or(20_000.0)
-                        .clamp(1.0, u32::MAX as f64) as u32,
-                })),
+                Engine::new(
+                    BreakoutProp::new(BreakoutOptions {
+                        key: options.key.take().unwrap_or_default(),
+                        secret: options.secret.take().unwrap_or_default(),
+                        subaccount: options.subaccount.take(),
+                        public_data_only: options.public_data_only,
+                        tick_interval: if options.polling_enabled == Some(false) {
+                            f64::INFINITY
+                        } else {
+                            safe_cex_engine::engine::bounded_tick_interval(
+                                options.tick_interval.take().unwrap_or(2_000.0),
+                            )
+                        },
+                        timeout_ms: options
+                            .recv_window
+                            .unwrap_or(20_000.0)
+                            .clamp(1.0, u32::MAX as f64) as u32,
+                    }),
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "grvt")]
@@ -563,15 +567,18 @@ pub fn build<T: Visit>(
             visitor,
             policy,
             startup,
-            Engine::new(Grvt::new(GrvtOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                trading_account_id: options.grvt_trading_account_id.take(),
-                signer_address: options.grvt_signer_address.take(),
-                session_proxy: options.grvt_session_proxy,
-            })),
+            Engine::new(
+                Grvt::new(GrvtOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    trading_account_id: options.grvt_trading_account_id.take(),
+                    signer_address: options.grvt_signer_address.take(),
+                    session_proxy: options.grvt_session_proxy,
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "coinbase")]
         "coinbase" | "coinbasespot" => finish(
@@ -588,7 +595,8 @@ pub fn build<T: Visit>(
                     read_credentials: options.read_credentials.clone(),
                 })
                 .map_err(invalid)?,
-            ),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "polymarket")]
         "polymarket" => {
@@ -597,11 +605,14 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(Polymarket::new(PolymarketOptions {
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    polymarket: options.polymarket.take(),
-                })),
+                Engine::new(
+                    Polymarket::new(PolymarketOptions {
+                        public_data_only: options.public_data_only,
+                        key: options.key.take(),
+                        polymarket: options.polymarket.take(),
+                    }),
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "paradex")]
@@ -609,29 +620,35 @@ pub fn build<T: Visit>(
             visitor,
             policy,
             startup,
-            Engine::new(Paradex::new(ParadexOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                paradex_address: options.paradex_address.take(),
-                subkey_address: options.subkey_address.take(),
-                payload_signer: options.payload_signer,
-            })),
+            Engine::new(
+                Paradex::new(ParadexOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    paradex_address: options.paradex_address.take(),
+                    subkey_address: options.subkey_address.take(),
+                    payload_signer: options.payload_signer,
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "apexomni")]
         "apexomni" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(ApexOmni::new(ApexOmniOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                passphrase: options.passphrase.take(),
-                omni_key_seed: options.omni_key_seed.take(),
-                tick_interval_ms: None,
-            })),
+            Engine::new(
+                ApexOmni::new(ApexOmniOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
+                    omni_key_seed: options.omni_key_seed.take(),
+                    tick_interval_ms: None,
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "txflow")]
         "txflow" => {
@@ -653,7 +670,7 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(safe_cex_venue_txflow::TxFlow::new(options)),
+                Engine::new(safe_cex_venue_txflow::TxFlow::new(options), entropy)?,
             )
         }
         #[cfg(feature = "kraken")]
@@ -661,27 +678,33 @@ pub fn build<T: Visit>(
             visitor,
             policy,
             startup,
-            Engine::new(Kraken::new(KrakenOptions {
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                Kraken::new(KrakenOptions {
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(KrakenSpot::new(KrakenOptions {
-                // Spot private reads are POSTs and retain primary credentials.
-                read_credentials: None,
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                KrakenSpot::new(KrakenOptions {
+                    // Spot private reads are POSTs and retain primary credentials.
+                    read_credentials: None,
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "asterdex")]
         "asterdex" => {
@@ -690,22 +713,25 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(AsterDex::new(AsterOptions {
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    application_id: options.application_id.take(),
-                    auth_user_address: options.asterdex.user_address.take(),
-                    auth_signer_address: options.asterdex.signer_address.take(),
-                    auth_private_key: options.asterdex.private_key.take(),
-                    api_version: options.asterdex.api_version,
-                    builder_address: options.asterdex.builder_address.take(),
-                    builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
-                    builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
-                    read_key: options.asterdex.read_key.take(),
-                    read_secret: options.asterdex.read_secret.take(),
-                })),
+                Engine::new(
+                    AsterDex::new(AsterOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        key: options.key.take(),
+                        secret: options.secret.take(),
+                        application_id: options.application_id.take(),
+                        auth_user_address: options.asterdex.user_address.take(),
+                        auth_signer_address: options.asterdex.signer_address.take(),
+                        auth_private_key: options.asterdex.private_key.take(),
+                        api_version: options.asterdex.api_version,
+                        builder_address: options.asterdex.builder_address.take(),
+                        builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
+                        builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
+                        read_key: options.asterdex.read_key.take(),
+                        read_secret: options.asterdex.read_secret.take(),
+                    }),
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "orderly")]
@@ -715,25 +741,28 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(Orderly::new(OrderlyOptions {
-                    broker: match venue {
-                        "kodiakfi" => OrderlyBroker::KodiakFi,
-                        "mode" => OrderlyBroker::Mode,
-                        "salsadex" => OrderlyBroker::SalsaDex,
-                        "what" => OrderlyBroker::What,
-                        "woofi" => OrderlyBroker::WooFi,
-                        _ => OrderlyBroker::Tealstreet,
-                    },
-                    public_data_only: options.public_data_only,
-                    testnet: options.testnet,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    application_id: options.application_id.take(),
-                    tick_interval: options
-                        .tick_interval
-                        .take()
-                        .map(safe_cex_engine::engine::bounded_tick_interval),
-                })),
+                Engine::new(
+                    Orderly::new(OrderlyOptions {
+                        broker: match venue {
+                            "kodiakfi" => OrderlyBroker::KodiakFi,
+                            "mode" => OrderlyBroker::Mode,
+                            "salsadex" => OrderlyBroker::SalsaDex,
+                            "what" => OrderlyBroker::What,
+                            "woofi" => OrderlyBroker::WooFi,
+                            _ => OrderlyBroker::Tealstreet,
+                        },
+                        public_data_only: options.public_data_only,
+                        testnet: options.testnet,
+                        key: options.key.take(),
+                        secret: options.secret.take(),
+                        application_id: options.application_id.take(),
+                        tick_interval: options
+                            .tick_interval
+                            .take()
+                            .map(safe_cex_engine::engine::bounded_tick_interval),
+                    }),
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "lighter")]
@@ -741,193 +770,232 @@ pub fn build<T: Visit>(
             visitor,
             policy,
             startup,
-            Engine::new(Lighter::new(LighterOptions {
-                robinhood: venue == "lighter-robinhood",
-                remote_signer: options.lighter_remote_signer,
-                signer_provider: options.lighter_signer_provider.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                application_id: options.application_id.take(),
-                api_key_index: options.api_key_index.take(),
-                integrator_account_index: options.lighter_integrator_account_index.take(),
-                stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
-            })),
+            Engine::new(
+                Lighter::new(LighterOptions {
+                    robinhood: venue == "lighter-robinhood",
+                    remote_signer: options.lighter_remote_signer,
+                    signer_provider: options.lighter_signer_provider.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    api_key_index: options.api_key_index.take(),
+                    integrator_account_index: options.lighter_integrator_account_index.take(),
+                    stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "bitrue")]
         "bitrue" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Bitrue::new(BitrueOptions {
-                read_credentials: options.read_credentials.take(),
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                recv_window: options
-                    .recv_window
-                    .take()
-                    .unwrap_or(20_000.0)
-                    .clamp(1.0, 60_000.0) as u32,
-            })),
+            Engine::new(
+                Bitrue::new(BitrueOptions {
+                    read_credentials: options.read_credentials.take(),
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    recv_window: options
+                        .recv_window
+                        .take()
+                        .unwrap_or(20_000.0)
+                        .clamp(1.0, 60_000.0) as u32,
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "bitunix")]
         "bitunix" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(BitunixFutures::new(BitunixOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                BitunixFutures::new(BitunixOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "backpack")]
         "backpack" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Backpack::new(BackpackOptions {
-                read_credentials: options.read_credentials.take(),
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                recv_window: options.recv_window.take(),
-            })),
+            Engine::new(
+                Backpack::new(BackpackOptions {
+                    read_credentials: options.read_credentials.take(),
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    recv_window: options.recv_window.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "blofin")]
         "blofin" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Blofin::new(BlofinOptions {
-                broker_attribution: options.broker_attribution,
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                passphrase: options.passphrase.take(),
-            })),
+            Engine::new(
+                Blofin::new(BlofinOptions {
+                    broker_attribution: options.broker_attribution,
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "mexc")]
         "mexc" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(MexcFutures::new(MexcOptions {
-                recv_window: tighter_recv_window(options.recv_window),
-                read_credentials: options.read_credentials.take(),
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                MexcFutures::new(MexcOptions {
+                    recv_window: tighter_recv_window(options.recv_window),
+                    read_credentials: options.read_credentials.take(),
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "phemex")]
         "phemex" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(PhemexPerpetuals::new(PhemexOptions {
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                PhemexPerpetuals::new(PhemexOptions {
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "binance")]
         "binance" | "binancepm" | "binancespot" | "binanceinverse" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(BinanceFutures::new(BinanceOptions {
-                recv_window: options.recv_window,
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                portfolio_margin: venue == "binancepm",
-                variant: match venue {
-                    "binancepm" => BinanceVariant::PortfolioMargin,
-                    "binancespot" => BinanceVariant::Spot,
-                    "binanceinverse" => BinanceVariant::CoinM,
-                    _ => BinanceVariant::UsdM,
-                },
-            })),
+            Engine::new(
+                BinanceFutures::new(BinanceOptions {
+                    recv_window: options.recv_window,
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    portfolio_margin: venue == "binancepm",
+                    variant: match venue {
+                        "binancepm" => BinanceVariant::PortfolioMargin,
+                        "binancespot" => BinanceVariant::Spot,
+                        "binanceinverse" => BinanceVariant::CoinM,
+                        _ => BinanceVariant::UsdM,
+                    },
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(KucoinSpot::new(KucoinOptions {
-                read_credentials: options.read_credentials.take(),
-                broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                passphrase: options.passphrase.take(),
-            })),
+            Engine::new(
+                KucoinSpot::new(KucoinOptions {
+                    read_credentials: options.read_credentials.take(),
+                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "kucoin")]
         "kucoin" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Kucoin::new(KucoinOptions {
-                read_credentials: options.read_credentials.take(),
-                broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                passphrase: options.passphrase.take(),
-            })),
+            Engine::new(
+                Kucoin::new(KucoinOptions {
+                    read_credentials: options.read_credentials.take(),
+                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "bingx")]
         "bingx" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Bingx::new(BingxOptions {
-                read_credentials: options.read_credentials.take(),
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                Bingx::new(BingxOptions {
+                    read_credentials: options.read_credentials.take(),
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "weex")]
         "weex" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(WeexFutures::new(WeexOptions {
-                read_credentials: options.read_credentials.take(),
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                passphrase: options.passphrase.take(),
-                private_ws_headers: options.private_ws_headers,
-            })),
+            Engine::new(
+                WeexFutures::new(WeexOptions {
+                    read_credentials: options.read_credentials.take(),
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
+                    private_ws_headers: options.private_ws_headers,
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "woo")]
         "woo" => finish(
             visitor,
             policy,
             startup,
-            Engine::new(Woo::new(WooOptions {
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                application_id: options.application_id.take(),
-            })),
+            Engine::new(
+                Woo::new(WooOptions {
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
@@ -968,7 +1036,7 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(BybitLinear::new(options)),
+                Engine::new(BybitLinear::new(options), entropy)?,
             )
         }
         #[cfg(feature = "bitget")]
@@ -984,21 +1052,24 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(BitgetFutures::new(BitgetOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                    product: if venue == "bitgetinverse" {
-                        Product::Inverse
-                    } else if venue == "bitgetusdc" {
-                        Product::Usdc
-                    } else {
-                        Product::Usdt
-                    },
-                })),
+                Engine::new(
+                    BitgetFutures::new(BitgetOptions {
+                        read_credentials: options.read_credentials.take(),
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        key: options.key.take(),
+                        secret: options.secret.take(),
+                        passphrase: options.passphrase.take(),
+                        product: if venue == "bitgetinverse" {
+                            Product::Inverse
+                        } else if venue == "bitgetusdc" {
+                            Product::Usdc
+                        } else {
+                            Product::Usdt
+                        },
+                    }),
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "cryptocom")]
@@ -1006,13 +1077,16 @@ pub fn build<T: Visit>(
             visitor,
             policy,
             startup,
-            Engine::new(Cryptocom::new(CryptocomOptions {
-                read_credentials: options.read_credentials.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-            })),
+            Engine::new(
+                Cryptocom::new(CryptocomOptions {
+                    read_credentials: options.read_credentials.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                }),
+                entropy,
+            )?,
         ),
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
@@ -1033,11 +1107,14 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(if venue == "hyperliquidspot" {
-                    Hyperliquid::new_spot(config)
-                } else {
-                    Hyperliquid::new(config)
-                }),
+                Engine::new(
+                    if venue == "hyperliquidspot" {
+                        Hyperliquid::new_spot(config)
+                    } else {
+                        Hyperliquid::new(config)
+                    },
+                    entropy,
+                )?,
             )
         }
         #[cfg(feature = "okx")]
@@ -1053,15 +1130,18 @@ pub fn build<T: Visit>(
                 visitor,
                 policy,
                 startup,
-                Engine::new(Okx::new(OkxOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet || venue.ends_with("demo"),
-                    eea: venue.starts_with("okxeu"),
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                })),
+                Engine::new(
+                    Okx::new(OkxOptions {
+                        read_credentials: options.read_credentials.take(),
+                        testnet: options.testnet || venue.ends_with("demo"),
+                        eea: venue.starts_with("okxeu"),
+                        public_data_only: options.public_data_only,
+                        key: options.key.take(),
+                        secret: options.secret.take(),
+                        passphrase: options.passphrase.take(),
+                    }),
+                    entropy,
+                )?,
             )
         }
         other => Err(invalid(format!("unsupported venue: {other}"))),

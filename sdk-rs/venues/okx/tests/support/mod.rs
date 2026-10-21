@@ -54,7 +54,7 @@ pub fn envelope(row: &str) -> String {
     format!(r#"{{"code":"0","msg":"","data":[{row}]}}"#)
 }
 pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
-    let mut engine = Engine::new(Okx::new(options));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
     engine.start(1_709_209_849_123.0);
     let request = actions(&mut engine)
         .into_iter()
@@ -99,7 +99,7 @@ pub fn is_get(action: &Action, suffix: &str) -> bool {
 }
 
 pub fn trading_engine() -> Engine<Okx> {
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),

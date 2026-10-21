@@ -129,7 +129,7 @@ fn to_settings(engine: &mut Engine<Blofin>, rig: &mut Rig) -> (Action, Action, S
 
 #[test]
 fn transient_settings_failures_back_off_and_the_account_still_loads() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (mut margin, mode, _) = to_settings(&mut engine, &mut rig);
     respond(&mut engine, &mode, 200, MODE, 2.);
@@ -167,7 +167,7 @@ fn transient_settings_failures_back_off_and_the_account_still_loads() {
 
 #[test]
 fn transport_failure_of_a_setting_read_is_retried() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (_, mode, _) = to_settings(&mut engine, &mut rig);
     let Action::Http(request) = &mode else {
@@ -187,7 +187,7 @@ fn transport_failure_of_a_setting_read_is_retried() {
 
 #[test]
 fn rejected_key_fails_startup_once_and_stops_retrying() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let refused = r#"{"code":"152401","msg":"Access key does not exist"}"#;
@@ -211,7 +211,7 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
 
 #[test]
 fn bad_signature_is_final_only_after_one_re_signed_resend() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (_, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -232,7 +232,7 @@ fn bad_signature_is_final_only_after_one_re_signed_resend() {
 
 #[test]
 fn concurrent_bad_signatures_on_both_reads_are_each_re_signed() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -259,7 +259,7 @@ fn concurrent_bad_signatures_on_both_reads_are_each_re_signed() {
 
 #[test]
 fn bad_signature_after_the_other_read_recovered_is_re_signed() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -283,7 +283,7 @@ fn bad_signature_after_the_other_read_recovered_is_re_signed() {
 
 #[test]
 fn rejected_read_only_ip_fails_startup_without_deactivating() {
-    let mut engine = Engine::new(Blofin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         read_credentials: Some(ReadCredentials {
             key: "read".into(),
             secret: "read-secret".into(),
@@ -310,7 +310,7 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
 
 #[test]
 fn missing_passphrase_fails_startup() {
-    let mut engine = Engine::new(Blofin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         passphrase: None,
         ..keyed()
     }));
@@ -326,7 +326,7 @@ fn missing_passphrase_fails_startup() {
 
 #[test]
 fn invalid_read_only_credentials_fail_startup() {
-    let mut engine = Engine::new(Blofin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         read_credentials: Some(ReadCredentials {
             key: "read".into(),
             secret: String::new(),
@@ -347,7 +347,7 @@ fn invalid_read_only_credentials_fail_startup() {
 
 #[test]
 fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -369,7 +369,7 @@ fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
 
 #[test]
 fn generic_socket_login_failure_reconnects() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -396,7 +396,7 @@ fn generic_socket_login_failure_reconnects() {
 
 #[test]
 fn bad_signature_on_socket_login_reconnects() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -429,7 +429,7 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
         (418, "", 60_000.),
         (429, "", 60_000.),
     ] {
-        let mut engine = Engine::new(Blofin::new(keyed()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
         let mut rig = Rig::default();
         let (margin, mode, _) = to_settings(&mut engine, &mut rig);
         respond(&mut engine, &mode, 200, MODE, 2.);
@@ -455,7 +455,7 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
 
 #[test]
 fn a_read_failing_during_a_ban_waits_out_the_ban_too() {
-    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(keyed()));
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     // The margin read is banned for 120 s at t=2 ms while the mode read is still in flight.

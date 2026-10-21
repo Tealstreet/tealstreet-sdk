@@ -207,10 +207,12 @@ fn bracket_sides(o: &PlaceOrderOpts) -> Result<(), String> {
     }
     Ok(())
 }
-fn client_id() -> Result<String, String> {
-    safe_cex_crypto::uuid::uuid().map(|id| format!("ts_{id}"))
+fn client_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+        .map(|id| format!("ts_{id}"))
 }
 fn prepare(
+    cx: &Cx<'_, Pending>,
     o: &PlaceOrderOpts,
     signer: &Credentials,
     now: u64,
@@ -283,7 +285,11 @@ fn prepare(
         client_id: if child {
             None
         } else {
-            Some(o.client_order_id.clone().map_or_else(client_id, Ok)?)
+            Some(
+                o.client_order_id
+                    .clone()
+                    .map_or_else(|| client_id(cx), Ok)?,
+            )
         },
     })
 }
@@ -385,14 +391,14 @@ fn place_operations(
             None
         };
         if native_batch(o) {
-            chunk.push(prepare(o, signer, cx.now as u64, false, execution)?);
+            chunk.push(prepare(cx, o, signer, cx.now as u64, false, execution)?);
             if chunk.len() == 10 {
                 flush(&mut chunk, &mut operations, signer.is_delegated())?;
             }
             continue;
         }
         flush(&mut chunk, &mut operations, signer.is_delegated())?;
-        let payload = prepare(o, signer, cx.now as u64, false, execution)?;
+        let payload = prepare(cx, o, signer, cx.now as u64, false, execution)?;
         let expected = vec![payload.client_id.clone()];
         operations.push_back(Operation {
             receipts: placement_receipt(&payload).into_iter().collect(),
@@ -424,7 +430,7 @@ fn place_operations(
                 child.stop_loss = None;
                 child.reduce_only = Some(true);
                 child.time_in_force = None;
-                let mut payload = prepare(&child, signer, cx.now as u64, true, None)?;
+                let mut payload = prepare(cx, &child, signer, cx.now as u64, true, None)?;
                 if kind == OrderType::StopLoss {
                     payload.kind = "STOP_LOSS_MARKET";
                     let signed = signer.order(

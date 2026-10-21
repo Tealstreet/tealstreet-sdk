@@ -3,7 +3,7 @@ use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notic
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 const NOW: f64 = 1000.0;
 fn engine(read: bool, public: bool) -> Engine<PhemexPerpetuals> {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -187,13 +187,14 @@ fn identity_public_only_fails_before_network_even_with_saved_credentials() {
 
 #[test]
 fn identity_without_credentials_fails_before_network() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options::default()));
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options::default()));
     result(ask(&mut e), true).unwrap_err();
 }
 
 #[test]
 fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
