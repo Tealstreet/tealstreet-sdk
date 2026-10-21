@@ -557,7 +557,10 @@ mandatory verifier rejects missing/duplicate/substituted cases and protected
 integrity failures. A green CI result may include exact declared FAILs; unused
 declarations and missing native fill metadata must remain visible limitations.
 The harness lane owns the remaining validator/fixture/declaration work; see the
-re-audit ledger for the Hyperliquid and Orderly caveats and pending WEEX follow-up.
+re-audit ledger for the Hyperliquid and Orderly caveats. Final sweep #1694
+(`e87107621f6`) pins all 50 effective clock policies and removes exactly 20 stale
+WEEX fee leaves; ten stable raw outputs and 112 exact remaining leaves establish
+repeatability/declaration scope, not private parity.
 
 Before cutover: live-smoke private captures on every venue (mainnet minimum size
 for coinbase, backpack, mexc with approval), a 3–7 day read-only production

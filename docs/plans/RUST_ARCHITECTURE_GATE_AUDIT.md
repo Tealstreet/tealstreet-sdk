@@ -2,7 +2,8 @@
 
 Base: landing `b6cb612bc7c7c611a17dff5900e6977a7e8b5ab8` (#1688).
 Integrated landing `c568c1745a9` preserves the later GRVT book repair and
-caller documentation; those changes do not alter the audited gate policy.
+caller documentation. Integrated #1694 at `e87107621f6` supplies the final
+clock-policy regression and narrow WEEX declaration cleanup.
 Scope: the Architecture and Gate honesty sections of `RUST_AUDITS.md`.
 Use current code and actual merged PRs; historical audit counts are not a
 current inventory. Production impact determines whether a remaining finding
@@ -24,7 +25,7 @@ needs a code fix, a cutover prerequisite or an owner decision.
    decided to retain the documents and index topic/status/read trigger/file,
    rather than consolidate or delete them.
    Do not edit its harness, tapes, declarations, clocks, comparators or policy.
-   Its unmerged WEEX follow-up is not landed evidence. Record any remaining
+   Cite its actual merged sweep receipts. Record any remaining
    harness-owned gaps and owner decisions with exact boundaries.
 4. After the evidence PR, fix any demonstrated SDK/engine-owned gaps in fresh
    branches, batched by behavior. Write a concrete short plan before each batch,
@@ -53,7 +54,8 @@ bullets plus six evidence limitations. The old strike counts are not an open-wor
 count. The current harness requires 32 suites / 110 exact cases and has 50 aliases.
 All 50 use the effective deterministic private-clock policy: 49 explicit flags,
 plus polling BreakoutProp. This is a source-policy observation, not proof that
-every private result is correct. The pending sweep regression is separate.
+every private result is correct. #1694 now pins the exact 50-name catalog and
+effective policy in a regression, without introducing a new clock implementation.
 
 The integrated index covers 151 tracked paths under `docs/plans`, including
 itself and this ledger. Its status column describes document use,
@@ -101,6 +103,8 @@ Selected actual sweep receipts: #1532 `cf83f43768a` (shared private clock work),
 (complete Bybit IDs), #1663 `e033ec44f2e` (Kraken), #1673 `21a9081c18c`
 (Lighter), #1677 `0bc79b6e83a` (Robinhood), #1682 `69d783d94b6` (Bitrue),
 #1689 `09f2253a284` (Hyperliquid) and #1692 `598c21db8ec` (Orderly).
+Final sweep #1694 `e87107621f6` adds the 50-name effective-clock regression and prunes exactly 20 stale WEEX fee leaves
+(132 to 112), retaining the tape hash, other leaves and complete raw-ID comparison.
 The full per-family ledger and exact raw-output hashes are in `HARNESS_TAPE_TIME.md`
 and the linked PR bodies. Only top-level metrics are excluded; raw client IDs,
 transport receipts, commands and checkpoints stay in repeatability comparisons.
@@ -119,9 +123,10 @@ transport receipts, commands and checkpoints stay in repeatability comparisons.
 - **Harness owner (codex-mxb4mq):** Hyperliquid's normalized nonce/signature and
   absent independent request validator mean its proof is repeatability-only.
   Orderly's existing unstaged mutation ACKs/current command-snapshot visibility
-  remain a causality caveat. Pending #1694 adds an exact 50-name effective-clock
-  assertion and removes exactly 20 stale WEEX fee keys; it is not merged evidence
-  in this ledger. Coordinate updates; do not edit that lane's harness files.
+  remain a causality caveat. #1694 closes the sweep's exact 50-name effective-clock
+  assertion and 20 stale WEEX fee keys; its complete ten-output proof and exact
+  112-key declaration check do not establish private parity. Coordinate future
+  validator/fixture changes with that lane; no harness files changed in this PR.
 - **Owner/cutover evidence:** choose approved accounts/environments/minimum-size
   live captures, the read-only 3–7 day production shadow and per-venue canary
   rollout. Scripted lifecycle tooling and green declared-FAIL CI do not provide
