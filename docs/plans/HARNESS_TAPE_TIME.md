@@ -279,3 +279,27 @@ Five focused pairs with startup rewind preserved produced identical complete
 nonmetric outputs within each implementation. All 33 private keys remain exact,
 with zero unexpected or unobserved keys. Keep the fixture, absent epoch metadata
 and both private/public declaration entries unchanged.
+
+## Standalone Hyperliquid Spot phase
+
+Enable the virtual private clock only in the standalone Hyperliquid Spot
+configuration, using the fixture's existing epoch. Keep L1 action signature
+validation, nonce freshness, spot asset indices, caller cloid correlation,
+snapshot/live fill deduplication and balance refresh receipts unchanged. The
+embedded Hyperliquid spot tape is a separate identity for the later Hyperliquid
+phase; do not claim coverage for it here.
+
+Validate an authentic CI engine fingerprint before focused five-pair iteration;
+refuse mismatches without fallback. Compare complete nonmetric outputs including
+IDs, timestamps and command receipts. Remove only exact unobserved tape-bound
+keys, and review any new key with its tape SHA and specific cause. Require
+focused harness tests, independent plan/implementation/current-CI raw reviews,
+fresh mandatory public/private verification, five identical current-head CI
+pairs and full green checks. Guard the shared Hyperliquid crate separately
+from merging, audit actual parents/files, report the merge, then move to Kraken.
+
+Five focused private pairs with a fingerprint-matching CI engine are identical
+within each implementation, including complete IDs, timestamps and receipts.
+The standalone private strict gate passes with zero diagnostics; keep the
+17-record fixture and declaration manifest unchanged. Current-head CI must
+independently reproduce the proof and verify both mandatory cases before merge.
