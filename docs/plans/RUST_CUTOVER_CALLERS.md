@@ -1359,3 +1359,13 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### WOO port-review warnings and confirmation
+
+Rust WOO keeps isolated exposure visible and logs one coded warning per symbol
+that isolated margin settings cannot be changed. Exhausted leverage readback
+reports an accepted write with unconfirmed setting and Unknown outcome, keeping
+cached settings until authoritative confirmation. No write is replayed and no
+unconfirmed success is returned. Caller method signatures and quantities remain
+unchanged; native algo reduce-only defaults and protective trigger semantics stay
+as documented.

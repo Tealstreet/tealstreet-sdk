@@ -174,6 +174,7 @@ pub struct Account {
     pub(crate) algos: HashMap<String, AlgoMeta>,
     skip_logged: HashMap<&'static str, String>,
     hidden: std::collections::HashSet<String>,
+    isolated_warned: std::collections::HashSet<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1332,6 +1333,13 @@ impl Woo {
                     .cloned()
                     .collect();
                 rows.extend(kept);
+                for position in &rows {
+                    if position.margin_type == Some(MarginType::Isolated)
+                        && self.account.isolated_warned.insert(position.symbol.clone())
+                    {
+                        cx.notice(Level::Warn, code::CONFIG_INVALID, format!("WOO {} uses isolated margin; changing isolated margin settings is unsupported", position.symbol));
+                    }
+                }
                 cx.store.set_positions(rows);
                 self.account_balance_pnl(cx);
                 self.account_metadata(cx);

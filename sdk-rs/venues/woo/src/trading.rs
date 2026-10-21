@@ -1168,7 +1168,7 @@ impl Woo {
             self.trade_abort(cx, error);
         }
     }
-    /// Retries a config read; a read that keeps failing precedes nothing that was sent.
+    /// Retries a config read, including confirmation after an accepted leverage write.
     fn trade_retry_read(&mut self, cx: &mut Cx<'_, Pending>, step: Step, error: &str) {
         let original = step.clone();
         let retry = match step {
@@ -1199,7 +1199,21 @@ impl Woo {
             self.trading.timer = Some(cx.set_timer(250.0));
         } else {
             self.trade_config_finished(&original);
-            self.trade_abort(cx, not_sent(error));
+            let error = if matches!(
+                original,
+                Step::Leverage {
+                    expected: Some(_),
+                    ..
+                }
+            ) {
+                VenueError::new(format!(
+                    "WOO leverage write was accepted, but readback remains unconfirmed: {error}"
+                ))
+                .outcome(Outcome::Unknown)
+            } else {
+                not_sent(error)
+            };
+            self.trade_abort(cx, error);
             self.trade_pump(cx);
         }
     }
