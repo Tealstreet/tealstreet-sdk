@@ -28,3 +28,35 @@ Historical integrated-head CI checkpoints: #1615 1,313,430; #1620 1,331,273;
 #1621 1,331,322; #1624 1,336,815; #1629/#1622 1,336,953; #1637 1,339,462 bytes.
 Successive differences include intervening landings; isolate claims accordingly.
 No downstream application/deployment changes are in scope.
+
+## Baseline profile
+
+Twiggy 0.8.0 `top`/`top --retained`/`paths` on the downloaded optimized Node
+CI artifacts (the web artifact is identical). No local release build was used.
+
+| Integrated checkpoint | Artifact bytes | Code bytes / functions | Data bytes |
+| --- | ---: | ---: | ---: |
+| #1615 | 1,313,430 | 1,220,276 / 1,120 | 88,763 |
+| #1620 | 1,331,273 | 1,237,735 / 1,133 | 89,145 |
+| #1624 | 1,336,815 | 1,244,259 / 1,155 | 88,776 |
+| #1637 | 1,339,462 | 1,246,396 / 1,156 | 89,286 |
+
+SHA-256 respectively: `9196bc699b733719e8eb9380ebb585f3fd04bcf22279dd475aba6190bb4fce66`,
+`c2a93c74c84e79aa69f9102c9a75f045c2c868df6aed8c604e62db8f06f17271`,
+`99a0d5f52ddeb6b49a97129a27ab2fcfc0c76c614d81e7ac264cbdab114d750e`,
+`b486c5b22e8efa716b2806070a3b6344987e96998d69d84b47509505029a30b8`.
+CI runs: 39614261328, 39620930357, 39629583459, 39640110159.
+
+The current command export directly retains a 129,671-byte body, exactly the
+same shallow size as #1615. Large unnamed engine/event bodies and their callees
+retain most code. Names are stripped by `build.sh`; anonymous function numbers
+are not stable identities across builds, and this profile does not prove which
+Rust source function owns each increase. The code/data split supports measuring
+parser call boundaries rather than compacting string data first.
+
+First measured candidate: non-inlined, concrete order-row, position-row and
+raw-topic parser helpers shared by existing call sites. Use the exact same
+Serde parsers, lifetimes and error results; preserve Hyro's separate typed-frame
+atomicity. Independent plan/source review agrees this is a low-risk size
+experiment, not yet a measured saving. Existing row-admission/repair/Hyro tests
+and strict CI replay outputs remain the behavior checks.
