@@ -112,4 +112,3 @@ TS site-forwarding cases, package typecheck, touched ESLint, Rust fmt/strict
 Clippy and bans. Registry checks use the Bybit-only feature build and select
 the relevant construction test; unselected venue construction cases require
 the full feature matrix in CI.
-
