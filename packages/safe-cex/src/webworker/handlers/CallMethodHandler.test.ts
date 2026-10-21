@@ -6,7 +6,7 @@ import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { workerCallClientOrderIds } from '../../exchanges/base';
+import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../../exchanges/base';
 import {
   decodeWorkerOrderIds,
   replacementClientOrderIdOf,
@@ -72,6 +72,25 @@ describe('CallMethodHandler', () => {
 
   describe('handle', () => {
     describe('callMethod', () => {
+      it('answers the Rust native account reads a main-thread mirror forwards', async () => {
+        const reads = {
+          fetchPositions: vi.fn().mockResolvedValue([{ symbol: 'BTCUSDT' }]),
+          fetchBalance: vi.fn().mockResolvedValue({ total: 1 }),
+          fetchPositionMode: vi.fn().mockResolvedValue(true),
+        };
+        Object.assign(mockExchange, reads);
+        for (const [method, call] of Object.entries(reads)) {
+          await handler.handleCallMethod(method, method as never, method === 'fetchPositions' ? [['BTCUSDT']] : []);
+          expect(call).toHaveBeenCalledOnce();
+          expect(mockPostMessage).toHaveBeenLastCalledWith({
+            op: 'callMethod:done',
+            data: { requestId: method, result: await call.mock.results[0].value, success: true },
+          });
+        }
+        expect(reads.fetchPositions).toHaveBeenCalledWith(['BTCUSDT']);
+        for (const method of Object.keys(reads)) expect(WORKER_WRITE_METHODS.has(method)).toBe(false);
+      });
+
       it('should call setLeverage and post success', async () => {
         const payload: StoreWorkerPayload = {
           op: 'callMethod',

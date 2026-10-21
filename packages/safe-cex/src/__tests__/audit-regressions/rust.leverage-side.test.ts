@@ -85,6 +85,8 @@ describe('Rust leverage command side boundary', () => {
     exchanges.push(exchange);
     const command = vi.fn().mockResolvedValue(null);
     Object.defineProperty(exchange, 'command', { value: command });
+    // Positions come from the authoritative native read; this test pins the legs' sides.
+    Object.defineProperty(exchange, 'fetchPositions', { value: async () => store.positions });
     await exchange.setAllLeverage(8);
     expect(command.mock.calls.map(([body]) => body)).toEqual([
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 8, side: PositionSide.Long },
