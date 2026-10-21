@@ -84,8 +84,10 @@ export const createExchange = async (
   virtualClock.start();
 
   if (options.engine === 'rust') {
-    const { isRustVenue, RustEngineExchange } = await import('./exchanges/rust/rust.exchange');
-    if (isRustVenue(exchangeName)) return new RustEngineExchange(exchangeName, options, store || new DefaultStore());
+    const { runsOnRustEngine, RustEngineExchange } = await import('./exchanges/rust/rust.exchange');
+    if (runsOnRustEngine(exchangeName, options)) {
+      return new RustEngineExchange(exchangeName, options, store || new DefaultStore());
+    }
   }
   const Exchange = await loadExchange(exchangeName);
   return new Exchange(exchangeName, options, store || new DefaultStore());

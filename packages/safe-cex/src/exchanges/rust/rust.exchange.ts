@@ -158,6 +158,14 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
+/**
+ * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
+ * account stays on the TS venue, which merges spot markets into the perp account; the
+ * engine's perp venue does not, and refuses the option when constructed directly.
+ */
+export const runsOnRustEngine = (name: ExchangeName, options: Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets'>) =>
+  options.engine === 'rust' && isRustVenue(name) && !(name === 'hyperliquid' && options.enableSpotMarkets);
+
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
@@ -591,7 +599,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error('Rust Hyperliquid currently supports perpetual markets only');
+      throw new Error(
+        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
+      );
     }
     if (
       ![
