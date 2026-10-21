@@ -118,6 +118,11 @@ impl safe_cex_venues::Visit for Boxed {
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    AccountAuth {
+        credential: safe_cex_engine::CredentialSlot,
+        scope: safe_cex_engine::AccountReadScope,
+        outcome: safe_cex_engine::AuthOutcome,
+    },
     Deactivate,
     StartupFailed {
         detail: &'a safe_cex_engine::VenueError,
@@ -289,6 +294,15 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::AccountAuth {
+                credential,
+                scope,
+                outcome,
+            }) => ActionOut::AccountAuth {
+                credential: *credential,
+                scope: *scope,
+                outcome: *outcome,
+            },
             Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::CommandError { command, message }) => ActionOut::CommandError {
                 command: *command,
@@ -971,6 +985,31 @@ mod tests {
             };
             assert_eq!(engine.inner.capabilities().options, options, "{venue}");
         }
+    }
+
+    #[test]
+    fn account_auth_serializes_scoped_credential_evidence_before_following_actions() {
+        use safe_cex_engine::{AccountReadScope, Action, AuthOutcome, CredentialSlot, Notice};
+        let encoded = super::encode(&[
+            Action::Notice(Notice::AccountAuth {
+                credential: CredentialSlot::Secondary,
+                scope: AccountReadScope::Orders,
+                outcome: AuthOutcome::Rejected,
+            }),
+            Action::Notice(Notice::AccountAuth {
+                credential: CredentialSlot::Primary,
+                scope: AccountReadScope::Balance,
+                outcome: AuthOutcome::Accepted,
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 7,
+                result: "[]".into(),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"},{"op":"accountAuth","credential":"primary","scope":"balance","outcome":"accepted"},{"op":"done","command":7,"result":"[]"}]"#
+        );
     }
 
     #[test]

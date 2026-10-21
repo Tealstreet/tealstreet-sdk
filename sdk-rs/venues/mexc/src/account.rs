@@ -150,14 +150,15 @@ impl MexcFutures {
         } else {
             format!("{}{path}", crate::REST)
         };
-        if streamed {
+        let scope = auth_scope(&pending);
+        let id = if streamed {
             cx.request_streamed(
                 method,
                 url,
                 headers,
                 ArrayAt::EnvelopeField("data"),
                 pending,
-            );
+            )
         } else {
             cx.request(
                 method,
@@ -169,6 +170,17 @@ impl MexcFutures {
                     Some(payload)
                 },
                 pending,
+            )
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
             );
         }
     }
@@ -1574,6 +1586,73 @@ pub fn side(n: f64) -> OrderSide {
         OrderSide::Sell
     } else {
         OrderSide::Buy
+    }
+}
+
+fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match pending {
+        Pending::Account(Request::Mode) => Settings,
+        Pending::Account(Request::Snapshot(s)) => match s.scope {
+            Scope::Assets => Balance,
+            Scope::Positions => Positions,
+            Scope::Regular | Scope::Plan | Scope::Stop => Orders,
+        },
+        _ => return None,
+    })
+}
+impl MexcFutures {
+    /// One order endpoint's rejection holds back its siblings' acceptance.
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let outcome = self.account_auth_evidence(pending, response);
+        match pending {
+            Pending::Account(Request::Snapshot(s)) => match s.scope {
+                Scope::Regular => self.orders_auth.report(0, outcome),
+                Scope::Plan => self.orders_auth.report(1, outcome),
+                Scope::Stop => self.orders_auth.report(2, outcome),
+                Scope::Assets | Scope::Positions => outcome,
+            },
+            _ => outcome,
+        }
+    }
+    fn account_auth_evidence(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        auth_scope(pending)?;
+        let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
+        if e.success != Some(true)
+            && matches!(
+                e.code,
+                401.0 | 402.0 | 406.0 | 602.0 | 701.0 | 702.0 | 703.0 | 704.0
+            )
+        {
+            return Some(Rejected);
+        }
+        if response.status != 200 || e.success != Some(true) || e.code != 0.0 {
+            return None;
+        }
+        let valid = match pending {
+            Pending::Account(Request::Mode) => e
+                .data
+                .is_some_and(|d| matches!(serde_json::from_str::<u8>(d.get()), Ok(1 | 2))),
+            // A row the snapshot skipped is malformed data, which never clears a streak.
+            Pending::Account(Request::Snapshot(s)) => {
+                !s.bad
+                    && s.assets.rejected() == 0
+                    && s.positions.rejected() == 0
+                    && s.orders.rejected() == 0
+                    && e.data.is_some()
+            }
+            _ => false,
+        };
+        valid.then_some(Accepted)
     }
 }
 

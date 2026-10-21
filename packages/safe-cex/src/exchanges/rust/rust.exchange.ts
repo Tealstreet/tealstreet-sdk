@@ -1,5 +1,6 @@
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
+  AccountAuthResult,
   CommandProgress,
   EngineCapabilities,
   EngineConstruction,
@@ -216,6 +217,7 @@ const LIGHTER_TIER_SYNC_MS = 15_000;
 /** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
 const BALANCE_INFO_SYNC_MS = 2_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+// ApeX and KuCoin Spot retain their existing getAccount command aliases below.
 const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
@@ -451,6 +453,8 @@ export class RustEngineExchange extends BaseExchange {
   private stopPollingConfig?: () => void;
   private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
   private syncingAccountState = false;
+  private warnIgnoredCoinbaseReadOptions = false;
+  private readonly accountAuthStreaks = new Uint8Array(10);
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
   /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
   changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
@@ -557,10 +561,27 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    const coinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName)
+      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
+      : [];
+    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
+    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
+    if (coinbaseReadOptions.some((value) => value !== undefined)) {
+      // The native JWT signer uses primary credentials; its egress must use the same account policy.
+      const {
+        secondary_key: _readKey,
+        secondary_secret: _readSecret,
+        secondary_passphrase: _readPassphrase,
+        secondaryProxyUrl: _readProxy,
+        ...effectiveOptions
+      } = options;
+      options = effectiveOptions;
+    }
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
+    this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
     // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
     const socket = (channel: RustSocketHandle['channel']) =>
@@ -633,8 +654,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override recordAuthFailure(): void {
-    super.recordAuthFailure();
-    this.updatePollingPolicy();
+    this.receiveAccountAuth({ credential: 'primary', scope: 'account', outcome: 'rejected' });
   }
 
   private authFailureNoted = false;
@@ -649,9 +669,17 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override recordAuthSuccess(): void {
-    super.recordAuthSuccess();
-    this.updatePollingPolicy();
+    this.receiveAccountAuth({ credential: 'primary', scope: 'account', outcome: 'accepted' });
   }
+
+  private receiveAccountAuth = ({ credential, scope, outcome }: AccountAuthResult): void => {
+    if (this.isDisposed || this.engineFailure) return;
+    const index = (credential === 'secondary' ? 5 : 0) + ['account', 'balance', 'orders', 'positions', 'settings'].indexOf(scope);
+    // Reuse Base's cap for each context, then expose their maximum to its policy.
+    this.accountAuthStreaks[index] = this.setAuthFailureStreak(outcome === 'accepted' ? 0 : this.accountAuthStreaks[index] + 1);
+    this.setAuthFailureStreak(Math.max(...this.accountAuthStreaks));
+    this.updatePollingPolicy();
+  };
 
   private syncPollingPolicy = (): Promise<void> | undefined => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
@@ -696,6 +724,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
+    if (this.warnIgnoredCoinbaseReadOptions) {
+      this.warnIgnoredCoinbaseReadOptions = false;
+      this.log('Saved read credentials and their proxy are ignored; Coinbase private reads use primary credentials.', LogSeverity.Warning);
+    }
     if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
         'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
@@ -837,6 +869,7 @@ export class RustEngineExchange extends BaseExchange {
         onSocketChange: this.syncSocketHealthToStore,
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
+        onAccountAuth: this.receiveAccountAuth,
         onDeactivate: () => {
           this.noteAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
@@ -1632,6 +1665,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Identity reads leave failure visibility to their caller. */
   getAccount = async (): Promise<ExchangeAccount> => {
+    this.assertEngineAlive();
     await this.ensureHost();
     const lookup = this.capabilityRecord?.account;
     if (lookup === 'afterLoad') await this.start();
