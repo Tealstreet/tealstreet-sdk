@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, Response, SocketId, TimerId,
 };
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
@@ -26,6 +26,8 @@ struct Session {
     orders: Option<String>,
     breakdown: Option<String>,
     logs: Vec<String>,
+    /// Logs at `LogLevel::Error`, also present in `logs`.
+    errors: Vec<String>,
     sends: Vec<(SocketId, String)>,
     // Private sockets only; the unopened public feed has its own supervisor.
     closes: Vec<SocketId>,
@@ -55,6 +57,7 @@ impl Session {
             orders: None,
             breakdown: None,
             logs: vec![],
+            errors: vec![],
             sends: vec![],
             closes: vec![],
             privates: vec![],
@@ -87,8 +90,11 @@ impl Session {
                     self.private = Some(socket);
                     self.privates.push(socket)
                 }
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
-                    self.logs.push(message.to_string())
+                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
+                    if level == LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
                 }
                 Action::WsSend { socket, text } => self.sends.push((socket, text)),
                 Action::WsClose { socket } if self.privates.contains(&socket) => {
@@ -1485,4 +1491,107 @@ fn one_invalid_spot_holding_keeps_its_stored_copy_while_valid_peers_commit() {
 
     s.breakdown = breakdown(&[holding("BTC", "2", "1")]);
     s.poll_until(|s| total(s, "ETH").is_none());
+}
+
+fn intx_position(symbol: &str, size: &str) -> String {
+    format!(
+        r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_LONG","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
+    )
+}
+fn intx_positions(rows: &[String]) -> Option<String> {
+    Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")))
+}
+const SYMBOLLESS_POSITION: &str = r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#;
+impl Session {
+    /// Answers every read, positions last in each batch, until `done` holds.
+    fn poll_positions_last_until(&mut self, done: impl Fn(&Self) -> bool) {
+        for _ in 0..80 {
+            let (positions, mut requests): (Vec<_>, Vec<_>) = self
+                .collect()
+                .into_iter()
+                .partition(|r| r.url.contains("/intx/positions/"));
+            requests.extend(positions);
+            if requests.is_empty() {
+                if done(self) {
+                    return;
+                }
+                self.fire();
+            }
+            for r in requests {
+                self.answer(r);
+                if done(self) {
+                    return;
+                }
+            }
+        }
+        panic!("condition never held");
+    }
+}
+
+#[test]
+fn startup_position_row_without_a_symbol_is_an_error_logged_once_until_a_clean_snapshot() {
+    let mut s = Session::new("INTX", false);
+    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    let mut s = s.ready();
+    let message = "Coinbase skipped unmappable position without a symbol";
+    assert_eq!(s.errors, [message]);
+    let reads = |s: &Session| {
+        s.urls
+            .iter()
+            .filter(|u| u.contains("/intx/positions/"))
+            .count()
+    };
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 1);
+
+    s.positions = intx_positions(&[]);
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 2);
+    // The flat copies it now keeps make the recurrence a warning.
+    assert_eq!(s.errors.len(), 1);
+}
+
+#[test]
+fn intx_upnl_sums_committed_positions_including_retained_copies_across_a_balance_poll() {
+    let mut s = Session::new("INTX", false);
+    s.products = Some(INTX.replace(
+        "}]}",
+        &format!(
+            "}},{}]}}",
+            INTX.trim_start_matches(r#"{"products":["#)
+                .trim_end_matches("]}")
+                .replace("BTC", "ETH")
+        ),
+    ));
+    s.positions = intx_positions(&[
+        intx_position("BTC-PERP-INTX", "2"),
+        intx_position("ETH-PERP-INTX", "1"),
+    ]);
+    let mut s = s.ready();
+    assert_eq!(s.e.store().balance().upnl, 30.0);
+
+    // BTC now 3 (UPnL 30); the symbol-less row keeps ETH's stored copy (UPnL 10).
+    s.positions = intx_positions(&[
+        intx_position("BTC-PERP-INTX", "3"),
+        SYMBOLLESS_POSITION.into(),
+    ]);
+    s.poll_positions_last_until(|s| {
+        s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0
+    });
+    assert_eq!(s.e.store().balance().upnl, 40.0);
+
+    let reads = |s: &Session| {
+        s.urls
+            .iter()
+            .filter(|u| u.contains("/intx/portfolio/"))
+            .count()
+    };
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen);
+    assert_eq!(s.e.store().balance().upnl, 40.0);
 }

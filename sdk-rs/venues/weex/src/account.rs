@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const TERMINAL_LIMIT: usize = 20_000;
 const RECONCILIATION_DEADLINE_MS: f64 = 20_000.0;
 const PRIVATE_WS: &str = "wss://ws-contract.weex.com/v3/ws/private";
+const SKIP_LOG_LIMIT: usize = 4_096;
 #[derive(Clone, Copy)]
 pub enum Kind {
     Balance,
@@ -53,6 +54,24 @@ impl Skipped {
     fn extend(&mut self, other: Skipped) {
         self.ids.extend(other.ids);
         self.unidentified |= other.unidentified;
+    }
+    fn is_empty(&self) -> bool {
+        !self.unidentified && self.ids.is_empty()
+    }
+}
+/// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped ids.
+fn rearm_skips<'a>(
+    logged: &mut HashSet<String>,
+    prefix: &str,
+    skipped: &Skipped,
+    mapped: impl Iterator<Item = &'a str>,
+) {
+    if skipped.is_empty() {
+        logged.retain(|key| !key.starts_with(prefix));
+    } else {
+        for id in mapped {
+            logged.remove(&format!("{prefix}{id}"));
+        }
     }
 }
 #[derive(Clone)]
@@ -159,6 +178,8 @@ pub struct State {
     unreconciled_fills: bool,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
+    /// `order:` or `position:` plus the ID (empty if none) of skipped rows already logged.
+    skip_logged: HashSet<String>,
 }
 impl State {
     pub fn new() -> Self {
@@ -502,26 +523,21 @@ impl WeexFutures {
             return;
         }
         if request.skipped_rows > 0 {
-            let kind = match request.kind {
-                Kind::Normal => "order",
-                Kind::Algo => "algo order",
-                Kind::Positions => "position",
-                Kind::Balance => "balance",
-                _ => "symbol configuration",
-            };
-            cx.log(
-                LogLevel::Warning,
-                format!(
-                    "WEEX skipped {} malformed {kind} row(s){}{}",
-                    request.skipped_rows,
-                    if request.skipped.ids.is_empty() {
-                        ""
+            match request.kind {
+                Kind::Normal | Kind::Algo | Kind::Positions => self.log_skipped_rows(cx, &request),
+                Kind::Balance | Kind::Config | Kind::Metadata => {
+                    let kind = if matches!(request.kind, Kind::Balance) {
+                        "balance"
                     } else {
-                        ": "
-                    },
-                    request.skipped.ids.join(", ")
-                ),
-            );
+                        "symbol configuration"
+                    };
+                    let count = request.skipped_rows;
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("WEEX skipped {count} malformed {kind} row(s)"),
+                    );
+                }
+            }
         }
         match request.kind {
             // The next cycle corrects a read that raced an account event; fencing it
@@ -576,6 +592,12 @@ impl WeexFutures {
                         .filter_map(|order| self.account.snapshot_order(order))
                         .collect();
                     let skipped = std::mem::take(&mut self.account.order_skipped);
+                    rearm_skips(
+                        &mut self.account.skip_logged,
+                        "order:",
+                        &skipped,
+                        orders.iter().filter_map(|o| o.id.split("__").next()),
+                    );
                     orders.extend(
                         cx.store
                             .orders()
@@ -600,6 +622,59 @@ impl WeexFutures {
             self.account.settings_failures = 0;
         }
         self.account_finished(cx, false);
+    }
+    /// Logs each skipped order or position row once until it maps again. A position, or a
+    /// row without an ID, whose skip keeps no stored copy is an error: it reads as absent.
+    fn log_skipped_rows(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let positions = matches!(request.kind, Kind::Positions);
+        let (prefix, kind) = match request.kind {
+            Kind::Positions => ("position:", "position"),
+            Kind::Algo => ("order:", "algo order"),
+            _ => ("order:", "order"),
+        };
+        let stored = |id: Option<&str>| {
+            if positions {
+                id.map_or(!cx.store.positions().is_empty(), |id| {
+                    cx.store.position(id).is_some()
+                })
+            } else {
+                cx.store.orders().iter().any(|o| {
+                    !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                        && id.is_none_or(|id| o.id.split("__").next() == Some(id))
+                })
+            }
+        };
+        let mut rows: Vec<_> = request
+            .skipped
+            .ids
+            .iter()
+            .map(|id| {
+                let error = positions && !stored(Some(id));
+                (
+                    id.as_str(),
+                    error,
+                    format!("WEEX skipped malformed {kind} row {id}"),
+                )
+            })
+            .collect();
+        if request.skipped.unidentified {
+            let message = format!("WEEX skipped malformed {kind} row without an ID");
+            rows.push(("", !stored(None), message));
+        }
+        for (id, error, message) in rows {
+            let logged = &mut self.account.skip_logged;
+            if logged.len() >= SKIP_LOG_LIMIT {
+                logged.clear();
+            }
+            if logged.insert(format!("{prefix}{id}")) {
+                let level = if error {
+                    LogLevel::Error
+                } else {
+                    LogLevel::Warning
+                };
+                cx.log(level, message);
+            }
+        }
     }
     pub(crate) fn account_failed(
         &mut self,
@@ -659,6 +734,12 @@ impl WeexFutures {
                         }
                     })
                     .collect();
+                rearm_skips(
+                    &mut self.account.skip_logged,
+                    "position:",
+                    &skipped,
+                    positions.iter().map(|p| p.id.as_str()),
+                );
                 positions.extend(
                     cx.store
                         .positions()

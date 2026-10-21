@@ -1092,7 +1092,7 @@ fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
     }
     let (warnings, actions) = warnings_then_next_cycle(&mut e);
     assert!(
-        warnings.contains(&"WEEX skipped 1 malformed order row(s)".to_owned()),
+        warnings.contains(&"WEEX skipped malformed order row without an ID".to_owned()),
         "{warnings:?}"
     );
     assert!(!warnings.iter().any(|w| w.contains("12345")));
@@ -1127,7 +1127,7 @@ fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit
     assert_eq!(e.store().position("BTCUSDT:short"), Some(&short));
     let (warnings, actions) = warnings_then_next_cycle(&mut e);
     assert!(
-        warnings.contains(&"WEEX skipped 1 malformed position row(s)".to_owned()),
+        warnings.contains(&"WEEX skipped malformed position row without an ID".to_owned()),
         "{warnings:?}"
     );
 
@@ -1161,5 +1161,59 @@ fn protective_algo_row_typed_market_keeps_its_working_type() {
     assert_eq!(
         order.trigger_type,
         Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
+}
+/// Takes this cycle's actions, then starts the next account cycle.
+fn drain_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<Action>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (drained, e.drain_actions().collect())
+}
+#[test]
+fn startup_position_row_without_identity_is_an_error_logged_once_until_a_clean_snapshot() {
+    let message = "WEEX skipped malformed position row without an ID";
+    let idless = r#"[{"side":"LONG","size":"7"}]"#;
+    let read = |e: &mut Engine<WeexFutures>, actions: &[Action], rows: &str| {
+        response(e, request(actions, "allPosition"), 200, rows);
+        complete_except_positions(e, actions);
+        let (drained, next) = drain_then_next_cycle(e);
+        let errors = logs(&drained, LogLevel::Error);
+        let warnings = logs(&drained, LogLevel::Warning);
+        (
+            errors,
+            warnings.iter().filter(|l| *l == message).count(),
+            next,
+        )
+    };
+    let (mut e, actions) = started(false);
+    let (errors, _, actions) = read(&mut e, &actions, idless);
+    assert!(e.store().loaded().positions);
+    assert_eq!(errors, [message]);
+    // The same skip on the next cycle is not reported again.
+    let (errors, warnings, actions) = read(&mut e, &actions, idless);
+    assert!(errors.is_empty());
+    assert_eq!(warnings, 0);
+
+    let (_, _, actions) = read(&mut e, &actions, "[]");
+    let (errors, _, _) = read(&mut e, &actions, idless);
+    assert_eq!(errors, [message]);
+}
+#[test]
+fn startup_order_row_without_identity_is_an_error_with_no_stored_orders() {
+    let (mut e, actions) = started(false);
+    let idless = r#"[{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#;
+    complete(&mut e, &actions, idless, "[]");
+    assert!(e.store().loaded().orders);
+    let (drained, _) = drain_then_next_cycle(&mut e);
+    assert_eq!(
+        logs(&drained, LogLevel::Error),
+        ["WEEX skipped malformed order row without an ID"]
     );
 }

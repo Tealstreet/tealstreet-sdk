@@ -38,6 +38,7 @@ const SPOT_EXECUTION_WINDOW: usize = 16_384;
 /// the wallet's USD total after this long; the asset is then valued at 0.
 const VALUATION_WAIT_MS: f64 = 30_000.0;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 pub enum Request {
     /// Collected while streaming: max leverage by symbol.
@@ -85,6 +86,8 @@ struct OrdersJoin {
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
     skipped: SnapshotCoverage<String>,
+    /// Symbols of the rows rejected under each id; "" when the row's symbol is unreadable.
+    rejected_symbols: HashMap<String, Vec<String>>,
     failed: bool,
 }
 
@@ -170,6 +173,26 @@ pub struct AccountState {
     /// Funded assets valued at 0 for want of a price; each is warned about once.
     zero_valued_assets: HashSet<String>,
     native_asset_marks: HashMap<String, f64>,
+    /// Position ids (or "" for an unidentified row) whose skipped row was already logged.
+    position_skip_logged: HashSet<String>,
+    /// Order ids whose skipped row was already logged.
+    order_skip_logged: HashSet<String>,
+}
+
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.log(level, message);
+    }
 }
 
 pub fn order_type(text: &str) -> Option<OrderType> {
@@ -418,6 +441,7 @@ impl BinanceFutures {
             regular: None,
             algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
             skipped: SnapshotCoverage::default(),
+            rejected_symbols: HashMap::new(),
             failed: false,
         });
         self.signed(
@@ -650,17 +674,12 @@ impl BinanceFutures {
                     let key = serde_json::from_str::<Identity>(item)
                         .ok()
                         .and_then(|row| rejected_position_key(&row.symbol, &row.position_side));
-                    match &key {
-                        Some(id) => _cx.log(
-                            LogLevel::Warning,
-                            format!("Binance skipped malformed positionRisk row {id}"),
-                        ),
-                        None => _cx.log(
-                            LogLevel::Warning,
-                            "Binance skipped malformed positionRisk row without an identity",
-                        ),
-                    }
-                    skipped.reject(key);
+                    let message = match &key {
+                        Some(id) => format!("Binance skipped malformed positionRisk row {id}"),
+                        None => "Binance skipped malformed positionRisk row without an identity"
+                            .to_owned(),
+                    };
+                    self.reject_position_row(_cx, *generation, skipped, key, message);
                     return;
                 };
                 if self.is_inverse()
@@ -709,14 +728,11 @@ impl BinanceFutures {
                 // An unreadable size is not flat: keep this leg's last known state.
                 let Some(signed) = num::parse_decimal(&p.position_amt) else {
                     let key = rejected_position_key(&p.symbol, &p.position_side);
-                    _cx.log(
-                        LogLevel::Warning,
-                        format!(
-                            "Binance positionRisk row {} has an unreadable positionAmt",
-                            p.symbol
-                        ),
+                    let message = format!(
+                        "Binance positionRisk row {} has an unreadable positionAmt",
+                        p.symbol
                     );
-                    skipped.reject(key);
+                    self.reject_position_row(_cx, *generation, skipped, key, message);
                     return;
                 };
                 if signed == 0.0 && !self.is_inverse() {
@@ -960,7 +976,7 @@ impl BinanceFutures {
                     };
                     let Some(kind) = order_type(&o.kind) else {
                         let message = format!("Binance open order {id} has an unsupported type");
-                        rejected.push((id, message));
+                        rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
                     if client_keyed
@@ -974,7 +990,7 @@ impl BinanceFutures {
                             || num::parse(&o.executed_qty) > num::parse(&o.orig_qty))
                     {
                         let message = format!("Binance open order {id} has invalid economics");
-                        rejected.push((id, message));
+                        rejected.push((id, o.symbol.to_string(), message));
                         return;
                     }
                     let price = num::parse(&o.price);
@@ -1043,7 +1059,7 @@ impl BinanceFutures {
                     let Some(kind) = order_type(&o.strategy_type) else {
                         let message =
                             format!("Binance conditional order {id} has an unsupported type");
-                        rejected.push((id.to_owned(), message));
+                        rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     };
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
@@ -1053,7 +1069,7 @@ impl BinanceFutures {
                     {
                         let message =
                             format!("Binance conditional order {id} has invalid economics");
-                        rejected.push((id.to_owned(), message));
+                        rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     }
                     let price = opt(&o.price);
@@ -1113,7 +1129,7 @@ impl BinanceFutures {
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
                         let message = format!("Binance open order {id} has an unsupported type");
-                        rejected.push((id, message));
+                        rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
                     let amount = opt(&o.quantity);
@@ -1195,6 +1211,14 @@ impl BinanceFutures {
                         p
                     })
                     .collect();
+                // A clean snapshot re-arms every skip log; otherwise only the legs it mapped.
+                if join.skipped.rejected() == 0 {
+                    self.account.position_skip_logged.clear();
+                } else {
+                    for p in &positions {
+                        self.account.position_skip_logged.remove(&p.id);
+                    }
+                }
                 for current in cx.store.positions() {
                     if !join.skipped.allows_absence(&current.id)
                         && !positions.iter().any(|p| p.id == current.id)
@@ -1333,6 +1357,14 @@ impl BinanceFutures {
         self.account.orders_stale = false;
         let mut orders = join.regular.unwrap_or_default();
         orders.extend(join.algo.unwrap_or_default());
+        // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
+        if join.skipped.rejected() == 0 {
+            self.account.order_skip_logged.clear();
+        } else {
+            for order in &orders {
+                self.account.order_skip_logged.remove(&order.id);
+            }
+        }
         for (symbol, client, native, filled) in join.native_orders {
             if self.is_spot() {
                 // Only the first accepted REST observation establishes history.
@@ -1366,9 +1398,19 @@ impl BinanceFutures {
                         .get(&(current.symbol.clone(), native))
                         .is_some_and(|(_, terminal)| *terminal)
                 });
+            // A rejected row on another symbol is a different order reusing the id.
+            let same_order = join
+                .rejected_symbols
+                .get(&current.id)
+                .is_none_or(|symbols| {
+                    symbols
+                        .iter()
+                        .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
+                });
             if current.status == OrderStatus::Open
                 && !terminal
                 && !join.skipped.allows_absence(&current.id)
+                && same_order
                 && !orders.iter().any(|o| o.id == current.id)
             {
                 orders.push(current.clone());
@@ -1382,7 +1424,7 @@ impl BinanceFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
-        rows: Vec<(String, String)>,
+        rows: Vec<(String, String, String)>,
     ) {
         let Some(join) = self
             .account
@@ -1392,10 +1434,56 @@ impl BinanceFutures {
         else {
             return;
         };
-        for (id, message) in rows {
-            cx.log(LogLevel::Warning, message);
+        for (id, symbol, message) in rows {
+            log_skip(
+                cx,
+                &mut self.account.order_skip_logged,
+                id.clone(),
+                LogLevel::Warning,
+                message,
+            );
+            join.rejected_symbols
+                .entry(id.clone())
+                .or_default()
+                .push(symbol);
             join.skipped.reject(Some(id));
         }
+    }
+
+    /// Records an unmappable positionRisk row. With no stored copy to keep, it holds the
+    /// snapshot while discovery is unsettled and is otherwise reported as an error.
+    fn reject_position_row(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        generation: u32,
+        skipped: &mut SnapshotCoverage<String>,
+        key: Option<String>,
+        message: String,
+    ) {
+        let stored = match &key {
+            Some(id) => cx.store.position(id).is_some(),
+            None => !cx.store.positions().is_empty(),
+        };
+        if !stored && !self.discovery_settled() {
+            if let Some(join) = &mut self.account.positions
+                && join.generation == generation
+            {
+                join.failed = true;
+            }
+            cx.log(
+                LogLevel::Warning,
+                "Binance positionRisk row unmappable during discovery; preserving previous snapshot",
+            );
+            return;
+        }
+        let level = if stored {
+            LogLevel::Warning
+        } else {
+            LogLevel::Error
+        };
+        let logged = &mut self.account.position_skip_logged;
+        log_skip(cx, logged, key.clone().unwrap_or_default(), level, message);
+        skipped.reject(key);
     }
 
     /// USD totals over every asset: stablecoins at par, others priced by their

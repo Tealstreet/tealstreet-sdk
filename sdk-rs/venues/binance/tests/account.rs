@@ -1077,6 +1077,98 @@ fn a_malformed_position_row_keeps_its_stored_leg_while_valid_peers_commit() {
     assert_eq!(h.engine.store().positions().len(), 1);
 }
 
+fn risk_row(side: &str, amount: &str) -> String {
+    format!(
+        r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+    )
+}
+
+#[test]
+fn a_skipped_position_row_with_no_stored_leg_is_an_error_logged_once_until_it_maps() {
+    let mut h = ready();
+    let malformed = risk_row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
+    let message = "Binance skipped malformed positionRisk row BTCUSDT:short";
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.errors, [message]);
+    // The same skip on the next poll is not reported again.
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert_eq!(h.errors.len(), 1);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 1);
+
+    // Once the leg maps, a recurrence is reported again, as a warning over its stored copy.
+    let both = format!(
+        "[{},{}]",
+        risk_row("LONG", "0.010"),
+        risk_row("SHORT", "-0.020")
+    );
+    advance_to_position_read(&mut h, &both);
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{malformed}]", risk_row("LONG", "0.010")),
+    );
+    assert_eq!(h.errors.len(), 1);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 2);
+}
+
+#[test]
+fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_partial() {
+    let mut h = Harness::started(credentials());
+    let partial =
+        support::EXCHANGE_INFO.replacen(r#""symbols":["#, r#""symbols":[{"symbol":1},"#, 1);
+    h.respond("/fapi/v1/exchangeInfo", 200, &partial);
+    h.respond("/fapi/v1/leverageBracket", 200, "[]");
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    let malformed = risk_row("BOTH", "0.050").replace(r#""entryPrice":"95000.0","#, "");
+    h.respond("/fapi/v3/positionRisk", 200, &format!("[{malformed}]"));
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+    assert!(!h.engine.store().loaded().positions);
+    assert!(h.errors.is_empty());
+
+    // Once discovery settles, the row is skipped and, with nothing stored, reported.
+    h.advance(1_000.0);
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    advance_to_position_read(&mut h, &format!("[{malformed}]"));
+    assert!(h.engine.store().loaded().positions);
+    assert_eq!(
+        h.errors,
+        ["Binance skipped malformed positionRisk row BTCUSDT"]
+    );
+}
+
+#[test]
+fn a_repeated_order_skip_logs_once_until_the_order_maps_again() {
+    let mut h = ready();
+    let order = |kind: &str| {
+        format!(
+            r#"[{{"orderId":2,"clientOrderId":"c2","executedQty":"0","origQty":"0.004","price":"89000","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}]"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &str| {
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
+        h.advance(10_000.0);
+        h.respond("/fapi/v1/openOrders", 200, orders);
+        h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    };
+    let message = "Binance open order 2 has an unsupported type";
+    let count = |h: &Harness| h.logs.iter().filter(|m| *m == message).count();
+    refresh(&mut h, &order("FUTURE_KIND"));
+    refresh(&mut h, &order("FUTURE_KIND"));
+    assert_eq!(count(&h), 1);
+    refresh(&mut h, &order("LIMIT"));
+    refresh(&mut h, &order("FUTURE_KIND"));
+    assert_eq!(count(&h), 2);
+}
+
 #[test]
 fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapshot_omits_it() {
     let mut h = ready();
