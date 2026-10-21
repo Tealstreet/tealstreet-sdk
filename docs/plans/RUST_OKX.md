@@ -229,3 +229,12 @@ integration cross-reviews PASS; findings and resolutions are posted on PR1302.
 - Initial full repository verification PASS(27 tasks); targeted fixes and merge
   have their own passing regressions. PR must now pass the updated CI before
   merge; no requested implementation work remains beyond landing/CI handling.
+# WebSocket default-port migration plan (2026-10-21)
+
+OKX's [September 30 changelog](https://www.okx.com/docs-v5/log_en/)
+retires public-internet WebSocket port 8443 on October 31, 2026. Remove the
+explicit port in Rust and TS global/EEA live/demo URLs and routing metadata,
+preserving every host/path. Update the URL spec and transport expectations;
+verify focused OKX/Binance and TS transport checks, review, then merge on green
+CI after the overseer's hold lifts.
+
