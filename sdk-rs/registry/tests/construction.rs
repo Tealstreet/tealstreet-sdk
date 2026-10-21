@@ -519,10 +519,11 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
-            assert!(
-                error
-                    .message
-                    .starts_with(&format!("Rust {venue} does not support payloadSigner"))
+            assert_eq!(
+                error.message,
+                format!(
+                    "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+                )
             );
         }
     }
