@@ -54,4 +54,12 @@ c58afe1514d38ddbd90e45261f078721a9db03c6:sdk-rs/harness/kucoinspot.test.mjs:gene
 070fd851dd0377bb63c4c4235c3bb58db0fd0307:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1693
 b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1757
 27a5979867c0f2d0ae002abe803eeca5b4c9977a:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1919
+
+# Orderly construction test: the public Bitcoin wiki WIF example, used only as a
+# wrong-length base58 key (never a credential); replaced by a synthetic value since.
+# Exact historical fingerprint only; future changes stay scanned.
+6c0b435132267af4c4b95b3249845dffa3c78e8d:sdk-rs/registry/tests/construction.rs:generic-api-key:193
+
+# Restored master coinbase.utils.ts (B2 hosted signing): PEM header strings in a
+# doc comment and regex, not a key. Exact fingerprint only.
 a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts:private-key:159

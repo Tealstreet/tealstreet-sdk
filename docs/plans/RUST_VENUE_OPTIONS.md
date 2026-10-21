@@ -19,8 +19,9 @@ lines of per-venue credential validation and builds a per-venue options blob.
 
 ## PRs 2-4: TS validation into Rust, about five venues each
 
-Each rule in `createHost` moves into its venue's `from_options` with the TS
-message unchanged and a Rust regression test; the TS check and its imports go.
+Each rule in `createHost` moves into the registry (a rule function per venue,
+run before that venue's construction) with the TS message unchanged and a Rust
+regression test; the TS check and its imports go.
 Batches: Polymarket, Orderly family, BreakoutProp, Paradex, AsterDEX; then the
 generic "private accounts require key and secret" rule; then the options blob
 becomes uniform (no venue-name spreads), with venue-specific derivations

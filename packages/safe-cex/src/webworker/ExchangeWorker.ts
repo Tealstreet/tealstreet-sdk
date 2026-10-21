@@ -8,7 +8,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
-import { exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, exchangeErrorTags } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { hostedSigningVenues, isKeylessRemoteSigned } from '../exchanges/hostedSigningVenues';
 import { exchangeRegistry } from '../exchanges/registry';
@@ -245,6 +245,7 @@ export class ExchangeWorker {
           {
             sendToSentry: effectiveSendToSentry,
             suppressConsoleLog,
+            classified: classifiedError(error),
             sentryData: {
               error: serializableError,
               tags: {
