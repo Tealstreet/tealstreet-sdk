@@ -552,15 +552,30 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   ~~REST candles with `from`+`limit` return the oldest N instead of newest, no
   1500 cap (`lib.rs:1439`)~~; ~~COIN-M strict batch discards placed ids on a partial
   reject (`trading.rs:397,700`)~~; ~~PM `close: true` with an amount closes the whole
-  position (`trading.rs:1087`)~~; COIN-M unpriced coin excluded from totals
-  (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
+  position (`trading.rs:1087`)~~; ~~COIN-M unpriced coin excluded from totals
+  (TS counts 1:1 — confirm)~~ (deliberate: an unpriced coin waits for a price,
+  then counts $0 with its native amount kept, where TS adds a fabricated $1 per
+  coin; `inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd`); ~~CancelOrders with unknown ids reports success
   without sending (`trading.rs:224`)~~ (explicit errors; see
   [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
   unsupported~~; ~~USD-M journal (`fetchHistoricalPositions`) not wired in the host~~ (folds
   per-symbol fills as TS).
-- Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
-  STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
+- Low: ~~fixed `recvWindow`~~; ~~Binance UI STOP orders amend to stop-market~~
+  (native `STOP`/`TAKE_PROFIT`/`*_LIMIT` stops refuse amend as `unsupported`
+  before any write: re-placing them as `STOP_MARKET` at the old limit price would
+  trigger at a different price).
+- Known risks, kept by decision (overseer, 2026-10-21):
+  - closePosition conflict cancel in batches: `trading.rs` cancels an existing
+    full-position stop for every `PlaceOrders`, batches included, while TS only
+    does so for single `placeOrder` (its batches hit -4130 and keep the old stop).
+    Kept: replacing the stop is what the caller asked for, and parity would change
+    which orders are sent.
+  - PM -2011 plain cancel marks canceled: outside an amendment, a PM -2011 is
+    treated as already gone and silent, where TS shows the error and keeps the
+    row. A cancel on the wrong endpoint or with stale ownership could hide a live
+    order locally until the next snapshot. Kept: changing cancel reconciliation is
+    RISKY without live -2011 evidence; snapshot reconciliation bounds the window.
 - Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
   Native unsupported histories reject; SDK methods expose matching branded Base
   fallbacks. Existing unknown-ID mixed-batch cancellation preflight was reverified.

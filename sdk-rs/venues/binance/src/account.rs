@@ -139,6 +139,8 @@ pub struct AccountState {
     derivative_trade_order: VecDeque<(String, u64, i64)>,
     derivative_fill_watermarks: HashMap<(String, u64), f64>,
     terminal_algo_ids: HashSet<String>,
+    /// Orders whose native type executes at a limit price once triggered.
+    pub(crate) limit_stops: HashSet<String>,
     strategy_client_native: HashMap<(String, String), u64>,
     terminal_strategies: HashSet<(String, u64)>,
     pm_order_owners: HashMap<String, PmOrderOwner>,
@@ -206,6 +208,15 @@ pub fn order_type(text: &str) -> Option<OrderType> {
         "TRAILING_STOP_MARKET" => OrderType::TrailingStopLoss,
         _ => return None,
     })
+}
+
+/// Native stop types that execute at a limit price once triggered; this venue
+/// re-places stops as market-execution orders, so it must not amend these.
+pub fn executes_at_limit(native: &str) -> bool {
+    matches!(
+        native,
+        "STOP" | "TAKE_PROFIT" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT"
+    )
 }
 
 pub fn order_side(text: &str) -> OrderSide {
@@ -991,6 +1002,7 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let id = match (&o.client_order_id, client_keyed) {
@@ -1002,6 +1014,9 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    if executes_at_limit(&o.kind) {
+                        limit_stops.push(id.clone());
+                    }
                     if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
@@ -1050,6 +1065,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.account.limit_stops.extend(limit_stops);
                 if self.is_inverse() {
                     for order in &mut orders {
                         order.extra = Some(OrderExtra {
@@ -1077,6 +1093,7 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_strategies = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let id = o.new_client_strategy_id.as_ref();
                     let Some(kind) = order_type(&o.strategy_type) else {
@@ -1085,6 +1102,9 @@ impl BinanceFutures {
                         rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     };
+                    if executes_at_limit(&o.strategy_type) {
+                        limit_stops.push(id.to_owned());
+                    }
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
                         || [&o.price, &o.orig_qty, &o.stop_price]
                             .iter()
@@ -1130,6 +1150,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.account.limit_stops.extend(limit_stops);
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1148,6 +1169,7 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
@@ -1155,6 +1177,9 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    if executes_at_limit(&o.order_type) {
+                        limit_stops.push(o.algo_id.to_string());
+                    }
                     let amount = opt(&o.quantity);
                     orders.push(Order {
                         id: o.algo_id.to_string(),
@@ -1178,6 +1203,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.account.limit_stops.extend(limit_stops);
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1691,6 +1717,13 @@ impl BinanceFutures {
         };
         let status = o.status.as_ref();
         let kind = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type);
+        if o.ot
+            .as_deref()
+            .or(o.o.as_deref())
+            .is_some_and(executes_at_limit)
+        {
+            self.account.limit_stops.insert(id.clone());
+        }
         if status == "NEW" && kind.is_none() {
             return;
         }
@@ -1946,6 +1979,9 @@ impl BinanceFutures {
                 let Some(kind) = order_type(&o.st) else {
                     return;
                 };
+                if executes_at_limit(&o.st) {
+                    self.account.limit_stops.insert(id.clone());
+                }
                 let price = opt(&o.p);
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
@@ -2002,6 +2038,9 @@ impl BinanceFutures {
                 let Some(kind) = order_type(&o.o) else {
                     return;
                 };
+                if executes_at_limit(&o.o) {
+                    self.account.limit_stops.insert(id.clone());
+                }
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
                     id,
@@ -2783,6 +2822,9 @@ impl BinanceFutures {
         } else {
             event.c.to_string()
         };
+        if executes_at_limit(&event.o) {
+            self.account.limit_stops.insert(id.clone());
+        }
         let key = (event.s.to_string(), native);
         let client_key = (event.s.to_string(), id.clone());
         // A valid stream observation is live even when its lifecycle total
