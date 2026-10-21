@@ -409,7 +409,7 @@ impl BitunixFutures {
             if let Some(s) = self
                 .sockets
                 .iter()
-                .find(|s| matches!(s.feed, Feed::Private) && s.opened)
+                .find(|s| s.active && matches!(s.feed, Feed::Private) && s.opened)
             {
                 self.login(cx, s.id);
             }

@@ -733,3 +733,13 @@ After a confirmed write, a later rejection cannot claim the whole command was
 rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
+
+Rust socket supervision retains one retry state per private/futures/public-shard
+feed. Refusals use shared capped exponential jitter; open alone never resets the
+failure streak. Connection attempts expire after 10 seconds; opened public feeds
+expire after 45 seconds without traffic. Private feeds retain legacy silent-session
+compatibility until their first real pong, then use the same 45-second traffic
+deadline. Pings run every 15 seconds without synthetic traffic. Retired socket
+epochs and queue/login timers cannot mutate a replacement. Futures retirement
+immediately invalidates depth and publishes consumer clearing, retaining interests
+for one replay of the current subscriptions at the replacement open.

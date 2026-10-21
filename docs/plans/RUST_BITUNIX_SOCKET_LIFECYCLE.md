@@ -28,3 +28,16 @@ independent plan/implementation review, CI and separate exact merge guard.
 Fresh actual landing branch; do not carry unmerged public-startup work. Integrate
 that actual merge if it lands before this phase. Private rows/auth/read credentials,
 host clock and forced routing remain separate phases.
+
+Plan audit CLEAR: private supervisor uses finite f64::MAX idle (shared watch
+clamps to five seconds), with a venue-owned 45-second deadline enabled only by
+real pong. Real traffic alone resets failures; no fake received(), supervisor
+reconstruction or ignored timeout. Test late pong, reset epoch gate, retired
+queue/login timers and interests changed during backoff explicitly.
+
+Verification: two root regressions fail original production code (immediate
+reconnect and stale disconnected book); all six lifecycle regressions pass after
+the fix, including every feed/shard, capped/reset retries, private pong timing,
+retired queue/login timers, connection deadlines and current-interest replay.
+374 combined Bitunix/Binance native tests and strict Bitunix Clippy/fmt/bans pass.
+Two independent implementation/adversarial reviews are CLEAR.

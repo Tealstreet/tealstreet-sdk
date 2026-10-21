@@ -93,6 +93,14 @@ fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
             code: 1006,
         },
     );
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
     let socket = e
         .drain_actions()
         .find_map(|a| {
@@ -103,7 +111,7 @@ fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
             }
         })
         .unwrap();
-    e.handle(3.0, Event::WsOpened { socket });
+    e.handle(at, Event::WsOpened { socket });
     assert!(e.book("BTCUSDT").is_none());
     assert!(e.drain_actions().any(
         |a| matches!(a,Action::WsSend {text,..} if text.contains("market_btcusdt_depthop_0.1"))
@@ -278,42 +286,49 @@ fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
 
 #[test]
 fn watchdog_closes_a_silent_connection_and_reconnects() {
-    let (mut e, s) = ready();
-    let actions: Vec<_> = e.drain_actions().collect();
-    // ready consumed connect timers, so isolate a fresh reconnection.
-    drop(actions);
+    let (mut e, original) = ready();
+    e.drain_actions().for_each(drop);
     e.handle(
         1.0,
         Event::WsClosed {
-            socket: s,
+            socket: original,
             code: 1006,
         },
     );
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::WsOpened { socket });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at + 45_000.0, Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
-    let timer = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(*timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    let socket = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
-                Some(*socket)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    e.handle(50_000.0, Event::TimerFired { timer });
     assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::WsClose {socket:s} if s==socket))
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
     );
 }
 

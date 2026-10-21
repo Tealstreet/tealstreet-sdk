@@ -125,6 +125,20 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         },
     );
     let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let (retry, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(at, Event::TimerFired { timer: retry });
+    let actions: Vec<_> = engine.drain_actions().collect();
     let (replacement, context) = actions
         .iter()
         .find_map(|action| match action {
@@ -138,20 +152,19 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         .unwrap();
     assert_eq!(context.feed, "ticker:300");
     assert!(!context.recover);
-    let watchdog = actions
-        .iter()
-        .find_map(|action| match action {
-            Action::SetTimer { timer, .. } => Some(*timer),
-            _ => None,
-        })
-        .unwrap();
     engine.handle(
-        2.0,
+        at,
         Event::WsOpened {
             socket: replacement,
         },
     );
-    engine.drain_actions().for_each(drop);
+    let watchdog = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
     engine.handle(50_000.0, Event::TimerFired { timer: watchdog });
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(
@@ -159,6 +172,20 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             .iter()
             .any(|action| matches!(action, Action::WsClose { socket } if *socket == replacement))
     );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let (retry, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(at, Event::TimerFired { timer: retry });
+    let actions: Vec<_> = engine.drain_actions().collect();
     let (recovered, context) = actions
         .iter()
         .find_map(|action| match action {
@@ -174,12 +201,26 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
     assert_eq!(context.feed, "ticker:300");
     assert!(context.recover);
     engine.handle(
-        50_001.0,
+        at + 1.0,
         Event::WsClosed {
             socket: recovered,
             code: 1006,
         },
     );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let (retry, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(at, Event::TimerFired { timer: retry });
     assert!(engine.drain_actions().any(|action| matches!(action,
         Action::WsConnect { context: Some(context), .. } if context.feed == "ticker:300" && !context.recover)));
 }

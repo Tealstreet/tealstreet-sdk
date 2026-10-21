@@ -7,6 +7,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, Cx, Method, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
@@ -61,10 +62,12 @@ enum Feed {
 struct Socket {
     id: SocketId,
     feed: Feed,
+    active: bool,
     opened: bool,
+    recover: bool,
+    supervisor: Supervisor,
     received: f64,
     pong_observed: bool,
-    watchdog: Option<TimerId>,
     queue_timer: Option<TimerId>,
     queue: VecDeque<String>,
 }
@@ -131,12 +134,8 @@ impl BitunixFutures {
             vec![]
         }
     }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
-        self.connect_recovering(cx, feed, false);
-    }
-    fn connect_recovering(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed, recover: bool) {
-        let (url, channel, identity) = match &feed {
-            // Depth and klines use the futures endpoint, which the host routes as Business.
+    fn socket_spec(feed: &Feed, recover: bool) -> safe_cex_engine::SocketSpec {
+        let (url, channel, identity) = match feed {
             Feed::Futures => (FUTURES, SocketChannel::Business, "futures".into()),
             Feed::Private => (PRIVATE, SocketChannel::Private, "private".into()),
             Feed::Public { channel, range } => (
@@ -145,33 +144,62 @@ impl BitunixFutures {
                 format!("{channel}:{}", range.start),
             ),
         };
-        let id = cx.connect(
-            safe_cex_engine::SocketSpec::new(url)
-                .channel(channel)
-                .feed(identity, recover),
-        );
+        safe_cex_engine::SocketSpec::new(url)
+            .channel(channel)
+            .feed(identity, recover)
+    }
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
+        let mut supervisor = Supervisor::new(Config {
+            // Legacy private sessions may be silent until their first real pong.
+            // Keep that venue-owned gate without manufacturing received traffic.
+            idle_timeout_ms: if matches!(feed, Feed::Private) {
+                f64::MAX
+            } else {
+                45_000.0
+            },
+            ping_interval_ms: Some(15_000.0),
+            ..Config::default()
+        });
+        supervisor.connecting(cx);
+        let id = cx.connect(Self::socket_spec(&feed, false));
         self.sockets.push(Socket {
             id,
             feed,
+            active: true,
             opened: false,
+            recover: false,
+            supervisor,
             received: cx.now,
             pong_observed: false,
-            watchdog: Some(cx.set_timer(15_000.0)),
             queue_timer: None,
             queue: VecDeque::new(),
         });
     }
-    fn reconnect(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, recover: bool) {
-        if let Some(i) = self.sockets.iter().position(|s| s.id == socket) {
-            let s = self.sockets.remove(i);
-            if let Some(t) = s.watchdog {
-                cx.clear_timer(t);
-            }
-            if let Some(t) = s.queue_timer {
-                cx.clear_timer(t);
-            }
-            self.connect_recovering(cx, s.feed, recover);
+    fn retire(&mut self, cx: &mut Cx<'_, Pending>, index: usize, recover: bool) {
+        let s = &mut self.sockets[index];
+        if !s.active {
+            return;
         }
+        s.active = false;
+        s.opened = false;
+        s.recover = recover;
+        s.queue.clear();
+        if let Some(timer) = s.queue_timer.take() {
+            cx.clear_timer(timer);
+        }
+        if matches!(s.feed, Feed::Private)
+            && let Some(timer) = self.account.login_retry.take()
+        {
+            cx.clear_timer(timer);
+        }
+        if matches!(s.feed, Feed::Futures) {
+            for (symbol, book) in &mut self.books {
+                book.levels.clear();
+                book.initialized = false;
+                cx.book_changed(symbol);
+            }
+        }
+        s.supervisor.retry(cx);
     }
     fn futures_topic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
         let m = cx.store.market(symbol)?;
@@ -185,7 +213,7 @@ impl BitunixFutures {
         if let Some(s) = self
             .sockets
             .iter()
-            .find(|s| s.opened && matches!(s.feed, Feed::Futures))
+            .find(|s| s.active && s.opened && matches!(s.feed, Feed::Futures))
         {
             cx.send(s.id, topic_frame(topic, subscribe));
         }
@@ -326,11 +354,16 @@ impl Venue for BitunixFutures {
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let topics = self.subscriptions(cx);
-        let Some(s) = self.sockets.iter_mut().find(|s| s.id == socket) else {
+        let Some(s) = self
+            .sockets
+            .iter_mut()
+            .find(|s| s.active && !s.opened && s.id == socket)
+        else {
             return;
         };
         s.opened = true;
         s.received = cx.now;
+        s.supervisor.opened(cx);
         match &s.feed {
             Feed::Private => {}
             Feed::Futures => {
@@ -389,10 +422,15 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        let Some(s) = self.sockets.iter_mut().find(|s| s.id == socket) else {
+        let Some(s) = self
+            .sockets
+            .iter_mut()
+            .find(|s| s.active && s.opened && s.id == socket)
+        else {
             return;
         };
         s.received = cx.now;
+        s.supervisor.received(cx.now);
         match serde_json::from_str::<Message<'_>>(text) {
             Ok(m) => {
                 if matches!(s.feed, Feed::Private) {
@@ -414,7 +452,9 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        self.reconnect(cx, socket, false);
+        if let Some(i) = self.sockets.iter().position(|s| s.active && s.id == socket) {
+            self.retire(cx, i, false);
+        }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -640,7 +680,7 @@ impl Venue for BitunixFutures {
         if let Some(s) = self
             .sockets
             .iter_mut()
-            .find(|s| s.queue_timer == Some(timer))
+            .find(|s| s.active && s.opened && s.queue_timer == Some(timer))
         {
             s.queue_timer = None;
             if let Some(frame) = s.queue.pop_front() {
@@ -649,26 +689,48 @@ impl Venue for BitunixFutures {
             }
             return;
         }
-        if let Some(i) = self.sockets.iter().position(|s| s.watchdog == Some(timer)) {
+        if let Some(i) = self
+            .sockets
+            .iter()
+            .position(|s| s.supervisor.owns_timer(timer))
+        {
             let s = &mut self.sockets[i];
-            if cx.now - s.received >= 45_000.0
-                && (!matches!(s.feed, Feed::Private) || !s.opened || s.pong_observed)
+            // Do this before the supervisor can send a due ping/rearm a watch.
+            if s.active
+                && s.opened
+                && matches!(s.feed, Feed::Private)
+                && s.pong_observed
+                && cx.now - s.received >= 45_000.0
             {
-                let id = s.id;
-                cx.close(id);
-                self.reconnect(cx, id, true);
-            } else {
-                if s.opened {
+                cx.close(s.id);
+                self.retire(cx, i, true);
+                return;
+            }
+            match s.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => {
+                    s.supervisor.connecting(cx);
+                    s.id = cx.connect(Self::socket_spec(&s.feed, s.recover));
+                    s.active = true;
+                    s.opened = false;
+                    s.received = cx.now;
+                    s.pong_observed = false;
+                }
+                SocketTick::TimedOut(_) => {
+                    cx.close(s.id);
+                    self.retire(cx, i, true);
+                }
+                SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
                         cx.send(s.id, r#"{"op":"ping"}"#);
                     } else {
                         cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
                     }
                 }
-                s.watchdog = Some(cx.set_timer(15_000.0));
+                _ => {}
             }
         }
     }
+
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::SubscribeOrderBook { symbol } => {
