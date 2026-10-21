@@ -254,3 +254,23 @@ nonmetric outputs. At checkpoint 7 both implementations expose the same two
 order rows; remove only the five old declarations for that checkpoint's row
 count, row identity, symbol and client ID. Keep the other 33 exact private
 keys, strict FAIL, unchanged fixture and existing signature/session validation.
+
+## Phemex phase
+
+Enable only Phemex's virtual private clock. Keep its startup clock rewinding:
+leave `monotonicReplayClock` unset, because continuous startup breaks signed
+request validation. Preserve expiry freshness, bootstrap auth/subscription/
+snapshot ordering, the 1600 ms REST snapshot, terminal reconciliation, duplicate
+fill handling and both USDT/USDC account views. Do not change wire records,
+protocol validators or production behavior. The fixture currently has no epoch
+metadata; add an anchor only if complete raw evidence requires one.
+
+Use a hard fingerprint-matching CI engine for five focused private pairs.
+Compare complete nonmetric outputs including IDs, timestamps, settings and
+command receipts. Prune only exact unobserved private declaration keys; any
+new difference requires reviewed exact keys, tape SHA and a specific cause.
+Preserve existing public declarations and strict FAIL. Require focused tests,
+independent reviews, fresh mandatory public/private verification, five identical
+current-head CI pairs and full green checks. Run the Phemex dependency guard
+separately from the merge, audit actual parents/files, report the merge, and
+move to standalone Hyperliquid Spot.
