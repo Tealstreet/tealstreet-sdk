@@ -70,11 +70,14 @@ not a deployed-runtime or npm-publication claim.
   snapshot query, native price IDs/order/zero totals and a standalone JSON decoder;
   malformed snapshots/refusals reject without mutating subscription books.
   **Still SDK-owned:** REST `fetchOrderBook` for Crypto.com/GRVT/Paradex/WEEX;
-  Hyperliquid `scheduleCancel`; typed GRVT builder rejection.
+  Hyperliquid `scheduleCancel`.
+  ~~Typed GRVT builder rejection~~ now preserves definitive code/reason/caps
+  through the engine, host and worker/hosted command replies; failed checks stay
+  nonmodal. [Regressions and required NX migration](RUST_GRVT_BUILDER_ERROR.md).
   ~~WEEX metadata refresh~~ now uses the shared `onReadAndMetadata` policy;
   [regressions](RUST_WEEX_METADATA_REFRESH.md) cover cached flat symbols,
   repeated reads, malformed-response retention and public-only isolation.
-  Streaming books and generic errors do not close the remaining gaps.
+  Streaming books do not close the remaining REST/dead-man gaps.
 - ~~`instanceof BlofinExchange` as an active downstream cutover blocker.~~
   Pinned NX read-only audit finds the class check in an unused helper, with no
   production import/render; active generic helpers have no guard. It remains

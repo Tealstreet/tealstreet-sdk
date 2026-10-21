@@ -39,7 +39,9 @@ pub use engine::{
     PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
     SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
 };
-pub use error::{ErrorKind, Outcome, Partial, VenueError};
+pub use error::{
+    BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,
+};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;
