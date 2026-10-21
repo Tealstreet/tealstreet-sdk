@@ -532,8 +532,15 @@ Remaining resilience and completeness findings are independent of request parity
   in one classified failure, with Unknown sticky across later refusals. Native
   partial/malformed batch regressions cover this; remaining chunks follow the
   existing failure policy rather than blindly resending accepted writes.
-- Medium: account-read failures (auth, IP whitelist) are logged at Warning and retried
-  at ~1 Hz (`account.rs:446`, `lib.rs:577`): no toast, account never loads.
+- Medium: ~~account-read failures (auth, IP whitelist) are logged at Warning and
+  retried at ~1 Hz~~. Current signed account/settings reads now report selected
+  credential/scope evidence from strict native refusals and validated success
+  shapes; merged order endpoints and per-symbol settings retain other refusals.
+  Reads back off from1s to30s, with a shared60s minimum rate pause and bounded
+  Retry-After. Every issuer obeys the pause; blocked owned preflight fails once
+  NotSent and never replays a write. Sanitized coded diagnostics preserve native
+  and rate metadata. Regression coverage includes malformed lists/rows, stale
+  callbacks,40 settings symbols, both shared-expiry orders and owned no-write.
 - Medium (unverified venue behaviour): leverage serialized as `30.0`
   (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
   requires order detail to be final immediately (`trading.rs:1437`); ~~a login
