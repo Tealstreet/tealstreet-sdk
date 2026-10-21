@@ -26,3 +26,16 @@ nearby size evidence, independent correctness/adversarial review, fresh full CI,
 complete raw proof/public timing evidence and actual stripped bytes. Then fresh
 separate exact-file revert guard, merge on green, verify actual parents/tree and
 report to overseer. Browser cold-start measurement follows this repair.
+
+## Pre-CI audit
+
+Captured the real `family_args` arrays without invoking cargo: KuCoin Spot now
+matches `01bfcbbb9d0f` exactly; all other 27 families match the current baseline
+arguments byte for byte. Cargo.toml is unchanged from that pre-#1661 pin and
+keeps release/host/engine defaults at 3. Shell syntax and diff checks pass.
+The baseline CI package passes `validateCiWasm` on this fresh source base before
+editing the build script (matching fingerprint and package hashes): stripped
+wasm 677,234 B, SHA256
+`991fbae3976573f187565dac536db7bf625c334d92f8f70ad6e8bffa65910e7e`.
+Candidate bytes, complete 11-output comparison and timing evidence belong in
+the PR before readiness/merge; baseline success alone does not certify it.
