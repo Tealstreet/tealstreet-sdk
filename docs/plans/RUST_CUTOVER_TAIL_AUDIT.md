@@ -69,12 +69,14 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    `unauthorized`/`cap-too-low` reason, required raw cap and available authorized
    raw cap across engine, SDK and worker error serialization. Keep transport
    or malformed-check failures distinct from a definitive missing approval.
-3. **REST order-book queries:** Rust `orderBookQuery` is enabled only for
-   AsterDEX, MEXC and Polymarket. TS additionally implements the REST query for
-   Backpack, Crypto.com, GRVT, Paradex and WEEX. Their Rust capability records
-   currently refuse `fetchOrderBook`; streaming subscriptions are separate.
-   Add native query/typed book responses and capability bits for supported
-   products, without synthesizing a REST answer from a possibly absent stream.
+3. **REST order-book queries:** Backpack now joins AsterDEX, MEXC and Polymarket
+   with a native unsigned query and capability. Its request-owned snapshot keeps
+   raw price IDs/order/zero totals and never mutates subscription state; malformed
+   data/refusals fail. A precise shared decoder feature admits standalone JSON
+   requests without unrelated venue commands. Crypto.com, GRVT, Paradex and WEEX
+   remain parity gaps; streaming subscriptions are separate. MEXC's existing
+   standalone JSON decoder omission is a separate queued correction. Add each
+   remaining native query/capability without synthesizing an absent stream book.
 4. **Hyperliquid dead-man switch:** TS `scheduleCancel(time?: number | null)`
    sends a signed account-wide action; Rust inherits the base rejection and
    has no matching engine command. Preserve cancellation semantics, UTC-ms
