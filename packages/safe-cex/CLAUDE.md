@@ -112,8 +112,26 @@ migration guidance to the explicit port policy. Existing gateway/application
 owners must adopt this API deliberately; a Rust registry entry does not migrate
 their configuration. The policy controls live feed ownership, not routing,
 credentials, supported venue products, or whether explicit public REST queries
-are allowed. `fetchBalance` reads current native reconciled state, as do the
-Rust adapter's other store-backed account reads.
+are allowed.
+
+Rust `fetchOrders`, `fetchPositions`, `fetchBalance` and `fetchPositionMode` wait
+for the relevant native readiness flags on cold starts, then apply and forward
+the current native account snapshot. This closes the store-flush delay without
+requesting a network resync. Public-only engines with no requested private
+readiness reject once metadata is ready; explicitly loaded native empties remain
+valid. Missing account-snapshot support, terminal engines
+and disposal reject instead of returning cached rows. Synchronous in-process
+decisions can call `syncAccountState()` once native metadata is ready; the Base
+implementation is a harmless no-op for TS adapters. Native account reads carry
+an explicit frame marker so both worker and main preserve observation freshness
+counters; ordinary stream frames still advance them. Recursive notification
+readers reuse the already-applied state rather than publishing another snapshot.
+
+Rust `nukePositions` sizes one current native position snapshot with the shared
+native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
+market batch and propagates partial or unknown outcomes without automatic retry.
+`nuke` also attempts the venue's cancel-all operation after a close failure;
+the original close failure remains the result. Concurrent nukes are rejected.
 
 ## Rust account construction
 
@@ -144,9 +162,16 @@ maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries, options, and whether signatures take the host clock as-is
 (`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
-`start`); `engineCapabilities` is undefined before then. Missing history axes
+`start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
+`fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
+published rails, and `onMetadata` answers from those rails once a metadata
+refresh has loaded them but asks the venue for a symbol not yet refreshed (the
+worker only asks when the active symbol has no rails). Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
-once the engine exists.
+once the engine exists. `account` also gates the engine: `FetchAccount` to a
+venue whose record says `unsupported` is refused before the venue runs, so a
+venue answering identity for only some products (Binance USD-M/PM, Bybit
+except HyroTrader) reports it per product.
 
 ## Rust main-thread trading
 
@@ -154,7 +179,11 @@ The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
 worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
 (trading, nuke, client-ID lookup, public trades, candles, history axes; plus
-`fetchHistoricalPositions` by name) whole through
+`fetchHistoricalPositions` and the native account reads `fetchOrders`,
+`fetchPositions`, `fetchBalance` and `fetchPositionMode` by name, since those
+wait on native state and would otherwise start a local engine; the worker
+answers them as `WORKER_OPTIONAL_METHODS`, and a mirror's `syncAccountState` is
+a no-op because worker frames keep its store current) whole through
 `callMethodInWorker`, so preflight, placement scopes and nuke retries run
 against the worker's state and report there once. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
@@ -532,7 +561,7 @@ position". If neither exists, the honest code path is a refusal.
 
 ### The inverse rule — and what is NOT true about it
 
-Inverse handling belongs in SIZING. `order/positionSizing.ts:nativePositionSize`
+Inverse handling belongs in SIZING. `safe-cex/src/utils/nativePositionSize.ts`
 branches on `isInverse` because an inverse contract is a fixed QUOTE amount, so
 its count comes from the notional.
 
@@ -601,9 +630,10 @@ only defined on linear markets.
 
 ### 3. Native position sizing — converged, and the proof it works
 
-`script-api-core/src/order/positionSizing.ts:nativePositionSize` is the single
-definition; web's `getPositionNativeSize` and the CLI's `nativeCloseSize` are
-both thin wrappers over it. Its own comment records that the copies HAD drifted
+`safe-cex/src/utils/nativePositionSize.ts` is the single definition;
+`script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
+Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
+use it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 

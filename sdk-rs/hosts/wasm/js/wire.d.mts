@@ -20,6 +20,7 @@ export const SECTION: {
   POSITION_GREEKS: 18;
   CAPABILITIES: 19;
   UNDERLYING_TOKENS: 20;
+  ACCOUNT_READ: 21;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -230,6 +231,9 @@ export interface FillRows {
   /** `[price, amount]` per execution. */
   rows: Float64Array;
   symbol?(i: number): string | undefined;
+  /** Optional financial tails; NaN means unreported, including legacy rows. */
+  realizedPnl?: Float64Array;
+  fee?: Float64Array;
   orderId(i: number): string;
 }
 
@@ -240,6 +244,7 @@ export class Frame {
   readonly time: number;
   /** NONE is absent; other references require a valid STRINGS entry. */
   string(index: number): string | undefined;
+  accountRead(): boolean;
   markets(): MarketTable | undefined;
   predictionMarkets(): PredictionMarketTable | undefined;
   instrumentClassifications(): InstrumentClassificationTable | undefined;

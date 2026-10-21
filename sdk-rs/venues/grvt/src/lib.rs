@@ -1,6 +1,7 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
 mod history;
+mod identity;
 mod sign;
 mod trading;
 mod wire;
@@ -52,6 +53,9 @@ pub(crate) enum Job {
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
+    Identity {
+        command: safe_cex_engine::CommandId,
+    },
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
@@ -264,6 +268,15 @@ impl Grvt {
                 self.account_headers(),
                 request.array_at(),
             ),
+            Job::Identity { .. } => (
+                if self.options.testnet {
+                    "https://trades.testnet.grvt.io"
+                } else {
+                    "https://trades.grvt.io"
+                },
+                self.account_headers(),
+                None,
+            ),
             Job::Account(request) => (
                 if self.options.testnet {
                     "https://trades.testnet.grvt.io"
@@ -289,6 +302,7 @@ impl Grvt {
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
+            Job::Identity { command } => self.identity_failed(cx, command, error),
             Job::Account(request) => self.account_failed(cx, request, error),
             Job::Trade(request) => {
                 self.trade_failed(cx, request, error, safe_cex_engine::Outcome::NotSent)
@@ -678,6 +692,7 @@ impl Venue for Grvt {
             fills_by_order_id: true,
             cancel_all: safe_cex_engine::CancelAll::Native,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -796,6 +811,7 @@ impl Venue for Grvt {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
+            Job::Identity { .. } => {}
             Job::Account(request) => self.account_item(cx, request, item),
             Job::Trade(request) => self.trade_item(cx, request, item),
             Job::History(request) => self.history_item(cx, request, item),
@@ -899,6 +915,12 @@ impl Venue for Grvt {
             }
             return;
         }
+        if matches!(pending.job, Job::Identity { .. })
+            && pending.auth_generation != self.account.generation
+        {
+            self.fail_pending(cx, pending, "Stale GRVT account identity session");
+            return;
+        }
         if pending.job.is_private() {
             self.account_response_headers(cx, pending.auth_generation, &response);
         }
@@ -909,6 +931,7 @@ impl Venue for Grvt {
             return;
         }
         match pending.job {
+            Job::Identity { command } => self.identity_response(cx, command, response),
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
             Job::History(request) => self.history_response(cx, *request, response),
@@ -1052,6 +1075,7 @@ impl Venue for Grvt {
                     rows.clear();
                     *failed = false;
                 }
+                Job::Identity { .. } => {}
                 Job::Account(request) => request.reset(),
                 Job::Trade(request) => request.reset(),
                 Job::History(request) => request.reset(),
@@ -1123,6 +1147,10 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         if let Command::Query { command, query } = command {
             self.start_query(cx, command, query);
             return;

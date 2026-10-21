@@ -44,6 +44,8 @@ pub mod section {
     pub const CAPABILITIES: u16 = 19;
     /// Underlying venue tokens, indexed by the current market table.
     pub const UNDERLYING_TOKENS: u16 = 20;
+    /// Current account read, not a new streaming observation.
+    pub const ACCOUNT_READ: u16 = 21;
 }
 
 pub mod status_flag {
