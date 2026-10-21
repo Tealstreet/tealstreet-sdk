@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::capabilities::Capabilities;
-use crate::error::VenueError;
+use crate::error::{ErrorKind, VenueError};
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::log::{Health, Level, LogEvent, Value, code as log_code};
 use crate::model::{
@@ -636,6 +636,7 @@ struct Io<P> {
     snapshot: Vec<u8>,
     min_level: Level,
     health: Health,
+    sockets: SocketRoles,
 }
 
 impl<P> Default for Io<P> {
@@ -665,6 +666,7 @@ impl<P> Default for Io<P> {
             snapshot: Vec::new(),
             min_level: Level::Info,
             health: Health::default(),
+            sockets: SocketRoles::default(),
         }
     }
 }
@@ -701,6 +703,11 @@ impl<P> Cx<'_, P> {
             return SocketId(0);
         }
         let socket = SocketId(self.io.next());
+        if let Some(channel) = &channel {
+            self.io
+                .sockets
+                .connected(socket, channel, &mut self.io.health);
+        }
         self.io.actions.push(Action::WsConnect {
             binary,
             socket,
@@ -725,6 +732,10 @@ impl<P> Cx<'_, P> {
     pub fn close(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        if self.io.sockets.closed(socket) {
+            self.io.health.count(log_code::WS_CLOSED);
         }
         self.io.actions.push(Action::WsClose { socket });
     }
@@ -953,6 +964,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn deactivate(&mut self) {
+        self.io.health.count(log_code::AUTH_REJECTED);
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
@@ -990,9 +1002,11 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        self.io.actions.push(Action::Notice(Notice::StartupFailed {
-            error: error.into(),
-        }));
+        let error = error.into();
+        count_auth_failure(&mut self.io.health, &error);
+        self.io
+            .actions
+            .push(Action::Notice(Notice::StartupFailed { error }));
     }
 
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
@@ -1001,10 +1015,11 @@ impl<P> Cx<'_, P> {
             self.io.order_locks.finish(command, true);
             self.io.active_commands.remove(&command);
         }
-        self.io.actions.push(Action::Notice(Notice::CommandFailed {
-            command,
-            error: error.into(),
-        }));
+        let error = error.into();
+        count_auth_failure(&mut self.io.health, &error);
+        self.io
+            .actions
+            .push(Action::Notice(Notice::CommandFailed { command, error }));
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
@@ -1521,9 +1536,16 @@ impl<V: Venue> Engine<V> {
                 cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
                 self.venue.on_open(&mut cx, socket)
             }
-            Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
-            Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
+            Event::WsBinary { socket, data } => {
+                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                self.venue.on_binary(&mut cx, socket, data)
+            }
+            Event::WsMessage { socket, text } => {
+                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                self.venue.on_message(&mut cx, socket, text)
+            }
             Event::WsClosed { socket, code } => {
+                cx.io.sockets.closed(socket);
                 cx.io.health.count(log_code::WS_CLOSED);
                 self.venue.on_close(&mut cx, socket, code)
             }
@@ -2119,6 +2141,66 @@ fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, messag
             level,
             message: crate::log::cap(message),
         }));
+    }
+}
+
+/// Live sockets that declared a role, for reconnect and private-traffic counts.
+#[derive(Default)]
+struct SocketRoles {
+    live: Vec<(SocketId, u8)>,
+    /// Private sockets alone, so the per-frame check scans one or two ids.
+    private: Vec<SocketId>,
+    /// Closes per role whose replacement connect has not happened yet.
+    awaiting_reconnect: [u32; 3],
+}
+
+impl SocketRoles {
+    fn role(channel: &SocketChannel) -> u8 {
+        match channel {
+            SocketChannel::Public => 0,
+            SocketChannel::Private => 1,
+            SocketChannel::Business => 2,
+        }
+    }
+
+    fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
+        let role = Self::role(channel);
+        let awaiting = &mut self.awaiting_reconnect[role as usize];
+        if *awaiting > 0 {
+            *awaiting -= 1;
+            health.reconnects = health.reconnects.saturating_add(1);
+        }
+        self.live.push((socket, role));
+        if role == 1 {
+            self.private.push(socket);
+        }
+    }
+
+    /// Whether `socket` was a live role socket.
+    fn closed(&mut self, socket: SocketId) -> bool {
+        let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
+            return false;
+        };
+        let (_, role) = self.live.swap_remove(index);
+        self.awaiting_reconnect[role as usize] =
+            self.awaiting_reconnect[role as usize].saturating_add(1);
+        self.private.retain(|id| *id != socket);
+        true
+    }
+
+    fn received(&self, socket: SocketId, now: f64, health: &mut Health) {
+        if self.private.contains(&socket) {
+            health.last_private_message_ms = Some(now);
+        }
+    }
+}
+
+fn count_auth_failure(health: &mut Health, error: &VenueError) {
+    if matches!(
+        error.kind,
+        Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+    ) {
+        health.count(log_code::AUTH_REJECTED);
     }
 }
 
