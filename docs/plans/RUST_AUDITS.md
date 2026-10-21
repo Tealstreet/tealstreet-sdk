@@ -539,9 +539,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
   doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
-  spot vault signs as vault (TS as master) — confirm; more terminal statuses;
-  `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
-  not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
+  spot vault signs as vault (TS as master) — confirm; ~~more terminal statuses~~
+  (Rust treats every `*Canceled`/`*Rejected` as terminal, a superset of TS);
+  ~~`stopLoss: 0` rejects whole order~~ (0 means no bracket on every market, as
+  TS); ~~signed fees~~ (deliberate: TS `abs` mislabels rebates); ~~unified
+  balance spot slices not populated~~ (spot holdings publish as `coins`;
+  currencies stay unset because TS's `currencies.USDC` is a synthetic sizing
+  slice, not the raw spot row); fills lack execution id, realized PnL and fee
+  (engine `Fill`; claude-i2upd7).
 
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011

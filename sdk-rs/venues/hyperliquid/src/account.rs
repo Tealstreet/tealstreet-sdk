@@ -1575,6 +1575,31 @@ impl Hyperliquid {
         self.warn_unvalued(cx, unvalued);
         self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
+        // Spot holdings for the margin panel, as TS shows them; USD totals stay unified.
+        let coins = state
+            .balances
+            .iter()
+            .filter(|b| b.total != 0.0)
+            .map(|b| CoinBalance {
+                base: b.coin.to_string(),
+                amount: b.total,
+                notional: b.total * self.collateral_price(cx, &b.coin).unwrap_or(0.0),
+            })
+            .collect();
+        cx.store.set_coin_balances(coins);
+    }
+    /// The USD price collateral valuation uses for one coin, when it has one.
+    fn collateral_price(&self, cx: &Cx<'_, Pending>, coin: &str) -> Option<f64> {
+        if ["USDC", "USDT", "USD", "USDH"]
+            .iter()
+            .any(|stable| coin.eq_ignore_ascii_case(stable))
+        {
+            return Some(1.0);
+        }
+        let ticker = cx.store.ticker(self.symbol(coin)?)?;
+        [ticker.mark, ticker.last]
+            .into_iter()
+            .find(|price| price.is_finite() && *price > 0.0)
     }
     pub(crate) fn map_order(&self, cx: &Cx<'_, Pending>, row: &OrderRow<'_>) -> Option<Order> {
         let symbol = self.symbol(&row.coin)?.to_owned();
