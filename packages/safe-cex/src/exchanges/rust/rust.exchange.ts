@@ -159,12 +159,33 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
 /**
+ * A hosted account: no local secret, signed by the browser through `remoteSigner`.
+ * Paradex and Polymarket keep their signing key in `key`, and Lighter runs read-only
+ * without one, as TS does, so none of them is keyless here.
+ */
+export const isKeylessRemoteSigned = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  Boolean(options.remoteSigner) &&
+  !options.secret &&
+  !options.auth?.privateKey &&
+  !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
+
+/**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
  * account stays on the TS venue, which merges spot markets into the perp account; the
- * engine's perp venue does not, and refuses the option when constructed directly.
+ * engine's perp venue does not, and refuses the option when constructed directly. A
+ * keyless remote-signed account stays on TS too, which signs through the browser.
  */
-export const runsOnRustEngine = (name: ExchangeName, options: Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets'>) =>
-  options.engine === 'rust' && isRustVenue(name) && !(name === 'hyperliquid' && options.enableSpotMarkets);
+export const runsOnRustEngine = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  options.engine === 'rust' &&
+  isRustVenue(name) &&
+  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
+  !isKeylessRemoteSigned(name, options);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -602,6 +623,9 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error(
         'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
       );
+    }
+    if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
+      throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     if (
       ![
