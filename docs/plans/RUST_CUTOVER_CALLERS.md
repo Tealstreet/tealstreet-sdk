@@ -391,7 +391,7 @@ the op protocol is its ABI. Beyond B2, B6, B7:
 
 ### OKX WebSocket port operations prerequisite (#1588)
 
-**Open ops work, before 2026-10-31.** [OKX's port-retirement notice](https://www.okx.com/docs-v5/log_en/#upcoming-changes-websocket-port-8443-discontinuation)
+**Open ops work, before 2026-10-31.** [OKX's port-retirement notice](https://www.okx.com/docs-v5/log_en/)
 states public-internet WebSocket connections to 8443 stop on that date; 443
 already works, with the same hosts and paths. #1588 removes `:8443` from SDK
 global/EEA live/demo URLs and relay metadata. This merge does not migrate the
@@ -729,7 +729,8 @@ remain required for ordinary command/host errors and legacy TS diagnostics.
 For received native diagnostics, #1583 adds `processEvent(event, classified?)`:
 classification follows stable codes and available typed detail without matching
 message text. Recognized codes may classify even Info/Debug events; unrecognized
-Info/Debug returns `null`, while unclassified Warn/Error becomes `unknown`.
+Info/Debug returns `null`; unrecognized Warn/Error uses typed classification
+or `unknown`.
 A generic `request.failed` message alone does not establish auth failure.
 `processHealth(exchange.getHealth())` copies lifetime counters into
 `HealthState.engineHealth`; it does not increment observed `errorCounts` or
