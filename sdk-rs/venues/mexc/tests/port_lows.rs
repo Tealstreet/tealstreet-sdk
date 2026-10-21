@@ -385,7 +385,9 @@ fn public_refusals_do_not_damage_private_auth_or_state() {
         assert_eq!(out.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:91, error }) if error.kind == Some(ErrorKind::VenueUnavailable) && error.message.contains("invalid api key"))).count(), 1);
         assert!(!out.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::Deactivate | Notice::StartupFailed { .. })
+            Action::Notice(
+                Notice::Deactivate | Notice::StartupFailed { .. } | Notice::AccountAuth { .. }
+            )
         )));
         assert_eq!(e.health().auth_failures, auth_failures);
         assert!(e.store().order("901").is_some());
