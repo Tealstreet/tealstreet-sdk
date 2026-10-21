@@ -75,7 +75,10 @@ not a deployed-runtime or npm-publication claim.
   ~~GRVT REST `fetchOrderBook` parity~~ now uses a request-owned unsigned MDG
   lite query with native instrument/depth fields, full/lite typed mapping and
   cumulative base totals; public errors never refresh or replace account auth.
-  **Still SDK-owned:** REST `fetchOrderBook` for Paradex/WEEX;
+  ~~Paradex REST `fetchOrderBook` parity~~ now uses an unsigned request-owned
+  depth query, native side order and per-level quote totals; live SBE books,
+  sequence state and existing private JWT remain independent.
+  **Still SDK-owned:** REST `fetchOrderBook` for WEEX;
   Hyperliquid `scheduleCancel`.
   ~~Typed GRVT builder rejection~~ now preserves definitive code/reason/caps
   through the engine, host and worker/hosted command replies; failed checks stay
