@@ -163,7 +163,8 @@ were checked read-only at `65e086a3c90`; shipped NX runtime verification remains
 a cutover requirement, not evidence supplied by this source audit.
 The history-owner batch checks #1628 (`d659c18c3f5`), #1629 (`a3c4e827722`),
 #1630 (`b2092b50aca`), #1631 (`e9049c794c8`), #1632 (`41cd4914a70`) and
-#1633 (`a29812d8e49`); Bitunix also makes failed reads reject as described below.
+#1633 (`a29812d8e49`) and WEEX #1627 (`9a444620376`). Bitunix also makes
+failed reads reject as described below.
 Bitget ordinary private-row repair checks #1625 at `02a0db19f3c`. Focused NX
 query/result boundaries were rechecked read-only at `65e086a3c90`; B11 remains open.
 
@@ -246,6 +247,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1631 / `e9049c794` | OKX closed-position cap and noncomposite history cap/cursor-stall markers carry their query command. EEA composite failures and existing financial/history policy stay unchanged. |
 | #1632 / `41cd4914a` | Paradex bounded history page-budget marker carries its query command before partial completion. Unbounded page-cap and other stall failures stay unchanged. |
 | #1633 / `a29812d8e` | Bitunix history transport/HTTP/envelope/malformed-row failures now reject instead of resolving earlier rows as complete. Genuine remaining-page caps or stalled order/income paging retain rows with command-attributed `history.incomplete`; a completed final page does not get a false cap marker. Callers must preserve failure versus partial versus complete outcomes before coverage. |
+| #1627 / `9a4446203` | WEEX income lifetime-budget, truncated-chunk, advertised-cursor, failed-page and terminal-failure markers now carry their query command. Existing retained rows, chunk continuation, pacing and terminal rejection policy stay unchanged; a marker on a rejected query is not a successful partial array. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -1252,13 +1254,14 @@ markers rather than broadcast them.
 | OKX #1631 | Closed-position page cap; noncomposite history page cap and non-advancing cursor. EEA composite paths retain their strict failures. |
 | Paradex #1632 | Bounded history page-budget exhaustion; unbounded cap and other stalled walks still fail. |
 | Bitunix #1633 | Order/income paging with more rows possible but a cap or stalled progress; complete terminal pages do not get a cap marker. Failed reads reject. |
+| WEEX #1627 | Income lifetime request budget, truncated chunks, advertised additional cursor rows, failed pages and terminal query failure. Existing continuation versus rejection policy remains. |
 
-The five attribution-only patches (#1628–#1632) retain Warn code/text and
-precede the affected completion
-(or, for Bybit windows, subsequent window work). `fields.command` is the
+The six attribution-only patches (#1627–#1632) retain Warn code/text. Their
+markers precede retained-row completion, later window/chunk work, or the
+existing terminal failure, depending on the path. `fields.command` is the
 query's engine command ID, separate from venue/context data and query options.
 These fixes change ownership metadata, not the retained rows, paging bounds or
-failure policy of these five venue patches. No new frame or result schema is
+failure policy of those six venue patches. No new frame or result schema is
 introduced; producer and existing host behavior now join up for these paths.
 Bitunix #1633 additionally rejects history transport/HTTP/envelope or malformed
 row failures instead of returning accumulated earlier rows as a successful
@@ -1266,6 +1269,11 @@ array. Its genuinely capped/stalled order or income walks still return retained
 rows with the attributed marker; a final page with no more work no longer gets
 a false cap warning. Keep query failure, partial retained rows and a complete
 result distinct; an error is not an empty/complete history window.
+A WEEX marker can likewise precede its existing terminal rejection; it does
+not turn that rejection into partial success. The #1627 host regressions use
+the real native WEEX event fixture to prove direct-host array marking and
+owning-client command translation, including a concurrent unflagged request.
+Those proofs cover SDK/native-event/DO boundaries, not NX worker/hosted hops.
 
 **Required NX query association:** consume completeness on the result of the
 specific pending call. A direct JS SDK consumer reads `rows.incomplete` before
