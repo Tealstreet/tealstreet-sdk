@@ -37,6 +37,7 @@ pub enum Request {
         symbol: String,
         revision: u64,
         generation: u64,
+        publish: bool,
         leverage: Option<(f64, f64)>,
     },
     ListenKey {
@@ -304,6 +305,7 @@ impl Account {
         credentials: Option<&Credentials>,
         command: u32,
         symbol: String,
+        publish: bool,
     ) {
         let Some(credentials) = credentials else {
             cx.fail(
@@ -330,6 +332,7 @@ impl Account {
                 symbol,
                 revision: self.settings_revision,
                 generation: *generation,
+                publish,
                 leverage: None,
             },
             false,
@@ -841,20 +844,17 @@ impl Account {
                 symbol,
                 revision,
                 generation,
+                publish,
                 leverage,
             } => {
-                if revision != self.settings_revision
-                    || self.metadata_generations.get(&symbol) != Some(&generation)
-                {
-                    cx.fail(
-                        command,
-                        metadata_error(
-                            "BingX settings changed during metadata read; refresh metadata",
-                        ),
-                    );
-                    return;
-                }
+                let current = publish
+                    && revision == self.settings_revision
+                    && self.metadata_generations.get(&symbol) == Some(&generation);
                 if let Some((buy, sell)) = leverage {
+                    if !current {
+                        current_metadata(cx, command, &symbol, (buy, sell));
+                        return;
+                    }
                     let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
                     let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
                         Ok("ISOLATED") => MarginType::Isolated,
@@ -885,6 +885,15 @@ impl Account {
                         cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
                         return;
                     };
+                    if !current {
+                        current_metadata(
+                            cx,
+                            command,
+                            &symbol,
+                            (rails.long_leverage, rails.short_leverage),
+                        );
+                        return;
+                    }
                     let Some(market) = cx.store.market(&symbol) else {
                         cx.fail(
                             command,
@@ -903,6 +912,7 @@ impl Account {
                             symbol,
                             revision,
                             generation,
+                            publish,
                             leverage: Some((rails.long_leverage, rails.short_leverage)),
                         },
                         false,
@@ -1637,6 +1647,24 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
+}
+
+/// A superseded read still answers without publishing stale settings.
+fn current_metadata(cx: &mut Cx<'_, Pending>, command: u32, symbol: &str, read: (f64, f64)) {
+    let setting = cx.store.setting(symbol);
+    let valid = |value: &f64| value.is_finite() && *value > 0.0;
+    let buy = setting
+        .and_then(|s| s.buy_leverage)
+        .filter(valid)
+        .unwrap_or(read.0);
+    let sell = setting
+        .and_then(|s| s.sell_leverage)
+        .filter(valid)
+        .unwrap_or(read.1);
+    cx.done(
+        command,
+        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
+    );
 }
 
 /// Metadata reads do not submit a trading effect, including failed confirmations.
