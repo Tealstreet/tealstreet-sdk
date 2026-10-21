@@ -393,7 +393,7 @@ fn owned_position_on_malformed_market_rejects_scope_but_other_missing_rows_are_s
             assert_eq!(h.e.store().positions(), previous);
             assert_eq!(*h.e.store().balance(), balance);
             assert!(!h.pending.iter().any(|r| r.url.contains("asset/balances")));
-            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position has unavailable market metadata"))));
+            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("owned position has unavailable market metadata"))));
         } else {
             h.reply("balances", BALANCES);
             assert_eq!(h.e.store().positions().len(), 1, "{inst} {kind} {quantity}");
@@ -443,7 +443,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     for kind in ["position", "order"] {
         let needle = format!("Skipping BloFin {kind} on uncatalogued market ETH-USD");
         assert!(
-            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))),
+            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains(&needle))),
             "{kind}"
         );
     }
@@ -469,7 +469,7 @@ fn working_order_on_malformed_market_rejects_authoritative_order_scope() {
     h.collect();
     h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BAD-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
     assert_eq!(h.e.store().orders(), previous);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("working order has unavailable market metadata"))));
 }
 #[test]
 fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
@@ -1317,7 +1317,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
             h.e.take_frame(START + 13.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
         h.e.handle(
             START + 14.0,
             Event::WsMessage {
@@ -1376,7 +1376,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
         h.e.take_frame(START + 4.0)
             .is_none_or(|f| executions(f).is_empty())
     );
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution price unavailable for order 123")&&message.contains("missing cumulative quote baseline"))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123")&& event.message.contains("missing cumulative quote baseline"))));
     h.e.handle(
         START + 5.0,
         Event::WsMessage {
@@ -1437,7 +1437,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
             h.e.take_frame(START + 3.0)
                 .is_none_or(|f| executions(f).is_empty())
         );
-        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("execution prefix unavailable"))));
+        assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
     }
 }
 #[test]
@@ -1506,7 +1506,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
             h.e.take_frame(START + 4.0)
                 .is_none_or(|frame| executions(frame).is_empty())
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))), "invalid average {invalid_average} must visibly reject the current quote and preserve the proven basis");
         let seed = startup_execution(
             "123",
             8,
@@ -1645,7 +1645,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
             [(260.0 - f64::from(known_average), 0.004)],
             "startup/eviction must retain the last proven cumulative quote (evict={evict})"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("execution price unavailable for order 123"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123"))));
     }
 }
 #[test]
@@ -1694,10 +1694,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
         );
         assert!(!h.actions.iter().any(|action| matches!(
             action,
-            Action::Notice(safe_cex_engine::Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
-                ..
-            })
+            Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error
         )));
         let live = startup_execution(
             "123",
@@ -1720,7 +1717,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
                 .is_none_or(|frame| executions(frame).is_empty()),
             "a missing historical quote cannot replay historical quantity4..6 as live"
         );
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { level:safe_cex_engine::LogLevel::Error, message }) if message.contains("missing cumulative quote baseline"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("missing cumulative quote baseline"))));
         let suffix = startup_execution("123", 10, 140, START - 100.0, START + 6.0, "filled");
         for now in [START + 7.0, START + 8.0] {
             h.e.handle(
@@ -1788,8 +1785,8 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
     );
     assert!(h.e.store().order("456").is_some());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            if message.contains("Malformed BloFin order row"))));
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("Malformed BloFin order row"))));
 }
 fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
     actions.iter().find_map(|a| match a {
@@ -1855,5 +1852,5 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         assert!(rereads <= 5, "re-read is bounded");
     }
     assert_eq!(rereads, 5);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("stops re-reading"))));
 }

@@ -2256,7 +2256,10 @@ fn error_logs(actions: &[Action]) -> usize {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )
         })
         .count()
@@ -2269,7 +2272,12 @@ fn warnings(actions: &[Action]) -> Vec<String> {
             Action::Notice(Notice::Log {
                 level: safe_cex_engine::LogLevel::Warning,
                 message,
-            }) => Some(message.clone()),
+            })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                message,
+                ..
+            })) => Some(message.clone()),
             _ => None,
         })
         .collect()

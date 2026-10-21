@@ -9,14 +9,16 @@ pub mod spot;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    Store, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, Store,
+    TimerId, Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -603,7 +605,7 @@ impl Kucoin {
         generation: u64,
         error: &str,
     ) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         if let Some(book) = self
             .books
             .get_mut(symbol)
@@ -807,16 +809,21 @@ impl Venue for Kucoin {
                 .validate()
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if self.options.testnet {
-            cx.log(LogLevel::Error, "KuCoin Futures testnet is unsupported");
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "KuCoin Futures testnet is unsupported",
+            );
             return;
         }
         if !self.options.public_data_only && self.credentials.is_none() {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "KuCoin credentials require key, secret and passphrase",
             );
             return;
@@ -1013,7 +1020,11 @@ impl Venue for Kucoin {
                                 && s.ping_timeout.is_finite()
                                 && s.ping_timeout >= 1000.0
                         }) else {
-                            cx.log(LogLevel::Error, "invalid KuCoin websocket server");
+                            cx.notice(
+                                Level::Error,
+                                code::STREAM_UNAVAILABLE,
+                                "invalid KuCoin websocket server",
+                            );
                             self.reconnect_later(cx, channel);
                             return;
                         };
@@ -1050,7 +1061,7 @@ impl Venue for Kucoin {
                         c.pong = Some(cx.set_timer(c.ping_timeout));
                     }
                     Err(error) => {
-                        cx.log(LogLevel::Warning, error);
+                        cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error);
                         self.reconnect_later(cx, channel);
                     }
                 }
@@ -1140,7 +1151,7 @@ impl Venue for Kucoin {
                     return;
                 }
                 self.connections[channel].token_pending = false;
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error);
                 self.reconnect_later(cx, channel);
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -1216,7 +1227,11 @@ impl Venue for Kucoin {
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
-                    cx.log(LogLevel::Error, "unknown KuCoin market");
+                    cx.notice(
+                        Level::Error,
+                        code::SUBSCRIPTION_REJECTED,
+                        "unknown KuCoin market",
+                    );
                     return;
                 }
                 if !self.books.contains_key(&symbol) {
@@ -1267,7 +1282,7 @@ impl Venue for Kucoin {
                         );
                     }
                 }
-                Err(e) => cx.log(LogLevel::Error, e),
+                Err(e) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e),
             },
             Command::UnsubscribeCandles {
                 symbol,
@@ -1386,8 +1401,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("KuCoin stops re-reading a catalogue with {after} malformed markets"),
         );
     }

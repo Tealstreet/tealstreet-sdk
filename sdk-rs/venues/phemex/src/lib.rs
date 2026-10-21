@@ -7,12 +7,14 @@ mod income;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -403,7 +405,7 @@ impl Venue for PhemexPerpetuals {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if cx.now < self.paused_until {
@@ -772,7 +774,11 @@ impl Venue for PhemexPerpetuals {
                     return;
                 }
                 if self.books.len() + self.candles.len() >= 19 {
-                    cx.log(LogLevel::Warning, "Phemex subscription capacity reached");
+                    cx.notice(
+                        Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "Phemex subscription capacity reached",
+                    );
                     return;
                 }
                 self.generation += 1;
@@ -799,7 +805,11 @@ impl Venue for PhemexPerpetuals {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 let Some(n) = resolution(interval) else {
-                    cx.log(LogLevel::Error, interval.unsupported("Phemex"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Phemex"),
+                    );
                     return;
                 };
                 let key = (symbol.clone(), interval);

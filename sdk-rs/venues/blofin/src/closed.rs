@@ -2,6 +2,8 @@
 //! rows, which the host maps with the TS mappers. Rows dedupe on `historyId`,
 //! not `positionId`, and page by the smallest `historyId` seen.
 use super::*;
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::url::encode;
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -179,8 +181,7 @@ impl Blofin {
             return Self::finish_closed(cx, request);
         }
         if request.page >= MAX_PAGES {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                 format!(
                     "BloFin closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"
                 ),

@@ -640,6 +640,17 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   }
 
+  private authFailureNoted = false;
+  /** One engine dispatch often reports a rejection twice (`auth.rejected` and `deactivate`). */
+  private noteAuthFailure = () => {
+    if (this.authFailureNoted) return;
+    this.authFailureNoted = true;
+    queueMicrotask(() => {
+      this.authFailureNoted = false;
+    });
+    this.recordAuthFailure();
+  };
+
   override recordAuthSuccess(): void {
     super.recordAuthSuccess();
     this.updatePollingPolicy();
@@ -879,7 +890,7 @@ export class RustEngineExchange extends BaseExchange {
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
-          this.recordAuthFailure();
+          this.noteAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
@@ -1321,7 +1332,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
-    if (event.code === 'auth.rejected') this.recordAuthFailure();
+    if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
   };
 

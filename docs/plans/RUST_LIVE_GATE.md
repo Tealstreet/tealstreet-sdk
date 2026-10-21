@@ -92,6 +92,12 @@ Build `rust:shadow-private` by reusing the live-smoke profile and recorder:
   account; resting limit orders; an open one-way position; a hedge-mode
   position; a protective TP/SL; spot balances (spot products). Shapes are set
   up by hand in the venue UI beforehand; the runner never creates them.
+- **Venue probes to schedule with private shadow:**
+  - Kraken Futures `history/v3/account-log`: find a cursor that reaches rows
+    older than one full 500-row page. Only `since` is known to work (TS
+    measurement, 2026-08-14), so until then income on heavy accounts returns the
+    newest page with a `history.incomplete` warning. Candidates: `from`/`to`, an
+    id cursor, or the v2 route. Read-only.
 
 ## 3. Smoke checklist (credentialed, writes)
 

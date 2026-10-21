@@ -653,6 +653,10 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account_tier: true,
