@@ -1066,3 +1066,19 @@ fn plain_limit_order_events_carry_no_trigger_type() {
     let order = e.store().order("702345678901234601").unwrap();
     assert_eq!(order.trigger_type, None);
 }
+#[test]
+fn protective_algo_row_typed_market_keeps_its_working_type() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234502,"symbol":"BTCUSDT","side":"SELL","type":"MARKET","planType":"STOP_LOSS","reduceOnly":true,"algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"68000","workingType":"MARK_PRICE","updateTime":1773295700000}]"#,
+    );
+    let order = e.store().order("812345678901234502").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(
+        order.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
+}

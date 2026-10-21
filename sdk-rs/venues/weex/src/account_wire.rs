@@ -273,6 +273,8 @@ impl OrderRow<'_> {
         {
             order.kind = OrderType::Conditional;
         }
+        // Algo rows always trigger, even when their order type reads LIMIT/MARKET.
+        order.trigger_type = (!self.working_type.is_empty()).then(|| trigger(&self.working_type));
         order.extra = Some(OrderExtra {
             conditional_order_price: Some(if self.price != 0.0 {
                 self.price
