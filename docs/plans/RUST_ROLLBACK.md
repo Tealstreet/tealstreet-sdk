@@ -9,7 +9,7 @@ Companion contracts: [cutover callers](RUST_CUTOVER_CALLERS.md),
 [remote signing](RUST_REMOTE_SIGNING.md), [mobile](RUST_MOBILE_B3.md),
 [live evidence](RUST_LIVE_GATE.md) and [cutover readiness](RUST_CUTOVER_READINESS.md).
 
-Mirror source: landing `383d3f7960a` (including actual #1696 and #1697).
+Mirror source: landing `2ff8452aa53` (including actual #1696, #1697 and #1690).
 SDK source references below are relative to `packages/safe-cex/` unless stated.
 
 ## Current construction contract
