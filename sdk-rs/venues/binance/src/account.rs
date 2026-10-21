@@ -234,6 +234,16 @@ fn position_side(ps: &str, signed_contracts: f64) -> PositionSide {
     }
 }
 
+/// The leg a rejected positionRisk row names; an unknown side or symbol names none.
+fn rejected_position_key(symbol: &str, ps: &str) -> Option<String> {
+    let mode = match ps {
+        "BOTH" => PositionMode::Oneway,
+        "LONG" | "SHORT" => PositionMode::Hedged,
+        _ => return None,
+    };
+    (!symbol.is_empty()).then(|| position_id(symbol, position_side(ps, 0.0), mode))
+}
+
 fn opt(value: &Option<std::borrow::Cow<'_, str>>) -> f64 {
     value.as_deref().map_or(0.0, num::parse)
 }
@@ -630,12 +640,28 @@ impl BinanceFutures {
                 skipped,
             } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
-                    if let Some(join) = &mut self.account.positions
-                        && join.generation == *generation
-                    {
-                        join.failed = true;
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct Identity<'a> {
+                        #[serde(borrow, default)]
+                        symbol: Cow<'a, str>,
+                        #[serde(borrow, default)]
+                        position_side: Cow<'a, str>,
                     }
-                    _cx.log(LogLevel::Error, "Binance positionRisk row malformed");
+                    let key = serde_json::from_str::<Identity>(item)
+                        .ok()
+                        .and_then(|row| rejected_position_key(&row.symbol, &row.position_side));
+                    match &key {
+                        Some(id) => _cx.log(
+                            LogLevel::Warning,
+                            format!("Binance skipped malformed positionRisk row {id}"),
+                        ),
+                        None => _cx.log(
+                            LogLevel::Warning,
+                            "Binance skipped malformed positionRisk row without an identity",
+                        ),
+                    }
+                    skipped.reject(key);
                     return;
                 };
                 if self.is_inverse()
@@ -646,6 +672,7 @@ impl BinanceFutures {
                     if !self.catalogue_partial {
                         return;
                     }
+                    // Discovery is retrying the catalogue; hold the snapshot until it settles.
                     if let Some(join) = &mut self.account.positions
                         && join.generation == *generation
                     {
@@ -682,12 +709,7 @@ impl BinanceFutures {
                 }
                 // An unreadable size is not flat: keep this leg's last known state.
                 let Some(signed) = num::parse_decimal(&p.position_amt) else {
-                    let key = match p.position_side.as_ref() {
-                        "BOTH" => Some(PositionMode::Oneway),
-                        "LONG" | "SHORT" => Some(PositionMode::Hedged),
-                        _ => None,
-                    }
-                    .map(|mode| position_id(&p.symbol, position_side(&p.position_side, 0.0), mode));
+                    let key = rejected_position_key(&p.symbol, &p.position_side);
                     _cx.log(
                         LogLevel::Warning,
                         format!(
@@ -930,20 +952,19 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
-                let mut invalid: Option<String> = None;
-                let mut skipped = Vec::new();
+                let mut rejected = Vec::new();
+                let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let parsed = json::each::<OpenOrder>(body, |o| {
+                    let id = match (&o.client_order_id, client_keyed) {
+                        (Some(client), true) => client.to_string(),
+                        _ => o.order_id.to_string(),
+                    };
                     let Some(kind) = order_type(&o.kind) else {
-                        if self.options.portfolio_margin || self.is_spot() {
-                            invalid.get_or_insert_with(|| {
-                                format!("order {} has unsupported type {}", o.order_id, o.kind)
-                            });
-                        } else {
-                            skipped.push(o.order_id.to_string());
-                        }
+                        let message = format!("Binance open order {id} has an unsupported type");
+                        rejected.push((id, message));
                         return;
                     };
-                    if (self.options.portfolio_margin || self.is_spot())
+                    if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
                                 .iter()
@@ -953,19 +974,13 @@ impl BinanceFutures {
                                 .is_some_and(|n| !nonnegative_number(n))
                             || num::parse(&o.executed_qty) > num::parse(&o.orig_qty))
                     {
-                        invalid.get_or_insert_with(|| format!("order {}", o.order_id));
+                        let message = format!("Binance open order {id} has invalid economics");
+                        rejected.push((id, message));
                         return;
                     }
                     let price = num::parse(&o.price);
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
-                    let id = match (
-                        &o.client_order_id,
-                        self.options.portfolio_margin || self.is_spot(),
-                    ) {
-                        (Some(client), true) => client.to_string(),
-                        _ => o.order_id.to_string(),
-                    };
                     native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
                     orders.push(Order {
                         id,
@@ -1005,22 +1020,16 @@ impl BinanceFutures {
                         });
                     }
                 }
-                if let Some(detail) = &invalid {
-                    cx.log(
-                        LogLevel::Error,
-                        format!("Binance open order row has invalid economics: {detail}"),
-                    );
-                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) if invalid.is_none() => {
+                        Ok(()) => {
                             join.regular = Some(orders);
                             join.native_orders = native_orders;
-                            self.skip_unsupported_orders(cx, generation, skipped);
+                            self.reject_orders(cx, generation, rejected);
                         }
-                        _ => join.failed = true,
+                        Err(_) => join.failed = true,
                     }
                 }
                 self.finish_orders(cx);
@@ -1029,15 +1038,13 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_strategies = Vec::new();
-                let mut invalid: Option<String> = None;
+                let mut rejected = Vec::new();
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
+                    let id = o.new_client_strategy_id.as_ref();
                     let Some(kind) = order_type(&o.strategy_type) else {
-                        invalid.get_or_insert_with(|| {
-                            format!(
-                                "strategy {} has unsupported type {}",
-                                o.new_client_strategy_id, o.strategy_type
-                            )
-                        });
+                        let message =
+                            format!("Binance conditional order {id} has an unsupported type");
+                        rejected.push((id.to_owned(), message));
                         return;
                     };
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
@@ -1045,9 +1052,9 @@ impl BinanceFutures {
                             .iter()
                             .any(|n| n.as_deref().is_some_and(|n| !nonnegative_number(n)))
                     {
-                        invalid.get_or_insert_with(|| {
-                            format!("strategy {}", o.new_client_strategy_id)
-                        });
+                        let message =
+                            format!("Binance conditional order {id} has invalid economics");
+                        rejected.push((id.to_owned(), message));
                         return;
                     }
                     let price = opt(&o.price);
@@ -1085,21 +1092,16 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
-                if let Some(detail) = &invalid {
-                    cx.log(
-                        LogLevel::Error,
-                        format!("Binance conditional order row has invalid economics: {detail}"),
-                    );
-                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) if invalid.is_none() => {
+                        Ok(()) => {
                             join.algo = Some(orders);
                             join.native_strategies = native_strategies;
+                            self.reject_orders(cx, generation, rejected);
                         }
-                        _ => join.failed = true,
+                        Err(_) => join.failed = true,
                     }
                 }
                 self.finish_orders(cx);
@@ -1107,10 +1109,12 @@ impl BinanceFutures {
             Request::OpenAlgoOrders { generation } => {
                 let now = cx.now;
                 let mut orders = Vec::new();
-                let mut skipped = Vec::new();
+                let mut rejected = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
-                        skipped.push(o.algo_id.to_string());
+                        let id = o.algo_id.to_string();
+                        let message = format!("Binance open order {id} has an unsupported type");
+                        rejected.push((id, message));
                         return;
                     };
                     let amount = opt(&o.quantity);
@@ -1142,7 +1146,7 @@ impl BinanceFutures {
                     match parsed {
                         Ok(()) => {
                             join.algo = Some(orders);
-                            self.skip_unsupported_orders(cx, generation, skipped);
+                            self.reject_orders(cx, generation, rejected);
                         }
                         Err(_) => join.failed = true,
                     }
@@ -1374,12 +1378,12 @@ impl BinanceFutures {
         cx.store.set_orders(orders);
     }
 
-    /// Keeps the last known state of listed orders whose type is unsupported.
-    fn skip_unsupported_orders(
+    /// Keeps the last known state of listed orders that could not be mapped.
+    fn reject_orders(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
-        ids: Vec<String>,
+        rows: Vec<(String, String)>,
     ) {
         let Some(join) = self
             .account
@@ -1389,11 +1393,8 @@ impl BinanceFutures {
         else {
             return;
         };
-        for id in ids {
-            cx.log(
-                LogLevel::Warning,
-                format!("Binance open order {id} has an unsupported type"),
-            );
+        for (id, message) in rows {
+            cx.log(LogLevel::Warning, message);
             join.skipped.reject(Some(id));
         }
     }

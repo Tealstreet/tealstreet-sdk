@@ -37,10 +37,23 @@ pub struct Request {
     balance: Option<Balance>,
     configs: Vec<(String, Config)>,
     skipped_rows: usize,
-    /// Order or position IDs of malformed rows skipped by this read.
-    skipped: Vec<String>,
-    /// A skipped row had no identity, so the read cannot replace the list.
+    skipped: Skipped,
+}
+/// Order or position IDs of malformed rows a read skipped. A malformed row is
+/// not evidence that its row closed; one without an ID protects every row.
+#[derive(Default)]
+struct Skipped {
+    ids: Vec<String>,
     unidentified: bool,
+}
+impl Skipped {
+    fn covers(&self, id: &str) -> bool {
+        self.unidentified || self.ids.iter().any(|skipped| skipped == id)
+    }
+    fn extend(&mut self, other: Skipped) {
+        self.ids.extend(other.ids);
+        self.unidentified |= other.unidentified;
+    }
 }
 #[derive(Clone)]
 pub struct Config {
@@ -127,9 +140,9 @@ pub struct State {
     orders_revision: u64,
     settings_revision: u64,
     order_stage: Vec<Order>,
-    order_skipped: Vec<String>,
+    order_skipped: Skipped,
     /// Revision, staged rows, and IDs of positions whose rows were malformed.
-    position_stage: Option<(u64, Vec<StagedPosition>, Vec<String>)>,
+    position_stage: Option<(u64, Vec<StagedPosition>, Skipped)>,
     deferred: Vec<(TimerId, Request)>,
     order_parts: u8,
     orders_failed: bool,
@@ -310,7 +323,7 @@ impl WeexFutures {
         self.account.order_parts = 0;
         self.account.orders_failed = false;
         self.account.order_stage.clear();
-        self.account.order_skipped.clear();
+        self.account.order_skipped = Skipped::default();
         self.account.position_stage = None;
         for kind in [
             Kind::Metadata,
@@ -339,8 +352,7 @@ impl WeexFutures {
                 balance: None,
                 configs: vec![],
                 skipped_rows: 0,
-                skipped: vec![],
-                unidentified: false,
+                skipped: Skipped::default(),
             };
             self.send_account(cx, request);
         }
@@ -455,8 +467,8 @@ impl WeexFutures {
                 row_identity(request.kind, item, &self.account, cx.store),
             ) {
                 (Kind::Balance | Kind::Config, _) => {}
-                (_, Some(key)) => request.skipped.push(key),
-                (_, None) => request.unidentified = true,
+                (_, Some(key)) => request.skipped.ids.push(key),
+                (_, None) => request.skipped.unidentified = true,
             }
             request.skipped_rows += 1;
         }
@@ -502,14 +514,14 @@ impl WeexFutures {
                 format!(
                     "WEEX skipped {} malformed {kind} row(s){}{}",
                     request.skipped_rows,
-                    if request.skipped.is_empty() { "" } else { ": " },
-                    request.skipped.join(", ")
+                    if request.skipped.ids.is_empty() {
+                        ""
+                    } else {
+                        ": "
+                    },
+                    request.skipped.ids.join(", ")
                 ),
             );
-        }
-        if request.unidentified {
-            self.account_failed(cx, request, "malformed row without an identity");
-            return;
         }
         match request.kind {
             // The next cycle corrects a read that raced an account event; fencing it
@@ -563,7 +575,6 @@ impl WeexFutures {
                         .filter(|order| seen.insert(order.id.clone()))
                         .filter_map(|order| self.account.snapshot_order(order))
                         .collect();
-                    // A malformed row is not evidence that its order closed.
                     let skipped = std::mem::take(&mut self.account.order_skipped);
                     orders.extend(
                         cx.store
@@ -571,7 +582,7 @@ impl WeexFutures {
                             .iter()
                             .filter(|o| {
                                 !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
-                                    && skipped.iter().any(|id| o.id.split("__").next() == Some(id))
+                                    && o.id.split("__").next().is_some_and(|id| skipped.covers(id))
                                     && seen.insert(o.id.clone())
                             })
                             .filter_map(|o| self.account.snapshot_order(o.clone())),
@@ -606,7 +617,7 @@ impl WeexFutures {
         if matches!(request.kind, Kind::Normal | Kind::Algo) {
             self.account.orders_failed = true;
             self.account.order_stage.clear();
-            self.account.order_skipped.clear();
+            self.account.order_skipped = Skipped::default();
         }
         if matches!(request.kind, Kind::Config | Kind::Metadata) {
             self.account.settings_failures += 1;
@@ -648,13 +659,12 @@ impl WeexFutures {
                         }
                     })
                     .collect();
-                // A malformed row is not evidence that its position closed.
                 positions.extend(
                     cx.store
                         .positions()
                         .iter()
                         .filter(|old| {
-                            skipped.contains(&old.id)
+                            skipped.covers(&old.id)
                                 && !positions.iter().any(|p: &Position| p.id == old.id)
                         })
                         .cloned()
@@ -845,7 +855,7 @@ impl WeexFutures {
             // cannot publish rows, send another page, or finish a newer cycle.
             self.account.cycle += 1;
             self.account.order_stage.clear();
-            self.account.order_skipped.clear();
+            self.account.order_skipped = Skipped::default();
             self.account.position_stage = None;
             self.account.orders_failed = true;
             for (timer, _) in self.account.deferred.drain(..) {

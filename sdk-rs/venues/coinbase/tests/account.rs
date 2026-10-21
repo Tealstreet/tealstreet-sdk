@@ -22,6 +22,9 @@ struct Session {
     urls: Vec<String>,
     kind: &'static str,
     positions: Option<String>,
+    products: Option<String>,
+    orders: Option<String>,
+    breakdown: Option<String>,
     logs: Vec<String>,
     sends: Vec<(SocketId, String)>,
     // Private sockets only; the unopened public feed has its own supervisor.
@@ -48,6 +51,9 @@ impl Session {
             urls: vec![],
             kind,
             positions: None,
+            products: None,
+            orders: None,
+            breakdown: None,
             logs: vec![],
             sends: vec![],
             closes: vec![],
@@ -109,7 +115,7 @@ impl Session {
         } else if url.contains("/cfm/balance_summary") {
             CFM_BALANCE.into()
         } else if url.contains("/portfolios/portfolio-one") {
-            BREAKDOWN.into()
+            self.breakdown.clone().unwrap_or_else(|| BREAKDOWN.into())
         } else if url.contains("/intx/portfolio/") {
             INTX_BALANCE.into()
         } else if url.contains("/intx/positions/") {
@@ -121,10 +127,12 @@ impl Session {
                 .clone()
                 .unwrap_or_else(|| CFM_POSITIONS.into())
         } else if url.contains("/orders/historical/batch") {
-            r#"{"orders":[],"has_next":false}"#.into()
+            self.orders
+                .clone()
+                .unwrap_or_else(|| r#"{"orders":[],"has_next":false}"#.into())
         } else if url.contains("/products") {
             if url.contains("contract_expiry_type=PERPETUAL") {
-                INTX.into()
+                self.products.clone().unwrap_or_else(|| INTX.into())
             } else if url.contains("product_type=FUTURE") {
                 CFM.into()
             } else {
@@ -1339,4 +1347,142 @@ fn private_resent_snapshot_on_the_same_connection_expires_without_user_frames() 
     assert!(s.closes.is_empty());
     s.advance(resent + 35_000.0);
     assert_eq!(s.closes, [socket]);
+}
+
+impl Session {
+    /// Answers reads and fires timers until `done` holds.
+    fn poll_until(&mut self, done: impl Fn(&Self) -> bool) {
+        for _ in 0..80 {
+            let requests = self.collect();
+            if requests.is_empty() {
+                if done(self) {
+                    return;
+                }
+                self.fire();
+            }
+            for r in requests {
+                self.answer(r);
+            }
+        }
+        panic!("condition never held");
+    }
+}
+
+#[test]
+fn position_row_without_a_symbol_keeps_stored_positions_while_valid_peers_commit() {
+    let mut s = Session::new("INTX", false);
+    s.products = Some(INTX.replace(
+        "}]}",
+        &format!(
+            "}},{}]}}",
+            INTX.trim_start_matches(r#"{"products":["#)
+                .trim_end_matches("]}")
+                .replace("BTC", "ETH")
+        ),
+    ));
+    let row = |symbol: &str, side: &str, size: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_{side}","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
+        )
+    };
+    let positions = |rows: &[String]| Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")));
+    s.positions = positions(&[
+        row("BTC-PERP-INTX", "LONG", "2"),
+        row("ETH-PERP-INTX", "LONG", "1"),
+    ]);
+    let mut s = s.ready();
+    let eth = s.e.store().position("ETH-PERP-INTX").unwrap().clone();
+    assert_eq!(eth.contracts, 1.0);
+    s.logs.clear();
+
+    s.positions = positions(&[
+        row("BTC-PERP-INTX", "LONG", "3"),
+        r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#.into(),
+    ]);
+    s.poll_until(|s| s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0);
+    assert_eq!(s.e.store().position("ETH-PERP-INTX"), Some(&eth));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped unmappable position without a symbol")
+    );
+    assert!(!s.logs.iter().any(|l| l.contains('7')));
+
+    s.positions = positions(&[row("BTC-PERP-INTX", "LONG", "3")]);
+    s.poll_until(|s| s.e.store().position("ETH-PERP-INTX").unwrap().contracts == 0.0);
+}
+
+#[test]
+fn order_row_without_an_id_keeps_stored_orders_while_valid_peers_commit() {
+    let mut s = Session::new("INTX", false).ready();
+    let orders = |rows: &[String]| {
+        Some(format!(
+            r#"{{"orders":[{}],"has_next":false}}"#,
+            rows.join(",")
+        ))
+    };
+    let a = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let b = user_order("order-b", "BTC-PERP-INTX", "OPEN", "0", "2");
+    s.orders = orders(&[a.clone(), b]);
+    s.poll_until(|s| s.e.store().order("order-b").is_some());
+    let stored = s.e.store().order("order-b").unwrap().clone();
+    s.logs.clear();
+
+    let moved = a.replace(r#""limit_price":"100""#, r#""limit_price":"101""#);
+    s.orders = orders(&[
+        moved.clone(),
+        r#"{"status":"OPEN","limit_price":"7"}"#.into(),
+    ]);
+    s.poll_until(|s| s.e.store().order("order-a").unwrap().price == 101.0);
+    assert_eq!(s.e.store().order("order-b"), Some(&stored));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped unmappable order without an id")
+    );
+
+    s.orders = orders(&[moved]);
+    s.poll_until(|s| s.e.store().order("order-b").is_none());
+    assert_eq!(s.e.store().orders().len(), 1);
+}
+
+#[test]
+fn one_invalid_spot_holding_keeps_its_stored_copy_while_valid_peers_commit() {
+    let holding = |asset: &str, total: &str, free: &str| {
+        format!(
+            r#"{{"asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
+        )
+    };
+    let breakdown = |rows: &[String]| {
+        Some(format!(
+            r#"{{"breakdown":{{"spot_positions":[{}]}}}}"#,
+            rows.join(",")
+        ))
+    };
+    let total = |s: &Session, asset: &str| {
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == asset)
+            .map(|c| c.balance.total)
+    };
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = breakdown(&[holding("BTC", "1.5", "1"), holding("ETH", "3", "3")]);
+    let mut s = s.ready();
+    assert_eq!(total(&s, "ETH"), Some(3.0));
+    s.logs.clear();
+
+    s.breakdown = breakdown(&[holding("BTC", "2", "1"), holding("ETH", "4", "9")]);
+    s.poll_until(|s| total(s, "BTC") == Some(2.0));
+    assert_eq!(total(&s, "ETH"), Some(3.0));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped invalid spot holding ETH")
+    );
+    assert!(!s.logs.iter().any(|l| l.contains('9')));
+
+    s.breakdown = breakdown(&[holding("BTC", "2", "1")]);
+    s.poll_until(|s| total(s, "ETH").is_none());
 }

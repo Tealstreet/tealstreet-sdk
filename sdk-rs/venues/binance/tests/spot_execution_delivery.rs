@@ -281,10 +281,8 @@ fn rejected_snapshots_cannot_seed_history_for_an_unseen_native_order() {
         }
         let rows = match failure {
             "syntax" => "[bad]".into(),
-            "row" => format!(
-                "{},{{\"symbol\":\"BTCUSDT\",\"orderId\":88,\"clientOrderId\":\"bad\",\"price\":\"NaN\",\"origQty\":\"7\",\"executedQty\":\"3\",\"type\":\"LIMIT\",\"side\":\"BUY\"}}]",
-                orders("3").trim_end_matches(']')
-            ),
+            // A rejected row seeds nothing for its own order; valid peers still commit.
+            "row" => orders("3").replace(r#""9000""#, r#""NaN""#),
             "terminal" => format!(
                 "{},{{\"symbol\":\"BTCUSDT\",\"orderId\":99,\"clientOrderId\":\"other\",\"price\":\"9000\",\"origQty\":\"7\",\"executedQty\":\"0\",\"type\":\"LIMIT\",\"side\":\"BUY\"}}]",
                 orders("3").trim_end_matches(']')
@@ -553,4 +551,70 @@ fn flat_and_nested_quantified_cancel_all_acknowledgements_preserve_trade_deliver
             OrderStatus::Canceled
         );
     }
+}
+
+#[test]
+fn one_unmappable_spot_order_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let order = |client: &str, native: u64, kind: &str, price: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","orderId":{native},"clientOrderId":"{client}","price":"{price}","origQty":"7","executedQty":"0","type":"{kind}","side":"BUY","timeInForce":"GTC"}}"#
+        )
+    };
+    let read = |h: &mut Harness, poke: u64, rows: &str| {
+        let client = format!("poke{poke}");
+        h.message(
+            "ws-api/v3",
+            &event((poke, "BTCUSDT", &client), "NEW", "NEW", "0", "0", None),
+        );
+        h.advance(10_000.0);
+        h.respond("/api/v3/openOrders", 200, rows);
+        // Acknowledge the stream heartbeat so the next read is not a resubscribe.
+        if let Some((_, sent)) = h.sent.iter().rev().find(|(_, s)| s.contains("heartbeat")) {
+            let id = sent.split('"').nth(3).unwrap().to_owned();
+            h.message(
+                "ws-api/v3",
+                &format!(r#"{{"id":"{id}","status":200,"result":[{{"subscriptionId":0}}]}}"#),
+            );
+        }
+    };
+    let mut h = ready(&format!(
+        "[{},{}]",
+        order("a", 10, "LIMIT", "9000"),
+        order("b", 11, "LIMIT", "9001")
+    ));
+    let stored = h.engine.store().order("b").unwrap().clone();
+    h.logs.clear();
+
+    read(
+        &mut h,
+        97,
+        &format!(
+            "[{},{}]",
+            order("a", 10, "LIMIT", "9002"),
+            order("b", 11, "FUTURE_KIND", "1")
+        ),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.order("a").unwrap().price, 9002.0);
+    assert_eq!(store.order("b"), Some(&stored));
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l == "Binance open order b has an unsupported type")
+    );
+    assert!(!h.logs.iter().any(|l| l.contains("FUTURE_KIND")));
+
+    read(
+        &mut h,
+        98,
+        &format!("[{}]", order("a", 10, "LIMIT", "9002")),
+    );
+    let ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["a"]);
 }

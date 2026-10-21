@@ -1,5 +1,6 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -35,6 +36,8 @@ pub struct Orders {
     proofs: HashMap<String, Editable>,
     fill_values: HashMap<String, f64>,
     skipped: HashMap<String, Option<String>>,
+    /// A row without an id: no current order may be removed by its absence.
+    unidentified: bool,
     invalid: bool,
     revision: u64,
     kind: ProductKind,
@@ -60,8 +63,9 @@ pub enum Request {
     Balance,
     SpotBalance,
     Positions {
-        rows: Vec<Position>,
-        skipped: HashSet<String>,
+        rows: SnapshotBuilder<String, Position>,
+        /// A rejected row had no symbol, so the INTX UPnL sum is unknown.
+        pnl_unknown: bool,
         invalid: bool,
         read_revision: u64,
     },
@@ -1076,8 +1080,8 @@ impl Coinbase {
                 self.account_read(
                     cx,
                     Request::Positions {
-                        rows: vec![],
-                        skipped: HashSet::new(),
+                        rows: SnapshotBuilder::default(),
+                        pnl_unknown: false,
                         invalid: false,
                         read_revision: self.account.revision,
                     },
@@ -1094,6 +1098,7 @@ impl Coinbase {
                     proofs: HashMap::new(),
                     fill_values: HashMap::new(),
                     skipped: HashMap::new(),
+                    unidentified: false,
                     invalid: false,
                     revision: self.account.revision,
                     kind,
@@ -1241,24 +1246,37 @@ impl Coinbase {
     ) {
         let result: Result<(), String> = (|| {
             match req {
-                Request::Positions { rows, skipped, .. } => {
-                    if rows.len() >= MAX_ROWS {
+                Request::Positions {
+                    rows, pnl_unknown, ..
+                } => {
+                    if rows.rows().len() >= MAX_ROWS {
                         return Err("Coinbase positions exceed limit".into());
                     }
                     let p = match self.map_position(cx, text) {
                         Ok(p) => p,
                         Err(error) => {
                             // The store keeps its copy of a position whose row cannot map.
-                            let symbol = self.position_symbol(text).ok_or_else(|| error.clone())?;
-                            cx.log(
-                                LogLevel::Warning,
-                                format!("Coinbase skipped unmappable position {symbol}: {error}"),
-                            );
-                            skipped.insert(symbol);
+                            let symbol = self.position_symbol(text);
+                            match &symbol {
+                                Some(symbol) => cx.log(
+                                    LogLevel::Warning,
+                                    format!(
+                                        "Coinbase skipped unmappable position {symbol}: {error}"
+                                    ),
+                                ),
+                                None => {
+                                    cx.log(
+                                        LogLevel::Warning,
+                                        "Coinbase skipped unmappable position without a symbol",
+                                    );
+                                    *pnl_unknown = true;
+                                }
+                            }
+                            rows.reject(symbol);
                             return Ok(());
                         }
                     };
-                    if rows.iter().any(|r| r.id == p.id) {
+                    if rows.rows().iter().any(|r| r.id == p.id) {
                         return Err("Coinbase duplicate position".into());
                     }
                     rows.push(p);
@@ -1270,8 +1288,14 @@ impl Coinbase {
                     let mapped = match map_order_detail(cx.store, text, cx.now) {
                         Ok(mapped) => mapped,
                         Err(error) => {
-                            let (id, symbol) =
-                                skipped_row(cx.store, text).ok_or_else(|| error.clone())?;
+                            let Some((id, symbol)) = skipped_row(cx.store, text) else {
+                                cx.log(
+                                    LogLevel::Warning,
+                                    "Coinbase skipped unmappable order without an id",
+                                );
+                                s.unidentified = true;
+                                return Ok(());
+                            };
                             cx.log(
                                 LogLevel::Warning,
                                 format!("Coinbase skipped unmappable order {id}: {error}"),
@@ -1710,16 +1734,30 @@ impl Coinbase {
                     if r.breakdown.spot_positions.len() > 1000 {
                         return Err("Coinbase spot balance limit".into());
                     }
-                    let mut coins = vec![];
+                    let mut coins = SnapshotBuilder::default();
                     let mut seen = HashSet::new();
                     for b in r.breakdown.spot_positions {
-                        if b.asset.is_empty()
-                            || !seen.insert(b.asset.clone())
-                            || b.total_balance_crypto.0 < 0.0
+                        if b.asset.is_empty() {
+                            cx.log(
+                                LogLevel::Warning,
+                                "Coinbase skipped spot holding without an asset",
+                            );
+                            coins.reject(None);
+                            continue;
+                        }
+                        if !seen.insert(b.asset.clone()) {
+                            return Err("Coinbase duplicate spot holding".into());
+                        }
+                        if b.total_balance_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 > b.total_balance_crypto.0
                         {
-                            return Err("Coinbase invalid spot holding".into());
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Coinbase skipped invalid spot holding {}", b.asset),
+                            );
+                            coins.reject(Some(b.asset));
+                            continue;
                         }
                         coins.push(CurrencyBalance {
                             currency: b.asset,
@@ -1731,14 +1769,16 @@ impl Coinbase {
                             },
                         });
                     }
-                    cx.store.set_currency_balances(coins);
+                    let current = cx.store.currency_balances().unwrap_or_default().to_vec();
+                    cx.store
+                        .set_currency_balances(coins.commit(current, |c| c.currency.clone()));
                     if self.account.kind == Some(ProductKind::Spot) {
                         cx.store.set_balance(Balance::default());
                     }
                 }
                 Request::Positions {
-                    mut rows,
-                    skipped,
+                    rows: builder,
+                    pnl_unknown,
                     invalid,
                     read_revision,
                 } => {
@@ -1746,17 +1786,6 @@ impl Coinbase {
                     if invalid {
                         return Err("Coinbase rejected partial position snapshot".into());
                     }
-                    rows.extend(
-                        cx.store
-                            .positions()
-                            .iter()
-                            .filter(|p| {
-                                skipped.contains(&p.symbol)
-                                    && !rows.iter().any(|r| r.symbol == p.symbol)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                    );
                     #[derive(serde::Deserialize)]
                     struct Meta {
                         positions: Vec<serde::de::IgnoredAny>,
@@ -1766,12 +1795,14 @@ impl Coinbase {
                     if !meta.positions.is_empty() {
                         return Err("Coinbase unstreamed positions".into());
                     }
+                    // A flat placeholder may only stand where the snapshot's silence is proof.
+                    let mut flat = vec![];
                     for m in cx.store.markets() {
                         if m.is_spot != Some(true)
-                            && !skipped.contains(&m.symbol)
-                            && !rows.iter().any(|p| p.symbol == m.symbol)
+                            && builder.allows_absence(&m.symbol)
+                            && !builder.rows().iter().any(|p| p.symbol == m.symbol)
                         {
-                            rows.push(Position {
+                            flat.push(Position {
                                 id: m.symbol.clone(),
                                 symbol: m.symbol.clone(),
                                 side: PositionSide::Long,
@@ -1789,6 +1820,9 @@ impl Coinbase {
                             })
                         }
                     }
+                    let mut rows =
+                        builder.commit(cx.store.positions().iter().cloned(), |p| p.symbol.clone());
+                    rows.extend(flat);
                     let upnl = rows.iter().map(|p| p.unrealized_pnl).sum::<f64>();
                     for p in &rows {
                         cx.store.update_setting(&p.symbol, |s| {
@@ -1801,7 +1835,10 @@ impl Coinbase {
                     self.account.position_generation =
                         self.account.position_generation.wrapping_add(1);
                     self.trading_positions(cx);
-                    if self.account.kind == Some(ProductKind::Intx) && cx.store.loaded().balance {
+                    if self.account.kind == Some(ProductKind::Intx)
+                        && cx.store.loaded().balance
+                        && !pnl_unknown
+                    {
                         let mut b = cx.store.balance().clone();
                         b.upnl = upnl;
                         cx.store.set_balance(b);
@@ -1899,7 +1936,8 @@ impl Coinbase {
             }
         }
         // A snapshot whose only rows lack any identity says nothing about other orders.
-        let unmapped = s.rows.is_empty() && s.skipped.values().any(Option::is_none);
+        let unmapped =
+            s.unidentified || s.rows.is_empty() && s.skipped.values().any(Option::is_none);
         for o in cx.store.orders() {
             if (unmapped || s.skipped.contains_key(&o.id)) && !s.rows.contains_key(&o.id) {
                 s.rows.insert(o.id.clone(), o.clone());
@@ -2175,6 +2213,7 @@ impl Coinbase {
                 proofs: s.proofs,
                 fill_values: s.fill_values,
                 skipped: s.skipped,
+                unidentified: false,
                 invalid: false,
                 revision,
                 kind: self.account.kind.unwrap_or(ProductKind::Spot),

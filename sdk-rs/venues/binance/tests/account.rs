@@ -1033,6 +1033,51 @@ fn an_unreadable_position_amount_keeps_that_leg_until_a_valid_snapshot_omits_it(
 }
 
 #[test]
+fn a_malformed_position_row_keeps_its_stored_leg_while_valid_peers_commit() {
+    let mut h = ready();
+    let row = |side: &str, amount: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+        )
+    };
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{}]", row("LONG", "0.010"), row("SHORT", "-0.020")),
+    );
+    let short = h.engine.store().position("BTCUSDT:short").unwrap().clone();
+    h.logs.clear();
+
+    let malformed = row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
+    advance_to_position_read(&mut h, &format!("[{},{malformed}]", row("LONG", "0.030")));
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.03);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance skipped malformed positionRisk row BTCUSDT:short")
+    );
+
+    // A row without an identity protects every stored leg but still lets peers commit.
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{{\"positionAmt\":\"1\"}}]", row("LONG", "0.040")),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.04);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance skipped malformed positionRisk row without an identity")
+    );
+
+    advance_to_position_read(&mut h, &format!("[{}]", row("LONG", "0.040")));
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.engine.store().positions().len(), 1);
+}
+
+#[test]
 fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapshot_omits_it() {
     let mut h = ready();
     let order = |id: u64, kind: &str, price: &str| {

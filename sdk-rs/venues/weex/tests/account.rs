@@ -1056,3 +1056,84 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
     assert!(e.store().order("702345678901234600").is_none());
     assert_eq!(e.store().orders().len(), 3);
 }
+/// Takes this cycle's warnings, then starts the next account cycle.
+fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (
+        logs(&drained, LogLevel::Warning),
+        e.drain_actions().collect(),
+    )
+}
+#[test]
+fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let stored = ["812345678901234500", "812345678901234500__tp"]
+        .map(|id| e.store().order(id).unwrap().clone());
+    let actions = next_cycle(&mut e);
+    let moved = NORMAL.replace(r#""price":"69500""#, r#""price":"69600""#);
+    let normal = moved.replace(
+        "}]",
+        r#"},{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#,
+    );
+    complete(&mut e, &actions, &normal, "[]");
+    let store = e.store();
+    assert_eq!(store.order("702345678901234600").unwrap().price, 69600.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped 1 malformed order row(s)".to_owned()),
+        "{warnings:?}"
+    );
+    assert!(!warnings.iter().any(|w| w.contains("12345")));
+
+    complete(&mut e, &actions, &moved, "[]");
+    let ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["702345678901234600"]);
+}
+#[test]
+fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit() {
+    let leg = |side: &str, size: &str| {
+        POSITIONS
+            .trim_matches(['[', ']'])
+            .replace(r#""side":"LONG""#, &format!(r#""side":"{side}""#))
+            .replace(
+                r#""separatedMode":"COMBINED""#,
+                r#""separatedMode":"SEPARATED""#,
+            )
+            .replace(r#""size":"0.02""#, &format!(r#""size":"{size}""#))
+    };
+    let (mut e, actions) = started(false);
+    let both = format!("[{},{}]", leg("LONG", "0.02"), leg("SHORT", "0.03"));
+    response(&mut e, request(&actions, "allPosition"), 200, &both);
+    complete_except_positions(&mut e, &actions);
+    let short = e.store().position("BTCUSDT:short").cloned().unwrap();
+    let (_, actions) = warnings_then_next_cycle(&mut e);
+
+    let partial = format!(r#"[{},{{"side":"LONG","size":"7"}}]"#, leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &partial);
+    complete_except_positions(&mut e, &actions);
+    assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 0.05);
+    assert_eq!(e.store().position("BTCUSDT:short"), Some(&short));
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped 1 malformed position row(s)".to_owned()),
+        "{warnings:?}"
+    );
+
+    let long = format!("[{}]", leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &long);
+    complete_except_positions(&mut e, &actions);
+    assert!(e.store().position("BTCUSDT:short").is_none());
+    assert_eq!(e.store().positions().len(), 1);
+}

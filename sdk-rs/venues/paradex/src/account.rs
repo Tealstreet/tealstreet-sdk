@@ -31,7 +31,6 @@ pub enum Request {
     Margins {
         revision: u64,
         rows: Vec<(String, f64)>,
-        invalid: bool,
         boot: bool,
     },
     Positions {
@@ -979,7 +978,6 @@ impl Account {
             Pending::Account(Request::Margins {
                 revision: self.margins_revision,
                 rows: vec![],
-                invalid: false,
                 boot,
             }),
         );
@@ -1065,12 +1063,21 @@ impl Account {
             matches!(request, Request::Positions { .. }),
         );
         match request {
-            Request::Margins { rows, invalid, .. } => {
+            Request::Margins { rows, .. } => {
                 match serde_json::from_str::<Margin<'_>>(item) {
                     Ok(row) if !row.market.is_empty() && row.leverage.0 > 0. => {
                         rows.push((row.market.into(), row.leverage.0))
                     }
-                    _ => *invalid = true,
+                    // Settings are upserts: a skipped row leaves its stored leverage as is.
+                    _ => cx.log(
+                        LogLevel::Warning,
+                        match row_market(item) {
+                            Some(market) => {
+                                format!("Paradex skipped malformed margin row {market}")
+                            }
+                            None => "Paradex skipped malformed margin row without a market".into(),
+                        },
+                    ),
                 }
             }
             Request::Positions { rows, coverage, .. } => {
@@ -1232,13 +1239,10 @@ impl Account {
             Request::Margins {
                 revision,
                 rows,
-                invalid,
                 boot,
             } => {
                 self.margins_busy = false;
-                if invalid {
-                    cx.log(LogLevel::Warning, "Invalid Paradex margin snapshot");
-                } else if revision == self.margins_revision {
+                if revision == self.margins_revision {
                     for (symbol, leverage) in rows {
                         cx.store.update_setting(&symbol, |s| {
                             s.leverage = leverage;
