@@ -684,3 +684,12 @@ partial success. See the crate's tests and `harness/gate.mjs` known fixes.
 Hedged `setLeverage` requires Long/Short and writes only native `LONG`/`SHORT`;
 one-way uses `BOTH`. Acknowledgements, REST snapshots and config events retain
 separate buy/sell leverage. A rejected write changes neither leg.
+
+Rust `updateSymbolMetadata` performs signed per-symbol leverage then margin-mode
+reads even for flat symbols. Both native rails and an exact CROSSED/ISOLATED
+margin mode commit together. A pending settings write, newer settings/config,
+authoritative nonempty position snapshot or newer query for the same symbol
+invalidates the result; callers can refresh again. Failed reads retain settings.
+ACCOUNT_UPDATE position rows decode independently: valid peers apply, malformed
+rows retain prior state and produce a coded warning plus bounded REST repair.
+Balance-only records remain balance records; source precedence stays P, B, p.

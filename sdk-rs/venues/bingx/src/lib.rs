@@ -657,6 +657,12 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -866,6 +872,9 @@ impl Venue for Bingx {
                 return;
             }
             Pending::Trade(request) => {
+                if request.changes_settings() {
+                    self.account.settings_changed();
+                }
                 self.account.bump_orders();
                 self.account.bump_positions();
                 let reconcile = (request.changes_settings() || request.reconciles_orders())
@@ -1133,7 +1142,23 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if matches!(
+            &command,
+            Command::SetLeverage { .. }
+                | Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+        ) {
+            self.account.settings_changed();
+        }
         match command {
+            Command::FetchLeverage { command, symbol } => {
+                if self.trading.settings_pending() {
+                    cx.done(command, Err("BingX settings write is still pending; refresh metadata after it completes".into()));
+                } else {
+                    self.account
+                        .fetch_metadata(cx, self.credentials.as_ref(), command, symbol);
+                }
+            }
             Command::Query { command, query } => {
                 self.history
                     .query(cx, self.credentials.as_ref(), command, query)

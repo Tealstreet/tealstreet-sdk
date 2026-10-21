@@ -32,6 +32,13 @@ const REPAIR_MS: f64 = 750.0;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
+    Metadata {
+        command: u32,
+        symbol: String,
+        revision: u64,
+        generation: u64,
+        leverage: Option<(f64, f64)>,
+    },
     ListenKey {
         epoch: u64,
     },
@@ -82,6 +89,8 @@ pub struct Account {
     repair: Option<TimerId>,
     orders_revision: u64,
     positions_revision: u64,
+    settings_revision: u64,
+    metadata_generations: HashMap<String, u64>,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -256,6 +265,43 @@ impl Account {
     }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
+    }
+    pub fn settings_changed(&mut self) {
+        self.settings_revision = self.settings_revision.wrapping_add(1);
+    }
+    pub fn fetch_metadata(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        command: u32,
+        symbol: String,
+    ) {
+        let Some(credentials) = credentials else {
+            cx.done(command, Err("BingX metadata requires credentials".into()));
+            return;
+        };
+        let Some(market) = cx.store.market(&symbol) else {
+            cx.done(command, Err("Unknown BingX market".into()));
+            return;
+        };
+        let native = market.id.clone();
+        let generation = self.metadata_generations.entry(symbol.clone()).or_default();
+        *generation = generation.wrapping_add(1);
+        Self::request(
+            cx,
+            credentials,
+            Method::Get,
+            "/openApi/swap/v2/trade/leverage",
+            Params::new().str("symbol", &native),
+            Request::Metadata {
+                command,
+                symbol,
+                revision: self.settings_revision,
+                generation: *generation,
+                leverage: None,
+            },
+            false,
+        );
     }
     /// Keeps earlier malformed markets the new catalogue still lacks; returns the
     /// malformed count before and after.
@@ -758,6 +804,77 @@ impl Account {
             return;
         }
         match request {
+            Request::Metadata {
+                command,
+                symbol,
+                revision,
+                generation,
+                leverage,
+            } => {
+                if revision != self.settings_revision
+                    || self.metadata_generations.get(&symbol) != Some(&generation)
+                {
+                    cx.done(
+                        command,
+                        Err("BingX settings changed during metadata read; refresh metadata".into()),
+                    );
+                    return;
+                }
+                if let Some((buy, sell)) = leverage {
+                    let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
+                    let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
+                        Ok("ISOLATED") => MarginType::Isolated,
+                        Ok("CROSSED") => MarginType::Cross,
+                        _ => {
+                            cx.done(command, Err("Invalid BingX margin metadata".into()));
+                            return;
+                        }
+                    };
+                    self.bump_positions();
+                    cx.store.update_setting(&symbol, |s| {
+                        s.leverage = buy;
+                        s.buy_leverage = Some(buy);
+                        s.sell_leverage = Some(sell);
+                        s.margin_type = Some(margin);
+                    });
+                    cx.done(
+                        command,
+                        Ok(format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#)),
+                    );
+                } else {
+                    let parsed = serde_json::from_str::<Data<Leverage>>(response.body);
+                    let Some(rails) = parsed
+                        .ok()
+                        .map(|p| p.data)
+                        .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
+                    else {
+                        cx.done(command, Err("Invalid BingX leverage metadata".into()));
+                        return;
+                    };
+                    let Some(market) = cx.store.market(&symbol) else {
+                        cx.done(
+                            command,
+                            Err("BingX market disappeared during metadata read".into()),
+                        );
+                        return;
+                    };
+                    Self::request(
+                        cx,
+                        credentials,
+                        Method::Get,
+                        "/openApi/swap/v2/trade/marginType",
+                        Params::new().str("symbol", &market.id),
+                        Request::Metadata {
+                            command,
+                            symbol,
+                            revision,
+                            generation,
+                            leverage: Some((rails.long_leverage, rails.short_leverage)),
+                        },
+                        false,
+                    );
+                }
+            }
             Request::ListenKey { .. } => {
                 self.key_in_flight = false;
                 let parsed = serde_json::from_str::<ListenKey<'_>>(response.body);
@@ -885,6 +1002,9 @@ impl Account {
                         .collect();
                     rows.extend(kept);
                     cx.store.set_positions(rows);
+                    if !settings.is_empty() {
+                        self.settings_changed();
+                    }
                     for (symbol, value) in settings {
                         cx.store.update_setting(&symbol, |s| *s = value);
                     }
@@ -970,6 +1090,7 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
+            Request::Metadata { command, .. } => cx.done(command, Err(error.into())),
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1007,24 +1128,51 @@ impl Account {
                     self.balance_revision = self.balance_revision.wrapping_add(1);
                     self.fetch_balance(cx, credentials);
                 }
-                let candidates = [
+                let mut selected = None;
+                for (index, rows) in [
                     &event.a.positions,
                     &event.a.balances,
                     &event.a.legacy_positions,
-                ];
-                if let Some(rows) = candidates
-                    .into_iter()
-                    .find(|rows| rows.iter().any(|p| !p.s.is_empty() && p.pa.is_some()))
+                ]
+                .into_iter()
+                .enumerate()
                 {
+                    let has_position = rows.iter().any(|raw| {
+                        serde_json::from_str::<PositionIntent<'_>>(raw.get())
+                            .ok()
+                            .is_some_and(|p| !p.s.is_empty())
+                    });
+                    // P/p are dedicated position arrays; malformed-only updates need repair too.
+                    if has_position || (!rows.is_empty() && index != 1) {
+                        selected = Some((rows, index == 1));
+                        break;
+                    }
+                }
+                if let Some((rows, balances)) = selected {
                     self.bump_positions();
-                    for p in rows {
-                        self.on_position(cx, p);
+                    for raw in rows {
+                        if balances
+                            && !serde_json::from_str::<PositionIntent<'_>>(raw.get())
+                                .ok()
+                                .is_some_and(|p| !p.s.is_empty())
+                        {
+                            continue;
+                        }
+                        match serde_json::from_str::<PositionUpdate<'_>>(raw.get()) {
+                            Ok(p) if !p.s.is_empty() && p.pa.is_some() => self.on_position(cx, &p),
+                            _ => cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                "Skipping malformed BingX position update; REST repair scheduled",
+                            ),
+                        }
                     }
                     self.schedule_repair(cx);
                 }
             }
             "ACCOUNT_CONFIG_UPDATE" => {
                 if let Some(config) = event.ac {
+                    self.settings_changed();
                     self.bump_positions();
                     let symbol = config.s.replace('-', "");
                     let hedged = cx.store.hedged();

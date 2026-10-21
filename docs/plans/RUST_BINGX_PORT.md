@@ -383,3 +383,29 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 4. Add regressions reproducing current failures, run focused BingX/Binance tests,
    fmt/strict Clippy/bans and relevant host/TS checks with CARGO_BUILD_JOBS=4.
    Independently review, fix and push for CI; merge only after overseer hold lifts.
+
+- Reproduced both failures before implementation: flat metadata produced no native
+  request and a malformed WS position row blocked its valid peer. Metadata now
+  signs the documented GET leverage/marginType endpoints, validates positive
+  native rails and exact mode, stages both, and returns rails only on a current
+  atomic commit. Dispatch/ACK/config/authoritative settings snapshots and newer
+  same-symbol queries fence stale results; pending writes block new reads.
+  Empty position snapshots do not invalidate flat metadata. A nonempty settings
+  snapshot conservatively invalidates the read even if values are unchanged.
+- Stream position arrays now retain raw rows until independent strict decoding;
+  source precedence P/B/p stays intact, balance-only B records stay quiet, and
+  malformed-only position packets still warn and schedule REST repair. Order,
+  execution and config envelopes keep their strict contracts.
+- Primary endpoint/field reference:
+  https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md
+  (Query Margin Mode and Query Leverage and Available Position).
+- Independent design/adversarial review found snapshot/pending-write races;
+  separate settings revision, per-symbol query generations and native pending
+  write tracking address them. Final read-only review found no blockers.
+  Risky partial-fill cancel-replace, unknown trigger-source and strict financial
+  history contracts are recorded rather than relaxed.
+- Final focused validation passes: BingX143 + Binance246 native tests, 14
+  BingX-enabled host tests, 13 TS capability/metadata tests, safe-cex typecheck,
+  touched ESLint including ignored tests, fmt, strict all-target BingX Clippy
+  and banned patterns. Additional regressions prove independent-symbol reads
+  both succeed and empty position polls do not invalidate flat metadata.

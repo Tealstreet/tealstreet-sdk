@@ -32,7 +32,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
         : 'eachOpenSymbol',
     leverageQuery: is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
       ? 'onRead'
-      : is('mexc', 'woo', 'kraken')
+      : is('mexc', 'woo', 'kraken', 'bingx')
         ? 'onMetadata'
         : 'settings',
     maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : is('breakoutprop') ? 'unsupported' : 'market',

@@ -1,6 +1,6 @@
 import type { EngineCapabilities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { Order } from '../../types';
+import type { ExchangeName, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +14,7 @@ import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 const running: RustEngineExchange[] = [];
 
 /** A venue whose bridge behaviour comes only from the record its engine reports. */
-const fixture = (capabilities: Partial<EngineCapabilities>) => {
+const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo') => {
   const commands: Array<Record<string, unknown>> = [];
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
@@ -24,7 +24,7 @@ const fixture = (capabilities: Partial<EngineCapabilities>) => {
     findOrderByClientOrderId: { found: false, definitive: true },
   };
   const engine: WasmEngineLike = {
-    capabilities: () => engineCapabilities('woo', capabilities),
+    capabilities: () => engineCapabilities(name, capabilities),
     start: started,
     command(json) {
       const command = JSON.parse(json);
@@ -56,7 +56,7 @@ const fixture = (capabilities: Partial<EngineCapabilities>) => {
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   installNativeStartupFrames(engine, store);
-  const exchange = new RustEngineExchange('woo', { key: 'key', secret: 'secret' }, store);
+  const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, store);
   running.push(exchange);
   return { exchange, commands, started };
 };
@@ -179,6 +179,16 @@ describe('Rust bridge routes from the engine capability record', () => {
     await settings.exchange.start();
     await expect(settings.exchange.fetchLeverageForSymbol('BTC')).resolves.toBeNull();
     expect(settings.commands.map((c) => c.op)).not.toContain('fetchLeverage');
+  });
+
+  it('reads BingX settings for a flat symbol during metadata refresh', async () => {
+    const { exchange, commands } = fixture({}, 'bingx');
+    await exchange.start();
+    await exchange.updateSymbolMetadata('BTCUSDT');
+    expect(commands.filter((c) => c.op === 'fetchLeverage')).toEqual([
+      expect.objectContaining({ symbol: 'BTCUSDT' }),
+    ]);
+    expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 20, sellLeverage: 50 });
   });
 
   it('takes maximum leverage from the reported source', async () => {

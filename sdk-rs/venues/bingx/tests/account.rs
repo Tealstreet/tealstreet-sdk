@@ -32,6 +32,7 @@ struct Harness {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     logs: Vec<String>,
+    done: Vec<(u32, Result<String, String>)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -55,6 +56,7 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             logs: Vec::new(),
+            done: Vec::new(),
         };
         h.engine.start(h.now);
         h.collect();
@@ -69,6 +71,12 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.done.push((command, result))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.message)))
+                }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
@@ -1433,4 +1441,312 @@ fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
             .iter()
             .any(|log| log.contains("owned position market unavailable"))
     );
+}
+
+#[test]
+fn metadata_reads_flat_symbol_leverage_and_margin_without_a_position() {
+    let mut h = Harness::ready();
+    h.engine.store_mut().set_positions(vec![]);
+    h.event(Event::Command(Command::FetchLeverage {
+        command: 901,
+        symbol: "BTCUSDT".into(),
+    }));
+    let leverage = h.take("/trade/leverage");
+    assert_eq!(leverage.method, Method::Get);
+    assert!(leverage.url.contains("symbol=BTC-USDT"));
+    assert!(leverage.url.contains("signature="));
+    h.reply(
+        leverage.id,
+        200,
+        r#"{"code":0,"data":{"longLeverage":12,"shortLeverage":"34"}}"#,
+    );
+    let margin = h.take("/trade/marginType");
+    assert_eq!(margin.method, Method::Get);
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: margin.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":{"marginType":"ISOLATED"}}"#,
+            },
+        },
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command:901, result:Ok(json) }) if serde_json::from_str::<serde_json::Value>(json).unwrap() == serde_json::json!({"buyLeverage":12,"sellLeverage":34}))));
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(12.0));
+    assert_eq!(setting.sell_leverage, Some(34.0));
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    assert!(h.engine.store().positions().is_empty());
+}
+
+#[test]
+fn malformed_position_update_keeps_valid_peers_and_requests_repair() {
+    let mut h = Harness::ready();
+    let skipped = h.engine.health().rows_skipped;
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","ps":"BOTH","pa":"broken","ep":"60000"},{"s":"BTC-USDT","ps":"BOTH","pa":"0.2","ep":"60010","up":"12"}]}}"#);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.2);
+    assert_eq!(h.engine.store().positions()[0].entry_price, 60010.0);
+    assert_eq!(h.engine.health().rows_skipped, skipped + 1);
+    let at = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at > h.now && *at < h.now + 750.0)
+        .map(|(_, at)| *at)
+        .min_by(f64::total_cmp)
+        .expect("repair timer");
+    h.fire_at(at);
+    assert!(h.requests.iter().any(|r| r.url.contains(POSITIONS)));
+}
+
+const RAILS: &str = r#"{"code":0,"data":{"longLeverage":12,"shortLeverage":34}}"#;
+const ISOLATED: &str = r#"{"code":0,"data":{"marginType":"ISOLATED"}}"#;
+fn metadata(h: &mut Harness, command: u32) -> HttpRequest {
+    h.event(Event::Command(Command::FetchLeverage {
+        command,
+        symbol: "BTCUSDT".into(),
+    }));
+    h.take("/trade/leverage")
+}
+fn margin_stage(h: &mut Harness, command: u32) -> HttpRequest {
+    let read = metadata(h, command);
+    h.reply(read.id, 200, RAILS);
+    h.take("/trade/marginType")
+}
+fn failed_metadata(h: &Harness, command: u32) {
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == command).count(), 1);
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == command && result.is_err())
+    );
+}
+#[test]
+fn metadata_failures_never_publish_partial_or_guessed_settings() {
+    for (status, body) in [
+        (503, "{}"),
+        (200, r#"{"code":0,"data":{"marginType":"UNKNOWN"}}"#),
+        (200, r#"{"code":0,"data":{}}"#),
+    ] {
+        let mut h = Harness::ready();
+        let old = h.engine.store().setting("BTCUSDT").unwrap();
+        let read = margin_stage(&mut h, 902);
+        assert_eq!(
+            h.engine.store().setting("BTCUSDT").unwrap().leverage,
+            old.leverage
+        );
+        h.reply(read.id, status, body);
+        failed_metadata(&h, 902);
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.buy_leverage, old.buy_leverage);
+        assert_eq!(setting.sell_leverage, old.sell_leverage);
+        assert_eq!(setting.margin_type, old.margin_type);
+    }
+    for body in [
+        r#"{"code":0,"data":{"longLeverage":0,"shortLeverage":34}}"#,
+        r#"{"code":0,"data":{"longLeverage":"NaN","shortLeverage":34}}"#,
+        r#"{"code":0,"data":{"longLeverage":12}}"#,
+    ] {
+        let mut h = Harness::ready();
+        let read = metadata(&mut h, 903);
+        h.reply(read.id, 200, body);
+        failed_metadata(&h, 903);
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("/trade/marginType"))
+        );
+    }
+    let mut h = Harness::ready();
+    let read = metadata(&mut h, 904);
+    h.event(Event::HttpFailed {
+        request: read.id,
+        error: "scripted failure",
+    });
+    failed_metadata(&h, 904);
+}
+#[test]
+fn newer_settings_writes_and_snapshots_fence_metadata() {
+    for change in 0..4 {
+        let mut h = Harness::ready();
+        let read = margin_stage(&mut h, 905);
+        match change {
+            0 => h.event(Event::Command(Command::SetLeverage {
+                command: 906,
+                symbol: "BTCUSDT".into(),
+                leverage: 25.0,
+                side: None,
+            })),
+            1 => h.event(Event::Command(Command::SetMarginType {
+                command: 906,
+                symbol: "BTCUSDT".into(),
+                isolated: true,
+            })),
+            2 => h.event(Event::Command(Command::SetPositionMode {
+                command: 906,
+                symbol: None,
+                hedged: true,
+            })),
+            _ => {
+                h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#);
+            }
+        }
+        h.reply(read.id, 200, ISOLATED);
+        failed_metadata(&h, 905);
+        assert_ne!(
+            h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+            Some(12.0)
+        );
+    }
+    let mut h = Harness::ready();
+    h.now += POLL_MS;
+    let poll = h.timers.iter().find(|(_, at)| *at == 3000.0).unwrap().0;
+    h.event(Event::TimerFired { timer: poll });
+    let snapshot = h.take(POSITIONS);
+    let read = margin_stage(&mut h, 907);
+    h.reply(snapshot.id, 200, POSITION);
+    h.reply(read.id, 200, ISOLATED);
+    failed_metadata(&h, 907);
+}
+#[test]
+fn metadata_cannot_race_pending_writes_or_a_newer_query() {
+    let mut h = Harness::ready();
+    h.event(Event::Command(Command::SetLeverage {
+        command: 908,
+        symbol: "BTCUSDT".into(),
+        leverage: 25.0,
+        side: None,
+    }));
+    let write = h.take("/trade/leverage");
+    h.event(Event::Command(Command::FetchLeverage {
+        command: 909,
+        symbol: "BTCUSDT".into(),
+    }));
+    failed_metadata(&h, 909);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/trade/leverage")));
+    h.reply(write.id, 200, r#"{"code":0,"data":{}}"#);
+    let first = margin_stage(&mut h, 910);
+    let second = margin_stage(&mut h, 911);
+    h.reply(second.id, 200, ISOLATED);
+    h.reply(first.id, 200, ISOLATED);
+    failed_metadata(&h, 910);
+    assert!(h.done.iter().any(|(id, r)| *id == 911 && r.is_ok()));
+}
+#[test]
+fn malformed_only_updates_repair_and_balance_only_updates_stay_quiet() {
+    for source in ["P", "p", "B"] {
+        let mut h = Harness::ready();
+        let skipped = h.engine.health().rows_skipped;
+        h.message(&format!(r#"{{"e":"ACCOUNT_UPDATE","a":{{"{source}":[{{"s":"BTC-USDT","ps":"BOTH","pa":"bad"}}]}}}}"#));
+        assert_eq!(h.engine.health().rows_skipped, skipped + 1);
+        assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+        assert!(
+            h.timers
+                .iter()
+                .any(|(_, at)| *at > h.now && *at < h.now + 750.0)
+        );
+    }
+    let mut h = Harness::ready();
+    let skipped = h.engine.health().rows_skipped;
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"B":[{"a":"USDT","wb":"bad"}]}}"#);
+    assert_eq!(h.engine.health().rows_skipped, skipped);
+    assert!(
+        !h.timers
+            .iter()
+            .any(|(_, at)| *at > h.now && *at < h.now + 750.0)
+    );
+}
+
+#[test]
+fn metadata_commit_fences_older_positions_and_signature_retries_keep_the_fence() {
+    let mut h = Harness::ready();
+    let poll = h.timers.iter().find(|(_, at)| *at == 3000.0).unwrap().0;
+    h.now = 3000.0;
+    h.event(Event::TimerFired { timer: poll });
+    let snapshot = h.take(POSITIONS);
+    let read = margin_stage(&mut h, 912);
+    h.reply(read.id, 200, ISOLATED);
+    assert!(h.done.iter().any(|(id, r)| *id == 912 && r.is_ok()));
+    h.reply(snapshot.id, 200, POSITION);
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(12.0)
+    );
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+
+    for stage in [0, 1] {
+        let mut h = Harness::ready();
+        let read = if stage == 0 {
+            metadata(&mut h, 913)
+        } else {
+            margin_stage(&mut h, 913)
+        };
+        h.reply(
+            read.id,
+            200,
+            r#"{"code":100001,"msg":"signature mismatch"}"#,
+        );
+        let path = if stage == 0 {
+            "/trade/leverage"
+        } else {
+            "/trade/marginType"
+        };
+        let retry = h.take(path);
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":50}}"#);
+        h.reply(retry.id, 200, if stage == 0 { RAILS } else { ISOLATED });
+        failed_metadata(&h, 913);
+        assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+        assert!(!h.requests.iter().any(|r| r.url.contains(path)));
+    }
+}
+#[test]
+fn position_source_precedence_and_mixed_balance_fallback_apply_once() {
+    let mut h = Harness::ready();
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","pa":"0.2","ep":60000,"ps":"BOTH"}],"B":[{"s":"BTC-USDT","pa":"0.3","ps":"BOTH"}],"p":[{"s":"BTC-USDT","pa":"0.4","ps":"BOTH"}]}}"#);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.2);
+    let skipped = h.engine.health().rows_skipped;
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"B":[{"a":"USDT","wb":"bad"},{"s":"BTC-USDT","pa":"0.5","ps":"BOTH"}]}}"#);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.5);
+    assert_eq!(h.engine.health().rows_skipped, skipped);
+}
+
+#[test]
+fn independent_symbol_metadata_and_empty_poll_do_not_invalidate_each_other() {
+    let mut h = Harness::ready();
+    let mut other = h.engine.store().market("BTCUSDT").unwrap().clone();
+    other.id = "ETH-USDT".into();
+    other.symbol = "ETHUSDT".into();
+    other.base = "ETH".into();
+    let first = h.engine.store().market("BTCUSDT").unwrap().clone();
+    h.engine.store_mut().set_markets(vec![first, other]);
+    let one = margin_stage(&mut h, 914);
+    h.event(Event::Command(Command::FetchLeverage {
+        command: 915,
+        symbol: "ETHUSDT".into(),
+    }));
+    let two = h.take("/trade/leverage");
+    assert!(two.url.contains("symbol=ETH-USDT"));
+    h.reply(two.id, 200, RAILS);
+    let two = h.take("/trade/marginType");
+    assert!(two.url.contains("symbol=ETH-USDT"));
+    h.reply(one.id, 200, ISOLATED);
+    h.reply(two.id, 200, ISOLATED);
+    for id in [914, 915] {
+        assert!(h.done.iter().any(|(c, r)| *c == id && r.is_ok()));
+    }
+
+    let mut h = Harness::ready();
+    let poll = h.timers.iter().find(|(_, at)| *at == 3000.0).unwrap().0;
+    h.now = 3000.0;
+    h.event(Event::TimerFired { timer: poll });
+    let snapshot = h.take(POSITIONS);
+    let read = margin_stage(&mut h, 916);
+    h.reply(snapshot.id, 200, r#"{"code":0,"data":[]}"#);
+    h.reply(read.id, 200, ISOLATED);
+    assert!(h.done.iter().any(|(id, r)| *id == 916 && r.is_ok()));
 }

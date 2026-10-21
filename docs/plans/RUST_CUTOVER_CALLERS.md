@@ -1343,3 +1343,13 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### BingX port-review metadata and stream recovery
+
+Rust BingX `updateSymbolMetadata(symbol)` now reads native leverage and margin
+mode for flat symbols and publishes them together. Existing metadata consumers
+keep their API and can retry a read invalidated by a concurrent settings change;
+`fetchLeverageForSymbol` continues reading the published cache. No extra polling
+or write retry is added. Malformed position-stream rows retain prior exposure
+while valid peers update, followed by authoritative REST repair. Hedge leverage
+and bracket trigger-source contracts remain as documented.
