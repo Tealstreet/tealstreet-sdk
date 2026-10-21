@@ -15,7 +15,8 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
+    Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -83,7 +84,7 @@ pub(crate) fn issue(
     params: Params,
     at: Option<ArrayAt>,
     pending: Pending,
-) {
+) -> RequestId {
     let (url, headers, body) = params
         .clone()
         .into_request(method, path, credentials, cx.now);
@@ -102,10 +103,10 @@ pub(crate) fn issue(
     match at {
         Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
         None => cx.request(method, url, headers, body, pending),
-    };
+    }
 }
 
-fn signature_rejected(body: &str) -> bool {
+pub(crate) fn signature_rejected(body: &str) -> bool {
     serde_json::from_str::<Rejection<'_>>(body).is_ok_and(|r| {
         r.code == Some(100_001)
             || r.msg
@@ -314,6 +315,10 @@ impl Bingx {
             params
                 .clone()
                 .into_request(method, path, self.credentials.as_ref(), cx.now);
+        let scope = match &inner {
+            Pending::Account(request) => account::auth_scope(request),
+            _ => None,
+        };
         let pending = Pending::Signed(Box::new(Signed {
             inner,
             method,
@@ -322,10 +327,13 @@ impl Bingx {
             at,
             resent: true,
         }));
-        match at {
+        let id = match at {
             Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
             None => cx.request(method, url, headers, body, pending),
         };
+        if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
+            account::tag_read(cx, id, method, credentials, scope);
+        }
     }
 
     /// The seed's ticker slot for a native symbol; after commit, the store's.
@@ -657,6 +665,15 @@ impl Venue for Bingx {
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

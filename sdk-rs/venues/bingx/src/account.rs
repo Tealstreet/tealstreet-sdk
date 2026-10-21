@@ -407,7 +407,8 @@ impl Account {
                 ArrayAt::EnvelopeField("data")
             }
         });
-        crate::issue(
+        let scope = auth_scope(&request);
+        let id = crate::issue(
             cx,
             Some(credentials),
             method,
@@ -416,6 +417,9 @@ impl Account {
             at,
             Pending::Account(request),
         );
+        if let Some(scope) = scope {
+            tag_read(cx, id, method, credentials, scope);
+        }
     }
 
     fn fetch_key(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -1665,6 +1669,78 @@ fn current_metadata(cx: &mut Cx<'_, Pending>, command: u32, symbol: &str, read: 
         command,
         format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
     );
+}
+
+/// Tag an account read with the credential slot that actually signs it.
+pub(crate) fn tag_read(
+    cx: &mut Cx<'_, Pending>,
+    id: safe_cex_engine::RequestId,
+    method: Method,
+    credentials: &Credentials,
+    scope: safe_cex_engine::AccountReadScope,
+) {
+    let slot = if method == Method::Get && credentials.read.is_some() {
+        safe_cex_engine::CredentialSlot::Secondary
+    } else {
+        safe_cex_engine::CredentialSlot::Primary
+    };
+    cx.tag_account_read(id, slot, scope);
+}
+
+pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match request {
+        Request::PositionMode { .. } => Settings,
+        Request::Balance { .. } => Balance,
+        Request::Positions { .. } => Positions,
+        Request::OpenOrders { .. } => Orders,
+        _ => return None,
+    })
+}
+impl crate::Bingx {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        // A first signature rejection is re-signed once; only the final answer counts.
+        let pending = match pending {
+            Pending::Signed(signed)
+                if !signed.resent && crate::signature_rejected(response.body) =>
+            {
+                return None;
+            }
+            Pending::Signed(signed) => &signed.inner,
+            pending => pending,
+        };
+        let Pending::Account(request) = pending else {
+            return None;
+        };
+        auth_scope(request)?;
+        #[derive(serde::Deserialize)]
+        struct Evidence {
+            code: i64,
+        }
+        let evidence: Evidence = serde_json::from_str(response.body).ok()?;
+        if matches!(evidence.code, 100001 | 100004 | 100413 | 100419) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || evidence.code != 0 {
+            return None;
+        }
+        let valid = match request {
+            Request::PositionMode { .. } => {
+                serde_json::from_str::<ModeEnvelope>(response.body).is_ok()
+            }
+            Request::Balance { failed, .. } => !failed,
+            // Undecodable rows are skipped individually; a signed code-0 page
+            // still proves the credential was accepted.
+            Request::Positions { .. } | Request::OpenOrders { .. } => true,
+            _ => false,
+        };
+        valid.then_some(Accepted)
+    }
 }
 
 /// Metadata reads do not submit a trading effect, including failed confirmations.
