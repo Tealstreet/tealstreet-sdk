@@ -44,7 +44,8 @@ compatibility. Independent binary fixtures exercise private and lifecycle
 consumer edge cases without credentials; they do not claim live trading or
 replace the per-venue private protocol tapes. A registered venue is not thereby
 ready for deletion: unsupported products, legacy helpers, runtime imports and
-consumer adoption remain explicit blockers.
+consumer adoption remain explicit blockers. Live evidence (public and private
+shadow, smoke, canary and rollback) is defined in [RUST_LIVE_GATE.md](RUST_LIVE_GATE.md).
 
 ## Progress
 

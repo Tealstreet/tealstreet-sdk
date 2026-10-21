@@ -244,6 +244,11 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
+    /// The catalogue is complete and no discovery read awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && self.discovery.idle()
+    }
+
     pub fn new(options: Options) -> Self {
         let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         if options.variant == Variant::UsdM && options.portfolio_margin {
@@ -1469,7 +1474,13 @@ impl Venue for BinanceFutures {
                             && matches!(&*m.margin_asset, "USDT" | "USDC")
                     }
                 {
-                    markets.push(market_from_wire(&m, self.options.variant));
+                    let market = market_from_wire(&m, self.options.variant);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Pending::Daily => {

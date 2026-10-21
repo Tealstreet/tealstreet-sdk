@@ -4,10 +4,13 @@ import type { WasmEngineLike } from './host.mjs';
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
   constructor(venue: string, optionsJson: string);
+  /** JSON-encoded health counters. */
+  health(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
+  accountSnapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;
   /** Optional text fast paths; Paradex-only builds use wsMessage for controls. */
