@@ -13,7 +13,7 @@ import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'nod
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
-import { deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
+import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
 import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
@@ -220,7 +220,7 @@ async function runRust() {
   const wallStart = performance.now();
 
   clockStart = performance.now();
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate)) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate), continuousReplayStartup(venue, isPrivate)) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -705,7 +705,7 @@ async function runTs() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   clockStart = performance.now();
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate)) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate), continuousReplayStartup(venue, isPrivate)) : undefined;
   clock?.install();
 
   const store = new DefaultStore();

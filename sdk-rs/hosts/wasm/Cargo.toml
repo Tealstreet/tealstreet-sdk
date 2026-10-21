@@ -8,30 +8,30 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-bitunix = ["dep:safe-cex-venue-bitunix", "text-ingress"]
+bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
-grvt = ["dep:safe-cex-venue-grvt", "text-ingress"]
-polymarket = ["dep:safe-cex-venue-polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
-coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
+grvt = ["safe-cex-venues/grvt", "text-ingress"]
+polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
+coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
 # Polling-only builds isolate the startup subscription decoder.
 cold-subscriptions = []
-breakoutprop = ["dep:safe-cex-venue-breakoutprop", "text-ingress", "cold-subscriptions"]
-paradex = ["dep:safe-cex-venue-paradex"]
-apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress", "safe-cex-engine/command-apexomni"]
-txflow = ["dep:safe-cex-venue-txflow", "text-ingress"]
-kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
-asterdex = ["dep:safe-cex-venue-asterdex", "text-ingress", "safe-cex-engine/command-asterdex"]
-lighter = ["dep:safe-cex-venue-lighter", "text-ingress"]
-woo = ["dep:safe-cex-venue-woo", "text-ingress"]
-bitrue = ["dep:safe-cex-venue-bitrue", "text-ingress"]
-bitget = ["dep:safe-cex-venue-bitget", "text-ingress"]
-backpack = ["dep:safe-cex-venue-backpack", "text-ingress"]
-blofin = ["dep:safe-cex-venue-blofin", "text-ingress"]
-mexc = ["dep:safe-cex-venue-mexc", "text-ingress"]
-bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
-weex = ["dep:safe-cex-venue-weex", "text-ingress"]
-phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
+breakoutprop = ["safe-cex-venues/breakoutprop", "text-ingress", "cold-subscriptions"]
+paradex = ["safe-cex-venues/paradex"]
+apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni"]
+txflow = ["safe-cex-venues/txflow", "text-ingress"]
+kraken = ["safe-cex-venues/kraken", "text-ingress"]
+asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex"]
+lighter = ["safe-cex-venues/lighter", "text-ingress"]
+woo = ["safe-cex-venues/woo", "text-ingress"]
+bitrue = ["safe-cex-venues/bitrue", "text-ingress"]
+bitget = ["safe-cex-venues/bitget", "text-ingress"]
+backpack = ["safe-cex-venues/backpack", "text-ingress"]
+blofin = ["safe-cex-venues/blofin", "text-ingress"]
+mexc = ["safe-cex-venues/mexc", "text-ingress"]
+bingx = ["safe-cex-venues/bingx", "text-ingress"]
+weex = ["safe-cex-venues/weex", "text-ingress"]
+phemex = ["safe-cex-venues/phemex", "text-ingress"]
 default = [
     "bitunix",
     "breakoutprop",
@@ -62,49 +62,22 @@ default = [
     "orderly",
     "phemex",
 ]
-cryptocom = ["dep:safe-cex-venue-cryptocom", "text-ingress"]
-binance = ["dep:safe-cex-venue-binance", "text-ingress"]
-kucoin = ["dep:safe-cex-venue-kucoin", "text-ingress"]
-kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
-bybit = ["dep:safe-cex-venue-bybit", "text-ingress"]
-hyperliquid = ["dep:safe-cex-venue-hyperliquid", "text-ingress"]
-okx = ["dep:safe-cex-venue-okx", "text-ingress"]
-orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
+cryptocom = ["safe-cex-venues/cryptocom", "text-ingress"]
+binance = ["safe-cex-venues/binance", "text-ingress"]
+kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
+kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
+bybit = ["safe-cex-venues/bybit", "text-ingress"]
+hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress"]
+okx = ["safe-cex-venues/okx", "text-ingress"]
+orderly = ["safe-cex-venues/orderly", "text-ingress"]
 
 [dependencies]
-safe-cex-venue-bitunix = { workspace = true, optional = true }
-safe-cex-venue-breakoutprop = { path = "../../venues/breakoutprop", optional = true }
-safe-cex-venue-grvt = { workspace = true, optional = true }
-safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true }
-safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
-safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
-safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
-safe-cex-venue-txflow = { path = "../../venues/txflow", optional = true }
-safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
-safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }
-safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }
-safe-cex-venue-woo = { workspace = true, optional = true }
-safe-cex-venue-bitrue = { workspace = true, optional = true }
-safe-cex-venue-bitget = { path = "../../venues/bitget", optional = true }
-safe-cex-venue-backpack = { path = "../../venues/backpack", optional = true }
-safe-cex-venue-blofin = { workspace = true, optional = true }
-safe-cex-venue-mexc = { workspace = true, optional = true }
-safe-cex-venue-bingx = { workspace = true, optional = true }
-safe-cex-venue-weex = { workspace = true, optional = true }
-safe-cex-venue-phemex = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
-safe-cex-venue-orderly = { path = "../../venues/orderly", optional = true }
-safe-cex-venue-cryptocom = { workspace = true, optional = true }
-safe-cex-venue-binance = { workspace = true, optional = true }
-safe-cex-venue-kucoin = { workspace = true, optional = true }
-safe-cex-venue-bybit = { workspace = true, optional = true }
-safe-cex-venue-hyperliquid = { workspace = true, optional = true }
-safe-cex-venue-okx = { workspace = true, optional = true }
+safe-cex-venues.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 js-sys.workspace = true
-zeroize.workspace = true
 
 [lints]
 workspace = true

@@ -81,6 +81,13 @@ fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     n.ok_or_else(|| serde::de::Error::custom("invalid public number"))
 }
 
+/// The identity of a contract row that failed to decode.
+#[derive(Deserialize)]
+pub struct ContractKey<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract<'a> {

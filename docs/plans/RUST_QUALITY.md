@@ -128,7 +128,8 @@ Medium:
 5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
    row keeps the store's copy. Structurally ends the one-bad-row-discards-the-
    snapshot class (~50 hand-rolled `invalid` flags).
-6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
+6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts
+   (crate and host wiring done; TS credential checks moving in batches);
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
