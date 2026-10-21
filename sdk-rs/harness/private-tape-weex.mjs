@@ -47,7 +47,7 @@ const finalAlgo = { ...algo, algoId: '702345678901234565', triggerPrice: '71000'
 // that command's writes are acknowledged, however a poll is timed.
 for (const [at, afterCommand, rows] of [[0, 0, [resting]], [2800, 1, [resting, placedBtc, placedEth]], [4100, 3, [resting, placedEth]], [5300, 5, [placedEth]], [7200, 6, [finalEth]]]) http('GET', '/capi/v3/openOrders?limit=100&page=0', rows, undefined, at, afterCommand);
 http('GET', '/capi/v3/account/position/allPosition', [finalPosition], undefined, 7200);
-for (const [at, afterCommand, rows] of [[0, 0, []], [3300, 2, [algo]], [4100, 3, []], [4500, 4, [protective]], [5300, 5, []], [6100, 6, [finalAlgo]]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at, afterCommand);
+for (const [at, afterCommand, rows] of [[0, 0, []], [3300, 2, [algo]], [4100, 3, []], [4500, 4, [protective]], [5300, 5, []], [6300, 6, [finalAlgo]]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at, afterCommand);
 ws(400, PUBLIC, { event: 'ping', time: '1773298805000' });
 ws(800, PRIVATE, { type: 'ping', time: '1773298805000' });
 ws(1200, PRIVATE, { e: 'positions', E: 1773298805123, d: [position] });
@@ -82,7 +82,7 @@ ws(5400, PRIVATE, { e: 'orders', E: streamTime, msgEvent: 'OrderUpdate', d: [
   orderEvent({ id: protective.algoId, side: 'SELL', type: 'TAKE_PROFIT_MARKET', size: '0.01', triggerPrice: '76000', status: 'CANCELED', reduceOnly: true }),
 ] });
 ws(5600, PRIVATE, { e: 'account', E: 1773298805123, d: [{ coin: 'USDT', amount: '4950' }] });
-command(6100, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'conditional', side: 'buy', amount: 0.001, triggerPrice: 71000 }] });
+command(6300, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'conditional', side: 'buy', amount: 0.001, triggerPrice: 71000 }] });
 write('POST', '/capi/v3/algoOrder', { orderId: finalAlgo.algoId, clientOrderId: '$clientAlgoId', success: true }, { symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG', type: 'STOP_MARKET', quantity: '0.001', triggerPrice: '71000' });
 ws(6400, PRIVATE, { e: 'orders', E: 1773298805123, d: [finalAlgo] });
 // A post-only buy above the ask is accepted and canceled at once; its terminal
