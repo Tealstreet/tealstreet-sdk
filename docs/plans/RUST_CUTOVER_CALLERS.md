@@ -180,6 +180,9 @@ egress and the limits of account-auth evidence are recorded below.
 The Bitunix private-snapshot batch checks #1641 (`f156e3dc0aa`), #1643
 (`163929bc0f5`) and #1645 (`6642e51468b`); ordinary position-read progress,
 retained row families and readiness/preflight limits use those actual merges.
+The Bitunix host-clock/login batch checks #1648 (`205ceb3fe8d`) and #1649
+(`fc5ab92248a`); synchronized SDK time and login diagnostic/retry ownership
+below use the merged source.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -268,6 +271,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1641 / `f156e3dc0` | Ordinary Bitunix position reads can publish financial snapshots despite intervening WS routing-ID notifications. Reads coalesce around an active serial with bounded lost-read replacement; accepted leverage/margin/mode writes still fence older snapshots, and command-owned preflight keeps full generation checks. Caller APIs and write retries stay unchanged. |
 | #1643 / `163929bc0` | Malformed typed Bitunix position rows retain the affected symbol's cached hedge legs, settings and REST routing IDs while valid peers advance. Unknown identity protects absence; valid explicit zero rows can still close positions. Partial mode conflicts discard atomically; partial reads cannot establish initial readiness or approve trading preflight. |
 | #1645 / `6642e5146` | Malformed Bitunix regular/TP-SL REST rows retain rejected native-ID families and routing metadata while admitted peers advance. Unknown identity holds absence within its endpoint scope; admitted parents can remove obsolete children. Only admitted groups advance execution baselines, and partial initial/preflight reads remain insufficient. Order/TP-SL WS scheduling and global generation fences are separate. |
+| #1648 / `205ceb3fe` | Bitunix advertises the existing `hostClock` capability, so the SDK supplies synchronized virtual-clock time before first engine start and later callbacks, including private login. REST/login timestamp units and signing formats stay unchanged; callers add no account field or constructor argument. |
+| #1649 / `fc5ab9224` | Missing/null/malformed private login results now emit sanitized Warn `stream.malformed`; explicit boolean false retains Error `auth.rejected`. The existing two-second same-socket login retry coalesces repeated failures; success/retirement cancel it and stale timers cannot sign on a replacement. Deactivation and trading retry policy stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2338,6 +2343,31 @@ previous snapshot rather than publishing a parsed prefix. Keep readiness and
 existing command-error handling; method signatures, quantities and worker error
 fields are unchanged. Order/TP-SL WS reconciliation scheduling and global
 generation fencing remain separate from these REST row-admission changes.
+
+### Bitunix host time and login controls (#1648/#1649)
+
+Bitunix now sets the existing `hostClock` capability true. The SDK adopts the
+record before startup and supplies `virtualClock.getCurrentTimeMs()` to the first
+engine start and later callbacks, including private socket open. REST requests
+and private login sign with that engine time using their existing timestamp units
+and signing formats. SDK callers add no account field or constructor argument.
+Venue server-time synchronization and signature-rejection recovery remain
+separate decisions; this change adds no trading write retry.
+
+Login controls are inspected before requiring `data`. An explicit typed boolean
+`data.result: false` retains the existing Error `auth.rejected`. Missing, null or
+malformed results now emit sanitized Warn `stream.malformed`, without echoing the
+response body or inventing a credential rejection. Code-aware diagnostic
+consumers must preserve that distinction rather than infer bad credentials from
+the malformed-control warning.
+
+Both unsuccessful forms retain the existing two-second login retry on the same
+private socket. Repeated controls coalesce without postponing its deadline. A
+typed success clears the pending retry; socket retirement cancels it, and a late
+timer from an old socket cannot send login on a replacement. Authentication
+deactivation policy, private first-pong compatibility and trading write retries
+are unchanged. This batch does not change the separate proxy-route or order
+reconciliation scheduling contracts.
 
 ## Required startup degradation visibility
 
