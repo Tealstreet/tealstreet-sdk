@@ -35,3 +35,13 @@ startup. Leave private reads, Bybit and post-loaded recovery unchanged.
 The coded events are recoverable reporting receipts and helper state; this
 change does not introduce persistent health-badge semantics or a terminal
 StartupFailed notice. Existing hosts already forward event codes and fields.
+
+Validation: 13 new tests (10 venue regressions and three engine policy tests).
+The initial three missing-degradation cases and empty OKX catalogue reproduced
+on landing; review's three malformed-preview cases reproduced before the fix.
+All 1,106 engine/OKX/BloFin/Bitget/Binance tests pass. The new typed
+on_stream_malformed callback preserves the default behavior for other venues
+and private reads while keeping raw previews out of public degradation.
+Independent final review found no blocker and retained every existing test and
+assertion. Capped retries, rate-limit minimums, duplicate timer suppression,
+independent read counters, latest venue cause and recovery are covered.

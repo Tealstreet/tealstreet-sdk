@@ -110,6 +110,134 @@ impl<K: Clone> Backoff<K> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscoveryRead {
+    Markets,
+    Tickers,
+}
+impl DiscoveryRead {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Markets => "markets",
+            Self::Tickers => "tickers",
+        }
+    }
+}
+
+/// Public startup remains recoverable throughout an outage. Six failed reads
+/// surface one degradation receipt; retries continue on the existing schedule.
+#[derive(Default)]
+pub struct PublicRetries {
+    retry: Backoff<DiscoveryRead>,
+    degraded: bool,
+    ready: bool,
+}
+impl PublicRetries {
+    pub fn failed_after<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        read: DiscoveryRead,
+        minimum_ms: f64,
+        error: crate::VenueError,
+    ) {
+        self.ready(cx);
+        let waiting = self.retry.waiting(&read);
+        self.retry.failed_after(cx, read, minimum_ms);
+        if waiting || self.ready || self.degraded {
+            return;
+        }
+        let attempts = self
+            .retry
+            .reads
+            .iter()
+            .find(|r| r.key == read)
+            .unwrap()
+            .attempts;
+        if attempts < 6 {
+            return;
+        }
+        self.degraded = true;
+        let mut fields = vec![
+            ("read", read.name().into()),
+            ("attempts", attempts.into()),
+            (
+                "kind",
+                error
+                    .kind
+                    .unwrap_or(crate::ErrorKind::VenueUnavailable)
+                    .as_str()
+                    .into(),
+            ),
+        ];
+        if let Some(code) = error.venue_code {
+            fields.push(("venueCode", code.into()));
+        }
+        if let Some(message) = error.venue_message {
+            fields.push(("venueMessage", message.into()));
+        }
+        if minimum_ms.is_finite() && minimum_ms > 0.0 {
+            fields.push(("retryAfterMs", minimum_ms.into()));
+        }
+        cx.event(
+            Level::Warn,
+            code::STARTUP_DEGRADED,
+            format!("Public startup delayed; still retrying: {}", error.message),
+            fields,
+        );
+    }
+
+    pub fn succeeded<P>(&mut self, cx: &mut Cx<'_, P>, read: DiscoveryRead) {
+        self.retry.succeeded(cx, &read);
+        self.ready(cx);
+    }
+
+    /// Call after committing usable data, including a partial catalogue.
+    /// Repair retries remain independent of public startup readiness.
+    pub fn ready<P>(&mut self, cx: &mut Cx<'_, P>) {
+        if !self.ready && cx.store.loaded().markets && cx.store.loaded().tickers {
+            self.ready = true;
+            if std::mem::take(&mut self.degraded) {
+                cx.notice(
+                    Level::Info,
+                    code::STARTUP_RECOVERED,
+                    "Public startup recovered",
+                );
+            }
+        }
+    }
+
+    pub fn on_timer(&mut self, timer: TimerId) -> Option<DiscoveryRead> {
+        self.retry.on_timer(timer)
+    }
+}
+
+/// Only parsed envelope error fields may enter diagnostics, never a raw body.
+pub fn public_response_error(
+    status: u16,
+    venue_code: Option<&str>,
+    venue_message: Option<&str>,
+) -> crate::VenueError {
+    let kind = if matches!(status, 418 | 429) {
+        crate::ErrorKind::RateLimited
+    } else {
+        crate::ErrorKind::VenueUnavailable
+    };
+    let message = match (venue_code, venue_message.filter(|s| !s.is_empty())) {
+        (Some(code), Some(message)) => format!("Public discovery {code}: {message}"),
+        (Some(code), None) => format!("Public discovery {code}"),
+        (None, _) if !(200..300).contains(&status) => format!("Public discovery HTTP {status}"),
+        _ => "Malformed public discovery response".into(),
+    };
+    let mut error = crate::VenueError::new(message).kind(kind);
+    if let Some(code) = venue_code {
+        error = error.venue_code(code);
+        if let Some(message) = venue_message {
+            error = error.venue_message(message);
+        }
+    }
+    error
+}
+
 /// Longest honoured `Retry-After`: real IP bans can exceed minutes, but an
 /// absurd or overflowing value must not stall an account indefinitely.
 pub const MAX_RATE_LIMIT_PAUSE_MS: f64 = 3_600_000.0;
