@@ -26,9 +26,9 @@ family_args() {
     # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
     build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
       --config 'profile.release.package.safe-cex-engine.opt-level=2')
-  elif [[ $family == bitrue ]]; then
-    # Spend standalone size headroom on decoder throughput; combined builds keep the size profile.
-    build_args+=(--config 'profile.release.package.safe-cex-venue-bitrue.opt-level=3')
+  elif [[ $family == kucoin ]]; then
+    # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
+    build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
   fi
 }
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
