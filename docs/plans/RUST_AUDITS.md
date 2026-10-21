@@ -661,7 +661,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   one unformattable lot rejects the batch before writes, where TS skips
   that order); ~~classic upnl; inverse reference price~~ (Rust is the
   same or better: live upnl on every account type, row mark before tickers);
-  demo key hint (open: needs a signed probe of the other host on a 10003);
+  ~~demo key hint~~ (bounded signed opposite-host probe on startup10003;
+  only confirmed built-in linear live/demo mismatches add guidance);
   ~~recvWindow~~ (decided: capped at 20 s); rate limiter (RISKY: send timing);
   Hyro early pings (unproven; check supervisor staleness first).
 - Confirm (TS bugs Rust fixed): spot amount precision, option books socket, spot
