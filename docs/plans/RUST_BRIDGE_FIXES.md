@@ -948,3 +948,107 @@ reviews PASS; strict scoped lint PASS with ignored tests explicitly included. In
 legs; no production assertion was weakened. Logs: /tmp/bridge-phase4a-nuke-*.log
 and /tmp/bridge-phase4a-sizing-policy-tests.log. This is current engine state,
 not proof of network resynchronization or a new unknown-outcome classifier.
+
+## Phase 6b authentication feedback foundation checkpoint
+
+Core captures signer slot and read scope on the existing in-flight continuation.
+The pure venue hook observes one complete final response before the unchanged
+callback. Missing expected streamed lists cannot report Accepted; invalid UTF-8,
+truncated streams, transport/signature failure and untagged requests emit no
+auth notice. Notices carry only bounded typed context through WASM and native
+account broadcasts. SDK counters isolate all ten slot/scope contexts, aggregate
+their maximum under Base's existing cap, and send the resolved polling policy.
+Throwing host consumers preserve the action tail and known command outcomes.
+NativeFrameSession strictly validates and orders optional account callbacks.
+
+194 core/native cases in nine nonempty suites PASS, including seven new core
+completion-path controls and an actual two-account/two-peer broadcast control.
+The standalone Backpack host encoder exact-JSON control PASS. Full host153,
+SDK102 and native-session129 controls PASS; package types, scoped strict lint,
+all-feature core/hosts/venue compilation, strict Clippy, fmt and bans PASS.
+Independent Rust and JS/TS correctness reviews PASS. Logs:
+/tmp/bridge-auth-{core-focused,foundation-*,host-all,sdk-*,session-*}.log.
+These checks prove the foundation, not the remaining venue classifiers or
+rebuilt-WASM native credential feedback.
+
+Coinbase and coinbasespot now drop any defined saved read-credential fields and
+their proxy from an immutable effective option copy, with one warning before
+host startup. Partial/empty saved read fields no longer fail the primary-only
+JWT signer; proxy-only settings without read fields retain their old policy.
+342 wrapper controls (six new functions including 12 partial/empty variants),
+types and strict lint PASS; independent review PASS. Logs:
+/tmp/bridge-coinbase-read-options-*.log. Caller/saved options remain unchanged.
+
+## Landing integration c44f22bd8e checkpoint
+
+Merged 61 landing commits, including leverage-side and wire/cancel repairs.
+Fourteen content conflicts were resolved by preserving both contracts, followed
+by an independent correctness review of all resolutions. setAllLeverage keeps
+native position selection and the selected side. Frame application retains
+recoverable section handling, native STATUS readiness, shared-feed validation,
+post-forward subscription replay and account-read freshness markers. FILLS
+revision one keeps raw symbol references, optional aligned financial columns,
+and legacy decoder support; no-financial bytes retain the landing layout.
+
+909 unique tests across seven native venue crates/67 nonempty suites PASS;
+133 core cases PASS. The wire33, focused account/recovery73, worker26 (complete
+JSON receipt), and earlier merged FrameApplier36 controls PASS. SDK types and
+strict scoped lint PASS. Native strict Clippy and remaining final acceptance
+checks are separately recorded; no full-SDK or rebuilt-WASM pass is claimed here.
+Initial checks exposed three unhandled fixture notice matches, four WIP hook
+visibility mistakes, financial offsets after the new symbol tail, one pending
+catalog market-only fixture, native readiness fixture setup and the contained
+snapshot-trap return expectation. Bounded fixes preserve all business assertions
+and add explicit symbol/padding/readiness/terminal-state controls. An obsolete
+broad SDK run was stopped after its setup failures; targeted complete receipts
+replace it for this integration checkpoint, not final acceptance.
+
+Logs: /tmp/bridge-c44-native7-complete.log plus
+/tmp/bridge-landing-c44-weex-complete.log; /tmp/bridge-landing-c44-core-tests.log;
+/tmp/bridge-landing-wire-merge-final.log; /tmp/bridge-landing-c44-recovery-verified.log;
+/tmp/bridge-landing-worker-ack-results.json. Four initial auth hooks were preserved
+as explicit WIP before merge; the full classifier migration remains unproved.
+
+## Phase 4d SDK identity dispatch checkpoint
+
+All 48 registered aliases have explicit identity behavior: 33 supported and
+15 unsupported. SDK dispatch exposes the native identity continuations without
+starting public streams or waiting for unrelated reconciliation; native code
+continues to own signing, sessions, typed ID parsing and namespacing. Existing
+ApeX/KuCoin Spot aliases, Coinbase portfolio IDs and Orderly configured IDs stay
+intact. Kraken Spot's balance command is never treated as identity.
+
+128 focused tests across six files PASS (61 new controls, complete JSON receipt
+/tmp/bridge-identity-sdk-final.json), including unchanged existing query paths.
+SDK types and strict scoped lint PASS. Independent correctness review PASS.
+See RUST_IDENTITY_ROUTING.md for exact alias inventory and receipts. This is
+real EngineHost/fake-ABI proof; combined native-WASM identity acceptance remains
+part of the final artifact gates.
+
+## User-requested wind-down checkpoint
+
+The overseer requested a stop at the next clean point, without starting queued
+follow-ups. No bridge PR exists, and the remaining resync/leverage/credential
+acceptance work is substantial. Preserve/push feat/rust-bridge-fixes rather than
+open a misleading ready PR. This checkpoint is explicit WIP, not a completed
+phase or a final all-gates claim.
+
+Slice A preserves BingX/MEXC/WEEX dispatch tags and typed observers with six new
+controls: 288 native cases across 22 nonempty suites plus three empty doctests
+PASS; strict Clippy/fmt/bans PASS. Independent classifier review and broader
+matrix are still needed. The remaining ten slice-A crates are unimplemented.
+See RUST_AUTH_RESULTS_SLICE_A.md for exact anchors and limits.
+
+Slice B preserves provisional observers/tags in eleven classified crates,
+including Kraken Spot; unsigned Hyperliquid/TxFlow remain inert. Cargo check and
+13-crate all-target/all-feature strict Clippy PASS; scoped formatting and diff
+checks PASS. No new auth venue tests, independent implementation review or
+combined-WASM proof exist. Documented acceptance tightening is required before
+shipping. See RUST_AUTH_RESULTS_SLICE_B.md; compile success is not correctness
+acceptance.
+
+SDK identity routing and earlier reviewed components remain committed. Explicit
+native network resync, MEXC/BingX/WEEX fresh leverage queries, rebuilt-artifact
+proof, final full gates, PR reviews, green CI, merge and fresh branch remain
+unfinished. Queued follow-ups c6nf4w-2/-3/-4 were not started. The requested full
+handoff is /Users/sam/cs/tealstreet-sdk/.aimux/plans/handoff-codex-c6nf4w.md.
