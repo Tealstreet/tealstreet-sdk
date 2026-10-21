@@ -248,3 +248,9 @@ Require focused harness tests, fresh public/private mandatory verification,
 independent reviews and five identical current-head CI pairs. Merge only after
 full green CI, a fresh separate GRVT dependency guard and an audited merge
 receipt, then report and move to Phemex with its startup rewind preserved.
+
+Five focused pairs with a matching CI engine reproduced identical complete
+nonmetric outputs. At checkpoint 7 both implementations expose the same two
+order rows; remove only the five old declarations for that checkpoint's row
+count, row identity, symbol and client ID. Keep the other 33 exact private
+keys, strict FAIL, unchanged fixture and existing signature/session validation.
