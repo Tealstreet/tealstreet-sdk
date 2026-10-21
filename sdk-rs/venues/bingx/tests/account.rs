@@ -2,8 +2,8 @@
 //! swap-ws-account and swap-trade. No credentials or live writes are used.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode, PositionSide};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, RequestId, Response, SocketId,
-    TimerId, wire,
+    Action, Command, Engine, Event, HttpRequest, Level, Method, Notice, RequestId, Response,
+    SocketId, TimerId, wire,
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
@@ -32,6 +32,7 @@ struct Harness {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     logs: Vec<String>,
+    errors: Vec<String>,
     done: Vec<(u32, Result<String, String>)>,
     command_errors: Vec<(u32, String)>,
 }
@@ -57,6 +58,7 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             logs: Vec::new(),
+            errors: Vec::new(),
             done: Vec::new(),
             command_errors: Vec::new(),
         };
@@ -73,6 +75,12 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::Event(event)) => {
+                    if event.level == Level::Error {
+                        self.errors.push(event.message.clone());
+                    }
+                    self.logs.push(event.message);
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, Ok(result)))
                 }
@@ -82,7 +90,6 @@ impl Harness {
                 Action::Notice(Notice::CommandError { command, message }) => {
                     self.command_errors.push((command, message))
                 }
-                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
             }
         }
@@ -1136,7 +1143,7 @@ fn one_malformed_position_row_is_skipped_and_never_closes_its_known_position() {
     assert!(
         h.logs
             .iter()
-            .any(|l| l.contains("skipped 1 malformed position row(s): ETHUSDT"))
+            .any(|l| l.contains("skipped malformed position row ETHUSDT"))
     );
     for snapshot in [
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.3","leverage":0}]}"#,
@@ -1160,9 +1167,11 @@ fn one_malformed_order_row_is_skipped_and_keeps_only_the_order_it_names() {
     );
     assert!(h.engine.store().order(ORDER_ID).is_some());
     assert_eq!(h.engine.store().order("77").unwrap().price, 61000.0);
-    assert!(h.logs.iter().any(|l| l.contains(&format!(
-        "skipped 1 malformed open order row(s): {ORDER_ID}"
-    ))));
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains(&format!("skipped malformed open order row {ORDER_ID}")))
+    );
     h.fire_at(28000.0);
     h.fire_at(30000.0);
     h.respond(
@@ -1287,25 +1296,104 @@ fn flat_rows_close_even_with_zero_leverage_and_hedge_skips_keep_only_their_side(
 }
 
 #[test]
-fn a_persistent_unidentifiable_order_row_keeps_known_orders_and_escalates_to_error() {
+fn a_persistent_unidentifiable_order_row_keeps_known_orders_and_logs_once() {
     let mut h = Harness::ready();
     let mut at = 26000.0;
     h.poll_late(at);
-    for read in 1..=3 {
+    let unidentified = "skipped malformed open order row without an id";
+    for _ in 0..3 {
         h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[42]}}"#);
         assert!(h.engine.store().order(ORDER_ID).is_some());
-        let escalated = h
-            .logs
-            .iter()
-            .any(|l| l.contains("3 consecutive snapshots is keeping every known open order"));
-        assert_eq!(escalated, read == 3, "read {read}");
         for _ in 0..4 {
             at += 2000.0;
             h.fire_at(at);
         }
     }
+    let count = |logs: &[String]| logs.iter().filter(|l| l.contains(unidentified)).count();
+    assert_eq!(count(&h.logs), 1, "{:?}", h.logs);
+    assert!(h.errors.is_empty(), "{:?}", h.errors);
+    // A clean snapshot re-arms it; with nothing stored to keep it is an error.
     h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[]}}"#);
     assert!(h.engine.store().order(ORDER_ID).is_none());
+    for _ in 0..4 {
+        at += 2000.0;
+        h.fire_at(at);
+    }
+    h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[42]}}"#);
+    assert_eq!(count(&h.logs), 2, "{:?}", h.logs);
+    assert_eq!(count(&h.errors), 1, "{:?}", h.errors);
+}
+
+#[test]
+fn a_rejected_position_row_logs_once_until_it_maps_or_a_snapshot_is_clean() {
+    let mut h = Harness::ready();
+    let bad_btc = r#"{"symbol":"BTC-USDT"}"#;
+    let bad_eth = r#"{"symbol":"ETH-USDT"}"#;
+    let good_btc = r#"{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"BOTH","avgPrice":"60000","unrealizedProfit":"10","leverage":20,"isolated":false,"liquidationPrice":50000}"#;
+    let mut at = 1000.0;
+    let mut poll = |h: &mut Harness, rows: &[&str]| {
+        at += 2000.0;
+        h.fire_at(at);
+        h.respond(
+            POSITIONS,
+            200,
+            &format!(r#"{{"code":0,"data":[{}]}}"#, rows.join(",")),
+        );
+    };
+    let count = |logs: &[String], id: &str| {
+        let line = format!("skipped malformed position row {id}");
+        logs.iter().filter(|l| l.contains(&line)).count()
+    };
+    poll(&mut h, &[bad_btc, bad_eth]);
+    poll(&mut h, &[bad_btc, bad_eth]);
+    assert_eq!(count(&h.logs, "BTCUSDT"), 1, "{:?}", h.logs);
+    assert_eq!(count(&h.logs, "ETHUSDT"), 1, "{:?}", h.logs);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    // The stored BTC copy is kept, so only the ETH row is an error.
+    assert_eq!(count(&h.errors, "BTCUSDT"), 0, "{:?}", h.errors);
+    assert_eq!(count(&h.errors, "ETHUSDT"), 1, "{:?}", h.errors);
+
+    // BTC maps again, re-arming only its own log.
+    poll(&mut h, &[good_btc, bad_eth]);
+    poll(&mut h, &[bad_btc, bad_eth]);
+    assert_eq!(count(&h.logs, "BTCUSDT"), 2, "{:?}", h.logs);
+    assert_eq!(count(&h.logs, "ETHUSDT"), 1, "{:?}", h.logs);
+
+    // A clean snapshot re-arms every position log.
+    poll(&mut h, &[good_btc]);
+    poll(&mut h, &[good_btc, bad_eth]);
+    assert_eq!(count(&h.logs, "ETHUSDT"), 2, "{:?}", h.logs);
+    assert_eq!(count(&h.errors, "ETHUSDT"), 2, "{:?}", h.errors);
+    assert_eq!(count(&h.errors, "BTCUSDT"), 0, "{:?}", h.errors);
+
+    // BTC drops out while ETH stays rejected; its malformed return has no copy left.
+    poll(&mut h, &[bad_btc, bad_eth]);
+    poll(&mut h, &[bad_eth]);
+    assert!(h.engine.store().positions().is_empty());
+    poll(&mut h, &[bad_btc, bad_eth]);
+    assert_eq!(count(&h.errors, "BTCUSDT"), 1, "{:?}", h.errors);
+}
+
+#[test]
+fn a_skip_warned_on_a_stale_snapshot_still_errors_once_its_copy_is_gone() {
+    let mut h = Harness::ready();
+    let bad_btc = r#"{"code":0,"data":[{"symbol":"BTC-USDT"}]}"#;
+    h.fire_at(3000.0);
+    let positions = h.take(POSITIONS);
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","pa":"0","ep":"60000","up":"0","ps":"BOTH","mt":"cross"}]}}"#);
+    h.reply(positions.id, 200, bad_btc);
+    let skipped = |logs: &[String]| {
+        logs.iter()
+            .filter(|l| l.contains("skipped malformed position row BTCUSDT"))
+            .count()
+    };
+    assert_eq!(skipped(&h.logs), 1, "{:?}", h.logs);
+    assert_eq!(skipped(&h.errors), 0, "{:?}", h.errors);
+    // The repair read commits with no BTC copy left.
+    h.fire_recovery();
+    h.respond(POSITIONS, 200, bad_btc);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(skipped(&h.errors), 1, "{:?}", h.errors);
 }
 
 #[test]
