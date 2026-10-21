@@ -145,6 +145,51 @@ pub enum AuthOutcome {
     Rejected,
 }
 
+/// Auth evidence for one scope served by several endpoints (orders as regular,
+/// plan and stop reads). A rejection reports at once; an acceptance reports only
+/// once no endpoint of the scope still rejects, so a sibling's success cannot
+/// reset the streak of a key refused on one endpoint.
+#[derive(Debug, Default)]
+pub struct MergedScopeAuth(std::cell::Cell<u32>);
+
+impl MergedScopeAuth {
+    /// `endpoint` is the endpoint's index within the scope (below 32).
+    pub fn report(&self, endpoint: u32, outcome: Option<AuthOutcome>) -> Option<AuthOutcome> {
+        let bit = 1 << endpoint;
+        match outcome? {
+            AuthOutcome::Rejected => {
+                self.0.set(self.0.get() | bit);
+                Some(AuthOutcome::Rejected)
+            }
+            AuthOutcome::Accepted => {
+                self.0.set(self.0.get() & !bit);
+                (self.0.get() == 0).then_some(AuthOutcome::Accepted)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod merged_scope_auth_tests {
+    use super::{AuthOutcome::*, MergedScopeAuth};
+
+    #[test]
+    fn a_rejected_endpoint_holds_back_its_siblings_acceptance_until_it_recovers() {
+        let auth = MergedScopeAuth::default();
+        assert_eq!(auth.report(0, Some(Accepted)), Some(Accepted));
+        assert_eq!(auth.report(1, Some(Rejected)), Some(Rejected));
+        // Every cycle: regular accepted, plan rejected. The streak can only grow.
+        for _ in 0..3 {
+            assert_eq!(auth.report(0, Some(Accepted)), None);
+            assert_eq!(auth.report(2, None), None);
+            assert_eq!(auth.report(1, Some(Rejected)), Some(Rejected));
+        }
+        assert_eq!(auth.report(0, Some(Accepted)), None);
+        assert_eq!(auth.report(1, Some(Accepted)), Some(Accepted));
+        assert_eq!(auth.report(0, Some(Accepted)), Some(Accepted));
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive evidence from a credential-bearing private account read.

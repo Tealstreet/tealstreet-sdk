@@ -28,7 +28,7 @@ pub use capabilities::{
 };
 pub use credentials::ReadCredentials;
 pub use engine::{
-    AccountReadScope, Action, AuthOutcome, Command, CommandId, CredentialSlot, Cx, Engine, Event,
+    AccountReadScope, Action, AuthOutcome, Command, MergedScopeAuth, CommandId, CredentialSlot, Cx, Engine, Event,
     Fill, FillFinancials, HttpRequest, LogLevel, Method, Notice, PayloadSignRequest,
     PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
     SocketContext, SocketId, TimerId, Venue, VenueAction, unsupported_venue_action,
