@@ -8,6 +8,7 @@ import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/ru
 import { ExchangeHealthMonitor } from '../../health/ExchangeHealthMonitor';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
@@ -17,6 +18,7 @@ const running: RustEngineExchange[] = [];
 /** A venue whose bridge behaviour comes only from the record its engine reports. */
 const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo', native?: () => Partial<StoreData>) => {
   const commands: Array<Record<string, unknown>> = [];
+  const commandTimes: number[] = [];
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
   const replies: Record<string, unknown> = {
@@ -36,10 +38,11 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name, capabilities),
     start: started,
-    command(json) {
+    command(json, now) {
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols') return '[]';
       commands.push(command);
+      commandTimes.push(now);
       return JSON.stringify([
         { op: 'done', command: command.command, result: JSON.stringify(replies[command.op] ?? []) },
       ]);
@@ -68,7 +71,7 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
   installNativeStartupFrames(engine, store, native);
   const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, store);
   running.push(exchange);
-  return { exchange, commands, started, engine };
+  return { exchange, commands, commandTimes, started, engine };
 };
 
 const order = (id: string, symbol: string): Order =>
@@ -148,6 +151,62 @@ describe('Rust bridge routes from the engine capability record', () => {
     await startupFailure;
     expect(commands.some((command) => command.op === 'placeOrders')).toBe(false);
     expect(errors).toHaveBeenCalledOnce();
+  });
+
+  it('validates scheduleCancel before JSON and preserves arm/clear through the native command', async () => {
+    const now = 1_800_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+    const { exchange, commands, commandTimes } = fixture({}, 'hyperliquid');
+    await exchange.start();
+    for (const invalid of [NaN, Infinity, -Infinity, now + 4_999, now + 5_000.5, Number.MAX_SAFE_INTEGER + 1, '1800000030000', false]) {
+      await expect(exchange.scheduleCancel(invalid as number)).rejects.toThrow(/safe integer|5 seconds/);
+    }
+    expect(commands.some((c) => c.op === 'scheduleCancel')).toBe(false);
+    await expect(exchange.scheduleCancel(now + 5_000)).resolves.toBeUndefined();
+    await expect(exchange.scheduleCancel(null)).resolves.toBeUndefined();
+    await expect(exchange.scheduleCancel()).resolves.toBeUndefined();
+    expect(commands.flatMap((c, i) => c.op === 'scheduleCancel' ? [commandTimes[i]] : [])).toEqual([now, now, now]);
+    expect(commands.filter((c) => c.op === 'scheduleCancel')).toEqual([
+      expect.objectContaining({ time: now + 5_000 }),
+      expect.not.objectContaining({ time: expect.anything() }),
+      expect.not.objectContaining({ time: expect.anything() }),
+    ]);
+  });
+
+  it('propagates native schedule write uncertainty without retry or clear', async () => {
+    const { exchange, commands, engine } = fixture({}, 'hyperliquid');
+    await exchange.start();
+    engine.command = (json) => {
+      const c = JSON.parse(json);
+      commands.push(c);
+      return JSON.stringify([{ op: 'done', command: c.command, error: 'lost schedule reply', detail: { message: 'lost schedule reply', kind: 'network', outcome: 'unknown' } }]);
+    };
+    await expect(exchange.scheduleCancel()).rejects.toMatchObject({ kind: 'network', outcome: 'unknown' });
+    expect(commands.filter((c) => c.op === 'scheduleCancel')).toHaveLength(1);
+  });
+
+  it('uses native scheduleCancel capability instead of venue-name inference', async () => {
+    const { exchange, commands } = fixture({ scheduleCancel: false }, 'hyperliquid');
+    await exchange.start();
+    await expect(exchange.scheduleCancel()).rejects.toThrow('unavailable');
+    expect(commands.some((c) => c.op === 'scheduleCancel')).toBe(false);
+  });
+
+  it('forwards scheduleCancel to the worker without creating a main-thread engine', async () => {
+    const now = 1_800_000_000_000;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
+    const { exchange, commands, started } = fixture({}, 'hyperliquid');
+    const worker = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: undefined });
+    });
+    exchange.on('callMethod', worker);
+    await expect(exchange.scheduleCancel(NaN)).rejects.toThrow('safe integer');
+    expect(worker).not.toHaveBeenCalled();
+    await expect(exchange.scheduleCancel(now + 30_000)).resolves.toBeUndefined();
+    expect(worker).toHaveBeenCalledOnce();
+    expect(worker.mock.calls[0][0]).toMatchObject({ method: 'scheduleCancel', args: [now + 30_000] });
+    expect(started).not.toHaveBeenCalled();
+    expect(commands).toEqual([]);
   });
 
   it('routes Backpack REST books from the native capability without subscribing', async () => {

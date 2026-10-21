@@ -1408,3 +1408,63 @@ fn perp_zero_bracket_prices_disable_only_the_requested_child() {
         }
     }
 }
+
+#[test]
+fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutation() {
+    let (mut e, _) = ready("disabled");
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 71,
+            symbol: "BTC-PERP".into(),
+            leverage: 5.0,
+            side: None,
+        }),
+    );
+    let first = write(&mut e);
+    let nonce = body(&first)["nonce"].as_u64().unwrap();
+    let schedule =
+        safe_cex_engine::command::decode_command(r#"{"op":"scheduleCancel","command":72}"#)
+            .unwrap();
+    e.handle(2001.0, Event::Command(schedule));
+    assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    reply(
+        &mut e,
+        &first,
+        200,
+        r#"{"status":"ok","response":{"type":"default"}}"#,
+    );
+    let timer = e
+        .drain_plain()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2500.0, Event::TimerFired { timer });
+    let control = write(&mut e);
+    let control_body = body(&control);
+    assert_eq!(
+        control_body["action"],
+        serde_json::json!({"type":"scheduleCancel"})
+    );
+    assert!(control_body["nonce"].as_u64().unwrap() > nonce);
+    let positions = serde_json::to_value(e.store().positions()).unwrap();
+    reply(
+        &mut e,
+        &control,
+        200,
+        r#"{"status":"ok","response":{"type":"default"}}"#,
+    );
+    let actions: Vec<_> = e.drain_plain().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 72, .. })))
+    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(
+        serde_json::to_value(e.store().positions()).unwrap(),
+        positions
+    );
+}
