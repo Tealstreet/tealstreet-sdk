@@ -1375,3 +1375,11 @@ opening plans no longer appear reduce-only. Position stops stay reduce-only.
 Order overlays and reduce-only sizing consumers receive corrected flags; no
 placement units or signatures change. Native fill-fee sign remains unchanged
 pending independent debit/rebate evidence.
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.
