@@ -63,6 +63,22 @@ const cases: Case[] = [
     name: 'kucoinspot-secondary-direct-provider', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', direct: true,
     options: { passphrase: 'fixture-primary-pass', secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondary_passphrase: 'fixture-read-pass' },
   },
+  {
+    name: 'bitunix-secondary-private-cors', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com',
+    options: { tealstreetProxy: true, tealstreetTunnel: false, secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondaryProxyUrl: 'https://secondary.invalid/bitunix' },
+  },
+  {
+    name: 'bitunix-secondary-private-how', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com', how: true,
+    options: { tealstreetTunnel: true, secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondaryProxyUrl: 'https://secondary.invalid/bitunix' },
+  },
+  {
+    name: 'bitunix-secondary-public-cors', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com',
+    options: { publicDataOnly: true, tealstreetProxy: true, secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondaryProxyUrl: 'https://secondary.invalid/bitunix' },
+  },
+  {
+    name: 'bitunix-secondary-direct-provider', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com', direct: true,
+    options: { secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret' },
+  },
   { name: 'breakout-direct-provider', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {}, direct: true },
   { name: 'breakout-tealstreet-direct', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {} },
   { name: 'breakout-proxy', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
@@ -291,12 +307,12 @@ const buildCase = async (input: Case) => {
     : resolveExchangeRouting(input.exchange, options);
   const siteHeaders = input.options.bybitSiteId === 'BRA_BTL' ? { 'x-site-id': 'BRA_BTL' } : {};
   const http = [];
-  const keyModes = input.exchange.startsWith('binance') ? [false, true] : [false];
+  const keyModes = input.exchange.startsWith('binance') || input.exchange === 'bitunix' ? [false, true] : [false];
   for (const keyed of keyModes) {
     const url = `${input.baseURL}/fixture?signature=a%2Fb`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(keyed ? { 'x-mbx-apikey': options.secondary_key ?? 'fixture-venue-key' } : {}),
+      ...(keyed ? { [input.exchange === 'bitunix' ? 'api-key' : 'x-mbx-apikey']: options.secondary_key ?? 'fixture-venue-key' } : {}),
       ...(input.exchange === 'breakoutprop' ? { Authorization: 'DXAPI documented-session' } : {}),
       ...(['coinbase', 'coinbasespot'].includes(input.exchange) ? { Authorization: 'Bearer fixture-venue-jwt' } : {}),
     };

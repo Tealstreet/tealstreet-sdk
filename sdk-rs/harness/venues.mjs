@@ -1806,6 +1806,7 @@ export const VENUES = {
     },
   },
   cryptocom: {
+    virtualPrivateClock: true,
     rust: 'cryptocom',
     requestKey: typedRequest,
     ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },

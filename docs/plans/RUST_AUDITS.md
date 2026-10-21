@@ -475,11 +475,20 @@ Remaining resilience and completeness findings are independent of request parity
   connects or a watchdog recover the socket sticks to an endpoint that ignores
   depth/kline subscriptions while still answering pings: books and live candles go
   dead with no log. Tag it `SocketChannel::Business`.~~ (tagged Business)
-- Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
-  network speed across futures, private and every ticker shard.
-- Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
-  forever (`lib.rs:453,477,570,587`; strict `Pair`/`Daily` in `wire.rs:118-143`); a
-  tickers failure also blocks the private start (`lib.rs:541`). TS skips such rows.
+- Medium: ~~reconnects have no backoff; refused connections loop at network
+  speed across futures, private and every ticker shard~~. Each stable feed now
+  retains a shared socket Supervisor across epochs, with capped jittered retries,
+  connection deadlines and real-traffic stability reset. Retired epochs and their
+  queue/login timers cannot affect replacements; routing roles/feed/recover are
+  preserved. Opened private sessions retain first-pong silence compatibility.
+- Medium: ~~one unparsable catalog/ticker row fails the whole list and retries
+  forever; a ticker failure also blocks private startup~~. Typed public row
+  failures are skipped with coded warnings while valid peers commit; empty or
+  wholly unusable seeds retry without establishing readiness. Private startup
+  completes from the usable catalogue while tickers remain pending, and ticker
+  recovery never resets private settings/state. Shared capped discovery backoff
+  preserves native/HTTP rate-limit floors and degradation/recovery; malformed
+  streams/envelopes remain failures with sanitized public diagnostics.
 - Medium: ~~one unmappable position row holds all financial peers and absence
   forever~~. Rejected native symbols retain their cached hedge legs, settings and
   REST routing IDs; valid peers and explicitly closed zero rows advance after a
@@ -488,9 +497,14 @@ Remaining resilience and completeness findings are independent of request parity
   initial reads cannot establish readiness or prove trading prerequisites.
   Regular/TP-SL order rows still hold the whole order snapshot on a malformed peer;
   native raw-family retention remains a separate open repair.
-- Medium: every WS position/order/tpsl event bumps the snapshot generation and the
-  in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
-  events do not update positions; under steady activity positions never commit.
+- Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
+  and postpone reconciliation indefinitely under steady activity~~. Ordinary
+  positions now retain their in-flight serial for a bounded read interval and
+  survive WS-only generation changes, with separate write-ACK revision fencing.
+  Command-owned preflight remains strict; notifications coalesce one follow-up
+  without moving deadlines, and lost reads recover without admitting old replies.
+  Order/TP-SL event generation still fences the entire order snapshot; keyed order
+  reconciliation remains a separate open finding.
 - Medium: ~~history failures return success with empty or partial rows~~.
   Rust now rejects failed first/later pages (transport, HTTP/native, malformed
   rows/envelopes), so a failed read cannot establish complete history. Full
@@ -513,8 +527,12 @@ Remaining resilience and completeness findings are independent of request parity
   rejection without `data` is ignored (`account.rs:744`).
 - Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
-  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; book kept
-  while disconnected; secondary read keys dropped; `data: null` envelopes treated as
+  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
+  while disconnected~~ (futures retirement immediately invalidates subscribed
+  books and publishes consumer clearing before retry; current interests replay
+  once on replacement); ~~secondary read keys dropped~~ (validated native options
+  now reach the GET signer, with api-key secondary egress in SDK/native plans;
+  mutations/private login remain primary and public discovery stays unsigned); `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
   as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL

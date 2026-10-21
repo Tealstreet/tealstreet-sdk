@@ -1,4 +1,4 @@
-//! Account snapshots commit only if no newer socket event has changed that axis.
+//! Account snapshots fence newer writes; position WS IDs do not replace REST financial state.
 use crate::sign::{self, Params};
 use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
@@ -59,6 +59,7 @@ pub struct PositionAdmission {
 pub struct Read {
     pub axis: Axis,
     pub generation: u64,
+    pub position_write_revision: u64,
     pub serial: u64,
     pub after: Option<u32>,
     pub positions: Vec<Position>,
@@ -119,6 +120,10 @@ pub struct AccountState {
     /// When the tick last issued a balance read.
     pub balance_polled_at: f64,
     pub generations: [u64; 3],
+    pub position_write_revision: u64,
+    /// Current ordinary or command-owned read; background refresh cannot supersede it.
+    pub position_read: Option<(u64, f64)>,
+    pub position_dirty: bool,
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
     pub terminal: HashMap<String, f64>,
@@ -139,6 +144,7 @@ pub struct AccountState {
 const TICK_MS: f64 = 500.0;
 /// An unanswered balance read is abandoned after this long.
 const BALANCE_STALL_MS: f64 = 10_000.0;
+const POSITION_STALL_MS: f64 = 10_000.0;
 
 impl Axis {
     pub(crate) fn index(self) -> usize {
@@ -232,7 +238,16 @@ impl BitunixFutures {
         body: Option<String>,
         pending: Pending,
     ) {
-        let Some(c) = &self.credentials else {
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
+        let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             self.fail_private(cx, pending, "Bitunix credentials required");
             return;
         };
@@ -256,7 +271,16 @@ impl BitunixFutures {
             if query.is_empty() { "" } else { "?" },
             query
         );
-        if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
+        let scope = match &pending {
+            Pending::Private(read) => Some(match read.axis {
+                Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
+                Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
+                Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
+            }),
+            Pending::SymbolSettings { .. } => Some(safe_cex_engine::AccountReadScope::Settings),
+            _ => None,
+        };
+        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
             || matches!(&pending, Pending::History(_))
         {
             cx.request_streamed(
@@ -274,9 +298,20 @@ impl BitunixFutures {
                     "rows",
                 ]),
                 pending,
-            );
+            )
         } else {
-            cx.request(method, url, headers, body, pending);
+            cx.request(method, url, headers, body, pending)
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
+            );
         }
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
@@ -290,6 +325,22 @@ impl BitunixFutures {
     ) {
         if self.credentials.is_none() {
             return;
+        }
+        if axis == Axis::Positions {
+            if after.is_none()
+                && let Some((_, issued)) = self.account.position_read
+                && cx.now < issued + POSITION_STALL_MS
+            {
+                self.account.position_dirty = true;
+                if self.account.timers[1].is_none() {
+                    self.account.timers[1] =
+                        Some(cx.set_timer(issued + POSITION_STALL_MS - cx.now));
+                }
+                return;
+            }
+            if let Some(timer) = self.account.timers[1].take() {
+                cx.clear_timer(timer);
+            }
         }
         let path = match axis {
             Axis::Balance => ACCOUNT,
@@ -314,6 +365,7 @@ impl BitunixFutures {
             serial: self.account.serials[slot],
             axis,
             generation: self.account.generations[axis.index()],
+            position_write_revision: self.account.position_write_revision,
             positions: vec![],
             position_rejected: Default::default(),
             position_admitted: vec![],
@@ -323,6 +375,11 @@ impl BitunixFutures {
             invalid: false,
             baselines: vec![],
         };
+        if axis == Axis::Positions {
+            self.account.position_read = Some((read.serial, cx.now));
+            self.account.position_dirty = false;
+            self.account.timers[1] = Some(cx.set_timer(POSITION_STALL_MS));
+        }
         self.signed_request(cx, Method::Get, path, params, None, Pending::Private(read));
     }
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
@@ -415,6 +472,10 @@ impl BitunixFutures {
             }
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
+                self.position_answered(cx, &read);
+                if read.axis == Axis::Positions {
+                    self.debounce(cx, Axis::Positions);
+                }
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
                 }
@@ -460,8 +521,29 @@ impl BitunixFutures {
             Err(e) => cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e),
         }
     }
+    pub(crate) fn position_answered(&mut self, cx: &mut Cx<'_, Pending>, read: &Read) {
+        if read.axis != Axis::Positions
+            || !self
+                .account
+                .position_read
+                .is_some_and(|(serial, _)| serial == read.serial)
+        {
+            return;
+        }
+        self.account.position_read = None;
+        if let Some(timer) = self.account.timers[1].take() {
+            cx.clear_timer(timer);
+        }
+        let dirty = std::mem::take(&mut self.account.position_dirty);
+        if dirty || read.generation != self.account.generations[1] {
+            self.debounce(cx, Axis::Positions);
+        }
+    }
     pub(crate) fn debounce(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         let i = axis.index();
+        if axis == Axis::Positions && self.account.timers[i].is_some() {
+            return;
+        }
         if let Some(t) = self.account.timers[i].take() {
             cx.clear_timer(t);
         }
@@ -473,7 +555,7 @@ impl BitunixFutures {
             if let Some(s) = self
                 .sockets
                 .iter()
-                .find(|s| matches!(s.feed, Feed::Private) && s.opened)
+                .find(|s| s.active && matches!(s.feed, Feed::Private) && s.opened)
             {
                 self.login(cx, s.id);
             }
@@ -632,6 +714,7 @@ impl BitunixFutures {
         mut read: Read,
         response: Response<'_>,
     ) {
+        self.position_answered(cx, &read);
         if read.axis == Axis::Balance {
             self.account.balance_answered = self.account.balance_answered.max(read.serial);
         }
@@ -656,7 +739,12 @@ impl BitunixFutures {
         if read.serial != self.account.serials[slot] {
             return;
         }
-        if read.generation != self.account.generations[read.axis.index()] {
+        let current = if read.axis == Axis::Positions && read.after.is_none() {
+            read.position_write_revision == self.account.position_write_revision
+        } else {
+            read.generation == self.account.generations[read.axis.index()]
+        };
+        if !current {
             self.debounce(cx, read.axis);
             return;
         }

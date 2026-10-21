@@ -101,6 +101,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   kucoin: 'KC-API-KEY',
   kucoinspot: 'KC-API-KEY',
   mexc: 'ApiKey',
+  bitunix: 'api-key',
   bingx: 'X-BX-APIKEY',
   bitrue: 'X-CH-APIKEY',
   weex: 'ACCESS-KEY',
