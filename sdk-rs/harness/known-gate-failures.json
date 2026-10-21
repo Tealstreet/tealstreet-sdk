@@ -39571,7 +39571,7 @@
           ]
         },
         {
-          "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS shows it only after its next account read, by checkpoint 12.",
+          "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS refreshes positions immediately but re-derives balance only on its next periodic tick, by checkpoint 12.",
           "keys": [
             "checkpoint 10 account.balance.currencies.USDT.free",
             "checkpoint 10 account.balance.currencies.USDT.used",
@@ -39827,7 +39827,7 @@
           ]
         },
         {
-          "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS shows it only after its next account read, by checkpoint 12.",
+          "divergence": "After setLeverage 10 -> 12 at t=10000, native re-derives USDT margin in use at once (200 -> 166.67); TS refreshes positions immediately but re-derives balance only on its next periodic tick, by checkpoint 12.",
           "keys": [
             "checkpoint 10 account.balance.currencies.USDT.free",
             "checkpoint 10 account.balance.currencies.USDT.used",
