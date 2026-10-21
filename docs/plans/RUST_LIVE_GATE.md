@@ -125,11 +125,10 @@ named code as a reviewed change, or as a documented limitation.
 - **Kraken futures income/ledger paging past 500 rows** (from claude-cbzmw6's
   audit note).
   - **Current behaviour:** `sdk-rs/venues/kraken/src/history.rs` reads
-    `/api/history/v3/account-log`. Only the `since` cursor is proven to page.
-    `before` and ascending sorts return 0 rows, so a saturated ledger page
-    cannot be traversed. Rust reports `INCOMPLETE: saturated ledger page cannot
-    be traversed using the measured since/count contract`; it never returns a
-    silently truncated history.
+    `/api/history/v3/account-log`. Only the `since` cursor is proven to page;
+    `before` and ascending sorts return 0 rows. Past 500 rows, Rust matches TS:
+    it returns the newest 500 with a truncation warning, never a silently cut
+    history.
   - **Probe:** take an account with more than 500 ledger rows in one window and
     request the same window several ways:
     - `since` with `sort=asc`;
@@ -144,7 +143,7 @@ named code as a reviewed change, or as a documented limitation.
     duplicates, as checked against the account's own ledger total in the Kraken
     UI. If one exists, the Rust income pager adopts it with a regression test
     built from the redacted shapes of the measured responses. If none exists,
-    the INCOMPLETE refusal stands and is documented as a venue limit.
+    the truncation is documented as a venue limit.
 
 ## 4. Canary criteria
 
