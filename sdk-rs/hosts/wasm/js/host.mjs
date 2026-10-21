@@ -12,6 +12,10 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
+const socketStats = () => ({
+  open: 0, initialized: 0, lastReceived: 0, lastCloseCode: undefined, lastCloseAt: 0, closes: 0, closeStreak: 0,
+});
+
 const CHUNK_BYTES = 16 * 1024;
 const MAX_DECOMPRESSED_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
@@ -168,6 +172,8 @@ export class EngineHost {
     this.transport = transport;
     this.handlers = handlers;
     this.sockets = new Map();
+    this.socketRecords = new Map();
+    this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
@@ -327,6 +333,61 @@ export class EngineHost {
     return (this.capabilityRecord = JSON.parse(json));
   }
 
+  /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
+  health() {
+    if (this.disposed) throw new Error('engine disposed');
+    const json = this.engine.health?.();
+    return json ? JSON.parse(json) : undefined;
+  }
+
+  /** Per-channel socket state since construction (`EngineSocketStats`). */
+  socketHealth() {
+    const copy = (stats) => ({ ...stats });
+    return { public: copy(this.socketStats.public), business: copy(this.socketStats.business), private: copy(this.socketStats.private) };
+  }
+
+  /**
+   * Close the open sockets of `channel` (or all) as an abnormal close, so the
+   * venue runs its own reconnect. Returns how many sockets were closed.
+   */
+  reconnectSockets(channel) {
+    if (this.disposed) return 0;
+    let closed = 0;
+    for (const [id, record] of [...this.socketRecords]) {
+      // A connect in flight is left alone, as in TS: a second connect would leak it.
+      if ((channel !== undefined && record.channel !== channel) || !record.open || !this.sockets.has(id)) continue;
+      const socket = this.sockets.get(id);
+      this.sockets.delete(id);
+      this.socketClosed(id, 1006);
+      try { socket.close(); } catch { /* The engine still learns of the close below. */ }
+      this.run(this.invoke(this.engine.wsClose, id, 1006, this.transport.now()));
+      closed++;
+      if (this.disposed) break;
+    }
+    return closed;
+  }
+
+  socketClosed(id, code) {
+    const record = this.socketRecords.get(id);
+    if (!record) return;
+    this.socketRecords.delete(id);
+    const { stats } = record;
+    if (record.open) stats.open--;
+    if (record.initialized) stats.initialized--;
+    // Frames still in flight from a closed socket must not count as recovery.
+    record.open = false;
+    record.initialized = false;
+    stats.lastCloseCode = code;
+    stats.lastCloseAt = Date.now();
+    stats.closes++;
+    stats.closeStreak++;
+    this.socketChanged();
+  }
+
+  socketChanged() {
+    try { this.handlers.onSocketChange?.(); } catch { /* Health observers must not break socket handling. */ }
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -350,6 +411,7 @@ export class EngineHost {
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
+    this.socketRecords.clear();
     this.wsScratch = undefined;
     this.timers.clear();
     attempt(() => this.transport.dispose?.());
@@ -458,6 +520,7 @@ export class EngineHost {
   socketFailed(id, message) {
     const socket = this.sockets.get(id);
     this.sockets.delete(id);
+    this.socketClosed(id, 1006);
     try { socket?.close(); } catch { /* The failed transport is already detached. */ }
     if (this.disposed) return;
     this.handlers.onLog?.('error', message);
@@ -536,6 +599,18 @@ export class EngineHost {
           }, 0);
           break;
         }
+        const stats = this.socketStats[action.channel] ?? this.socketStats.public;
+        const record = { channel: action.channel ?? 'public', stats, open: false, initialized: false };
+        // Health tracking costs one write per frame; state changes notify once.
+        const received = () => {
+          stats.lastReceived = Date.now();
+          if (record.initialized || !record.open) return;
+          record.initialized = true;
+          stats.initialized++;
+          stats.closeStreak = 0;
+          this.socketChanged();
+        };
+        this.socketRecords.set(id, record);
         let socket;
         let connecting = true;
         try {
@@ -544,9 +619,18 @@ export class EngineHost {
             channel: action.channel,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
-            onOpen: () => { if (!this.disposed && (connecting || (socket && this.sockets.get(id) === socket))) this.run(this.invoke(engine.wsOpen, id, transport.now())); },
+            onOpen: () => {
+              if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
+              if (this.socketRecords.get(id) === record && !record.open) {
+                record.open = true;
+                stats.open++;
+                this.socketChanged();
+              }
+              this.run(this.invoke(engine.wsOpen, id, transport.now()));
+            },
             onMessage: (text) => {
               if (this.disposed || (!connecting && (!socket || this.sockets.get(id) !== socket))) return;
+              received();
               if (!wsMessageBytes) {
                 this.run(this.invoke(wsMessage, id, text, transport.now()));
                 return;
@@ -574,10 +658,12 @@ export class EngineHost {
             },
             onBinary: (data) => {
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
+              received();
               if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
               else {
                 const active = this.sockets.get(id);
                 this.sockets.delete(id);
+                this.socketClosed(id, 1003);
                 active.close();
                 this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
               }
@@ -585,6 +671,7 @@ export class EngineHost {
             onClose: (code) => {
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               this.sockets.delete(id);
+              this.socketClosed(id, code ?? 1006);
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
           });
@@ -610,6 +697,7 @@ export class EngineHost {
         this.clearSocketFailure(action.socket);
         this.sockets.get(action.socket)?.close();
         this.sockets.delete(action.socket);
+        this.socketClosed(action.socket, 1000);
         break;
       case 'http': {
         void this.request(action);
@@ -639,6 +727,12 @@ export class EngineHost {
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;
+      case 'event': {
+        const { level, code, message, fields = {} } = action;
+        if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
+        else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
+        break;
+      }
       case 'commandError': {
         // Only an explicitly attributed native error participates in command
         // reporting. Background warnings/errors retain their ordinary path.

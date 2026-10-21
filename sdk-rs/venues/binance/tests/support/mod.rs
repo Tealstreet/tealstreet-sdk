@@ -121,6 +121,7 @@ impl Harness {
                     panic!("unexpected Binance startup failure: {error}")
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::Deactivate) => {
                     panic!("unexpected Binance account deactivation")
                 }

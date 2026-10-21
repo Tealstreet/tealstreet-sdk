@@ -98,7 +98,9 @@ same client ownership. They do not settle the command: `done` remains its result
 Consumers should combine diagnostics with that result for one visible failure
 per command, preserving a partial-success diagnostic and an unknown timeout.
 Other notices are
-`error`, `log` and `deactivate`, relayed as JSON.
+`error`, `log`, `event` and `deactivate`, relayed as JSON.
+`event` carries `level` (`debug`/`info`/`warn`/`error`), a stable dotted `code`,
+`message` and optional flat `fields`; match on `code`, not message text.
 Native typed decoding and venue capability checks remain authoritative.
 
 The adapter never retries or replays a sent command. On disconnect a sent

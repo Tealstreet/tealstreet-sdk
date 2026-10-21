@@ -4,6 +4,7 @@ use crate::book::{Book, BookSide};
 use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
+use crate::log::{Health, Level, LogEvent, Value, code as log_code};
 use crate::model::{
     CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
@@ -134,10 +135,12 @@ pub enum LogLevel {
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
+    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
     Log {
         level: LogLevel,
         message: String,
     },
+    Event(LogEvent),
     /// Error diagnostic attributed to a command; completion owns its outcome.
     CommandError {
         command: CommandId,
@@ -631,6 +634,8 @@ struct Io<P> {
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
+    min_level: Level,
+    health: Health,
 }
 
 impl<P> Default for Io<P> {
@@ -658,6 +663,8 @@ impl<P> Default for Io<P> {
             fills: Vec::new(),
             frame: Vec::new(),
             snapshot: Vec::new(),
+            min_level: Level::Info,
+            health: Health::default(),
         }
     }
 }
@@ -907,11 +914,42 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    /// Unstructured shim kept until venues emit [`Cx::event`].
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        self.io.actions.push(Action::Notice(Notice::Log {
+        push_log(
+            &mut self.io.actions,
+            self.io.min_level,
             level,
-            message: message.into(),
-        }));
+            message.into(),
+        );
+    }
+
+    /// Whether an event at `level` reaches the host; check before formatting
+    /// an expensive Debug message.
+    pub fn logs(&self, level: Level) -> bool {
+        level >= self.io.min_level
+    }
+
+    /// Counted in [`Health`] whatever the host's minimum level.
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, Value)>,
+    ) {
+        let io = &mut *self.io;
+        push_event(
+            &mut io.actions,
+            &mut io.health,
+            io.min_level,
+            LogEvent {
+                level,
+                code,
+                message: message.into(),
+                fields,
+            },
+        );
     }
 
     pub fn deactivate(&mut self) {
@@ -1106,6 +1144,7 @@ pub trait Venue {
 /// Startup never hangs silently: sections still unloaded after this are named
 /// in a visible notice, repeated on a slow cadence until they load (non-terminal).
 const STARTUP_WATCH_MS: f64 = 60_000.0;
+const EMPTY_CATALOGUE_WARNING: &str = "Venue returned an empty market catalogue; it was not applied and the previous catalogue is kept";
 const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
 fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
@@ -1313,6 +1352,15 @@ impl<V: Venue> Engine<V> {
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
+    /// Events below `level` are dropped before they are built; defaults to Info.
+    pub fn set_log_level(&mut self, level: Level) {
+        self.io.min_level = level;
+    }
+
+    pub fn health(&self) -> &Health {
+        &self.io.health
+    }
+
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
         self.io.actions.push(Action::Notice(Notice::Log {
@@ -1469,10 +1517,16 @@ impl<V: Venue> Engine<V> {
                         .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
                 }
             }
-            Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
+            Event::WsOpened { socket } => {
+                cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
+                self.venue.on_open(&mut cx, socket)
+            }
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
-            Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
+            Event::WsClosed { socket, code } => {
+                cx.io.health.count(log_code::WS_CLOSED);
+                self.venue.on_close(&mut cx, socket, code)
+            }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
                 self.http_chunk(now, request, response.body.as_bytes());
@@ -1531,6 +1585,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.io.health.count(log_code::HTTP_FAILED);
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
             }
@@ -1701,6 +1756,12 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        let status = incoming.status;
+        if status == 429 {
+            cx.io.health.count(log_code::RATE_LIMITED);
+        } else if status >= 500 {
+            cx.io.health.count(log_code::HTTP_FAILED);
+        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
@@ -1760,11 +1821,17 @@ impl<V: Venue> Engine<V> {
 
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        if self.store.take_rejected_empty_catalogue() {
+            self.io.actions.push(Action::Notice(Notice::Log {
+                level: LogLevel::Warning,
+                message: EMPTY_CATALOGUE_WARNING.to_owned(),
+            }));
+        }
         self.io.actions.drain(..)
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.io.actions.is_empty()
+        !self.io.actions.is_empty() || self.store.rejected_empty_catalogue()
     }
 
     /// The venue's synchronized book for `symbol`, if any.
@@ -2036,6 +2103,43 @@ fn apply_signature(
         }
     }
     Ok(())
+}
+
+// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
+// would otherwise each inline a copy (the per-venue wasm budget is tight).
+#[inline(never)]
+fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
+    let enabled = match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warn,
+        LogLevel::Error => Level::Error,
+    };
+    if enabled >= min_level {
+        actions.push(Action::Notice(Notice::Log {
+            level,
+            message: crate::log::cap(message),
+        }));
+    }
+}
+
+#[inline(never)]
+fn push_event(
+    actions: &mut Vec<Action>,
+    health: &mut Health,
+    min_level: Level,
+    mut event: LogEvent,
+) {
+    health.count(event.code);
+    if event.level < min_level {
+        return;
+    }
+    event.message = crate::log::cap(event.message);
+    for (_, value) in &mut event.fields {
+        if let Value::Str(text) = value {
+            *text = crate::log::cap(std::mem::take(text));
+        }
+    }
+    actions.push(Action::Notice(Notice::Event(event)));
 }
 
 #[cfg(test)]
@@ -3001,7 +3105,7 @@ mod streaming_tests {
         }
     }
 
-    fn market(symbol: &str) -> crate::model::Market {
+    pub(super) fn market(symbol: &str) -> crate::model::Market {
         use crate::model::{Limits, Market, MinMax, Precision};
         Market {
             id: symbol.into(),
@@ -3184,7 +3288,7 @@ mod streaming_tests {
             book_sections(engine.take_frame(2.).unwrap())[0].0,
             section::BOOK
         );
-        engine.store.set_markets(Vec::new());
+        engine.store.set_markets(vec![market("B")]);
         engine.take_frame(3.).unwrap();
         assert!(engine.book_baselines.is_empty());
         engine.store.set_markets(vec![market("A")]);
@@ -4066,6 +4170,7 @@ mod startup_tests {
 
 #[cfg(test)]
 mod startup_watch_tests {
+    use super::streaming_tests::market;
     use super::*;
 
     struct Idle;
@@ -4106,6 +4211,28 @@ mod startup_watch_tests {
     }
 
     #[test]
+    fn an_empty_venue_catalogue_is_warned_about_and_never_applied() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_markets(Vec::new());
+        assert!(engine.has_actions());
+        let logs: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logs,
+            [(LogLevel::Warning, EMPTY_CATALOGUE_WARNING.to_owned())]
+        );
+        assert_eq!(engine.store().markets().len(), 1);
+        assert!(engine.drain_actions().next().is_none());
+    }
+
+    #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = Engine::new(Idle);
         engine.set_account_startup(true);
@@ -4116,7 +4243,7 @@ mod startup_watch_tests {
                 .all(|action| !matches!(action, Action::SetTimer { .. })),
             "the watch adds no timer of its own"
         );
-        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_markets(vec![market("A")]);
         assert!(notices(&mut engine, STARTUP_WATCH_MS - 1.0).is_empty());
         assert_eq!(
             notices(&mut engine, STARTUP_WATCH_MS),
@@ -4148,7 +4275,7 @@ mod startup_watch_tests {
     fn public_only_engine_is_not_told_its_account_never_loaded() {
         let mut engine = Engine::new(Idle);
         engine.start(0.0);
-        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_markets(vec![market("A")]);
         engine.store_mut().set_tickers(vec![]);
         assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
         let mut disabled = Engine::new(Idle);
@@ -4158,7 +4285,7 @@ mod startup_watch_tests {
         disabled.set_account_startup(true);
         disabled.start(0.0);
         let store = disabled.store_mut();
-        store.set_markets(vec![]);
+        store.set_markets(vec![market("A")]);
         store.set_balance(Default::default());
         store.set_orders(vec![]);
         store.set_positions(vec![]);
