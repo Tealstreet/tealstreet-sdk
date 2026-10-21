@@ -34,9 +34,9 @@ fn drained(e: &mut TestEngine) -> Vec<Action> {
     e.drain_actions()
         .map(|a| match a {
             Action::Notice(Notice::CommandFailed { command, error }) => {
-                Action::Notice(Notice::CommandDone {
+                Action::Notice(Notice::CommandFailed {
                     command,
-                    result: Err(error.legacy_text()),
+                    error: error.clone(),
                 })
             }
             a => a,
@@ -54,7 +54,7 @@ fn failures(e: &mut TestEngine) -> Vec<safe_cex_engine::VenueError> {
 fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
@@ -178,9 +178,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                result: Err(error), ..
-            }) if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -200,7 +198,7 @@ fn every_caller_id_rejects_the_whole_batch_before_a_write() {
         );
         let actions = drained(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(error),..}) if error=="mexc cannot honor a caller clientOrderId")));
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text()=="mexc cannot honor a caller clientOrderId")));
     }
     assert!(serde_json::from_str::<PlaceOrderOpts>(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":60,"price":59000,"clientOrderId":null}"#).is_err());
 }
@@ -227,8 +225,8 @@ fn unsupported_opening_conditional_and_trailing_reject_before_any_batch_write() 
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(e.store().orders().is_empty());
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error == "MEXC opening conditional and trailing-stop placement is not implemented"
+                Action::Notice(Notice::CommandFailed { error, .. })
+                if error.legacy_text() == "MEXC opening conditional and trailing-stop placement is not implemented"
             )));
         }
     }
@@ -326,13 +324,11 @@ fn lost_write_response_never_retries_and_finishes_the_command() {
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 1,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
 }
 
 #[test]
@@ -674,7 +670,7 @@ fn stale_terminal_amend_read_cannot_erase_a_newer_partial_fill_or_replace_it() {
     assert!((e.store().order("one").unwrap().filled - 0.004).abs() < 1e-12);
     let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(e),..}) if e.contains("Stale"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { error: e, .. }) if e.legacy_text().contains("Stale"))));
 }
 
 #[test]
@@ -713,10 +709,11 @@ fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
     let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -1178,7 +1175,7 @@ fn side_leverage_writes_only_the_selected_native_rail_and_keeps_other_setting() 
             a,
             Action::Notice(Notice::CommandDone {
                 command: 401,
-                result: Ok(_)
+                result: _
             })
         )));
         let setting = e.store().setting("BTCUSDT").unwrap();

@@ -286,7 +286,7 @@ impl TxFlow {
                             format!("TxFlow account leverage is not confirmed for {symbol}")
                         });
                 match result {
-                    Ok(data) => cx.done(command, Ok(data)),
+                    Ok(data) => cx.done(command, data),
                     Err(error) => cx.fail(command, VenueError::new(error)),
                 }
                 return;
@@ -877,7 +877,7 @@ impl TxFlow {
                     }
                     cx.fail(job.command, error);
                 }
-                Ok(()) => cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap())),
+                Ok(()) => cx.done(job.command, serde_json::to_string(&job.ids).unwrap()),
             }
         }
         self.pump_trades(cx);

@@ -804,7 +804,11 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
         let logs = e
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { message, .. }) => Some(message),
+                Action::Notice(Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => Some(message),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -871,7 +875,7 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
 }
 #[test]
 fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
-    use safe_cex_engine::{Action, LogLevel, Notice};
+    use safe_cex_engine::{Action, Level, LogEvent, Notice};
     let unlisted = STATE.replace(r#""asset":"1""#, r#""asset":"7""#);
     let read = |meta: &str| {
         let (mut e, _, reads, _) = bootstrap_with_meta(WALLET, meta);
@@ -884,7 +888,12 @@ fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
         let logs = e
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                Action::Notice(Notice::Log { level, message }) => {
+                    Some((Level::from(level), message))
+                }
+                Action::Notice(Notice::Event(LogEvent { level, message, .. })) => {
+                    Some((level, message))
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -903,6 +912,8 @@ fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
     let (e, logs) = read(META);
     assert!(e.store().loaded().positions);
     assert!(e.store().positions().is_empty());
-    assert!(logs.iter().any(|(level, m)| *level == LogLevel::Error
-        && m == "TxFlow skipped position on unlisted asset 7"));
+    assert!(
+        logs.iter().any(|(level, m)| *level == Level::Error
+            && m == "TxFlow skipped position on unlisted asset 7")
+    );
 }

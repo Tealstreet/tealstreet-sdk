@@ -295,7 +295,7 @@ fn flat_leverage_uses_legacy_oneway_cross_and_updates_both_rails() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 7,
-            result: Ok(_)
+            result: _
         })
     )));
 }

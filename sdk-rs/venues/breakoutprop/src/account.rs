@@ -1,11 +1,13 @@
 //! One portfolio response is one reconciliation transaction.
 use crate::Pending;
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, LogLevel, Store};
+use safe_cex_engine::{Cx, Store};
 use serde::Deserialize;
 use std::borrow::Cow;
 
@@ -99,7 +101,11 @@ pub(crate) struct Snapshot {
 impl Snapshot {
     pub(crate) fn commit(self, cx: &mut Cx<'_, Pending>) {
         for row in &self.skipped {
-            cx.log(LogLevel::Warning, format!("BreakoutProp skipped {row}"));
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
+                format!("BreakoutProp skipped {row}"),
+            );
         }
         cx.store.set_balance(self.balance);
         cx.store.retain_position_ids();

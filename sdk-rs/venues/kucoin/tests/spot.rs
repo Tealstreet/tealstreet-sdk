@@ -144,9 +144,8 @@ impl H {
             // Failures as the plain text the host renders.
             let action = match action {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    let result = Err(error.legacy_text());
-                    self.failures.push(error);
-                    Action::Notice(Notice::CommandDone { command, result })
+                    self.failures.push(error.clone());
+                    Action::Notice(Notice::CommandFailed { command, error })
                 }
                 action => action,
             };
@@ -217,13 +216,14 @@ impl H {
             .actions
             .iter()
             .position(
-                |a| matches!(a,Action::Notice(Notice::CommandDone{command,..})if *command==id),
+                |a| matches!(a,Action::Notice(Notice::CommandDone{command,..} | Notice::CommandFailed{command,..})if *command==id),
             )
             .unwrap();
         match self.actions.remove(i) {
             Action::Notice(Notice::CommandDone { result, .. }) => {
-                result.map(|r| serde_json::from_str(&r).unwrap())
+                Ok(serde_json::from_str(&result).unwrap())
             }
+            Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
             _ => unreachable!(),
         }
     }
@@ -1477,7 +1477,7 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         error: "failed write transport",
     });
     let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed write transport")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed write transport")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed write transport")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"

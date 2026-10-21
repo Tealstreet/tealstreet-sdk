@@ -72,7 +72,7 @@ impl H {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.legacy_text())))
@@ -83,6 +83,14 @@ impl H {
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::Notice(Notice::Log { level, message }) => {
                     if level == safe_cex_engine::LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
+                }
+                Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                    level, message, ..
+                })) => {
+                    if level == safe_cex_engine::Level::Error {
                         self.errors.push(message.clone());
                     }
                     self.logs.push(message)

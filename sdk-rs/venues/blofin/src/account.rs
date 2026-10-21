@@ -244,11 +244,11 @@ impl Blofin {
         symbol: String,
     ) {
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, Err(format!("Unknown market {symbol}")));
+            cx.fail(command, format!("Unknown market {symbol}"));
             return;
         };
         let Some(margin) = self.account.margin.filter(|_| self.account.mode_loaded) else {
-            cx.done(command, Err("BloFin margin mode is not loaded".into()));
+            cx.fail(command, "BloFin margin mode is not loaded");
             return;
         };
         let inst_id = market.id.clone();
@@ -1217,7 +1217,10 @@ impl Blofin {
                     });
                     Ok(json)
                 })();
-                cx.done(command, result.map_err(str::to_owned));
+                match result.map_err(str::to_owned) {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Request::Margin { revision } => {
                 if let Ok(Data { data: m }) =
@@ -1578,7 +1581,7 @@ impl Blofin {
         match request {
             Request::Leverage { command, .. } => {
                 cx.command_error(command, error);
-                cx.done(command, Err(error.to_owned()));
+                cx.fail(command, error.to_owned());
                 return;
             }
             Request::Orders { attempt, .. } => {

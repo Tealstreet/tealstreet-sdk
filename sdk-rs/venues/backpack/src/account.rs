@@ -3,12 +3,15 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::Level;
+use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
@@ -369,7 +372,7 @@ impl Backpack {
                     Some(c)
                 }
                 Err(e) => {
-                    cx.log(LogLevel::Error, e);
+                    cx.notice(Level::Error, code::CONFIG_INVALID, e);
                     None
                 }
             },
@@ -726,7 +729,7 @@ impl Backpack {
             Ok::<(), String>(())
         })();
         if let Err(e) = result {
-            cx.log(LogLevel::Error, e);
+            cx.notice(Level::Error, code::STREAM_MALFORMED, e);
             self.next_account(cx, failure_next);
             if self.account.tick.is_none() {
                 self.account.tick = Some(cx.set_poll_timer(10000.0));
@@ -739,7 +742,7 @@ impl Backpack {
         pending: Request,
         error: &str,
     ) {
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
         let next = match pending {
             Request::Info { .. } => Next::Positions,
             Request::Positions { next, .. } => next,

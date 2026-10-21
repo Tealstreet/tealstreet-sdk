@@ -279,7 +279,7 @@ fn normalize(rows: &mut [Execution]) {
 impl AsterDex {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
         if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let (from, to, bounded, income) = match &read {
@@ -297,7 +297,7 @@ impl AsterDex {
                 .zip(to)
                 .is_some_and(|(from, to)| to < from || (income && to == from))
         {
-            cx.done(command, Err("Invalid Aster history time range".into()));
+            cx.fail(command, "Invalid Aster history time range");
             return;
         }
         if bounded
@@ -305,21 +305,15 @@ impl AsterDex {
                 .zip(to)
                 .is_some_and(|(from, to)| to - from > MAX_WINDOW_MS)
         {
-            cx.done(
+            cx.fail(
                 command,
-                Err(
-                    "Aster fills and order history require a time window of at most seven days"
-                        .into(),
-                ),
+                "Aster fills and order history require a time window of at most seven days",
             );
             return;
         }
         let (endpoint, query, pending, private) = match read {
             Read::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Aster does not support caller client order IDs".into()),
-                );
+                cx.fail(command, "Aster does not support caller client order IDs");
                 return;
             }
             Read::Fills {
@@ -330,7 +324,7 @@ impl AsterDex {
                 limit,
             } => {
                 let Some(symbol) = symbol.filter(|symbol| !symbol.is_empty()) else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 (
@@ -358,7 +352,7 @@ impl AsterDex {
                 if self.version == crate::sign::Version::V1
                     && symbol.as_deref().is_none_or(str::is_empty)
                 {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 }
                 (
@@ -608,9 +602,9 @@ impl AsterDex {
                 range: Some(mut range),
             } => {
                 if let Some(error) = error {
-                    cx.done(command, Err(error));
+                    cx.fail(command, error);
                 } else if invalid {
-                    cx.done(command, Err("Malformed Aster history response".into()));
+                    cx.fail(command, "Malformed Aster history response");
                 } else {
                     let metadata = rows
                         .iter()
@@ -649,7 +643,10 @@ impl AsterDex {
         } else {
             result.map_err(|e| e.to_string())
         };
-        cx.done(command, result);
+        match result {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error),
+        };
     }
 
     fn next_income_page(
@@ -692,7 +689,10 @@ impl AsterDex {
                 } else {
                     serde_json::to_string(&range.collected).map_err(|error| error.to_string())
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
         }
     }

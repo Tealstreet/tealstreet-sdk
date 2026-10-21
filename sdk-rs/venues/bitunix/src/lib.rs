@@ -4,8 +4,10 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
+    Command, Cx, Method, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
 use safe_cex_engine::{
     book::{Book, BookSide},
@@ -400,10 +402,14 @@ impl Venue for BitunixFutures {
                     return;
                 }
                 if let Err(e) = self.public_message(cx, &m) {
-                    cx.log(LogLevel::Warning, e);
+                    cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
                 }
             }
-            Err(e) => cx.log(LogLevel::Warning, format!("invalid Bitunix frame: {e}")),
+            Err(e) => cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                format!("invalid Bitunix frame: {e}"),
+            ),
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -571,7 +577,10 @@ impl Venue for BitunixFutures {
                         .map_err(|e| e.to_string())?;
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             other => self.on_request_failed(cx, other, "malformed Bitunix list"),
         }
@@ -587,17 +596,17 @@ impl Venue for BitunixFutures {
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
                 }
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.debounce(cx, read.axis);
             }
-            Pending::Candles { command } => cx.done(command, Err(error.into())),
+            Pending::Candles { command } => cx.fail(command, error),
             Pending::SymbolSettings { symbol, .. } => {
                 // Retry on the next candle interest.
                 self.account.symbol_settings.remove(&symbol);
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
             }
             _ => {
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.retry = Some(cx.set_timer(5_000.0));
             }
         }
@@ -681,7 +690,11 @@ impl Venue for BitunixFutures {
                 interval: i,
             } => {
                 if interval_ms(i).is_none() {
-                    cx.log(LogLevel::Error, "Unsupported Bitunix candle interval");
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        "Unsupported Bitunix candle interval",
+                    );
                     return;
                 }
                 self.read_symbol_settings(cx, &symbol);
@@ -724,7 +737,7 @@ impl Venue for BitunixFutures {
                 to_ms,
             } => {
                 let Some(duration) = interval_ms(interval) else {
-                    cx.done(command, Err("Unsupported Bitunix candle interval".into()));
+                    cx.fail(command, "Unsupported Bitunix candle interval");
                     return;
                 };
                 let explicit_limit = limit;

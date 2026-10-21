@@ -1210,7 +1210,7 @@ impl Venue for KucoinSpot {
                         .rows
                         .commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     if let Some((command, id)) = r.lookup {
-                        cx.done(command, Ok(lookup_output(&r.symbol, &id, &rows)));
+                        cx.done(command, lookup_output(&r.symbol, &id, &rows));
                     } else {
                         self.orders_loading = false;
                         if r.revision == self.revision {
@@ -1229,10 +1229,10 @@ impl Venue for KucoinSpot {
                 invalid,
             } => {
                 if invalid {
-                    cx.done(command, Err("invalid KuCoin Spot candles".into()));
+                    cx.fail(command, "invalid KuCoin Spot candles");
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                    cx.done(command, serde_json::to_string(&rows).unwrap());
                 }
             }
             Pending::Account(command) => {
@@ -1264,7 +1264,10 @@ impl Venue for KucoinSpot {
                         )
                     })
                     .map_err(|e| e.to_string());
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             Pending::Fills(command) => {
                 #[derive(Serialize)]
@@ -1298,7 +1301,10 @@ impl Venue for KucoinSpot {
                     }
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 })();
-                cx.done(command, out);
+                match out {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
             }
         }
     }
@@ -1322,7 +1328,7 @@ impl Venue for KucoinSpot {
                 if let Some((command, id)) = r.lookup {
                     cx.command_error(command, error);
                     let out = lookup_output(&r.symbol, &id, cx.store.orders());
-                    cx.done(command, Ok(out));
+                    cx.done(command, out);
                     return;
                 } else {
                     self.orders_loading = false;
@@ -1337,7 +1343,7 @@ impl Venue for KucoinSpot {
             | Pending::Fills(command)
             | Pending::Account(command) => {
                 cx.command_error(command, error);
-                cx.done(command, Err(error.into()));
+                cx.fail(command, error);
                 return;
             }
             Pending::Markets { .. } => self.discovery.failed(cx, false),
@@ -1454,7 +1460,7 @@ impl Venue for KucoinSpot {
                 to_ms,
             } => {
                 let Ok((minutes, native)) = interval(i) else {
-                    cx.done(command, Err(i.unsupported("KuCoin Spot")));
+                    cx.fail(command, i.unsupported("KuCoin Spot"));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1504,7 +1510,7 @@ impl Venue for KucoinSpot {
 impl KucoinSpot {
     fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         if self.credentials.is_none() {
-            cx.done(command, Err("KuCoin Spot requires credentials".into()));
+            cx.fail(command, "KuCoin Spot requires credentials");
             return;
         }
         match query {
@@ -1516,7 +1522,7 @@ impl KucoinSpot {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return;
                 };
                 let mut path = format!("/api/v1/hf/fills?symbol={symbol}");
@@ -1552,11 +1558,11 @@ impl KucoinSpot {
                     }
                     cx.done(
                         command,
-                        Ok(serde_json::to_string(&Found {
+                        serde_json::to_string(&Found {
                             found: true,
                             order: o,
                         })
-                        .unwrap()),
+                        .unwrap(),
                     );
                 } else {
                     self.page(
@@ -1572,11 +1578,11 @@ impl KucoinSpot {
                     );
                 }
             }
-            Query::PublicTrades { .. } => cx.done(
+            Query::PublicTrades { .. } => cx.fail(
                 command,
-                Err("KuCoin Spot public trades are not implemented in TS".into()),
+                "KuCoin Spot public trades are not implemented in TS",
             ),
-            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, Ok("[]".into())),
+            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, "[]".into()),
         }
     }
 }

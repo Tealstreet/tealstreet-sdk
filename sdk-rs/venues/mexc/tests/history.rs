@@ -27,7 +27,9 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
                 result,
             }) = a
             {
-                Some(result)
+                Some(Ok(result))
+            } else if let Action::Notice(Notice::CommandFailed { command: 99, error }) = a {
+                Some(Err(error.legacy_text()))
             } else {
                 None
             }
@@ -237,8 +239,8 @@ fn general_income_cannot_silently_return_a_funding_only_ledger() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error == "MEXC income supports only kind FUNDING_FEE"
+            Action::Notice(Notice::CommandFailed { error, .. })
+            if error.legacy_text() == "MEXC income supports only kind FUNDING_FEE"
         )));
     }
 }

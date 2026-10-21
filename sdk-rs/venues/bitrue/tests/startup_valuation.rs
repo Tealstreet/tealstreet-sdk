@@ -43,7 +43,11 @@ impl Harness {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => self.logs.push(message),
                 _ => {}
             }
         }

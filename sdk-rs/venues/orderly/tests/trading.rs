@@ -14,7 +14,7 @@ fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
     out.into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
-                (command == id).then_some(result)
+                (command == id).then_some(Ok(result))
             }
             Action::Notice(Notice::CommandFailed { command, error }) => {
                 (command == id).then(|| Err(error.legacy_text()))
@@ -512,7 +512,7 @@ fn queued_second_stop_waits_for_first_pair_then_cancels_it_before_replacement() 
         a,
         Action::Notice(Notice::CommandDone {
             command: 1,
-            result: Ok(_)
+            result: _
         })
     )));
     let writes: Vec<_> = out
@@ -1698,7 +1698,7 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
     assert!(body(&r).get("symbol").is_none());
     reply(&mut e, &r, 200, r#"{"success":true}"#);
     let out = actions(&mut e);
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
     assert!(done(out, 101).is_ok());
     for (symbol, expected) in [("BTCUSDC", 80.), ("ETHUSDC", 80.), ("SOLUSDC", 30.)] {
         assert_eq!(e.store().setting(symbol).unwrap().leverage, expected);
@@ -1725,10 +1725,6 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
 
 fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>> {
     out.into_iter().find_map(|a| match a {
-        Action::Notice(Notice::CommandDone {
-            command,
-            result: Err(_),
-        }) if command == id => Some(None),
         Action::Notice(Notice::CommandFailed { command, error }) if command == id => {
             Some(error.outcome)
         }

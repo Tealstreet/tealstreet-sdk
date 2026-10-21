@@ -520,7 +520,7 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     );
     h.collect();
     h.reply("/account", POSITION);
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.as_ref().is_ok_and(|s|s.contains("\"buyLeverage\":25.0")))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.contains("\"buyLeverage\":25.0"))));
     assert!(h.pending.iter().all(|r| r.method == Method::Get));
 }
 
@@ -607,7 +607,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
         h.ws(&rejected);
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
         h.private_retry(1_000.0);
         let request = h.take("listenKey");
         h.respond(
@@ -627,7 +627,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         );
         h.collect();
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private stream") && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
     }
 }
 #[test]
@@ -650,7 +650,7 @@ fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
     h.collect();
     h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
     assert_stream_notices_are_safe(&h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("account read failed") && message.contains("code 401"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
 }
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
@@ -852,7 +852,10 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     h.fire_retry(500.0);
     assert!(
@@ -886,7 +889,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
         h.actions
             .iter()
             .filter(|a| {
-                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) if message.contains("E-ETH-USDT"))
+                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
             })
             .count()
     };
@@ -901,7 +904,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) if message.contains("E-ETH-USDT recovered")
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
     )));
 
     // A fresh failure after recovery starts again from the initial delay.
@@ -978,7 +981,7 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
             expected
         );
         assert!(h.e.store().setting("E-BTC-USDT").is_none());
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: Ok(v) }) if v.parse::<f64>().ok() == Some(expected))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: v }) if v.parse::<f64>().ok() == Some(expected))));
     }
     for malformed in [
         r#"{"code":"0","data":{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":125}]}}"#,
@@ -1008,13 +1011,11 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
                 .max,
             75.0
         );
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 52,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 52, .. })))
+        );
     }
     h.e.handle(
         h.now,
@@ -1060,13 +1061,11 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
             .max,
         100.0
     );
-    assert!(h.actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 61,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 61, .. })))
+    );
 }
 
 #[test]
@@ -1130,16 +1129,15 @@ fn leverage_bracket_failures_never_echo_private_transport_or_response_diagnostic
             .actions
             .iter()
             .filter_map(|action| match action {
-                Action::Notice(Notice::CommandDone {
-                    command: 62,
-                    result,
-                }) => Some(result),
+                Action::Notice(Notice::CommandFailed { command: 62, error }) => {
+                    Some(error.legacy_text())
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(completions.len(), 1);
         assert_eq!(
-            completions[0].as_ref().unwrap_err(),
+            completions[0],
             if transport_failure {
                 "Bitrue leverage bracket read failed"
             } else {
@@ -1203,13 +1201,13 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert_eq!(errors, [(91, expected), (92, expected)]);
         for owner in [91, 92] {
             let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command,..}) if *command==owner)).unwrap();
-            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command,result:Err(_)}) if *command==owner)).unwrap();
+            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed{command,..}) if *command==owner)).unwrap();
             assert!(error < done);
         }
         assert!(
             !h.actions
                 .iter()
-                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message==expected))
+                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
         );
     }
 }
@@ -1235,7 +1233,7 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         } else {
             "Bitrue account read failed"
         };
-        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) if message==expected)).count(),1);
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
     }
 }
 
@@ -1252,7 +1250,11 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
         if attempt < 3 {
             assert!(!h.actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandError { .. } | Notice::CommandDone { .. })
+                Action::Notice(
+                    Notice::CommandError { .. }
+                        | Notice::CommandDone { .. }
+                        | Notice::CommandFailed { .. }
+                )
             )));
             snapshot = h.take("/account");
         }
