@@ -283,16 +283,27 @@ their rejected promises without reporting the same failure a second time.
 
 ## Rust incomplete history
 
-A Rust history read that cannot be walked completely still returns the rows it
-read, with a `history.incomplete` warning event that names its `command`. The
-host then marks the returned array with a non-enumerable `incomplete: true`.
-Kraken (a full 500-row `account-log` page its since-only cursor cannot advance)
-and Binance (exhausted income chunks) set it. Existing callers see a plain array.
-A consumer recording coverage must not treat a flagged result as complete; the
-in-package journal (`journal/buildRecords.ts`) does not read it yet. Structured
-clone drops the property, so a worker or server hop must forward it, translating
-`fields.command` (the engine's id) to its own request id as it does for `done`.
-The event is a Warn: a host whose minimum level is Error drops it, and the flag.
+A successful partial Rust history read returns the available rows with a
+command-attributed `history.incomplete` notice. The JS host marks
+that command's array with non-enumerable `incomplete: true`, independently of
+notice-level filtering. Absence of this positive assertion never proves that a
+venue's history endpoint is exhaustive.
+
+`CallMethodHandler` carries optional `data.completeness: { incomplete: true }`
+beside the existing successful reply's `requestId` and `result`, through both
+structured clone and hosted JSON. `BaseExchange.callMethodInWorker` restores
+that pending request's marker before resolution and observers. Upgrade sender
+and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
+and `copyHistoryCompleteness` helpers preserve it before row transformations;
+Rust derived position and reported closed-PnL mappings retain it even on empty
+results. Bybit's derived history combines both source axes' assertions.
+
+The journal fold rejects flagged fills and symbol-scoped income; with complete
+account-wide fills it discards flagged income enrichment and leaves funding
+unattributed. NX ingestion must still inspect completeness before transforms
+and leave historical coverage uncompleted. Raw native/DO clients correlate the
+translated event command themselves; this SDK transport does not change their
+wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
 ## Rust socket health
 
