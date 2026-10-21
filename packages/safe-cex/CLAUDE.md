@@ -1132,6 +1132,19 @@ The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
 
+Every Rust SDK account sends `setPollScale` before native startup and when the
+multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
+over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
+(Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
+cadences rather than replacing them with the metadata tick. The resolved tick also
+travels as `ceiling`, so a server multiplier or the auth-backoff cap bounds the
+slowed cadence as before unless a venue's native cadence is already slower. Effective option
+changes are checked at the existing store flush cadence. Infinity is the explicit
+scale `null`; venue constructor options do not carry a second polling policy. Unchanged values are suppressed, failed delivery stays
+eligible for retry, and disposal removes the multiplier listener. These controls
+govern periodic reconciliation, not socket supervision or explicit reads. Base
+auth-streak propagation alone does not prove classified native auth feedback.
+
 ## Debugging exchange REST traffic
 
 REST routed through the HOW adapter appears as WS frames, not XHRs.

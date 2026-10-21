@@ -55,6 +55,7 @@ trait AnyEngine {
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
+    fn account_snapshot(&mut self, now: f64) -> &[u8];
     fn health(&self) -> Health {
         Health::default()
     }
@@ -93,6 +94,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
+    }
+    fn account_snapshot(&mut self, now: f64) -> &[u8] {
+        self.account_snapshot_frame(now)
     }
 
     fn health(&self) -> Health {
@@ -399,7 +403,7 @@ impl WasmEngine {
     pub fn health(&self) -> String {
         let h = self.inner.health();
         format!(
-            r#"{{"wsOpened":{},"wsClosed":{},"reconnects":{},"authFailures":{},"httpFailures":{},"rateLimited":{},"snapshotsDiscarded":{},"rowsSkipped":{}}}"#,
+            r#"{{"wsOpened":{},"wsClosed":{},"reconnects":{},"authFailures":{},"httpFailures":{},"rateLimited":{},"snapshotsDiscarded":{},"rowsSkipped":{},"lastPrivateMessage":{}}}"#,
             h.ws_opened,
             h.ws_closed,
             h.reconnects,
@@ -407,7 +411,10 @@ impl WasmEngine {
             h.http_failures,
             h.rate_limited,
             h.snapshots_discarded,
-            h.rows_skipped
+            h.rows_skipped,
+            h.last_private_message_ms
+                .filter(|at| at.is_finite())
+                .map_or_else(|| "null".to_owned(), |at| at.to_string())
         )
     }
 
@@ -569,8 +576,10 @@ impl WasmEngine {
                     return Ok(self.flush());
                 }
                 safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-                safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
-                    Event::TickIntervalChanged { interval_ms }
+                safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                    self.inner
+                        .handle(now, Event::PollCeilingChanged { ceiling_ms });
+                    Event::PollScaleChanged { scale }
                 }
             };
             self.inner.handle(now, event);
@@ -591,8 +600,10 @@ impl WasmEngine {
                 return Ok(self.flush());
             }
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-            safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
-                Event::TickIntervalChanged { interval_ms }
+            safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                self.inner
+                    .handle(now, Event::PollCeilingChanged { ceiling_ms });
+                Event::PollScaleChanged { scale }
             }
         };
         self.inner.handle(now, event);
@@ -612,6 +623,12 @@ impl WasmEngine {
     #[wasm_bindgen(js_name = snapshotFrame)]
     pub fn snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
         js_sys::Uint8Array::from(self.inner.snapshot(now))
+    }
+
+    /// Full private sections; leaves pending deltas and public baselines intact.
+    #[wasm_bindgen(js_name = accountSnapshotFrame)]
+    pub fn account_snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.inner.account_snapshot(now))
     }
 
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
@@ -942,6 +959,26 @@ mod tests {
     }
 
     #[test]
+    fn every_selected_venue_build_accepts_polling_control() {
+        use safe_cex_engine::command::{HostInput, decode_host_input};
+
+        assert_eq!(
+            decode_host_input(r#"{"op":"setPollScale","scale":2.5}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 2.5,
+                ceiling_ms: None
+            }
+        );
+        assert_eq!(
+            decode_host_input(r#"{"op":"setPollScale","scale":null}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: f64::INFINITY,
+                ceiling_ms: None,
+            }
+        );
+    }
+
+    #[test]
     fn host_commands_dispatch_once_and_flush_once_with_original_clock() {
         use safe_cex_engine::command::HostInput;
         use std::cell::{Cell, RefCell};
@@ -969,9 +1006,11 @@ mod tests {
             fn handle(&mut self, now: f64, event: Event<'_>) {
                 let input = match event {
                     Event::Command(command) => HostInput::Command(command),
-                    Event::TickIntervalChanged { interval_ms } => {
-                        HostInput::TickIntervalChanged { interval_ms }
-                    }
+                    Event::PollScaleChanged { scale } => HostInput::PollScaleChanged {
+                        scale,
+                        ceiling_ms: None,
+                    },
+                    Event::PollCeilingChanged { .. } => return,
                     _ => panic!("command boundary"),
                 };
                 self.events.borrow_mut().push((now, input));
@@ -984,6 +1023,9 @@ mod tests {
                 None
             }
             fn snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
+            fn account_snapshot(&mut self, _: f64) -> &[u8] {
                 &[]
             }
         }
@@ -1001,8 +1043,8 @@ mod tests {
             r#"{"op":"subscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
             r#"{"op":"unsubscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
             r#"{"op":"setTickerSymbols","symbols":["BTCUSDT"]}"#,
-            r#"{"op":"setTickInterval","interval":2000}"#,
-            r#"{"op":"setTickInterval","interval":null}"#,
+            r#"{"op":"setPollScale","scale":4}"#,
+            r#"{"op":"setPollScale","scale":null}"#,
             r#"{"op":"publicFeedUpdate","tickers":[]}"#,
         ];
         let mut dispatched = 0;
@@ -1205,6 +1247,9 @@ mod tests {
         fn snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
+        fn account_snapshot(&mut self, _now: f64) -> &[u8] {
+            &[]
+        }
     }
 
     #[test]
@@ -1249,6 +1294,9 @@ mod tests {
             fn snapshot(&mut self, _: f64) -> &[u8] {
                 &[]
             }
+            fn account_snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
             fn health(&self) -> Health {
                 Health {
                     ws_opened: 1,
@@ -1259,6 +1307,7 @@ mod tests {
                     rate_limited: 6,
                     snapshots_discarded: 7,
                     rows_skipped: 8,
+                    last_private_message_ms: Some(1_700_000_000_123.0),
                 }
             }
         }
@@ -1272,7 +1321,8 @@ mod tests {
         assert_eq!(
             health,
             serde_json::json!({"wsOpened":1,"wsClosed":2,"reconnects":3,"authFailures":4,
-                "httpFailures":5,"rateLimited":6,"snapshotsDiscarded":7,"rowsSkipped":8})
+                "httpFailures":5,"rateLimited":6,"snapshotsDiscarded":7,"rowsSkipped":8,
+                "lastPrivateMessage":1_700_000_000_123u64})
         );
     }
 

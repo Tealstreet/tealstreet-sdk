@@ -257,9 +257,10 @@ enum Control {
         client: u64,
         command: Command,
     },
-    TickIntervalChanged {
+    PollScaleChanged {
         client: u64,
-        interval_ms: f64,
+        scale: f64,
+        ceiling_ms: Option<f64>,
     },
     Leave(u64),
 }
@@ -319,9 +320,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let _ = ready.send(self.join(client, outgoing, cancel));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
-                    Some(Control::TickIntervalChanged { client, interval_ms }) => {
+                    Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
                         if self.peers.contains_key(&client) {
-                            self.host.engine.handle((self.host.clock)(), Event::TickIntervalChanged { interval_ms });
+                            let now = (self.host.clock)();
+                            self.host.engine.handle(now, Event::PollCeilingChanged { ceiling_ms });
+                            self.host.engine.handle(now, Event::PollScaleChanged { scale });
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
@@ -1167,7 +1170,9 @@ async fn connection(
                             let control = match input {
                                 HostInput::PublicFeedUpdate(_) => unreachable!("provider controls are rejected before command dispatch"),
                                 HostInput::Command(command) => Control::Command { client, command },
-                                HostInput::TickIntervalChanged { interval_ms } => Control::TickIntervalChanged { client, interval_ms },
+                                HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                                    Control::PollScaleChanged { client, scale, ceiling_ms }
+                                }
                             };
                             if account.commands.try_send(control).is_err() { break; }
                             continue;
