@@ -33,3 +33,50 @@ they are at this base; use only wasm build-command overrides.
    in the PR. Audit unchanged native settings and every family build argument.
    Integrate relevant landing changes, obtain final green CI under lane rules,
    run a fresh separate guard, merge the exact green head, and report the pin.
+
+## Production artifact inventory
+
+| Consumer | Owned Rust artifact | Source |
+| --- | --- | --- |
+| Browser SDK and browser worker | One of 28 web family modules | `sdk-rs/hosts/wasm/js/engine.web.mjs`; package `./engine` browser export |
+| Node/Bun SDK hosting | Combined Node bindings and wasm | `sdk-rs/hosts/wasm/js/engine.node.mjs`; package `./engine` node export |
+| exchange-mcp bundle | Combined Node module copied to `dist/wasm/rust` | `packages/exchange-mcp/tsup.config.ts`, `src/rust-engine.ts` |
+| Compiled Bun CLI | Combined web bindings and embedded wasm file | `apps/cli/src/rust-engine.ts`, `scripts/build.sh` |
+| Cloudflare Workers/Durable Objects | Deployment-injected module; documented family loader option | `sdk-rs/hosts/wasm/js/workers.mjs` `createEngineObject({loadEngine})` |
+| React Native | Host-injected module or native bridge | `packages/safe-cex-react-native/src/rustEngine.ts`; no separate Rust wasm build |
+
+The explicit `./web` and `./node` package exports expose the combined builds
+for direct consumers. Both binding layouts share the same stripped wasm bytes.
+There is one Rust wasm cdylib in this workspace; crypto and registry code are
+linked into it, rather than shipped as separate Rust wasm artifacts. The other
+tracked shipped wasm is Poseidon (`packages/poseidon-crypto/src/wasm`), built
+with Go, also copied by exchange-mcp. Rust opt-level does not apply to it. This
+is a source/build inventory, not a deployed-binary inspection.
+
+## Initial experiment and selection gates
+
+Baseline family evidence: green #1656 CI `39658033928`, source-equivalent to
+base `01bfcbbb9d0f` apart from caller documentation. All 32 suites are complete:
+438 stable raw Rust outputs, no variance. The subsequent landing push
+`39660462768` hit the known Aster signing-clock harness test before replay, so
+its incomplete suite is not counted as evidence.
+
+Initial candidate `5e5bd320220`: family CI `39661583419`; combined candidate
+`39661578191`; combined baseline `39661495401` on `d61577a43f1` (plan and CI
+layout selection only, original wasm settings). The combined module measures
+11,026,198 -> 9,795,511 bytes, saving 1,230,687 bytes; full proof remains pending.
+
+WOO's isolated family misses public steady-state CPU: TS 27.83 ms, Rust
+29.368 ms, exceeding the unmodified max(1 ms, 5%) allowance. Restore its exact
+original build arguments; do not rerun to select around this failure. Combined
+WOO is measured independently and initially passes. Other results remain
+subject to the complete matrix and final integrated run.
+
+Pin public CI invocations to nine interleaved pairs, the existing small-window
+count. This strengthens collection and avoids a seven-pair candidate being
+insufficient against a nine-pair adaptive baseline (observed for BloFin). No
+sample is omitted, and the performance policy and strict verifier are unchanged.
+
+Final integration order: #1655, #1658, then this PR's exclusive source window.
+Refresh source-equivalent baselines after integration and require green final
+CI plus the complete raw proof for both layouts before the separate guard.
