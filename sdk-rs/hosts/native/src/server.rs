@@ -103,6 +103,42 @@ impl FrameServer {
         })
     }
 
+    /// Registers an account on `venue`, constructed from the same options JSON
+    /// the wasm host accepts; construction rules reject before any I/O.
+    #[cfg(feature = "venues")]
+    pub fn add_venue<T: Transport + 'static>(
+        &mut self,
+        id: &str,
+        token: &str,
+        venue: &str,
+        options_json: &str,
+        transport: T,
+    ) -> io::Result<()> {
+        struct Register<'a, T> {
+            server: &'a mut FrameServer,
+            id: &'a str,
+            token: &'a str,
+            transport: T,
+        }
+        impl<T: Transport + 'static> safe_cex_venues::Visit for Register<'_, T> {
+            type Output = io::Result<()>;
+            fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
+                self.server
+                    .add_account(self.id, self.token, Host::new(engine, self.transport))
+            }
+        }
+        let options = serde_json::from_str(options_json)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let register = Register {
+            server: self,
+            id,
+            token,
+            transport,
+        };
+        safe_cex_venues::build(venue, options, register)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+    }
+
     /// Tokens grant full access to one preconfigured account. They must be
     /// distinct, nonempty opaque strings without whitespace. Never put them in URLs.
     /// Engines must not have received commands; startup and Store seeding are allowed.
@@ -1277,6 +1313,44 @@ mod tests {
         drop(actor);
         assert!(events.send(HostEvent::Timer(TimerId(1))).is_err());
         assert!(timer.await.unwrap_err().is_cancelled());
+    }
+
+    #[cfg(feature = "venues")]
+    #[tokio::test]
+    async fn venues_are_registered_by_name_after_their_construction_rules() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut server = FrameServer::new(ServerConfig::default()).unwrap();
+                server
+                    .add_venue(
+                        "a",
+                        "token-a",
+                        "binance",
+                        r#"{"publicDataOnly":true}"#,
+                        NoTransport,
+                    )
+                    .unwrap();
+                for (venue, options, message) in [
+                    ("nope", "{}", "unsupported venue: nope"),
+                    (
+                        "weex",
+                        r#"{"key":"k","secret":"s"}"#,
+                        "WEEX requires a passphrase",
+                    ),
+                ] {
+                    let error = server
+                        .add_venue("b", "token-b", venue, options, NoTransport)
+                        .unwrap_err();
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+                    assert_eq!(error.to_string(), message);
+                }
+                assert!(
+                    server
+                        .add_venue("b", "token-b", "binance", "not json", NoTransport)
+                        .is_err()
+                );
+            })
+            .await;
     }
 
     #[tokio::test]

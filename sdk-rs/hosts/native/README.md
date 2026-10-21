@@ -91,8 +91,10 @@ ordinary order requests retain the resolved account route.
 Accounts start independently of client arrival, and keep running after the last
 client disconnects. The embedding application supplies each venue engine,
 credentials, transport/routing plan and account token. The library can register
-heterogeneous venues with `add_account`; it does not accept account creation or
-credentials over the client protocol.
+heterogeneous venues with `add_account`, or by venue name with `add_venue`,
+which builds the engine through `safe-cex-venues` from the same options JSON the
+wasm host accepts (the default `venues` feature). It does not accept account
+creation or credentials over the client protocol.
 
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with

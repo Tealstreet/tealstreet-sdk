@@ -47702,13 +47702,6 @@
           ]
         },
         {
-          "divergence": "Native sets trigger last_price on plain LIMIT rows (61, 60) taken from order-channel events, which carry triggerPriceType CONTRACT_PRICE with triggerPrice 0; TS leaves trigger null. Native mapping issue, reported for follow-up.",
-          "keys": [
-            "checkpoint 4 account.orders[1].trigger",
-            "checkpoint 7 account.orders[0].trigger"
-          ]
-        },
-        {
           "divergence": "At checkpoint 8 (t=6100, placeOrders of conditional 65) TS lists only 62: the REST read it schedules 250 ms after the t=5400 cancel events already dropped canceled 60/64, and it has not yet seen 65. Native still holds canceled 60/64 until its next 2 s REST reconciliation (t=6250) and inserted 65 from its acknowledgement.",
           "keys": [
             "checkpoint 8 account.orders.length",
