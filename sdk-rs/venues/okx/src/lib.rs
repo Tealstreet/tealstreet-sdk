@@ -709,6 +709,28 @@ impl Okx {
         });
         self.account_prices(cx);
     }
+
+    fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Account(request) = pending {
+            self.account_failed(cx, request, error);
+        } else if let Pending::Trade(request) = pending {
+            self.trade_lost(cx, request, error);
+        } else if let Pending::History(request) = pending {
+            self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
+        } else if let Pending::Candles { command, .. } = pending {
+            cx.command_error(command, error);
+            cx.done(command, Ok("[]".into()));
+        } else {
+            let markets = matches!(pending, Pending::Markets { .. });
+            if !markets {
+                self.ticker_reading = false;
+                self.ticker_refresh_pending = false;
+            }
+            self.startup.failed(cx, markets);
+        }
+    }
 }
 
 impl Venue for Okx {
@@ -1095,7 +1117,7 @@ impl Venue for Okx {
             Err(format!("OKX HTTP {}: {}", response.status, response.body))
         };
         if let Err(error) = result {
-            self.on_request_failed(cx, pending, &error);
+            self.request_failed(cx, pending, &error);
             return;
         }
         match pending {
@@ -1247,25 +1269,10 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Account(request) = pending {
-            self.account_failed(cx, request, error);
-        } else if let Pending::Trade(request) = pending {
-            self.trade_lost(cx, request, error);
-        } else if let Pending::History(request) = pending {
-            self.history_failed(cx, request, error);
-        } else if let Pending::Closed(request) = pending {
-            Self::closed_failed(cx, request, error);
-        } else if let Pending::Candles { command, .. } = pending {
-            cx.command_error(command, error);
-            cx.done(command, Ok("[]".into()));
-        } else {
-            let markets = matches!(pending, Pending::Markets { .. });
-            if !markets {
-                self.ticker_reading = false;
-                self.ticker_refresh_pending = false;
-            }
-            self.startup.failed(cx, markets);
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.config_unanswered();
         }
+        self.request_failed(cx, pending, error);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

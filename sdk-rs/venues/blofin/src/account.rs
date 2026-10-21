@@ -64,7 +64,8 @@ pub(crate) struct Account {
     auth_failures: u32,
     /// Backs off the settings reads that gate startup; transient failures never end it.
     startup: safe_cex_engine::startup::Backoff<StartupRead>,
-    signature_rejections: u8,
+    /// Consecutive 152409 answers per settings read, indexed by `StartupRead`.
+    signature_rejections: [u8; 2],
     pub startup_rejected: bool,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -335,8 +336,13 @@ impl Blofin {
             StartupRead::Mode => self.account.mode_loaded,
         }
     }
-    /// An unloaded setting retries with backoff; the startup gate never fails closed.
+    /// Any outcome but 152409 ends that read's run of signature rejections.
     fn setting_unsettled(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+        self.account.signature_rejections[read as usize] = 0;
+        self.setting_retry(cx, read);
+    }
+    /// An unloaded setting retries with backoff; the startup gate never fails closed.
+    fn setting_retry(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
         if self.setting_loaded(read) {
             self.account.startup.succeeded(cx, &read);
         } else if !self.account.startup_rejected {
@@ -344,21 +350,31 @@ impl Blofin {
         }
     }
     /// A refused key can never pass the settings reads, so startup fails instead
-    /// of polling. Only documented key codes count; 152409 after one re-signed resend.
-    fn settings_rejected(&mut self, cx: &mut Cx<'_, Pending>, body: &str) -> bool {
-        let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(body) else {
-            return false;
-        };
-        let Some(kind) = key_rejection(&envelope.code) else {
-            self.account.signature_rejections = 0;
+    /// of polling. Only documented key codes count; 152409 only when the same read
+    /// gets it twice in a row, i.e. after one re-signed resend.
+    fn settings_rejected(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: StartupRead,
+        body: &str,
+    ) -> bool {
+        let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
+        let rejections = &mut self.account.signature_rejections[read as usize];
+        let Some(envelope) = envelope else {
+            *rejections = 0;
             return false;
         };
         if envelope.code == "152409" {
-            self.account.signature_rejections += 1;
-            if self.account.signature_rejections < 2 {
+            *rejections += 1;
+            if *rejections < 2 {
                 return false;
             }
+        } else {
+            *rejections = 0;
         }
+        let Some(kind) = key_rejection(&envelope.code) else {
+            return false;
+        };
         let read_key = self.options.read_credentials.is_some();
         let which = if read_key {
             "read-only API key"
@@ -915,9 +931,15 @@ impl Blofin {
                 Request::Mode { .. } => Some(StartupRead::Mode),
                 _ => None,
             };
-            if gate.is_some_and(|read| !self.setting_loaded(read))
-                && self.settings_rejected(cx, response.body)
-            {
+            if let Some(read) = gate.filter(|&read| !self.setting_loaded(read)) {
+                // settings_rejected already counted this answer; retry without resetting it.
+                if !self.settings_rejected(cx, read, response.body) {
+                    if response.body.contains("152401") || response.body.contains("152406") {
+                        self.account.auth_failures += 1;
+                    }
+                    self.setting_retry(cx, read);
+                    cx.log(LogLevel::Error, e);
+                }
                 return;
             }
             if response.body.contains("152401") || response.body.contains("152406") {
@@ -1345,12 +1367,14 @@ impl Blofin {
             return;
         };
         // BloFin answers a refused login with `event: "error"` (60009 or a 1524xx code).
+        // A socket 152409 reconnects with a fresh signature, like 60009.
         let login_failed = (message.event == "login" && message.code != "0")
             || (message.event == "error" && !self.account.authenticated);
         if login_failed {
             // Before the account is ready a refused key cannot recover by reconnecting.
             if !self.account.authenticated
                 && !(cx.store.loaded().balance && cx.store.loaded().orders)
+                && message.code != "152409"
                 && let Some(kind) = key_rejection(&message.code)
             {
                 let error = rejection("API key login", &message.code, &message.msg, kind);

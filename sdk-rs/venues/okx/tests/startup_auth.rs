@@ -237,6 +237,42 @@ fn invalid_signature_is_final_only_after_one_re_signed_resend() {
 }
 
 #[test]
+fn invalid_signature_counts_only_consecutive_answers() {
+    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut rig = Rig::default();
+    let mut config = to_config(&mut engine, &mut rig);
+    let sign = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
+    let busy = r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#;
+    let mut sent = 2.;
+    for interruption in [Some((200, busy)), Some((503, "<html>down</html>")), None] {
+        respond(&mut engine, &config, 401, sign, sent);
+        rig.take(&mut engine);
+        let (at, next) = rig.until(&mut engine, is_config).expect("re-signed");
+        match interruption {
+            Some((status, body)) => respond(&mut engine, &next, status, body, at),
+            None => {
+                let Action::Http(request) = &next else {
+                    unreachable!()
+                };
+                engine.handle(
+                    at,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "timed out",
+                    },
+                );
+            }
+        }
+        rig.take(&mut engine);
+        (sent, config) = rig.until(&mut engine, is_config).expect("retried");
+    }
+    respond(&mut engine, &config, 401, sign, sent);
+    rig.take(&mut engine);
+    assert!(rig.until(&mut engine, is_config).is_some(), "re-signed");
+    assert!(rig.failures.is_empty() && rig.deactivated == 0);
+}
+
+#[test]
 fn rejected_read_only_key_fails_startup_without_deactivating() {
     let mut engine = Engine::new(Okx::new(Options {
         read_credentials: Some(ReadCredentials {

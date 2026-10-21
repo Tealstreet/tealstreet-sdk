@@ -216,6 +216,57 @@ fn bad_signature_is_final_only_after_one_re_signed_resend() {
 }
 
 #[test]
+fn concurrent_bad_signatures_on_both_reads_are_each_re_signed() {
+    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut rig = Rig::default();
+    let (margin, mode, _) = to_settings(&mut engine, &mut rig);
+    let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
+    respond(&mut engine, &margin, 200, sign, 2.);
+    respond(&mut engine, &mode, 200, sign, 2.);
+    let mut out = rig.take(&mut engine);
+    out.extend(rig.run(&mut engine, 5_000.));
+    let margin = out
+        .iter()
+        .find(|a| get("margin-mode")(a))
+        .expect("margin re-signed");
+    let mode = out
+        .iter()
+        .find(|a| get("position-mode")(a))
+        .expect("mode re-signed");
+    respond(&mut engine, margin, 200, MARGIN, 5_000.);
+    respond(&mut engine, mode, 200, MODE, 5_000.);
+    assert!(
+        rig.take(&mut engine).iter().any(get("account/positions")),
+        "account loads"
+    );
+    assert!(rig.failures.is_empty() && rig.deactivated == 0);
+}
+
+#[test]
+fn bad_signature_after_the_other_read_recovered_is_re_signed() {
+    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut rig = Rig::default();
+    let (margin, mode, _) = to_settings(&mut engine, &mut rig);
+    let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
+    respond(&mut engine, &margin, 200, sign, 2.);
+    rig.take(&mut engine);
+    let (at, margin) = rig.until(&mut engine, get("margin-mode")).unwrap();
+    respond(&mut engine, &margin, 200, MARGIN, at);
+    rig.take(&mut engine);
+    respond(&mut engine, &mode, 200, sign, at + 120_000.);
+    rig.take(&mut engine);
+    let (at, mode) = rig
+        .until(&mut engine, get("position-mode"))
+        .expect("re-signed");
+    assert!(rig.failures.is_empty() && rig.deactivated == 0);
+    respond(&mut engine, &mode, 200, MODE, at);
+    assert!(
+        rig.take(&mut engine).iter().any(get("account/positions")),
+        "account loads"
+    );
+}
+
+#[test]
 fn rejected_read_only_ip_fails_startup_without_deactivating() {
     let mut engine = Engine::new(Blofin::new(Options {
         read_credentials: Some(ReadCredentials {
@@ -326,4 +377,31 @@ fn generic_socket_login_failure_reconnects() {
         "closed on the rejection, not the auth deadline"
     );
     assert!(rig.failures.is_empty());
+}
+
+#[test]
+fn bad_signature_on_socket_login_reconnects() {
+    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut rig = Rig::default();
+    let (_, _, private) = to_settings(&mut engine, &mut rig);
+    engine.handle(2., Event::WsOpened { socket: private });
+    rig.take(&mut engine);
+    engine.handle(
+        3.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"error","code":"152409","msg":"Signature verification failed"}"#,
+        },
+    );
+    rig.take(&mut engine);
+    let (at, _) = rig
+        .until(&mut engine, |a| {
+            private_connect(std::slice::from_ref(a)).is_some()
+        })
+        .expect("reconnects");
+    assert!(
+        at < 10_000.,
+        "closed on the rejection, not the auth deadline"
+    );
+    assert!(rig.failures.is_empty() && rig.deactivated == 0);
 }

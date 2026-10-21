@@ -127,6 +127,7 @@ pub struct AccountState {
     retry: Option<TimerId>,
     /// Backs off the config read that gates startup; transient failures never end it.
     startup: safe_cex_engine::startup::Backoff<()>,
+    /// Consecutive 50113 answers to the config read; two in a row reject the key.
     signature_rejections: u8,
     pub startup_rejected: bool,
 }
@@ -562,7 +563,6 @@ impl Okx {
                     return;
                 };
                 self.account.config_read_at = cx.now;
-                self.account.signature_rejections = 0;
                 self.account.startup.succeeded(cx, &());
                 let hedged = config.pos_mode == "long_short_mode";
                 let level = config.acct_lv.parse().ok();
@@ -842,22 +842,26 @@ impl Okx {
     }
 
     /// A refused key can never pass the config read, so startup fails instead
-    /// of polling. Only documented key codes count; 50113 after one re-signed resend.
+    /// of polling. Only documented key codes count; 50113 only twice in a row,
+    /// i.e. after one re-signed resend. Any other answer ends the run.
     pub(crate) fn config_rejected(&mut self, cx: &mut Cx<'_, Pending>, body: &str) -> bool {
+        let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
+        if envelope.as_ref().is_some_and(|e| e.code == "50113") {
+            self.account.signature_rejections += 1;
+        } else {
+            self.account.signature_rejections = 0;
+        }
         if self.account.configured {
             return false;
         }
-        let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(body) else {
+        let Some(envelope) = envelope else {
             return false;
         };
         let Some(kind) = rest_key_rejection(envelope.code) else {
             return false;
         };
-        if envelope.code == "50113" {
-            self.account.signature_rejections += 1;
-            if self.account.signature_rejections < 2 {
-                return false;
-            }
+        if envelope.code == "50113" && self.account.signature_rejections < 2 {
+            return false;
         }
         self.account.config_in_flight = false;
         let read_key = self.options.read_credentials.is_some();
@@ -869,6 +873,11 @@ impl Okx {
         let error = rejection(which, envelope.code, envelope.msg, kind);
         self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid && !read_key);
         true
+    }
+
+    /// A config read lost in transport is not a 50113 answer, so it ends the run.
+    pub(crate) fn config_unanswered(&mut self) {
+        self.account.signature_rejections = 0;
     }
 
     /// Before the account is ready, a login the venue refuses cannot recover by
