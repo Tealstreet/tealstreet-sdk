@@ -6,6 +6,23 @@ Neither measures a real browser. Production browser/worker loaders choose one
 of 28 families. Combined web is shipped for direct/embedded consumers and will
 be measured separately as a diagnostic, not as the family-loader path.
 
+Run `corepack yarn rust:measure-browser --inputs INPUTS --out OUTPUT` in CI.
+The job downloads `browser-wasm-families` and `browser-wasm-combined` from
+the same workflow run, checks source/run/build-input fingerprints and SHA-256
+for every JS/WASM file, then starts Chrome from the runner image. No build,
+browser library dependency, timing threshold or production behavior changes.
+`raw.json` retains all observations, version/source/runner provenance and
+failed-sample diagnostics; `table.md` contains medians. The first actual table
+and the run/artifact link are recorded in the PR before merge.
+
+Worker bootstrap and end-to-end include the DedicatedWorker launch (parent
+clock); module readiness includes production loader import, family import,
+WASM fetch/compile/instantiate (worker clock). Chrome launch is separate.
+Combined web bypasses the family loader and is explicitly diagnostic. There
+is no account construction or exchange I/O. Fresh profiles clear browser
+caches; the runner's OS caches may be warm. Three samples are descriptive,
+not evidence for a timing threshold or real-user latency distribution.
+
 1. Add a measurement harness using CI's existing Chrome and Node 22 built-ins,
    with no dependency or production/WASM code changes. Each of three samples
    uses a fresh Chrome process/profile and real DedicatedWorker. Start the
