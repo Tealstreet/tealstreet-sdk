@@ -717,9 +717,10 @@ impl Venue for WeexFutures {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
             Task::Markets(rows) => {
-                match serde_json::from_str::<Symbol<'_>>(item) {
-                    Ok(r) => rows.extend(r.market()),
-                    Err(_) => {
+                match serde_json::from_str::<Symbol<'_>>(item).map(Symbol::market) {
+                    Ok(Some(market)) if market.precision.is_tradable() => rows.push(market),
+                    Ok(None) => {}
+                    _ => {
                         p.skipped.push(row_symbol(item));
                         safe_cex_engine::startup::skipped_row(cx);
                     }

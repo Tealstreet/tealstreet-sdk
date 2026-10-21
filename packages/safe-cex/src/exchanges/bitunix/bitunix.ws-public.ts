@@ -301,7 +301,7 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
         mark: parseFloat(v(data, 'mp')),
         index: parseFloat(v(data, 'ip')),
         fundingRate: parseFloat(v(data, 'fr')),
-        fundingTime: parseFloat(v(data, 'ft')),
+        fundingTime: nextFundingTime(v(data, 'nft') || v(data, 'ft')),
       });
     }
   };
@@ -328,4 +328,13 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
   listenOrderBook = (_symbol: string, _callback: (orderBook: OrderBook) => void) => {
     throw new Error('Not implemented');
   };
+}
+
+/** `nft` is the next settlement as ISO text or epoch milliseconds; parseFloat
+ * of ISO text would return only its year. */
+function nextFundingTime(value: unknown): number {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
 }

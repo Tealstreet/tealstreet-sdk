@@ -8,14 +8,15 @@ mod sign;
 mod trading;
 pub mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query, Signed};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -534,8 +535,9 @@ impl BinanceFutures {
             self.reset_spot_subscription(cx);
             self.account.resync_orders_on_open = true;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::WS_DISCONNECTED,
             format!("Binance socket closed ({code}); reconnecting"),
         );
     }
@@ -561,8 +563,9 @@ impl BinanceFutures {
         for topic in params {
             let encoded = serde_json::to_string(topic).expect("string");
             if encoded.len() + 128 >= 4096 {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
                     "Binance Spot stream name exceeds the control frame limit",
                 );
                 return;
@@ -651,8 +654,9 @@ impl BinanceFutures {
         rejected: bool,
     ) {
         if response.status != 200 || markets.is_empty() {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 format!(
                     "Binance exchangeInfo read unavailable (HTTP {})",
                     response.status
@@ -795,7 +799,11 @@ impl BinanceFutures {
             Err(error) => Some(error.to_owned()),
         };
         if let Some(failure) = failure {
-            cx.log(LogLevel::Warning, format!("Binance tickers: {failure}"));
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("Binance tickers: {failure}"),
+            );
             for reported in &mut self.ticker_seed.reported {
                 *reported &= !from;
             }
@@ -831,8 +839,9 @@ impl BinanceFutures {
                 .map(|(ticker, _)| ticker)
                 .collect()
         };
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::STARTUP_PROGRESS,
             format!(
                 "Loaded {} Binance markets",
                 tickers.len().min(cx.store.markets().len())
@@ -1065,8 +1074,9 @@ impl BinanceFutures {
                 RATE_LIMIT_PAUSE_MS
             };
             self.rest_paused_until = self.rest_paused_until.max(cx.now + pause);
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_PAUSED,
                 format!(
                     "Binance REST limited (HTTP {status}); pausing depth snapshots for {pause} ms"
                 ),
@@ -1140,8 +1150,9 @@ impl BinanceFutures {
             && !self.books.contains_key(&symbol)
             && self.books.len() + self.candles.len() >= 1_024
         {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
                 "Binance Spot supports at most 1024 combined book/candle streams per account",
             );
             return;
@@ -1322,7 +1333,7 @@ impl Venue for BinanceFutures {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.get_streamed(
@@ -1408,8 +1419,9 @@ impl Venue for BinanceFutures {
                 if let Some(at) = pending.iter().position(|request| *request == id) {
                     pending.swap_remove(at);
                     if ack.code.is_some_and(|code| code != 0) {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::SUBSCRIPTION_REJECTED,
                             format!("Binance Spot subscription rejected: {}", ack.msg),
                         );
                         cx.close(socket);
@@ -1481,7 +1493,13 @@ impl Venue for BinanceFutures {
                             && matches!(&*m.margin_asset, "USDT" | "USDC")
                     }
                 {
-                    markets.push(market_from_wire(&m, self.options.variant));
+                    let market = market_from_wire(&m, self.options.variant);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Pending::Daily => {
@@ -1638,14 +1656,18 @@ impl Venue for BinanceFutures {
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {
                 if !self.supports(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Binance"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Binance"),
+                    );
                     return;
                 }
                 if self.is_spot()
                     && !self.candles.contains_key(&(symbol.clone(), interval))
                     && self.books.len() + self.candles.len() >= 1_024
                 {
-                    cx.log(LogLevel::Error, "Binance Spot supports at most 1024 combined book/candle streams per account");
+                    cx.notice(Level::Error, code::SUBSCRIPTION_REJECTED, "Binance Spot supports at most 1024 combined book/candle streams per account");
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_insert(0);

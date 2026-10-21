@@ -244,8 +244,8 @@ fn fills_are_per_execution_and_duplicates_are_suppressed() {
             text: fills,
         },
     );
-    assert!(e.take_market_frame(NOW).is_none());
-    let frame = e.take_frame(NOW).unwrap();
+    // Fills travel with their orders: the book-cadence flush carries both.
+    let frame = e.take_market_frame(NOW).unwrap();
     let mut at = 16;
     let mut found = false;
     for _ in 0..u16::from_le_bytes([frame[6], frame[7]]) {
