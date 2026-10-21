@@ -61,6 +61,18 @@ export interface EngineCapabilities {
   balanceInfo: boolean;
   hostClock: boolean;
   marketRefresh: boolean;
+  positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders';
+  closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin';
+  fillHistoryTime: 'asProvided' | 'secondsOrMilliseconds' | 'nonnegativeSecondsOrMilliseconds';
+  stpControls: boolean;
+  bybitExecutionControls: boolean;
+  rejectClientSlippage: boolean;
+  finiteCommandNumbers: boolean;
+  finiteHistoryBounds: boolean;
+  rejectOrderHistoryFilters: boolean;
+  publicCatalogueValidation: boolean;
+  isolatedBookSubscriptions: boolean;
+  inverseClosedPositions: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };

@@ -418,7 +418,7 @@ fn aster_api_resolution_preserves_override_and_trimmed_auth_precedence() {
         );
         assert_eq!(
             serde_json::to_string(&options.construction("binance")).unwrap(),
-            "{}"
+            r#"{"bridge":{"spot":false,"demo":false,"primaryCredentialsOnly":false,"payloadSigning":false,"apiKeyIndexRequired":false,"isolatedBookSubscriptions":false}}"#
         );
     }
     // An inferred V3 reaches the same registry path as an explicit V3.

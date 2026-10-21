@@ -2154,6 +2154,19 @@ impl Venue for BybitLinear {
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: if self.variant.is_spot() || self.variant == Variant::Inverse {
+                safe_cex_engine::PositionHistory::Unsupported
+            } else {
+                safe_cex_engine::PositionHistory::Bybit
+            },
+            closed_position_format: if self.variant.is_spot() {
+                safe_cex_engine::ClosedPositionFormat::Unsupported
+            } else {
+                safe_cex_engine::ClosedPositionFormat::Bybit
+            },
+            bybit_execution_controls: true,
+            reject_client_slippage: self.variant.is_hyro(),
+            inverse_closed_positions: self.variant == Variant::Inverse,
             options: self.category_enabled(Category::Option),
             // HyroTrader exposes no identity endpoint; `fetch_identity` refuses it.
             account: if self.variant.is_hyro() {

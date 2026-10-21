@@ -36,7 +36,7 @@ compile_error!(
 );
 
 mod construction;
-pub use construction::PublicMode;
+pub use construction::{BridgeConstruction, PublicMode};
 #[cfg(feature = "bybit")]
 mod hyro;
 #[cfg(feature = "bybit")]
@@ -111,6 +111,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Construction {
+    pub bridge: BridgeConstruction,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub can_sign: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,6 +135,7 @@ impl EngineOptions {
         let _ = venue;
         let mode = construction::resolve(venue, self);
         Construction {
+            bridge: construction::bridge(venue, self),
             asterdex_api_version,
             can_sign: mode.as_ref().map(|mode| mode.can_sign),
             public_data_only: mode.map(|mode| mode.public_data_only),
