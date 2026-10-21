@@ -45,7 +45,8 @@ pub enum Request {
         revision: u64,
     },
 }
-/// Rows a snapshot could not map; known ids keep their stored copy.
+/// Rows a snapshot could not map; known ids keep their stored copy, and a row
+/// without an id keeps every stored row of the list.
 #[derive(Default)]
 pub struct Skipped {
     ids: Vec<String>,
@@ -138,6 +139,8 @@ struct OrdersJoin {
     algo: Vec<Order>,
     classifications: Vec<(String, bool)>,
     skipped: Vec<String>,
+    /// A page skipped a row without an id: absence removes no stored order.
+    unidentified: bool,
     regular_done: bool,
     algo_done: bool,
 }
@@ -664,6 +667,7 @@ impl Woo {
             algo: vec![],
             classifications: vec![],
             skipped: vec![],
+            unidentified: false,
             regular_done: false,
             algo_done: false,
         });
@@ -1326,7 +1330,9 @@ impl Woo {
                     .positions()
                     .iter()
                     .filter(|p| {
-                        (skipped.ids.contains(&p.id) || skipped.ids.contains(&p.symbol))
+                        (skipped.anonymous()
+                            || skipped.ids.contains(&p.id)
+                            || skipped.ids.contains(&p.symbol))
                             && !rows.iter().any(|r| r.id == p.id)
                     })
                     .cloned()
@@ -1414,6 +1420,7 @@ impl Woo {
                 let added =
                     dest.len() != before || skipped.ids.iter().any(|id| !join.skipped.contains(id));
                 join.skipped.extend(skipped.ids);
+                join.unidentified |= skipped.anonymous > 0;
                 join.classifications
                     .extend(dest[before..].iter().filter_map(|row| {
                         classifications
@@ -1448,9 +1455,9 @@ impl Woo {
                     }
                     let mut combined = join.regular;
                     combined.extend(join.algo);
-                    for id in &join.skipped {
-                        if let Some(old) = cx.store.order(id)
-                            && !combined.iter().any(|r| &r.id == id)
+                    for old in cx.store.orders() {
+                        if (join.unidentified || join.skipped.contains(&old.id))
+                            && !combined.iter().any(|r| r.id == old.id)
                         {
                             combined.push(old.clone());
                         }
