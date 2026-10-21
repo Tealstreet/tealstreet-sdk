@@ -177,6 +177,9 @@ propagation, smoothing and canvas rendering were checked read-only at
 `65e086a3c90`. The required caller repair below remains open.
 The Bitunix secondary-read follow-up checks #1640 at `93bb218ffda`; identity,
 egress and the limits of account-auth evidence are recorded below.
+The Bitunix private-snapshot batch checks #1641 (`f156e3dc0aa`), #1643
+(`163929bc0f5`) and #1645 (`6642e51468b`); ordinary position-read progress,
+retained row families and readiness/preflight limits use those actual merges.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -262,6 +265,9 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1636 / `62adf7651` | A usable Bitunix catalogue starts private initialization before ticker seeding finishes. Valid public rows survive malformed typed peers; unusable required seeds retry without false loaded-empty readiness. Independent discovery retries honor rate floors and use existing startup.degraded/recovered codes. Ticker recovery does not restart private settings/polling; private/history failure policy and caller shapes stay unchanged. |
 | #1639 / `77a5e5faa` | Bitunix retains socket supervision/backoff per feed, rejects retired socket/timer events and replays current interests once on replacement. Futures-socket retirement immediately publishes empty books before retry; public ticker-shard retirement leaves the separate futures books intact. **Required, high priority:** NX must propagate empty-book invalidation through raw/smoothed listeners and clear displayed depth, rather than keep stale levels. See [Bitunix disconnected books](#bitunix-disconnected-books-1639). |
 | #1640 / `93bb218ff` | Bitunix signed GETs now use configured secondary read credentials and matching secondary egress; mutations, posted reads and private WS login stay primary, and public discovery stays unsigned. Account/settings requests tag the selected slot and scope, without adding native auth-outcome classification. Existing caller options remain; malformed secondary identities are rejected before I/O. |
+| #1641 / `f156e3dc0` | Ordinary Bitunix position reads can publish financial snapshots despite intervening WS routing-ID notifications. Reads coalesce around an active serial with bounded lost-read replacement; accepted leverage/margin/mode writes still fence older snapshots, and command-owned preflight keeps full generation checks. Caller APIs and write retries stay unchanged. |
+| #1643 / `163929bc0` | Malformed typed Bitunix position rows retain the affected symbol's cached hedge legs, settings and REST routing IDs while valid peers advance. Unknown identity protects absence; valid explicit zero rows can still close positions. Partial mode conflicts discard atomically; partial reads cannot establish initial readiness or approve trading preflight. |
+| #1645 / `6642e5146` | Malformed Bitunix regular/TP-SL REST rows retain rejected native-ID families and routing metadata while admitted peers advance. Unknown identity holds absence within its endpoint scope; admitted parents can remove obsolete children. Only admitted groups advance execution baselines, and partial initial/preflight reads remain insufficient. Order/TP-SL WS scheduling and global generation fences are separate. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2292,6 +2298,46 @@ existing scope. History, public discovery and trading requests do not create
 account-auth evidence. Request tagging is not native success/rejection
 classification: #1640 does not add Bitunix `account_auth_outcome` handling or
 justify clearing a credential badge from unrelated successful traffic.
+
+### Bitunix private snapshot progress and retention (#1641/#1643/#1645)
+
+Ordinary position reconciliation now progresses during continuous WS position
+notifications, which update routing IDs rather than replace REST financial state.
+An active read keeps its serial; activity coalesces a follow-up instead of
+continually postponing or superseding that read. An unanswered read is eligible
+for replacement after 10 seconds, and a late old response/failure cannot retire
+the replacement. Accepted leverage, margin and mode acknowledgements still fence
+older snapshots through a separate write revision. Command-owned preflight keeps
+the full generation/serial checks; this change adds no write retry.
+
+For complete successful REST envelopes, typed malformed position rows emit Warn
+`row.skipped` and retain the known symbol's cached hedge legs, settings and REST
+position IDs while healthy peers and safely absent symbols progress. An unknown
+identity protects absence removal, while an admitted explicit zero can still
+close its own position. A known rejection quarantines valid same-symbol
+duplicates in either input order; bounded rejection-key overflow conservatively
+holds the scope. Partial mode disagreement retains the whole previous snapshot
+instead of mixing incompatible position modes. Held rows do not republish their
+settings as fresh observations.
+
+Regular and TP-SL REST snapshots isolate malformed rows by raw native order ID.
+Retained families include the regular parent with attached brackets, or the
+standalone TP/SL siblings, plus their native cancel/amend routing metadata.
+Unknown identity holds absence only within that endpoint's scope. An admitted
+raw parent can still replace its old family and remove omitted children; a
+rejected duplicate quarantines that raw family. Only admitted groups advance
+execution baselines, preserving held rows' pending fill accounting.
+
+Consumers can therefore see newly admitted peers beside retained older rows;
+row skipping does not prove a full refresh. Partial initial position/order
+snapshots do not establish readiness. Initial orders require both current
+regular/TP-SL serials and generations. A partial command-owned read can update
+healthy UI peers but cannot approve a trading prerequisite: the command rejects
+without sending the dependent write. Malformed/failed envelopes retain the
+previous snapshot rather than publishing a parsed prefix. Keep readiness and
+existing command-error handling; method signatures, quantities and worker error
+fields are unchanged. Order/TP-SL WS reconciliation scheduling and global
+generation fencing remain separate from these REST row-admission changes.
 
 ## Required startup degradation visibility
 
