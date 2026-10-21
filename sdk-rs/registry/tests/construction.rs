@@ -419,3 +419,85 @@ fn aster_api_resolution_preserves_override_and_trimmed_auth_precedence() {
     // An inferred V3 reaches the same registry path as an explicit V3.
     construct("asterdex", &format!("{{{flat}}}")).unwrap();
 }
+
+#[test]
+fn sdk_public_mode_is_resolved_before_native_credential_validation() {
+    // Derived public input disagrees with raw explicit private intent.
+    assert_eq!(
+        rejected(
+            "paradex",
+            r#"{"publicDataOnly":true,"publicMode":{"requested":false}}"#
+        ),
+        "Rust Paradex private accounts require a key, Paradex address and subkey address"
+    );
+    construct(
+        "paradex",
+        r#"{"publicDataOnly":false,"publicMode":{"requested":true}}"#,
+    )
+    .unwrap();
+    // Legacy harness options keep their explicit native interpretation.
+    construct("paradex", r#"{"publicDataOnly":true}"#).unwrap();
+    // An automatic public fallback skips the private passphrase check.
+    construct(
+        "weex",
+        r#"{"publicDataOnly":false,"key":"k","publicMode":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        rejected(
+            "weex",
+            r#"{"publicDataOnly":true,"key":"k","secret":"s","publicMode":{"requested":false}}"#
+        ),
+        "WEEX requires a passphrase"
+    );
+}
+
+#[test]
+fn raw_public_mode_distinguishes_remote_and_payload_signers() {
+    let resolve = |venue, fields: &str| {
+        let options: EngineOptions = serde_json::from_str(fields).unwrap();
+        let result = options.construction(venue);
+        (result.can_sign.unwrap(), result.public_data_only.unwrap())
+    };
+    assert_eq!(
+        resolve(
+            "asterdex",
+            r#"{"key":"k","publicMode":{"remoteSigner":true}}"#
+        ),
+        (true, false)
+    );
+    assert_eq!(
+        resolve(
+            "asterdex",
+            r#"{"key":"k","publicMode":{"payloadSigner":true}}"#
+        ),
+        (false, true)
+    );
+    assert_eq!(
+        resolve(
+            "lighter",
+            r#"{"publicMode":{"remoteSigner":true,"apiKeyIndexPresent":true}}"#
+        ),
+        (false, false)
+    );
+    assert_eq!(
+        resolve(
+            "lighter",
+            r#"{"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#
+        ),
+        (false, true)
+    );
+    assert_eq!(
+        resolve("hyperliquid", r#"{"vault":"v","publicMode":{}}"#),
+        (false, false)
+    );
+    assert_eq!(
+        resolve("hyperliquidspot", r#"{"vault":"v","publicMode":{}}"#),
+        (false, true)
+    );
+    assert_eq!(
+        resolve("coinbase", r#"{"key":"k","publicMode":{"requested":true}}"#),
+        (true, true)
+    );
+    assert_eq!(resolve("txflow", r#"{"publicMode":{}}"#), (false, false));
+}

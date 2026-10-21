@@ -74,11 +74,13 @@ describe('Rust Paradex account boundary', () => {
   );
 
   it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
-    'rejects explicitly requested private mode with missing fields before loading: %j', async (missing) => {
+    'forwards raw private intent beside derived public eligibility for native validation: %j', async (missing) => {
       const { exchange, load, construct } = setup({ ...missing, publicDataOnly: false });
-      await expect(exchange.start()).rejects.toThrow('private accounts require a key');
-      expect(load).not.toHaveBeenCalled();
-      expect(construct).not.toHaveBeenCalled();
+      await exchange.start();
+      expect(load).toHaveBeenCalledOnce();
+      expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
+        ...missing, publicDataOnly: true, publicMode: { requested: false },
+      });
     },
   );
 
