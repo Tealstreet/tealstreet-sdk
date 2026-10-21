@@ -860,11 +860,12 @@ impl Venue for KucoinSpot {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
-            {
-                Ok(r) => rows.push(r.market()),
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            Pending::Markets { rows, invalid: _ } => {
+                match serde_json::from_str::<Instrument>(item).map(Instrument::market) {
+                    Ok(market) if market.precision.is_tradable() => rows.push(market),
+                    _ => safe_cex_engine::startup::skipped_row(cx),
+                }
+            }
             Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
                 Err(_) => safe_cex_engine::startup::skipped_row(cx),
