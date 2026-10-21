@@ -518,6 +518,10 @@ Remaining resilience and completeness findings are independent of request parity
   unsubscribes actually sent.
 
 ### OKX
+- ~~OKX's three request-associated cap/cursor ownership omissions~~ now carry
+  the actual closed-position or history query command before retained rows
+  complete. Native regressions cover exact Warn ownership/order at Error-only
+  logging; EEA composite-source failures remain failures.
 - ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
@@ -961,17 +965,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
-  ~~OKX's three request-associated cap/cursor ownership omissions~~ now carry
-  the actual closed-position or history query command before retained rows
-  complete. Native regressions cover exact Warn ownership/order at Error-only
-  logging; EEA composite-source failures remain failures.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
