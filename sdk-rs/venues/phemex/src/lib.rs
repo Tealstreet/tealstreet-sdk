@@ -363,10 +363,6 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
-    fn cancel_needs_stored_order(&self) -> bool {
-        true
-    }
-
     fn guard_pending_placements(&self) -> bool {
         true
     }

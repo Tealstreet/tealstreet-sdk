@@ -1036,6 +1036,7 @@ impl<P> Cx<'_, P> {
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
+        self.io.placement_acks.filled(&fill.order_id);
         self.io.fills.push(fill);
     }
 }
@@ -4237,9 +4238,24 @@ mod placement_ack_tests {
         }
         fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
         fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
-        /// The private stream reports the order named by the message.
+        /// The private stream reports the order named by the message, a group
+        /// child (`child@group`), or a fill of an unstored order (`fill:id`).
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
-            cx.store.upsert_order(order(text));
+            if let Some(id) = text.strip_prefix("fill:") {
+                cx.fill(Fill {
+                    order_id: id.into(),
+                    symbol: "BTCUSDT".into(),
+                    side: OrderSide::Buy,
+                    price: 1.,
+                    amount: 1.,
+                });
+            } else if let Some((child, group)) = text.split_once('@') {
+                let mut row = order(child);
+                row.parent_id = Some(group.into());
+                cx.store.upsert_order(row);
+            } else {
+                cx.store.upsert_order(order(text));
+            }
         }
         fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
         fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
@@ -4428,6 +4444,82 @@ mod placement_ack_tests {
         engine.drain_actions().for_each(drop);
         cancel(&mut engine, 1., 2, "7");
         assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    fn stream(engine: &mut Engine<StoredOnly>, now: f64, text: &str) {
+        engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text,
+            },
+        );
+    }
+
+    #[test]
+    fn stored_legs_and_group_children_release_a_held_cancel() {
+        // OKX stores an algo order only as its `_sl` leg.
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        stream(&mut engine, 2., "7_sl");
+        assert!(
+            results(&mut engine)
+                .iter()
+                .any(|(command, _)| *command == 2),
+            "a stored leg is the order"
+        );
+        // Orderly stores only a TP/SL group's children, each naming the group.
+        let mut grouped = engine_with_hold();
+        place(&mut grouped, 0.);
+        grouped.drain_actions().for_each(drop);
+        cancel(&mut grouped, 1., 2, "7");
+        stream(&mut grouped, 2., "70@7");
+        assert!(
+            results(&mut grouped)
+                .iter()
+                .any(|(command, _)| *command == 2)
+        );
+    }
+
+    #[test]
+    fn a_fill_of_an_unstored_order_releases_its_cancel_at_once() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 1., 2, "7");
+        stream(&mut engine, 2., "fill:7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
+    }
+
+    #[test]
+    fn a_later_write_to_a_held_order_keeps_its_arrival_order() {
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "7".into(),
+                price: Some(2.),
+                amount: None,
+            }),
+        );
+        assert!(results(&mut engine).is_empty());
+        // The id's own wait has ended while the amend is still held: the cancel
+        // must not overtake it; the amend goes out first.
+        cancel(&mut engine, ACK_WAIT_MS + 0.5, 3, "7");
+        let order: Vec<_> = results(&mut engine)
+            .into_iter()
+            .map(|(command, _)| command)
+            .collect();
+        assert_eq!(order, [2, 3]);
+    }
+
+    fn engine_with_hold() -> Engine<StoredOnly> {
+        engine(true)
     }
 
     fn engine_without_hold() -> Engine<StoredOnly> {

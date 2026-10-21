@@ -20,27 +20,41 @@ pub(crate) struct PlacementAcks {
     placing: HashSet<CommandId>,
     /// Acknowledged ids not yet seen in the store, with their expiry.
     acked: Vec<(String, f64)>,
+    /// Acknowledged ids reported filled: a venue may never store them.
+    filled: HashSet<String>,
     /// Held commands, each with its dispatch deadline.
     held: Vec<(Command, f64)>,
 }
 
 /// Virtual protective legs share their parent's stored identity.
 fn native(id: &str) -> &str {
-    [
-        "__stop_loss",
-        "__take_profit",
-        "__trailing_stop_loss",
-        "_tsl",
-        "_sl",
-        "_tp",
-    ]
-    .iter()
-    .find_map(|suffix| id.strip_suffix(suffix))
-    .unwrap_or(id)
+    LEG_SUFFIXES
+        .iter()
+        .find_map(|suffix| id.strip_suffix(suffix))
+        .unwrap_or(id)
 }
 
+const LEG_SUFFIXES: [&str; 6] = [
+    "__stop_loss",
+    "__take_profit",
+    "__trailing_stop_loss",
+    "_tsl",
+    "_sl",
+    "_tp",
+];
+
+/// Whether the store holds the order `id` names: the row itself, its parent
+/// for a virtual leg, its legs (`{id}_sl`), or children of a group `id`.
 fn stored(store: &Store, id: &str) -> bool {
-    store.order(id).is_some() || store.order(native(id)).is_some()
+    let native = native(id);
+    store.orders().iter().any(|order| {
+        order.id == id
+            || order.id == native
+            || order.parent_id.as_deref() == Some(native)
+            || LEG_SUFFIXES
+                .iter()
+                .any(|suffix| order.id.strip_suffix(suffix) == Some(native))
+    })
 }
 
 fn named_ids(command: &Command) -> &[String] {
@@ -71,9 +85,19 @@ impl PlacementAcks {
         }
     }
 
+    /// A fill settles the wait: the venue may drop a filled order rather than
+    /// store it, and the cancel's answer no longer depends on the stream.
+    pub fn filled(&mut self, order_id: &str) {
+        if self.acked.iter().any(|(acked, _)| acked == order_id) {
+            self.filled.insert(order_id.to_owned());
+        }
+    }
+
     fn awaited(&self, store: &Store, command: &Command, now: f64) -> bool {
         named_ids(command).iter().any(|id| {
             !stored(store, id)
+                && !self.filled.contains(id)
+                && !self.filled.contains(native(id))
                 && self
                     .acked
                     .iter()
@@ -81,9 +105,18 @@ impl PlacementAcks {
         })
     }
 
-    /// Whether to hold `command` until its acknowledged ids are stored.
+    /// Whether to hold `command` until its acknowledged ids are stored. A
+    /// command naming an id that an earlier held command names waits behind it,
+    /// so writes to one order keep their arrival order.
     pub fn hold(&mut self, store: &Store, command: &Command, now: f64) -> bool {
-        if !self.awaited(store, command, now) {
+        let behind = named_ids(command).iter().any(|id| {
+            self.held.iter().any(|(held, _)| {
+                named_ids(held)
+                    .iter()
+                    .any(|other| native(other) == native(id))
+            })
+        });
+        if !behind && !self.awaited(store, command, now) {
             return false;
         }
         self.held.push((command.clone(), now + ACK_WAIT_MS));
@@ -94,6 +127,9 @@ impl PlacementAcks {
     pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
         self.acked
             .retain(|(id, expiry)| *expiry > now && !stored(store, id));
+        let acked = &self.acked;
+        self.filled
+            .retain(|id| acked.iter().any(|(acked, _)| acked == id));
         if self.held.is_empty() {
             return Vec::new();
         }
@@ -101,7 +137,15 @@ impl PlacementAcks {
         let mut index = 0;
         while index < self.held.len() {
             let (command, deadline) = &self.held[index];
-            if now >= *deadline || !self.awaited(store, command, now) {
+            // An earlier held write to the same order goes first.
+            let behind = self.held[..index].iter().any(|(earlier, _)| {
+                named_ids(earlier).iter().any(|other| {
+                    named_ids(command)
+                        .iter()
+                        .any(|id| native(id) == native(other))
+                })
+            });
+            if !behind && (now >= *deadline || !self.awaited(store, command, now)) {
                 let (command, _) = self.held.remove(index);
                 // An expired wait must not hold the same id again on dispatch.
                 for id in named_ids(&command) {
