@@ -9,6 +9,13 @@ if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --fam
   echo "Usage: $0 [--venue VENUE | --families]" >&2
   exit 2
 fi
+# WASM-only size profiles. Native release profiles in Cargo.toml stay unchanged.
+# Keep the venue throughput exceptions; derivatives KuCoin and Paradex retain
+# their existing standalone overrides below. Explicit package profiles still win.
+wasm_profile_args=(--config 'profile.release.opt-level="z"'
+  --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
+  --config 'profile.release.package.safe-cex-engine.opt-level="z"'
+  --config 'profile.release.package.safe-cex-venue-kucoin.opt-level=3')
 # The Cargo arguments building the family that contains a venue.
 family_args() {
   case "$1" in
@@ -22,6 +29,9 @@ family_args() {
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
+  # WOO's isolated artifact missed the public steady-state CPU gate with the
+  # shared size profile. Keep its original arguments; combined is measured separately.
+  if [[ $family != woo ]]; then build_args+=("${wasm_profile_args[@]}"); fi
   if [[ $family == paradex ]]; then
     # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
     build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
@@ -73,7 +83,10 @@ if [[ ${1:-} == --families ]]; then
   done
   exit 0
 fi
-build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
+# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
+# Measure a narrower host-only profile without changing their engine/dependencies.
+build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
+  --config 'profile.release.package.safe-cex-wasm.opt-level="z"')
 if [[ ${1:-} == --venue ]]; then family_args "$2"; fi
 cargo build "${build_args[@]}"
 bind hosts/wasm/pkg/web hosts/wasm/pkg/node

@@ -509,8 +509,15 @@ Remaining resilience and completeness findings are independent of request parity
   survive WS-only generation changes, with separate write-ACK revision fencing.
   Command-owned preflight remains strict; notifications coalesce one follow-up
   without moving deadlines, and lost reads recover without admitting old replies.
-  Order/TP-SL event generation still fences the entire order snapshot; keyed order
-  reconciliation remains a separate open finding.
+- Medium: ~~Order/TP-SL WS generation fences the entire order snapshot and
+  starves healthy REST peers~~. Ordinary reads use current endpoint serials and
+  command-mutation revisions, retaining newer WS raw families, native metadata and
+  terminal absence while healthy REST-only peers advance. Malformed known/unknown
+  WS coverage quarantines only its family/endpoint absence; bounded overflow holds
+  cached data and cannot establish initial readiness. Both complete initial halves
+  retain overlap until atomic publication. Owned preflight remains generation
+  strict. Independent endpoint tokens retain the first repair deadline, and write
+  response/cleanup fences include partial-cancel ACK effects before error exits.
 - Medium: ~~history failures return success with empty or partial rows~~.
   Rust now rejects failed first/later pages (transport, HTTP/native, malformed
   rows/envelopes), so a failed read cannot establish complete history. Full

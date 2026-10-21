@@ -685,24 +685,38 @@ fn malformed_or_stale_final_fill_totals_never_create_replacements() {
         assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
     }
 }
-fn orders_refresh(e: &mut TestEngine, s: safe_cex_engine::SocketId) {
-    event(
-        e,
-        s,
-        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"1"}}"#,
+fn orders_refresh(
+    e: &mut TestEngine,
+    s: safe_cex_engine::SocketId,
+    now: f64,
+    pending: Option<(safe_cex_engine::TimerId, f64)>,
+) {
+    e.handle(
+        now,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"1"}}"#,
+        },
     );
-    let timer = e
-        .drain_actions()
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (timer, at) = actions
+        .into_iter()
         .filter_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                if at_ms == 1100.0 { Some(timer) } else { None }
+                if at_ms == now + 1000.0 {
+                    Some((timer, at_ms))
+                } else {
+                    None
+                }
             } else {
                 None
             }
         })
-        .next_back()
-        .unwrap();
-    e.handle(1100.0, Event::TimerFired { timer });
+        .chain(pending)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("new or previously armed order repair");
+    // A command's earlier repair must not be postponed by this notification.
+    e.handle(at, Event::TimerFired { timer });
     for r in requests(e) {
         reply(
             e,
@@ -727,7 +741,7 @@ fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
         }),
     );
     let write = requests(&mut e).remove(0);
-    orders_refresh(&mut e, s);
+    orders_refresh(&mut e, s, 100.0, None);
     assert!(
         e.store()
             .orders()
@@ -741,7 +755,11 @@ fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
             error: "response lost",
         },
     );
-    e.drain_actions().for_each(drop);
+    let pending = e.drain_actions().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if at_ms == 2101.0 => Some((timer, at_ms)),
+        _ => None,
+    });
+    assert!(pending.is_some(), "failed write schedules an order repair");
     assert!(
         !e.store()
             .orders()
@@ -756,13 +774,13 @@ fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
         }),
     );
     let write = requests(&mut e).remove(0);
-    orders_refresh(&mut e, s);
+    orders_refresh(&mut e, s, 1300.0, pending);
     assert_eq!(
         e.store().order("one").unwrap().status,
         OrderStatus::Canceling
     );
     e.handle(
-        1300.0,
+        2200.0,
         Event::HttpFailed {
             request: write.id,
             error: "response lost",
