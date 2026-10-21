@@ -3,7 +3,7 @@ import type { ExchangeName, ExchangeOptions } from '../types';
 
 import { afterEach, expect, it } from 'vitest';
 
-import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../exchanges/asterdex/asterdex.types';
+import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE, resolveAsterDEXApiVersion } from '../exchanges/asterdex/asterdex.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -64,3 +64,52 @@ it('locally signing venues refuse a payload signer before any I/O', () =>
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
     'Rust binance does not support payloadSigner',
   ));
+
+it.each([
+  [undefined, 'v3'],
+  ['v1', 'v1'],
+  ['v3', 'v3'],
+] as const)('compiled Aster resolves API version with override %s', async (apiVersion, expected) => {
+  const { WasmEngine } = await loadNodeEngine();
+  const engine = new WasmEngine('asterdex', JSON.stringify({
+    key: WALLET, secret: PRIVATE_KEY, applicationId: WALLET,
+    asterdex: { apiVersion },
+  }));
+  try {
+    expect(JSON.parse(engine.construction!())).toEqual({ asterdexApiVersion: expected });
+    const actions = JSON.parse(engine.start(1_700_000_000_000));
+    expect(actions.some((action: { url?: string }) => action.url?.includes(`/fapi/${expected}/time`))).toBe(true);
+  } finally {
+    (engine as unknown as { free(): void }).free();
+  }
+});
+
+
+it('compiled native and synchronous TS Aster version resolution agree on the same inputs', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  const base = { key: WALLET, secret: PRIVATE_KEY, applicationId: WALLET };
+  const cases: ExchangeOptions[] = [
+    base,
+    { ...base, extra: { asterdexApiVersion: 'v1' } },
+    { ...base, extra: { asterdexApiVersion: 'v3' } },
+    { key: 'hmac', secret: 'hmac' },
+    { key: '', secret: '', auth: { userAddress: WALLET, signerAddress: WALLET, privateKey: PRIVATE_KEY } },
+    { ...base, auth: { userAddress: ' ', signerAddress: ' ', privateKey: ' ' } },
+    { ...base, auth: { userAddress: ` ${WALLET} `, signerAddress: ` ${WALLET} `, privateKey: ` ${PRIVATE_KEY} ` } },
+    { ...base, auth: { userAddress: 'invalid' } },
+    { ...base, auth: { signerAddress: 'invalid' } },
+    { ...base, auth: { privateKey: 'invalid' } },
+    { ...base, applicationId: undefined },
+  ];
+  for (const options of cases) {
+    const engine = new WasmEngine('asterdex', JSON.stringify({
+      ...options, publicDataOnly: true,
+      asterdex: { ...options.auth, apiVersion: options.extra?.asterdexApiVersion },
+    }));
+    try {
+      expect(JSON.parse(engine.construction!()).asterdexApiVersion).toBe(resolveAsterDEXApiVersion(options));
+    } finally {
+      (engine as unknown as { free(): void }).free();
+    }
+  }
+});
