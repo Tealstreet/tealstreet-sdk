@@ -1,3 +1,4 @@
+import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
@@ -974,11 +975,12 @@ export class BaseExchange implements Exchange {
     return { added, removed };
   };
 
-  log = (message: string, severity: LogSeverity = LogSeverity.Info) => {
+  log = (message: string, severity: LogSeverity = LogSeverity.Info, engineEvent?: EngineEvent) => {
     if (this.options.tuning?.consoleLogging !== false) {
       console.log(message, severity);
     }
-    this.emitter.emit('log', `[${this.name}] ${message}`, severity);
+    if (engineEvent) this.emitter.emit('log', `[${this.name}] ${message}`, severity, engineEvent);
+    else this.emitter.emit('log', `[${this.name}] ${message}`, severity);
   };
 
   start = markBaseCapabilityFallback('start', async () => {
@@ -1954,7 +1956,7 @@ export class BaseExchange implements Exchange {
         : {};
     const legacyExtraData = Object.fromEntries(
       Object.entries(structuredExtraData).filter(
-        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog',
+        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog' && key !== 'engineEvent',
       ),
     );
 
@@ -2028,7 +2030,10 @@ export class BaseExchange implements Exchange {
     }
 
     // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
-    const typedTags = exchangeErrorTags(err);
+    const typedTags = {
+      ...exchangeErrorTags(err),
+      ...(structuredExtraData.engineEvent ? { event_code: structuredExtraData.engineEvent.code } : {}),
+    };
 
     // Detect if we're in a web worker
     const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
@@ -2057,10 +2062,12 @@ export class BaseExchange implements Exchange {
             },
             ...sentryContext,
             ...sentryExtra,
+            ...(structuredExtraData.engineEvent ? { engineEvent: structuredExtraData.engineEvent } : {}),
           },
         },
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
+        engineEvent: structuredExtraData.engineEvent,
         classified: classifiedError(err),
         suppressConsoleLog,
       });
@@ -2085,6 +2092,7 @@ export class BaseExchange implements Exchange {
             },
             ...sentryContext,
             ...sentryExtra,
+            ...(structuredExtraData.engineEvent ? { engineEvent: structuredExtraData.engineEvent } : {}),
           },
         });
       }
@@ -2094,6 +2102,7 @@ export class BaseExchange implements Exchange {
       this.emitter.emit('error', formattedMsg, {
         enhancedContext: enhancedError?.context,
         // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
+        engineEvent: structuredExtraData.engineEvent,
         classified: classifiedError(err),
         suppressConsoleLog,
       });
