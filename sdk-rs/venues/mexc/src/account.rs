@@ -288,8 +288,9 @@ impl MexcFutures {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.private.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.account.private.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
+        ));
     }
     pub fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let c = self.credentials.as_ref().unwrap();
@@ -1321,7 +1322,7 @@ impl MexcFutures {
             }
         }
         if self.account.poll.is_none() {
-            self.account.poll = Some(cx.set_timer(2000.0));
+            self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1341,7 +1342,7 @@ impl MexcFutures {
             }
         }
         if self.account.poll.is_none() {
-            self.account.poll = Some(cx.set_timer(2000.0));
+            self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }
     pub fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1358,10 +1359,10 @@ impl MexcFutures {
                     false,
                     Pending::Account(Request::Mode),
                 );
-                self.account.poll = Some(cx.set_timer(2000.0));
+                self.account.poll = Some(cx.set_poll_timer(2000.0));
             }
             if self.account.poll.is_none() {
-                self.account.poll = Some(cx.set_timer(2000.0));
+                self.account.poll = Some(cx.set_poll_timer(2000.0));
             }
             self.account
                 .terminal

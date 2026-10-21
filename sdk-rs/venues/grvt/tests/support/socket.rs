@@ -17,9 +17,7 @@ fn connected(actions: &[Action]) -> SocketId {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, .. } | Action::WsConnectWithHeaders { socket, .. } => {
-                Some(*socket)
-            }
+            Action::WsConnect { socket, .. } => Some(*socket),
             _ => None,
         })
         .expect("reconnect opens a fresh socket")
@@ -64,10 +62,10 @@ pub fn flaps<V: Venue>(mut e: Engine<V>, first: SocketId, mut now: f64) {
         },
     );
     e.handle(now + 1., Event::TimerFired { timer: retry });
-    assert!(!e.drain_actions().any(|a| matches!(
-        a,
-        Action::WsSend { .. } | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-    )));
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. } | Action::WsConnect { .. }))
+    );
     now += 10_000.;
     e.handle(now, Event::TimerFired { timer: watch });
     let actions: Vec<_> = e.drain_actions().collect();

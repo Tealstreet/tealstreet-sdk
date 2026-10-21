@@ -304,7 +304,7 @@ impl Account {
         self.fetch_balance(cx, credentials);
         self.fetch_orders(cx, credentials);
         self.poll_count = 1;
-        self.poll = Some(cx.set_timer(POLL_MS));
+        self.poll = Some(cx.set_poll_timer(POLL_MS));
     }
 
     fn request(
@@ -528,7 +528,7 @@ impl Account {
             self.repair = None;
             self.fetch_positions(cx, credentials);
         } else if self.poll == Some(timer) {
-            self.poll = Some(cx.set_timer(POLL_MS));
+            self.poll = Some(cx.set_poll_timer(POLL_MS));
             if !self.mode_known {
                 self.fetch_mode(cx, credentials);
             }
@@ -772,10 +772,15 @@ impl Account {
                     return;
                 };
                 self.key = Some(key.into());
-                self.socket = Some(cx.connect_channel(
-                    format!("{}?listenKey={key}", crate::paths::PRIVATE_WS),
-                    safe_cex_engine::SocketChannel::Private,
-                ));
+                self.socket = Some(
+                    cx.connect(
+                        safe_cex_engine::SocketSpec::new(format!(
+                            "{}?listenKey={key}",
+                            crate::paths::PRIVATE_WS
+                        ))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                    ),
+                );
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {

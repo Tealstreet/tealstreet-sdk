@@ -254,6 +254,13 @@ impl Polymarket {
             || self.skipped_slugs.contains("unknown")
             || (slug.is_empty() && !self.skipped_slugs.is_empty())
     }
+    /// Every catalogue and midpoint seed read has succeeded and none awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        self.public_retry.idle()
+            && self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty()
+    }
     fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
         let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
             .into_iter()
@@ -345,16 +352,17 @@ impl Polymarket {
         if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
-        c.socket = Some(cx.connect_feed(
-            SOCKETS[index],
-            if index == 0 {
-                SocketChannel::Public
-            } else {
-                SocketChannel::Private
-            },
-            if index == 0 { "market" } else { "user" },
-            true,
-        ));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(SOCKETS[index])
+                    .channel(if index == 0 {
+                        SocketChannel::Public
+                    } else {
+                        SocketChannel::Private
+                    })
+                    .feed(if index == 0 { "market" } else { "user" }, true),
+            ),
+        );
     }
     fn subscription(&self, cx: &mut Cx<'_, Pending>, ids: Vec<String>, operation: Option<&str>) {
         if ids.is_empty() {

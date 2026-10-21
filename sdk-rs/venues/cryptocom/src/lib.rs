@@ -231,13 +231,14 @@ impl Cryptocom {
             "wss://stream.crypto.com"
         };
         let kind = if channel == 0 { "market" } else { "user" };
-        self.sockets[channel].socket = Some(cx.connect_channel(
-            format!("{root}/exchange/v1/{kind}"),
-            if channel == 0 {
-                safe_cex_engine::SocketChannel::Public
-            } else {
-                safe_cex_engine::SocketChannel::Private
-            },
+        self.sockets[channel].socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(format!("{root}/exchange/v1/{kind}")).channel(
+                if channel == 0 {
+                    safe_cex_engine::SocketChannel::Public
+                } else {
+                    safe_cex_engine::SocketChannel::Private
+                },
+            ),
         ));
     }
 

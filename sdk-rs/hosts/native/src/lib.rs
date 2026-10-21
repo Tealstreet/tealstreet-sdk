@@ -29,7 +29,7 @@ use tokio::task::AbortHandle;
 /// What transports and timers report back to the loop.
 #[derive(Debug)]
 pub enum HostEvent {
-    TickIntervalChanged(f64),
+    PollScaleChanged(f64),
     /// Trusted host/provider ingress; network command clients cannot send it.
     PublicFeedUpdate(safe_cex_engine::PublicFeedUpdate),
     WsOpened(SocketId),
@@ -141,8 +141,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     engine.report_public_feed_error(error);
                 }
             }
-            HostEvent::TickIntervalChanged(interval_ms) => {
-                engine.handle(now, Event::TickIntervalChanged { interval_ms })
+            HostEvent::PollScaleChanged(scale) => {
+                engine.handle(now, Event::PollScaleChanged { scale })
             }
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
             HostEvent::WsBinary(socket, data) => engine.handle(
@@ -220,28 +220,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     binary,
                     socket,
                     url,
+                    headers,
                     channel,
                     context,
                 } => {
                     let outgoing = self.transport.connect_encoding(
                         binary,
-                        socket,
-                        url,
-                        vec![],
-                        channel,
-                        context,
-                        self.events.clone(),
-                    );
-                    self.sockets.insert(socket, outgoing);
-                }
-                Action::WsConnectWithHeaders {
-                    socket,
-                    url,
-                    headers,
-                    channel,
-                    context,
-                } => {
-                    let outgoing = self.transport.connect_context(
                         socket,
                         url,
                         headers,
@@ -313,12 +297,13 @@ mod timer_tests {
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
             self.timer = Some(cx.set_timer(1e308));
         }
-        fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
+        fn on_poll_scale(&mut self, cx: &mut Cx<'_, ()>, scale: f64) {
             if let Some(timer) = self.timer.take() {
                 cx.clear_timer(timer);
             }
-            if interval_ms.is_finite() {
-                self.timer = Some(cx.set_timer(interval_ms));
+            // A 1 s native cadence, armed as a raw venue timer.
+            if scale.is_finite() {
+                self.timer = Some(cx.set_timer(1_000. * scale));
             }
         }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -414,8 +399,8 @@ mod timer_tests {
 
         host.engine.handle(
             0.,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         host.execute(&mut |_| {});
@@ -423,12 +408,8 @@ mod timer_tests {
         tokio::time::sleep(Duration::from_millis(1)).await;
         assert!(parked.is_finished(), "ClearTimer aborts the parked task");
 
-        host.engine.handle(
-            0.,
-            Event::TickIntervalChanged {
-                interval_ms: 1_000.,
-            },
-        );
+        host.engine
+            .handle(0., Event::PollScaleChanged { scale: 1. });
         host.execute(&mut |_| {});
         let normal = *host.timers.keys().next().unwrap();
         let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())
