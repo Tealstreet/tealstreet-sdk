@@ -811,7 +811,7 @@ export class EngineHost {
           try { result = action.result === undefined ? undefined : JSON.parse(action.result); }
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
           // Optional and non-enumerable: rows stay a plain array for existing callers.
-          if (pending.incomplete && Array.isArray(result)) Object.defineProperty(result, 'incomplete', { value: true });
+          if (pending.incomplete && Array.isArray(result)) Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler

@@ -204,10 +204,13 @@ their rejected promises without reporting the same failure a second time.
 A Rust history read that cannot be walked completely still returns the rows it
 read, with a `history.incomplete` warning event that names its `command`. The
 host then marks the returned array with a non-enumerable `incomplete: true`.
-Kraken (income past one 500-row `account-log` page) and Binance (exhausted
-income chunks) set it. Existing callers see a plain array. A consumer recording
-coverage must not treat a flagged result as complete. Structured clone drops
-the property, so a worker or server hop has to forward it explicitly.
+Kraken (a full 500-row `account-log` page its since-only cursor cannot advance)
+and Binance (exhausted income chunks) set it. Existing callers see a plain array.
+A consumer recording coverage must not treat a flagged result as complete; the
+in-package journal (`journal/buildRecords.ts`) does not read it yet. Structured
+clone drops the property, so a worker or server hop must forward it, translating
+`fields.command` (the engine's id) to its own request id as it does for `done`.
+The event is a Warn: a host whose minimum level is Error drops it, and the flag.
 
 ## Rust socket health
 
