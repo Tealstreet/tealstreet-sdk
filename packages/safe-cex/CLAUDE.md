@@ -162,7 +162,11 @@ maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries, options, and whether signatures take the host clock as-is
 (`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
-`start`); `engineCapabilities` is undefined before then. Missing history axes
+`start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
+`fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
+published rails, and `onMetadata` answers from those rails once a metadata
+refresh has loaded them but asks the venue for a symbol not yet refreshed (the
+worker only asks when the active symbol has no rails). Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
 once the engine exists. `account` also gates the engine: `FetchAccount` to a
 venue whose record says `unsupported` is refused before the venue runs, so a

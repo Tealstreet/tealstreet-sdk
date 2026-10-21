@@ -192,6 +192,21 @@ describe('Rust bridge routes from the engine capability record', () => {
     await settings.exchange.start();
     await expect(settings.exchange.fetchLeverageForSymbol('BTC')).resolves.toBeNull();
     expect(settings.commands.map((c) => c.op)).not.toContain('fetchLeverage');
+
+    // A metadata-refreshed venue reads a flat symbol it has not refreshed yet,
+    // then serves the published rails without another venue read.
+    const onMetadata = fixture({ leverageQuery: 'onMetadata' });
+    await onMetadata.exchange.start();
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toEqual({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toMatchObject({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
   });
 
   it('takes maximum leverage from the reported source', async () => {

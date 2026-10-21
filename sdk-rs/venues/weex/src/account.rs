@@ -196,6 +196,10 @@ impl State {
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
     }
+    /// Fences a settings read against writes and newer reads.
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision
+    }
     pub fn invalidate_settings(&mut self) {
         self.settings_revision += 1;
         self.revision += 1;
