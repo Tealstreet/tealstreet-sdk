@@ -2,6 +2,7 @@ import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   CommandProgress,
   EngineCapabilities,
+  EngineHealth,
   EngineHost as EngineHostType,
   Transport,
   WasmEngineLike,
@@ -1411,6 +1412,9 @@ export class RustEngineExchange extends BaseExchange {
   cancelSymbolOrders = async (symbol: string) => {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
+
+  /** Engine health counters; undefined before the engine starts or after disposal. */
+  getHealth = (): EngineHealth | undefined => (this.host && !this.isDisposed ? this.host.health() : undefined);
 
   // Without an engine (a main-thread mirror) the open-order lookup still answers, non-definitively.
   findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>

@@ -4,6 +4,7 @@ use crate::book::{Book, BookSide};
 use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
+use crate::log::{Health, Level, LogEvent, Value, code as log_code};
 use crate::model::{
     CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
@@ -134,10 +135,12 @@ pub enum LogLevel {
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
+    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
     Log {
         level: LogLevel,
         message: String,
     },
+    Event(LogEvent),
     /// Error diagnostic attributed to a command; completion owns its outcome.
     CommandError {
         command: CommandId,
@@ -631,6 +634,8 @@ struct Io<P> {
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
+    min_level: Level,
+    health: Health,
 }
 
 impl<P> Default for Io<P> {
@@ -658,6 +663,8 @@ impl<P> Default for Io<P> {
             fills: Vec::new(),
             frame: Vec::new(),
             snapshot: Vec::new(),
+            min_level: Level::Info,
+            health: Health::default(),
         }
     }
 }
@@ -907,11 +914,42 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    /// Unstructured shim kept until venues emit [`Cx::event`].
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        self.io.actions.push(Action::Notice(Notice::Log {
+        push_log(
+            &mut self.io.actions,
+            self.io.min_level,
             level,
-            message: message.into(),
-        }));
+            message.into(),
+        );
+    }
+
+    /// Whether an event at `level` reaches the host; check before formatting
+    /// an expensive Debug message.
+    pub fn logs(&self, level: Level) -> bool {
+        level >= self.io.min_level
+    }
+
+    /// Counted in [`Health`] whatever the host's minimum level.
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, Value)>,
+    ) {
+        let io = &mut *self.io;
+        push_event(
+            &mut io.actions,
+            &mut io.health,
+            io.min_level,
+            LogEvent {
+                level,
+                code,
+                message: message.into(),
+                fields,
+            },
+        );
     }
 
     pub fn deactivate(&mut self) {
@@ -1314,6 +1352,15 @@ impl<V: Venue> Engine<V> {
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
+    /// Events below `level` are dropped before they are built; defaults to Info.
+    pub fn set_log_level(&mut self, level: Level) {
+        self.io.min_level = level;
+    }
+
+    pub fn health(&self) -> &Health {
+        &self.io.health
+    }
+
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
         self.io.actions.push(Action::Notice(Notice::Log {
@@ -1470,10 +1517,16 @@ impl<V: Venue> Engine<V> {
                         .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
                 }
             }
-            Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
+            Event::WsOpened { socket } => {
+                cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
+                self.venue.on_open(&mut cx, socket)
+            }
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
-            Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
+            Event::WsClosed { socket, code } => {
+                cx.io.health.count(log_code::WS_CLOSED);
+                self.venue.on_close(&mut cx, socket, code)
+            }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
                 self.http_chunk(now, request, response.body.as_bytes());
@@ -1532,6 +1585,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.io.health.count(log_code::HTTP_FAILED);
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
             }
@@ -1702,6 +1756,12 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        let status = incoming.status;
+        if status == 429 {
+            cx.io.health.count(log_code::RATE_LIMITED);
+        } else if status >= 500 {
+            cx.io.health.count(log_code::HTTP_FAILED);
+        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
@@ -2043,6 +2103,43 @@ fn apply_signature(
         }
     }
     Ok(())
+}
+
+// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
+// would otherwise each inline a copy (the per-venue wasm budget is tight).
+#[inline(never)]
+fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
+    let enabled = match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warn,
+        LogLevel::Error => Level::Error,
+    };
+    if enabled >= min_level {
+        actions.push(Action::Notice(Notice::Log {
+            level,
+            message: crate::log::cap(message),
+        }));
+    }
+}
+
+#[inline(never)]
+fn push_event(
+    actions: &mut Vec<Action>,
+    health: &mut Health,
+    min_level: Level,
+    mut event: LogEvent,
+) {
+    health.count(event.code);
+    if event.level < min_level {
+        return;
+    }
+    event.message = crate::log::cap(event.message);
+    for (_, value) in &mut event.fields {
+        if let Value::Str(text) = value {
+            *text = crate::log::cap(std::mem::take(text));
+        }
+    }
+    actions.push(Action::Notice(Notice::Event(event)));
 }
 
 #[cfg(test)]
