@@ -173,16 +173,7 @@ impl AsterDex {
             .or_else(|| nonempty(options.key.as_deref()));
         let secret = nonempty(options.auth_private_key.as_deref())
             .or_else(|| nonempty(options.secret.as_deref()));
-        let version = options.api_version.unwrap_or_else(|| {
-            if user.is_some_and(sign::is_address)
-                && signer.is_some_and(sign::is_address)
-                && secret.is_some_and(sign::is_private_key)
-            {
-                Version::V3
-            } else {
-                Version::V1
-            }
-        });
+        let version = sign::resolve_version(options.api_version, user, signer, secret);
         let credentials = if !options.public_data_only {
             let secret = if version == Version::V3 {
                 secret

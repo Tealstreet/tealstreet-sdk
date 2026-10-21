@@ -98,7 +98,50 @@ use safe_cex_venue_polymarket::{
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
 use safe_cex_venue_woo::{Options as WooOptions, Woo};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+/// Resolved, non-sensitive account construction choices, available before engine start.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Construction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asterdex_api_version: Option<&'static str>,
+}
+
+impl EngineOptions {
+    pub fn construction(&self, venue: &str) -> Construction {
+        let asterdex_api_version = None;
+        #[cfg(feature = "asterdex")]
+        let asterdex_api_version = if venue == "asterdex" {
+            Some(match self.aster_api_version() {
+                safe_cex_venue_asterdex::sign::Version::V1 => "v1",
+                safe_cex_venue_asterdex::sign::Version::V3 => "v3",
+            })
+        } else {
+            asterdex_api_version
+        };
+        let _ = venue;
+        Construction {
+            asterdex_api_version,
+        }
+    }
+
+    #[cfg(feature = "asterdex")]
+    fn aster_api_version(&self) -> safe_cex_venue_asterdex::sign::Version {
+        fn nonempty(value: &Option<String>) -> Option<&str> {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        }
+        safe_cex_venue_asterdex::sign::resolve_version(
+            self.asterdex.api_version,
+            nonempty(&self.asterdex.user_address).or_else(|| nonempty(&self.application_id)),
+            nonempty(&self.asterdex.signer_address).or_else(|| nonempty(&self.key)),
+            nonempty(&self.asterdex.private_key).or_else(|| nonempty(&self.secret)),
+        )
+    }
+}
 
 /// Receives the constructed engine; the host decides how to own it.
 pub trait Visit {
@@ -226,10 +269,7 @@ fn asterdex_rules(options: &EngineOptions) -> Result<(), VenueError> {
     let key = options.key.as_deref().unwrap_or_default();
     let secret = options.secret.as_deref().unwrap_or_default();
     if !options.public_data_only
-        && !matches!(
-            options.asterdex.api_version,
-            Some(safe_cex_venue_asterdex::sign::Version::V3)
-        )
+        && options.aster_api_version() != safe_cex_venue_asterdex::sign::Version::V3
         && key
             .strip_prefix("0x")
             .is_some_and(|address| hex_of(address, 40))

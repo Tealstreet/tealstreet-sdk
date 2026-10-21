@@ -2,6 +2,7 @@ import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   CommandProgress,
   EngineCapabilities,
+  EngineConstruction,
   EngineEvent,
   EngineHealth,
   EngineHost as EngineHostType,
@@ -612,13 +613,20 @@ export class RustEngineExchange extends BaseExchange {
     );
   }
 
+  private constructionRecord?: EngineConstruction;
+
+  private get asterApiVersion() {
+    // Construction/getters are synchronous; WASM loads asynchronously on first use.
+    return this.constructionRecord?.asterdexApiVersion ?? resolveAsterDEXApiVersion(this.options);
+  }
+
   protected override get canSign(): boolean {
     if (this.name === 'txflow') return Boolean(this.options.secret && this.options.applicationId);
     if (['coinbase', 'coinbasespot'].includes(this.name)) return Boolean(this.options.key);
     if (this.name !== 'asterdex') return super.canSign;
     if (!this.options.key) return false;
     if (this.options.remoteSigner) return true;
-    return resolveAsterDEXApiVersion(this.options) === 'v3'
+    return this.asterApiVersion === 'v3'
       ? hasAsterDEXV3AuthContext(this.options)
       : Boolean(this.options.secret);
   }
@@ -795,7 +803,8 @@ export class RustEngineExchange extends BaseExchange {
         subkeyAddress,
         payloadSigner: Boolean(this.options.payloadSigner),
         asterdex: {
-          apiVersion: resolveAsterDEXApiVersion(this.options),
+          apiVersion: ['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
+            ? this.options.extra?.asterdexApiVersion : undefined,
           userAddress: this.options.auth?.userAddress,
           signerAddress: this.options.auth?.signerAddress,
           privateKey: this.options.auth?.privateKey,
@@ -812,6 +821,7 @@ export class RustEngineExchange extends BaseExchange {
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
+    if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
     // Set from the engine's record before startup: venues that take the host clock as-is get the synced one.
     let hostClock = false;
     const host = new EngineHost(
@@ -1581,7 +1591,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private validateAsterStp = (mode?: AsterDEXStpMode): void => {
     if (mode === undefined) return;
-    if (resolveAsterDEXApiVersion(this.options) !== 'v3')
+    if (this.asterApiVersion !== 'v3')
       throw new Error('AsterDEX self-trade prevention requires API v3');
     if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
   };

@@ -691,6 +691,9 @@ It shares identical Binance-family wire records, not Binance socket/depth/auth
 or order-lifecycle policy. Public books retain the documented depth20 snapshot
 contract. Native URLs carry socket roles; host transports apply account routing.
 
+- Rust owns API-version inference and exposes the resolved version as WASM
+  construction metadata. The wrapper sends only explicit overrides; synchronous
+  pre-host getters retain TS inference until async WASM initialization completes.
 - Both V1 and V3 are supported. The exact standard-V3 ABI/EIP-191 versus Code
   EIP-712 split above is preserved, with independent ethers signature vectors.
 - The wrapper forwards explicit auth/version, builder policy, and secondary

@@ -3,6 +3,7 @@ import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
+  construction(): string;
   constructor(venue: string, optionsJson: string);
   /** JSON-encoded health counters. */
   health(): string;
