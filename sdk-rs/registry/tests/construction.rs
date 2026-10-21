@@ -309,6 +309,7 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "woo",
         "hyperliquidspot",
         "kraken",
+        "bitunix",
     ] {
         for options in [
             r#"{"remoteSigning":true}"#,

@@ -56,11 +56,11 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-it('locally signing venues refuse private accounts without a local signing key', () =>
+// The Rust local-signing rule (registry tests) backstops these; the bridge refuses
+// keyless remote and payload signers first, so neither reaches the engine.
+it('locally signing venues refuse a payload signer before any I/O', () =>
   startRejects(
     'binance',
-    // TS refuses keyless remoteSigner and non-Paradex payloadSigner accounts before the engine;
-    // the engine's own local-signing rule is pinned in registry/tests/construction.rs.
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    /does not support payloadSigner/,
+    'Rust binance does not support payloadSigner',
   ));
