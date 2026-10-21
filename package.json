@@ -59,6 +59,7 @@
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:measure-family": "node sdk-rs/harness/family-measure.mjs",
+    "rust:measure-browser": "node sdk-rs/harness/browser-cold-start.mjs",
     "rust:test-families": "node --test sdk-rs/harness/families.integration.mjs",
     "rust:private-tape-bybitinverse": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitinverse",
     "rust:private-tape-bybitspot": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitspot",
