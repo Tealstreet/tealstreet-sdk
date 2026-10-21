@@ -1,5 +1,6 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
+mod depth_query;
 mod history;
 mod identity;
 mod sign;
@@ -50,6 +51,9 @@ pub struct Pending {
     pub(crate) auth_generation: u64,
 }
 pub(crate) enum Job {
+    BookQuery {
+        command: safe_cex_engine::CommandId,
+    },
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -72,7 +76,8 @@ pub(crate) enum Job {
 impl Job {
     fn is_private(&self) -> bool {
         match self {
-            Self::Markets { .. }
+            Self::BookQuery { .. }
+            | Self::Markets { .. }
             | Self::Candles { .. }
             | Self::Account(account::Request::Login) => false,
             Self::History(request) => !request.is_public(),
@@ -226,6 +231,11 @@ impl Grvt {
         }
         pending.auth_generation = self.account.generation;
         let (base, headers, at) = match &pending.job {
+            Job::BookQuery { .. } => (
+                self.mdg(),
+                vec![("Content-Type", "application/json".into())],
+                None,
+            ),
             Job::Markets { .. } | Job::Candles { .. } => (
                 self.mdg(),
                 vec![("Content-Type", "application/json".into())],
@@ -302,6 +312,10 @@ impl Grvt {
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
+            Job::BookQuery { command } => cx.fail(
+                command,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            ),
             Job::Identity { command } => self.identity_failed(cx, command, error),
             Job::Account(request) => self.account_failed(cx, request, error),
             Job::Trade(request) => {
@@ -688,6 +702,7 @@ impl Venue for Grvt {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            order_book_query: true,
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             client_order_lookup: true,
             fills_by_order_id: true,
@@ -812,7 +827,7 @@ impl Venue for Grvt {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
-            Job::Identity { .. } => {}
+            Job::Identity { .. } | Job::BookQuery { .. } => {}
             Job::Account(request) => self.account_item(cx, request, item),
             Job::Trade(request) => self.trade_item(cx, request, item),
             Job::History(request) => self.history_item(cx, request, item),
@@ -894,6 +909,10 @@ impl Venue for Grvt {
         mut pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::BookQuery { command } = pending.job {
+            self.book_query_response(cx, command, response);
+            return;
+        }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
             if code == "1000"
@@ -932,6 +951,7 @@ impl Venue for Grvt {
             return;
         }
         match pending.job {
+            Job::BookQuery { .. } => unreachable!(),
             Job::Identity { command } => self.identity_response(cx, command, response),
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
@@ -1076,7 +1096,7 @@ impl Venue for Grvt {
                     rows.clear();
                     *failed = false;
                 }
-                Job::Identity { .. } => {}
+                Job::Identity { .. } | Job::BookQuery { .. } => {}
                 Job::Account(request) => request.reset(),
                 Job::Trade(request) => request.reset(),
                 Job::History(request) => request.reset(),
@@ -1148,6 +1168,30 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchOrderBook {
+            command,
+            ref symbol,
+            ..
+        } = command
+        {
+            if let Some(market) = cx.store.market(symbol) {
+                #[derive(Serialize)]
+                struct Request<'a> {
+                    i: &'a str,
+                    d: u32,
+                }
+                let body = serde_json::to_string(&Request {
+                    i: &market.id,
+                    d: 50,
+                })
+                .expect("book request serializes");
+                self.request(cx, "/lite/v1/book", body, Job::BookQuery { command });
+            } else {
+                cx.done(command, r#"{"bids":[],"asks":[]}"#.into());
+            }
+            return;
+        }
+
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
             return;
