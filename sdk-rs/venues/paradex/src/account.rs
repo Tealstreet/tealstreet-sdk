@@ -1759,6 +1759,7 @@ impl Account {
             }
         }
         cx.fill(Fill {
+            id: None,
             order_id: row.order_id.into(),
             symbol: row.market.into(),
             side,

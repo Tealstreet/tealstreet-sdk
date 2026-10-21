@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
-use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -754,7 +754,7 @@ fn owned_position_on_filtered_market_is_skipped_and_the_snapshot_commits() {
     assert_eq!(positions[0].symbol, "BTCUSDT");
     assert!(e.store().order("739113577038255617").is_some());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("uncatalogued market HIDEUSDT"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("uncatalogued market HIDEUSDT"))));
 }
 
 #[test]
@@ -774,7 +774,7 @@ fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 0.006, "previous snapshot kept");
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
 }
 
 #[test]
@@ -851,7 +851,7 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
     let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed leverage transport")).unwrap();
     assert!(error < done);
-    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed leverage transport")));
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed leverage transport")));
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
@@ -1041,7 +1041,7 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 5);
-    assert_eq!(payload.len(), 248);
+    assert_eq!(payload.len(), 264);
     let symbol_refs: Vec<_> = payload[144..164]
         .as_chunks::<4>()
         .0
@@ -1061,17 +1061,17 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
             [65000., 0.001]
         );
     }
-    assert!(value(168).is_nan());
-    assert_eq!([value(176), value(184)], [0., -2.]);
+    assert!(value(184).is_nan());
+    assert_eq!([value(192), value(200)], [0., -2.]);
     assert!(
-        value(192).is_nan(),
+        value(208).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert_eq!(value(200), 5.);
-    assert!(value(208).is_nan());
-    assert_eq!([value(216), value(224)], [0.2, 0.]);
-    assert!(value(232).is_nan());
-    assert!(value(240).is_nan());
+    assert_eq!(value(216), 5.);
+    assert!(value(224).is_nan());
+    assert_eq!([value(232), value(240)], [0.2, 0.]);
+    assert!(value(248).is_nan());
+    assert!(value(256).is_nan());
     assert!(e.take_market_frame(200.).is_none());
 }
 #[test]
@@ -1095,7 +1095,7 @@ fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
         assert!(e.store().loaded().orders, "{surface}");
         assert!(e.store().order("valid").is_some(), "{surface}");
         assert!(e.store().order("unloaded").is_none());
-        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
+        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
     }
 }
 
@@ -1213,7 +1213,7 @@ fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_loa
             assert!(e.store().orders().is_empty());
         }
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Malformed MEXC snapshot row"))));
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Malformed MEXC snapshot row"))));
     }
 }
 
@@ -1402,11 +1402,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, .. } => retry = Some(timer),
-                Action::Notice(Notice::Log {
-                    level: LogLevel::Warning,
-                    message,
-                })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Warn,
                     message,
                     ..
@@ -1444,7 +1440,6 @@ fn a_market_whose_amount_step_overflows_is_malformed_and_holds_its_exposure() {
         "previous snapshot kept"
     );
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. })
-            | Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+        Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
             if message.contains("owned position market unavailable"))));
 }

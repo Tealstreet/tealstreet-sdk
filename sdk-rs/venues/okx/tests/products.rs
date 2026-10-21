@@ -410,7 +410,7 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
     assert!(e.store().market("BTCUSDT").is_some());
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -644,7 +644,7 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().tickers().len(), 1);
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -1264,7 +1264,7 @@ mod product_semantics {
             if kind == 11 {
                 assert_eq!(
                     u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
-                    1
+                    2
                 );
                 let data = &frame[at + 8..at + 8 + len];
                 let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
@@ -2337,7 +2337,6 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
         for out in actions(&mut e) {
             match out {
                 Action::Http(_) => pending.push(out),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
                 Action::Notice(safe_cex_engine::Notice::Event(event)) => logs.push(event.message),
                 _ => {}
             }

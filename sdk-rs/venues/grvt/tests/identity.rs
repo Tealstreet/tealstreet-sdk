@@ -109,10 +109,10 @@ fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<Strin
                 );
                 errors += 1;
             }
-            Action::Notice(Notice::Log {
-                level: safe_cex_engine::LogLevel::Error,
+            Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Error,
                 ..
-            }) => panic!("identity failures must be command-scoped"),
+            })) => panic!("identity failures must be command-scoped"),
             _ => {}
         }
     }

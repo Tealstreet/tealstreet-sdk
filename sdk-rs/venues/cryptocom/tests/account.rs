@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::model::TimeInForce;
-use safe_cex_engine::{Action, Event, LogLevel, Notice};
+use safe_cex_engine::{Action, Event};
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -91,10 +91,9 @@ fn failed_second_order_snapshot_keeps_the_first_good_state() {
     assert_eq!(h.engine.store().orders().len(), 1);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(
-                safe_cex_engine::LogEvent { .. }
-            ))
+        Action::Notice(safe_cex_engine::Notice::Event(
+            safe_cex_engine::LogEvent { .. }
+        ))
     )));
 }
 #[test]
@@ -571,7 +570,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
 
 fn warned(h: &Harness, needle: &str) -> bool {
     h.actions.iter().any(|a| {
-        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
+        matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains(needle))
     })
 }

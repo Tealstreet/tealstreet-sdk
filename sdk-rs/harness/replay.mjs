@@ -15,7 +15,7 @@ import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -317,13 +317,7 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({
-          market: executed.market[i],
-          side: executed.side[i],
-          amount: executed.rows[i * 2 + 1],
-          price: executed.rows[i * 2],
-          id: executed.orderId(i),
-        });
+        fills.push(captureRustFill(executed, i));
       }
     },
   });
