@@ -152,6 +152,8 @@ The envelope-only credential-evidence follow-up checks #1611 at `a07b6b35c87`.
 The Bybit environment hint checks #1590 at `15434894bf5`; explicit market
 refresh checks #1596 at `687fe0c1e08`. Shared public startup reporting checks
 #1615 at `c63acfc19c2`; its required caller visibility work remains open below.
+The Bybit private-row follow-up checks #1620 at `4592d985e8a`; leverage-ACK
+read fencing and history-marker ownership remain separate follow-ups.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -221,6 +223,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1590 / `15434894b` | A startup fee-read 10003 on eligible built-in live linear/demo Bybit can add an opposite-environment key hint after one bounded signed diagnostic GET using the rejected credential. Failure/timeout retains the original rejection; native code, credential role and deactivation policy stay intact. No automatic environment switch or trading retry. |
 | #1596 / `687fe0c1e` | Bybit `refreshMarkets()` stages enabled public categories atomically, shares concurrent discovery and returns added/removed membership after publication. `marketRefresh` capability uses wire bit15; unsupported engines keep cached behavior. Failed discovery retains the old catalogue; shared-feed consumers must refresh the source and restart provider/accounts. See [Bybit explicit catalogue refresh](#bybit-explicit-catalogue-refresh). |
 | #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; after a prior degraded report, Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
+| #1620 / `4592d985e` | Ordinary Bybit REST/WS order and position rows isolate malformed peers while retaining rejected cached parents/protection or symbol exposure/Greeks. Unknown identity protects absence removal; valid peers can progress, with coherent same-symbol modes. Rejected WS evidence protects pending REST joins and coalesces read repair without globally starving unrelated rows. Warn `row.skipped` uses existing diagnostics; Hyro, execution/wallet/history handling and caller shapes stay separate. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -488,6 +491,32 @@ suppressed until recovery; emitted levels vary by venue/path (several use Warn
 when retaining a stored copy and Error when none can be kept). Use code and
 level, not message matching or an assumed one-event-per-row count. The B9
 caller migration and snapshot collection requirements remain open.
+
+#### Bybit private-row admission (#1620)
+
+Ordinary Bybit REST order/position snapshots and WS order/position arrays now
+admit healthy peers when another row cannot decode or validate. A rejected
+native order protects its cached parent, attached TP/SL family and
+position-bound metadata. An admitted parent still owns its complete family,
+including removal of old brackets. A rejected position protects its symbol's
+cached legs and Greeks; retaining those rows does not republish cached leverage
+or mode as newly confirmed settings.
+
+Unknown identities protect absence-based removal within the affected category
+while valid peers progress. Ambiguous same-symbol mode changes retain coherent
+exposure, and bounded rejection coverage holds the scope conservatively on
+exhaustion. A valid option update/close still updates/removes its Greeks without
+duplicating retained rows. Later authoritative reads can remove old exposure.
+
+Rejected WS evidence also protects affected identities in older pending REST
+joins; it does not globally invalidate unrelated healthy peers. Order repair
+uses the existing bounded read cadence and positions use account polling.
+These paths emit Warn `row.skipped` through the existing event channel; callers
+may see retained older exposure alongside fresh peers and must not infer fresh
+confirmation for every row. Structural/envelope/paging failures never prove
+empty exposure. Strict Hyro handshake/account evidence, execution/wallet paths
+and history completeness remain separate. #1620 does not add a leverage-ACK
+read fence or replay writes; caller APIs and write retry policy are unchanged.
 
 #### Rejected-row diagnostics and Orderly defaults (#1603, #1606)
 

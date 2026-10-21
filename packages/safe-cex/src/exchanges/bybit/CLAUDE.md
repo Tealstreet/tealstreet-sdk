@@ -2027,3 +2027,11 @@ repair. Orders use the existing bounded retry cadence; positions use account
 polling. Strict Hyro handshake/account evidence and financial execution/history
 coverage remain separate. Structural/envelope or paging failures never establish
 authoritative empty exposure.
+
+
+Rust acknowledged leverage writes (including native leverage-not-modified replies)
+advance the existing positions revision before publishing the selected leverage.
+An older in-flight positions join cannot restore stale leverage/settings; it
+coalesces one fresh read after settling. A refused write leaves the authoritative
+read eligible. The fence adds no write retries and does not alter position-mode
+switch semantics.

@@ -439,7 +439,7 @@ impl Trading {
                     if job.effective && error.outcome == Some(Outcome::Rejected) {
                         error.outcome = None;
                     }
-                    cx.fail(command, error);
+                    cx.fail(command, error.partial_ids(&job.ids));
                 }
                 None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
