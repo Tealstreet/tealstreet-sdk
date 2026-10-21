@@ -11,10 +11,15 @@ struct Read<K> {
 
 pub struct Backoff<K> {
     reads: Vec<Read<K>>,
+    /// End of the latest rate-limit/ban window; later failures wait it out too.
+    ban_until: f64,
 }
 impl<K> Default for Backoff<K> {
     fn default() -> Self {
-        Self { reads: Vec::new() }
+        Self {
+            reads: Vec::new(),
+            ban_until: 0.0,
+        }
     }
 }
 impl<K: PartialEq> Backoff<K> {
@@ -42,8 +47,11 @@ impl<K: PartialEq> Backoff<K> {
         } else {
             0.0
         };
-        // A ban covers the whole host, so reads already waiting wait it out too.
-        let until = cx.now + minimum;
+        // A ban covers the whole host: reads already waiting, and any read that
+        // fails before it ends, wait it out too.
+        let until = (cx.now + minimum).max(self.ban_until);
+        self.ban_until = until;
+        let minimum = until - cx.now;
         for read in &mut self.reads {
             if let Some(timer) = read.timer
                 && read.due < until

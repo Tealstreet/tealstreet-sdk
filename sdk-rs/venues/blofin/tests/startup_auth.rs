@@ -453,6 +453,34 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
     }
 }
 
+#[test]
+fn a_read_failing_during_a_ban_waits_out_the_ban_too() {
+    let mut engine = Engine::new(Blofin::new(keyed()));
+    let mut rig = Rig::default();
+    let (margin, mode, _) = to_settings(&mut engine, &mut rig);
+    // The margin read is banned for 120 s at t=2 ms while the mode read is still in flight.
+    respond_with(
+        &mut engine,
+        &margin,
+        429,
+        "Retry-After: 120",
+        "Too Many Requests",
+        2.,
+    );
+    rig.take(&mut engine);
+    respond_with(&mut engine, &mode, 500, "", "Internal Server Error", 10.);
+    let early = rig.run(&mut engine, 120_001.);
+    assert!(
+        !early.iter().any(get("position-mode")),
+        "a read that fails inside the ban must not retry into it"
+    );
+    let (at, _) = rig
+        .until(&mut engine, get("position-mode"))
+        .expect("retried after the ban");
+    assert_eq!(at, 120_002.);
+    assert!(rig.failures.is_empty());
+}
+
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
