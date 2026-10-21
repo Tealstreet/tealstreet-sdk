@@ -92,9 +92,10 @@ GitHub API. Existing line references retain the original NX audit revision;
 new history-forwarding references below use `fdd2389a825`. Open PR proposals
 are not merged contracts.
 
-Construction follow-ups: checked SDK landing `d06eabae16f` for #1563/#1567, retaining
+Construction follow-ups: checked SDK landing `570d15f3001` for #1563/#1567/#1575, retaining
 those downstream inventory revisions. The existing NX script-editor options
-already declare `extra.asterdexApiVersion?: 'v1' | 'v3'`; no new caller edit.
+already declare `extra.asterdexApiVersion?: 'v1' | 'v3'` and
+`extra.hyrotraderMode?: 'demo' | 'production'`; no new caller edit.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -109,8 +110,9 @@ the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
 
 Initial batch checked landing `3d73437e589`, including the merges after the last refresh
 (#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
-The construction follow-ups check through #1567 at `d06eabae16f`, including
+The construction follow-ups check through #1575 at `570d15f3001`, including
 #1563, the #1550 logging merge and #1518's internal failure-path refactor.
+The subsequent #1558 logging-level merge is checked at `e757d8d7990`.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -137,6 +139,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1563 / `60a3dc1e79` | Shared Rust AsterDEX API-version resolution now also supplies optional WASM construction metadata. The wrapper forwards only a valid explicit `extra.asterdexApiVersion` override and adopts the native version for signing eligibility/STP checks after loading. Synchronous pre-host and older-host inference remains parity-tested; account/options/trading call shapes are unchanged. |
 | #1567 / `d06eabae16` | One shared JSON rules table derives signing/public-mode eligibility synchronously in TS and before native validation/startup. Optional raw `publicMode` carries caller intent; `construction()` adds optional `canSign`/`publicDataOnly`, and the WASM module exports no-I/O `resolveConstruction`. Existing application options and legacy native/harness input remain compatible; the explicit-private Paradex refusal moves into the registry. See [Construction metadata and public mode](#construction-metadata-and-public-mode-1563-1567). |
 | #1518 / `8b115cefd7` | Internal `Cx::done` is success-only and `Cx::fail` owns command failures. Hosts still emit the existing `done` error shape with classified detail; message text is unchanged. No caller edit or new wire revision. |
+| #1575 / `570d15f300` | Rust selects HyroTrader endpoints from optional raw mode/network maps, retaining legacy explicit endpoints when that config is absent. Private non-Paradex `payloadSigner` refusal moves into the registry; WASM registry failures carry JSON `Error.venueError`, which the SDK converts to `ExchangeError`, preserving `unsupported`/`notSent` for that refusal. Factory routing and application options stay unchanged; see [Host construction rules](#host-construction-rules-1575). |
+| #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -220,7 +224,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `validateAccount()` starts the engine; error text from engine startup | web `components/newApiFlow/useAccountForm.ts:210-275` (matches `'passphrase'`, `'api key'`, `'secret'`, `'whitelist'`, `'permission'`, `'secondary'`) | TS venue messages | engine messages (e.g. `<name> credentials were rejected`, `Orderly requires base58-encoded 32-byte key and secret`) | RT |
 | `externalPublicData` websocket gateway rejected; in-process source accepted (B6); `privateOnly`+`publicFeed: direct` rejected | exchange-server `server.ts:1015-1034` | none for in-process | `publicFeed: { mode: 'shared', port }` + `RustPublicFeedProvider` for gateways | RT, B6 |
 | Keyless `remoteSigner` account routes to TS | exchange-server `server.ts:1015`; web hosted signing | browser-signed | #1498/#1505 keep hosted TS and browser signing working (B2); a direct private engine construction is refused, with the documented exceptions | none through factory/worker; direct construction RT |
-| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510/#1531: `runsOnRustEngine` keeps Bybit/Binance-family `payloadSigner` accounts (not `publicDataOnly`) on TS, whose signers honour it; every other private Rust account with one, including default-Rust Coinbase/Orderly (their kept TS classes ignore it), is refused at startup with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'` | RT (MCP `EXCHANGE_ENGINE=rust` signer mode: Bybit/Binance run TS; other venues fail loudly) |
+| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510/#1531: `runsOnRustEngine` keeps Bybit/Binance-family `payloadSigner` accounts (not `publicDataOnly`) on TS, whose signers honour it; every other private non-Paradex Rust account with one, including default-Rust Coinbase/Orderly (their kept TS classes ignore it), is refused at startup with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'`. #1575 enforces this in the registry after WASM loading, before venue I/O or signer invocation | RT (MCP `EXCHANGE_ENGINE=rust` signer mode: Bybit/Binance run TS; other venues fail loudly) |
 | Resolved polling policy (#1392) | MCP `config.ts:59-72` (`extra.tickInterval: Infinity` disables polling); web `exchangeAccountController` worker-config multipliers | TS `getTickInterval()` policy | all Rust periodic reconciliation now scales from the resolved interval, including overrides, server multipliers and auth backoff. `Infinity` pauses, finite updates resume; native rate floors/cooldowns remain. Startup, socket supervision and explicit reads continue | none; existing controls now apply to Rust |
 | `instanceof BlofinExchange` | web `components/reactiveStateHelper/exchangeReactiveStateHelper/BlofinExchangeReactiveStateHelper.tsx:6,20` | true for blofin | false when blofin runs Rust | RT (on blofin switch) |
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
@@ -248,9 +252,18 @@ to an engine or establish that credentials are valid.
 | WASM module `resolveConstruction(venue, optionsJson): string` | New named export returns the same metadata JSON without constructing an engine or performing I/O. `WasmEngineModule` declares it optional, so existing custom loaders need no new method. Resolving metadata is not credential validation or successful startup; the production wrapper still has synchronous TS getters before async loading. |
 | Explicit-private Paradex startup | `publicDataOnly: false` without key, Paradex address or subkey address still rejects `start()` with `Rust Paradex private accounts require a key, Paradex address and subkey address`. The registry now enforces it after WASM loading and before venue I/O, instead of the bridge refusing before loading. Public/automatic mode and the existing private-field requirements stay as before. |
 
-B2's factory routing for keyless remote signing and supported payload signers
-still applies. Further construction moves in
-[RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md) remain separate work.
+#### Host construction rules (#1575)
+
+The construction scope in [RUST_VENUE_CONSTRUCTION.md](RUST_VENUE_CONSTRUCTION.md)
+is now landed through #1563/#1567/#1575. B2's factory routing for keyless remote
+signing and supported payload signers still applies; the engine signing port
+remains an owner item. Paradex signing transport and polling are unchanged.
+
+| Host boundary | Landed contract and compatibility |
+| --- | --- |
+| SDK bridge → HyroTrader registry | Optional `EngineOptions.hyrotrader` carries raw `mode` plus `production`/`simulator` maps, each with `rest`, `publicWs`, `privateWs` and their `livenet`/`testnet` URLs. Rust selects simulator for `mode: 'demo'` or an empty production REST livenet URL (even for testnet accounts), then selects the requested network. All three selected URLs must be configured or construction rejects with `HyroTrader REST/public/private URLs are not configured`. Raw config takes precedence over explicit `endpoints`; omitting it preserves legacy native/harness explicit endpoints. Application callers keep `extra.hyrotraderMode` and `testnet`; this is no new live-connectivity evidence. |
+| Native private `payloadSigner` refusal | `payloadSigner` is parsed across features. After public-mode derivation, private non-Paradex construction refuses it as `unsupported`/`notSent`, including with a local secret, before HTTP/WS I/O or a signing callback. Public accounts bypass the refusal, including the existing Aster/Lighter payload-only public fallback. Paradex delegated signing and the Bybit/Binance TS factory exceptions remain. |
+| Raw WASM constructor → SDK startup | Registry construction failures throw a JS `Error` with JSON-encoded `venueError` detail. The SDK wraps valid detail in `ExchangeError`, preserving message/classification; `validateAccount()` still reports `kind: 'unsupported'` for the payload-signer refusal. Errors without usable detail retain their original form for older/custom loaders; invalid options JSON remains a plain constructor error. No constructor arguments or application call shapes change. |
 
 #### Capability detection
 
