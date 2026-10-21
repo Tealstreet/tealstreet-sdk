@@ -28,7 +28,7 @@ test('constructing a Lighter replay source leaves global randomness and signing 
     assert.throws(() => createLighterReplayRandom(seed), /tape SHA-256/);
 });
 
-test('private TS Lighter replay replaces colliding randomness after crypto init without weakening verification', () => {
+for (const venue of ['lighter', 'lighter-robinhood']) test(`private TS ${venue} replay replaces colliding randomness after crypto init without weakening verification`, () => {
   const directory = mkdtempSync(join(tmpdir(), 'lighter-replay-random-'));
   try {
     const tape = join(directory, 'lighter-private.jsonl');
@@ -36,7 +36,7 @@ test('private TS Lighter replay replaces colliding randomness after crypto init 
     const output = join(directory, 'output.json');
     const trace = join(directory, 'random.jsonl');
     const generator = fileURLToPath(new URL('./private-tape-lighter.mjs', import.meta.url));
-    const generated = spawnSync(process.execPath, [generator, '--out', tape], { encoding: 'utf8' });
+    const generated = spawnSync(process.execPath, [generator, '--venue', venue, '--out', tape], { encoding: 'utf8' });
     assert.equal(generated.status, 0, generated.stderr);
     // Without the replay initializer, entry/TP/SL draw the same suffix at the
     // same tape millisecond and the real verifier rejects the reused order ID.
@@ -55,7 +55,7 @@ Object.defineProperty(Math, 'random', {
 `);
     const replay = fileURLToPath(new URL('./replay.mjs', import.meta.url));
     const result = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', '--import', preload,
-      replay, '--impl', 'ts', '--venue', 'lighter', '--tape', tape, '--books', '', '--out', output],
+      replay, '--impl', 'ts', '--venue', venue, '--tape', tape, '--books', '', '--out', output],
     { encoding: 'utf8', timeout: 30_000, env: { ...process.env, ESBUILD_WORKER_THREADS: '0' } });
     assert.equal(result.status, 0, result.error?.message ?? result.stderr);
     const raw = JSON.parse(readFileSync(output));

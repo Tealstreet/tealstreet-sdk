@@ -382,3 +382,8 @@ independent reviews, focused harness tests, current-head CI proof and mandatory
 three-case verification with zero unexpected/unused private declarations.
 Merge only on full green CI with a fresh separate dependency guard, then audit
 and report the actual merge before Bitrue. Ordinary CI still runs one pair.
+
+The focused proof retains eleven exact keys per private tape. Remove only
+checkpoint-0 balance.total and balance.upnl on each, preserving every other
+manifest entry and both fixture byte streams. The Robinhood collision case
+passes with the extended hook and fails under the prior Lighter-only hook.
