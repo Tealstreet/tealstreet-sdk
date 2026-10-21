@@ -710,3 +710,17 @@ fills are emitted from cumulative `dealAmount`/`averagePrice` on UPDATE/CLOSE.
 
 Rust cancellation rejects absent-store IDs before any batch write because native
 symbol and protection identity require reconciliation. Empty lists remain no-ops.
+
+Rust command failures carry `VenueError` classification and preserve native
+messages/codes. Preflight and signing failures are `NotSent`; lost write responses,
+HTTP 408/5xx, malformed acknowledgements and undocumented native errors remain
+`Unknown`. HTTP status takes precedence over body classification. Native `10001`
+is a network error, while `10005`/`10006` are rate limits, per the
+[Bitunix error table](https://www.bitunix.com/api-docs/futures/ErrorCode/error_code.html).
+
+Batch failures finish once with accepted IDs as partial detail. Independent later
+batch legs still run; any uncertain leg keeps the overall outcome `Unknown`.
+After a confirmed write, a later rejection cannot claim the whole command was
+rejected or unsent. A failed read while reconciling an acknowledged cancellation
+does not imply an uncertain new write. Recovery writes require definitive native
+rejection; malformed or server-error answers never trigger cancel/recreate.
