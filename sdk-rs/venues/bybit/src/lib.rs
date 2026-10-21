@@ -2340,6 +2340,7 @@ impl Venue for BybitLinear {
         );
     }
 
+    #[inline(never)]
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
         if self.market_refresh.retired_startup && matches!(&pending.then, Then::Markets { .. }) {

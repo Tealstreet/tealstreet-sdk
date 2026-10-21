@@ -2046,3 +2046,7 @@ entry points across REST and WebSocket handlers. Ordinary raw topic envelopes
 share the same parser boundary too. This limits duplicated WASM parser code;
 accepted JSON forms, borrowed strings, row isolation and Hyro whole-frame
 validation retain their existing semantics.
+Private response handlers and streamed row dispatch also retain explicit
+out-of-line boundaries so the optimizer does not fold all their code into the
+shared response and streaming entry points. Their bodies and dispatch order
+remain unchanged.

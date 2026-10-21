@@ -292,6 +292,7 @@ impl BybitLinear {
         );
     }
 
+    #[inline(never)]
     pub(crate) fn on_options_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

@@ -60,3 +60,25 @@ Serde parsers, lifetimes and error results; preserve Hyro's separate typed-frame
 atomicity. Independent plan/source review agrees this is a low-risk size
 experiment, not yet a measured saving. Existing row-admission/repair/Hyro tests
 and strict CI replay outputs remain the behavior checks.
+
+## First candidate measurement and named attribution
+
+The concrete parser boundaries saved 179 bytes in normal stripped CI:
+1,339,283 bytes, SHA-256
+`807f33d74c05d51b453dd6b331b64231fadb2a5ff2e49cea552fce70a87626e3`,
+run 39643522100 / Bybit job 119372994023. This does not meet the target.
+
+With the overseer's explicit one-build exception, a scratch baseline build kept
+the name section (`wasm-bindgen` 0.2.129; Binaryen 132 `-Oz -g`; normal Rust
+release settings, four build jobs). It is for attribution, not size measurement.
+The named 95,453-byte `on_public_response` incorporates private response dispatch;
+several large concrete account/trade/history/closed/options handlers have no
+separate symbols. `ArraySplitter::emit` is 17,949 bytes and incorporates streamed
+row dispatch. Serde's row parsers are already mostly shared, explaining the small
+first saving. Entropy-named functions occupy 4,410 shallow bytes in total.
+
+The next measured candidate adds out-of-line boundaries to those existing
+concrete response handlers and `Venue::on_item`. Their bodies, argument types,
+parser grammar and error handling remain unchanged. Independent profile review
+identified these boundaries; CI must establish the actual saving and public
+performance before any final claim.

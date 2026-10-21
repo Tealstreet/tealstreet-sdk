@@ -538,6 +538,7 @@ impl BybitLinear {
         self.send(cx, rest, Then::History(Request { command }));
     }
 
+    #[inline(never)]
     pub(crate) fn on_history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
