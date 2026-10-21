@@ -887,6 +887,8 @@ describe('RustEngineExchange', () => {
       sent.push(order.clientOrderId!);
       return ['crypto-4242'];
     };
+    // The inherited lookup reads open orders from native state; this shell never starts.
+    exchange.fetchOrders = async () => store.orders;
     await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
       orderIds: ['crypto-4242'],
       clientOrderId: opts.clientOrderId,

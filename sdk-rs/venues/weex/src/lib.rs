@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod history;
+mod identity;
 mod paths;
 mod rate;
 mod sign;
@@ -54,6 +55,7 @@ enum Task {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Identity(CommandId),
     Daily,
     BookTickers,
     Depth {
@@ -154,6 +156,7 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
+    identity: Option<String>,
     /// Some but not all of key, secret and passphrase were supplied.
     incomplete_credentials: bool,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
@@ -168,6 +171,11 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let identity = options
+            .key
+            .as_deref()
+            .filter(|key| !options.public_data_only && !key.is_empty())
+            .map(identity::fingerprint);
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let supplied = [&options.key, &options.secret, &options.passphrase]
             .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
@@ -202,6 +210,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            identity,
             incomplete_credentials,
             read_credentials,
             private_ws_headers: options.private_ws_headers,
@@ -605,12 +614,17 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
+        if let Task::Identity(command) = task {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         cx.notice(
             safe_cex_engine::Level::Warn,
             code::REQUEST_FAILED,
             format!("WEEX: {error}"),
         );
         match task {
+            Task::Identity(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
@@ -674,17 +688,18 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
 
     type Pending = Pending;
-    fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities {
-            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
-            ..safe_cex_engine::Capabilities::BASE
-        }
-    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.read_credentials
             && let Err(error) = read.validate().and_then(|_| {
@@ -946,6 +961,7 @@ impl Venue for WeexFutures {
                 symbol,
                 revision,
             } => self.leverage_response(cx, command, &symbol, revision, response),
+            Task::Identity(command) => self.identity_response(cx, command, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
@@ -1105,6 +1121,10 @@ impl Venue for WeexFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         let Some(command) = self.trade_command(cx, command) else {
             return;
         };

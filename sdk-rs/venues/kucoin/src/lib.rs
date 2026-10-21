@@ -2,6 +2,7 @@
 mod account;
 mod funding;
 mod history;
+mod identity;
 pub mod sign;
 #[cfg(feature = "spot")]
 pub mod spot;
@@ -53,6 +54,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -797,6 +799,7 @@ impl Venue for Kucoin {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             cancel_all: safe_cex_engine::CancelAll::Native,
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -971,6 +974,10 @@ impl Venue for Kucoin {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let status = response.status;
         let body = response.body;
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
@@ -978,6 +985,7 @@ impl Venue for Kucoin {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match pending {
+            Pending::Identity(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
@@ -1124,6 +1132,10 @@ impl Venue for Kucoin {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Identity(command) = pending {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, 0, error),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
@@ -1154,6 +1166,7 @@ impl Venue for Kucoin {
                 let pause = self.discovery_paused_until - cx.now;
                 self.discovery.failed_after(cx, true, pause);
             }
+            Pending::Identity(_) => unreachable!(),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1206,6 +1219,10 @@ impl Venue for Kucoin {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::FetchLeverage { command, .. } => {

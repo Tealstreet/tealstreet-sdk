@@ -3,6 +3,11 @@ use serde::Deserialize;
 use std::borrow::Cow;
 
 pub use safe_cex_engine::de::{number, optional_number};
+// Preserve field absence without accepting explicit invalid/null values that
+// the existing required-number decoder rejects.
+fn reported_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    number(d).map(Some)
+}
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(borrow)]
@@ -296,10 +301,10 @@ pub struct FillRow<'a> {
     pub dir: Cow<'a, str>,
     #[serde(default, deserialize_with = "optional_number")]
     pub start_position: Option<f64>,
-    #[serde(default, deserialize_with = "number")]
-    pub closed_pnl: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub fee: f64,
+    #[serde(default, deserialize_with = "reported_number")]
+    pub closed_pnl: Option<f64>,
+    #[serde(default, deserialize_with = "reported_number")]
+    pub fee: Option<f64>,
     #[serde(default, borrow)]
     pub fee_token: Cow<'a, str>,
     #[serde(default)]

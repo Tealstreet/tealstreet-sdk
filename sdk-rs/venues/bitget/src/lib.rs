@@ -2,6 +2,7 @@
 mod account;
 mod book;
 mod history;
+mod identity;
 mod paths;
 mod sign;
 mod trading;
@@ -52,6 +53,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     History(Box<history::Request>),
     Trade(Box<trading::Request>),
     Account {
@@ -545,6 +547,7 @@ impl Venue for BitgetFutures {
             } else {
                 safe_cex_engine::QuantityUnits::Base
             },
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -635,6 +638,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Identity(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
@@ -713,6 +717,10 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         if let Pending::History(request) = pending {
             self.query_response(cx, *request, response);
             return;
@@ -806,6 +814,10 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Identity(command) = pending {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
@@ -821,6 +833,7 @@ impl Venue for BitgetFutures {
             }
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
+            Pending::Identity(_) => unreachable!(),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -858,6 +871,10 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::SubscribeOrderBook { symbol } => {
                 let state = self.books.entry(symbol.clone()).or_default();
