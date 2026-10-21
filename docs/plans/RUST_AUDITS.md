@@ -1066,9 +1066,15 @@ Mostly matches TS.
   leverage bracket read, `lib.rs:758`).~~ Symbol failures retain state and retry
   without blocking the usable initial sweep; both collateral balances and
   authenticated native bracket caps are exposed without silent leverage clamps.
-- Low: one bad contract row blocks startup; stream stops misclassified;
+- Low: ~~one bad contract row blocks startup~~ (public discovery isolates rows);
+  ~~stream stops misclassified~~ (private conditionOrder/triggerType now precede
+  execution MARKET/LIMIT, retaining authoritative cached protection);
   ~~snapshot starvation under load (revision discard, `account.rs:581,1310`)~~;
-  malformed snapshot never sets loaded.
+  ~~malformed order snapshot never sets loaded~~ (each symbol's first attempt
+  finishes the initial sweep; failed symbols retain state and retry independently).
+  RISKY retained: malformed account snapshots do not mark balance/positions loaded;
+  only admitted authoritative financial data can establish complete account state.
+
 - Confirm (TS bugs Rust fixed): TS prices a position at the all-zero placeholder
   ticker before the first quote (private tape: -12000 on a 0.2 BTC long whose
   real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
