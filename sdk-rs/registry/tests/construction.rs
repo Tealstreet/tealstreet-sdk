@@ -45,6 +45,25 @@ fn secondary_read_credentials_need_a_key_and_secret() {
         ),
         "Secondary read credentials require a nonempty key and secret"
     );
+    // AsterDEX reads its agent from `asterdex.readKey`/`readSecret`, so the uniform blob's copy is inert.
+    construct(
+        "asterdex",
+        r#"{"publicDataOnly":true,"readCredentials":{"key":"read","secret":""}}"#,
+    )
+    .unwrap();
+    // The SDK omits an absent secondary secret, which must not fail to parse.
+    construct(
+        "asterdex",
+        r#"{"publicDataOnly":true,"readCredentials":{"key":"read"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        rejected(
+            "binance",
+            r#"{"key":"k","secret":"s","readCredentials":{"key":"read"}}"#
+        ),
+        "Secondary read credentials require a nonempty key and secret"
+    );
 }
 
 #[test]
@@ -91,11 +110,12 @@ fn kraken_refuses_a_secret_it_cannot_sign_with() {
 }
 
 #[test]
-fn hyperliquid_perpetuals_refuse_the_spot_toggle() {
-    assert_eq!(
-        rejected("hyperliquid", r#"{"enableSpotMarkets":true}"#),
-        "Rust Hyperliquid currently supports perpetual markets only"
-    );
+fn hyperliquid_perpetuals_accept_the_spot_toggle() {
+    construct(
+        "hyperliquid",
+        r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,
+    )
+    .unwrap();
     construct(
         "hyperliquidspot",
         r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,

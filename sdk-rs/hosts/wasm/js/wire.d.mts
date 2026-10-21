@@ -19,6 +19,7 @@ export const SECTION: {
   DERIVATIVE_PRODUCTS: 17;
   POSITION_GREEKS: 18;
   CAPABILITIES: 19;
+  UNDERLYING_TOKENS: 20;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -57,6 +58,7 @@ export interface EngineCapabilities {
   accountTier: boolean;
   closedPositions: boolean;
   balanceInfo: boolean;
+  hostClock: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };
@@ -111,6 +113,12 @@ export interface InstrumentClassificationTable {
   symbolType(i: number): string | undefined;
   marketRegion(i: number): string | undefined;
   underlyingTicker(i: number): string | undefined;
+}
+export interface UnderlyingTokenTable {
+  count: number;
+  market: Uint32Array;
+  name(i: number): string;
+  fullName(i: number): string | undefined;
 }
 export interface DerivativeProductTable {
   count: number;
@@ -235,6 +243,7 @@ export class Frame {
   markets(): MarketTable | undefined;
   predictionMarkets(): PredictionMarketTable | undefined;
   instrumentClassifications(): InstrumentClassificationTable | undefined;
+  underlyingTokens(): UnderlyingTokenTable | undefined;
   derivativeProducts(): DerivativeProductTable | undefined;
   positionGreeks(): PositionGreekTable | undefined;
   predictionHoldings(): PredictionHoldingTable | undefined;

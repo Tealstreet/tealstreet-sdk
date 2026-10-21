@@ -410,7 +410,10 @@ pub fn build<T: Visit>(
         feature = "okx"
     ))]
     local_signing_rules(venue, &options)?;
-    if let Some(read) = &options.read_credentials {
+    // AsterDEX's read agent travels in `asterdex.readKey`/`readSecret`; it ignores these.
+    if let Some(read) = &options.read_credentials
+        && venue != "asterdex"
+    {
         read.validate().map_err(invalid)?;
     }
     #[cfg(feature = "weex")]
@@ -931,11 +934,6 @@ pub fn build<T: Visit>(
         ),
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
-            if venue == "hyperliquid" && options.enable_spot_markets {
-                return Err(invalid(
-                    "Rust Hyperliquid currently supports perpetual markets only",
-                ));
-            }
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -947,6 +945,7 @@ pub fn build<T: Visit>(
                     b: b.address,
                     f: b.fee_tenths_bps,
                 }),
+                enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
             };
             finish(
                 visitor,
@@ -1518,8 +1517,15 @@ mod tests {
         assert_eq!(read.key, "read");
         assert_eq!(read.secret, "read-secret");
         assert_eq!(read.passphrase.as_deref(), Some("read-pass"));
+        let missing: EngineOptions =
+            serde_json::from_str(r#"{"readCredentials":{"key":"read"}}"#).unwrap();
         assert!(
-            serde_json::from_str::<EngineOptions>(r#"{"readCredentials":{"key":"read"}}"#).is_err()
+            missing
+                .read_credentials
+                .as_ref()
+                .unwrap()
+                .validate()
+                .is_err()
         );
     }
 }

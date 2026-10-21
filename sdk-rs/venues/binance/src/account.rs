@@ -139,6 +139,8 @@ pub struct AccountState {
     derivative_trade_order: VecDeque<(String, u64, i64)>,
     derivative_fill_watermarks: HashMap<(String, u64), f64>,
     terminal_algo_ids: HashSet<String>,
+    /// Orders whose native type executes at a limit price once triggered.
+    pub(crate) limit_stops: HashSet<String>,
     strategy_client_native: HashMap<(String, String), u64>,
     terminal_strategies: HashSet<(String, u64)>,
     pm_order_owners: HashMap<String, PmOrderOwner>,
@@ -206,6 +208,17 @@ pub fn order_type(text: &str) -> Option<OrderType> {
         "TRAILING_STOP_MARKET" => OrderType::TrailingStopLoss,
         _ => return None,
     })
+}
+
+/// Native stop types that execute at a limit price once triggered; this venue
+/// re-places stops as market-execution orders, so it must not amend these.
+/// Spot `STOP_LOSS`/`TAKE_PROFIT` execute at market; futures `STOP`/`TAKE_PROFIT` do not.
+pub fn executes_at_limit(native: &str, spot: bool) -> bool {
+    match native {
+        "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT" => true,
+        "STOP" | "TAKE_PROFIT" => !spot,
+        _ => false,
+    }
 }
 
 pub fn order_side(text: &str) -> OrderSide {
@@ -991,7 +1004,9 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
+                let spot = self.is_spot();
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let id = match (&o.client_order_id, client_keyed) {
                         (Some(client), true) => client.to_string(),
@@ -1002,6 +1017,7 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    limit_stops.push((id.clone(), executes_at_limit(&o.kind, spot)));
                     if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
@@ -1050,6 +1066,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.note_limit_stops(limit_stops);
                 if self.is_inverse() {
                     for order in &mut orders {
                         order.extra = Some(OrderExtra {
@@ -1077,6 +1094,7 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_strategies = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let id = o.new_client_strategy_id.as_ref();
                     let Some(kind) = order_type(&o.strategy_type) else {
@@ -1085,6 +1103,7 @@ impl BinanceFutures {
                         rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     };
+                    limit_stops.push((id.to_owned(), executes_at_limit(&o.strategy_type, false)));
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
                         || [&o.price, &o.orig_qty, &o.stop_price]
                             .iter()
@@ -1130,6 +1149,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.note_limit_stops(limit_stops);
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1148,6 +1168,7 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut rejected = Vec::new();
+                let mut limit_stops = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
@@ -1155,6 +1176,10 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    limit_stops.push((
+                        o.algo_id.to_string(),
+                        executes_at_limit(&o.order_type, false),
+                    ));
                     let amount = opt(&o.quantity);
                     orders.push(Order {
                         id: o.algo_id.to_string(),
@@ -1178,6 +1203,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                self.note_limit_stops(limit_stops);
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1691,6 +1717,9 @@ impl BinanceFutures {
         };
         let status = o.status.as_ref();
         let kind = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type);
+        if let Some(native) = o.ot.as_deref().or(o.o.as_deref()) {
+            self.note_limit_stops([(id.clone(), executes_at_limit(native, false))]);
+        }
         if status == "NEW" && kind.is_none() {
             return;
         }
@@ -1946,6 +1975,7 @@ impl BinanceFutures {
                 let Some(kind) = order_type(&o.st) else {
                     return;
                 };
+                self.note_limit_stops([(id.clone(), executes_at_limit(&o.st, false))]);
                 let price = opt(&o.p);
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
@@ -2002,6 +2032,7 @@ impl BinanceFutures {
                 let Some(kind) = order_type(&o.o) else {
                     return;
                 };
+                self.note_limit_stops([(id.clone(), executes_at_limit(&o.o, false))]);
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
                     id,
@@ -2731,6 +2762,17 @@ impl BinanceFutures {
         fresh
     }
 
+    /// A reused id takes its latest native type, so only current stop-limits refuse amend.
+    fn note_limit_stops(&mut self, rows: impl IntoIterator<Item = (String, bool)>) {
+        for (id, limit) in rows {
+            if limit {
+                self.account.limit_stops.insert(id);
+            } else {
+                self.account.limit_stops.remove(&id);
+            }
+        }
+    }
+
     fn on_spot_order(&mut self, cx: &mut Cx<'_, Pending>, event: SpotEvent<'_>) {
         if event.c.is_empty() || event.s.is_empty() {
             return;
@@ -2783,6 +2825,9 @@ impl BinanceFutures {
         } else {
             event.c.to_string()
         };
+        if event.status == "NEW" {
+            self.note_limit_stops([(id.clone(), executes_at_limit(&event.o, true))]);
+        }
         let key = (event.s.to_string(), native);
         let client_key = (event.s.to_string(), id.clone());
         // A valid stream observation is live even when its lifecycle total

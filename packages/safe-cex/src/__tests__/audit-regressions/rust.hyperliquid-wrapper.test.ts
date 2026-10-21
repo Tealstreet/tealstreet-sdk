@@ -136,7 +136,8 @@ describe('Rust Hyperliquid wrapper', () => {
     expect(construct).toHaveBeenCalledOnce();
     const [venue, json] = construct.mock.calls[0];
     expect(venue).toBe('hyperliquid');
-    expect(JSON.parse(json)).toEqual({
+    // The options blob is uniform across venues; these are the fields this venue reads.
+    expect(JSON.parse(json)).toMatchObject({
       key: 'api-wallet',
       secret: 'private-key',
       applicationId: 'master-wallet',
@@ -170,11 +171,12 @@ describe('Rust Hyperliquid wrapper', () => {
     expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
   });
 
-  it('rejects spot opt-in before loading or starting an engine', async () => {
-    const { exchange, load, construct } = setup({ enableSpotMarkets: true });
-    await expect(exchange.start()).rejects.toThrow('supports perpetual markets only');
-    expect(load).not.toHaveBeenCalled();
-    expect(construct).not.toHaveBeenCalled();
+  it('forwards the spot opt-in to the perp engine', async () => {
+    const { exchange, construct } = setup({ enableSpotMarkets: true });
+    await exchange.start();
+    const [venue, json] = construct.mock.calls[0];
+    expect(venue).toBe('hyperliquid');
+    expect(JSON.parse(json).enableSpotMarkets).toBe(true);
   });
 
   it.each([

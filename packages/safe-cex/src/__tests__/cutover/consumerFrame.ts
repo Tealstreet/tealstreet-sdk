@@ -90,6 +90,19 @@ export function consumerFrame(
         ],
         [],
       );
+    const underlying = rows
+      .map((market, index) => ({ market, index }))
+      .filter(({ market }) => market.info?.hlTokenName !== undefined);
+    if (underlying.length)
+      table(
+        20,
+        [
+          underlying.length,
+          ...underlying.map(({ index }) => index),
+          ...underlying.flatMap(({ market }) => [ref(market.info.hlTokenName), ref(market.info.hlTokenFullName)]),
+        ],
+        [],
+      );
     const products = rows
       .map((market, index) => ({ market, index }))
       .filter(({ market }) => market.option || ['FUTURE', 'CALL', 'PUT'].includes(market.info?.instrumentKind));

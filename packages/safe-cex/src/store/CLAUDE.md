@@ -346,6 +346,12 @@ contract-count metadata stays separate from Binance COIN-M contract multipliers.
 
 ## Instrument and derivative frame metadata
 
+Optional `UNDERLYING_TOKENS` carries the venue token behind a market whose
+display name differs from it: Hyperliquid's merged spot pairs publish the
+token name and full name (`UBTC`, `Unit Bitcoin` behind `BTC/USDC`), applied as
+`market.info.hlTokenName`/`hlTokenFullName`, which the web's Underlying Token
+disclosure reads. Rows index the current market table and reset with it.
+
 Optional `INSTRUMENT_CLASSIFICATIONS` preserves native `symbolType`,
 `marketRegion` and `underlyingTicker` without an arbitrary JSON payload.
 Absent and explicitly empty labels are distinct; Bybit's empty label and
