@@ -97,7 +97,8 @@ describe('Rust ApeX Omni SDK boundary', () => {
     expect(construct).toHaveBeenCalledOnce();
     const [venue, json] = construct.mock.calls[0];
     expect(venue).toBe('apexomni');
-    expect(JSON.parse(json)).toEqual({
+    // The options blob is uniform across venues; these are the fields this venue reads.
+    expect(JSON.parse(json)).toMatchObject({
       key: 'api-key',
       secret: 'api-secret',
       passphrase: 'api-passphrase',

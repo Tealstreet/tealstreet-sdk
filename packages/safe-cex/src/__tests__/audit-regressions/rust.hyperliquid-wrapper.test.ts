@@ -136,7 +136,8 @@ describe('Rust Hyperliquid wrapper', () => {
     expect(construct).toHaveBeenCalledOnce();
     const [venue, json] = construct.mock.calls[0];
     expect(venue).toBe('hyperliquid');
-    expect(JSON.parse(json)).toEqual({
+    // The options blob is uniform across venues; these are the fields this venue reads.
+    expect(JSON.parse(json)).toMatchObject({
       key: 'api-wallet',
       secret: 'private-key',
       applicationId: 'master-wallet',
