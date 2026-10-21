@@ -319,8 +319,9 @@ impl Hyperliquid {
         let count = markets.len();
         self.commit_discovery(cx, markets, tickers, excluded);
         self.spot_committed = true;
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            safe_cex_engine::Level::Info,
+            code::STARTUP_PROGRESS,
             format!("Loaded {count} Hyperliquid spot markets"),
         );
         self.account_prices(cx);
@@ -332,8 +333,9 @@ impl Hyperliquid {
         }
     }
     fn spot_markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            safe_cex_engine::Level::Warn,
+            code::REQUEST_FAILED,
             format!("Failed to load Hyperliquid spot markets; retrying: {error}"),
         );
         self.startup.failed(cx, (SPOT_SCOPE.into(), 0));
