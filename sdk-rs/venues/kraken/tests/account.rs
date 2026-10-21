@@ -478,6 +478,114 @@ fn malformed_full_snapshots_retain_confirmed_orders_and_exposure() {
     assert_eq!(e.store().positions()[0].contracts, 2.0);
 }
 #[test]
+fn bad_rest_order_row_keeps_its_stored_copy_while_peers_commit() {
+    for bad in [
+        ORDER.replace(r#""type":"stop""#, r#""type":"mystery""#),
+        r#"{"order_id":"order-1","qty":"x"}"#.to_string(),
+        r#"{"qty":"x"}"#.to_string(),
+    ] {
+        let (mut e, s) = ready();
+        snapshot(&mut e, s);
+        let reqs = poll(&mut e, s);
+        let orders = reqs.iter().find(|r| r.url.contains("openorders")).unwrap();
+        let peer = ORDER.replace("order-1", "order-2");
+        reply(
+            &mut e,
+            orders,
+            200,
+            &format!(r#"{{"result":"success","openOrders":[{bad},{peer}]}}"#),
+        );
+        let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["order-1", "order-2"], "{bad}");
+    }
+}
+#[test]
+fn bad_rest_position_row_keeps_its_stored_legs_while_peers_commit() {
+    for bad in [
+        r#"{"symbol":"PF_XBTUSD","side":"sideways","size":3,"price":100}"#,
+        r#"{"symbol":"PF_XBTUSD","size":"x"}"#,
+        r#"{"size":3}"#,
+    ] {
+        let (mut e, s) = ready();
+        message(&mut e, s, NOW, POSITION);
+        let reqs = poll(&mut e, s);
+        let positions = reqs
+            .iter()
+            .find(|r| r.url.contains("openpositions"))
+            .unwrap();
+        let peer = r#"{"symbol":"PF_ETHUSD","side":"short","size":1,"price":10}"#;
+        reply(
+            &mut e,
+            positions,
+            200,
+            &format!(r#"{{"result":"success","openPositions":[{bad},{peer}]}}"#),
+        );
+        let btc = e.store().position("PF_XBTUSD:long").unwrap();
+        assert_eq!(btc.contracts, 2.0, "{bad}");
+        assert!(e.store().position("PF_ETHUSD:short").is_some(), "{bad}");
+    }
+}
+#[test]
+fn bad_stream_order_row_keeps_its_stored_copy_while_peers_commit() {
+    for (bad, kept) in [
+        (
+            ORDER.replace(r#""type":"stop""#, r#""type":"mystery""#),
+            &["order-1", "order-2"][..],
+        ),
+        (
+            r#"{"order_id":"order-1","qty":"x"}"#.to_string(),
+            &["order-1", "order-2"],
+        ),
+        (
+            r#"{"qty":"x"}"#.to_string(),
+            &["order-1", "order-2", "order-3"],
+        ),
+    ] {
+        let (mut e, s) = ready();
+        let reqs = poll(&mut e, s);
+        let orders = reqs.iter().find(|r| r.url.contains("openorders")).unwrap();
+        let stale = ORDER.replace("order-1", "order-3");
+        reply(
+            &mut e,
+            orders,
+            200,
+            &format!(r#"{{"result":"success","openOrders":[{ORDER},{stale}]}}"#),
+        );
+        let peer = ORDER.replace("order-1", "order-2");
+        message(
+            &mut e,
+            s,
+            NOW + 1.0,
+            &format!(r#"{{"feed":"open_orders_snapshot","orders":[{bad},{peer}]}}"#),
+        );
+        let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, kept, "{bad}");
+    }
+}
+#[test]
+fn bad_stream_position_row_keeps_its_stored_legs_while_peers_commit() {
+    for bad in [
+        r#"{"instrument":"PF_XBTUSD","side":"sideways","size":3,"price":100}"#,
+        r#"{"instrument":"PF_XBTUSD","balance":"x"}"#,
+        r#"{"size":3}"#,
+    ] {
+        let (mut e, s) = ready();
+        message(&mut e, s, NOW, POSITION);
+        let peer = r#"{"instrument":"PF_ETHUSD","balance":-1,"entry_price":10,"mark_price":10}"#;
+        message(
+            &mut e,
+            s,
+            NOW + 1.0,
+            &format!(r#"{{"feed":"open_positions","positions":[{bad},{peer}]}}"#),
+        );
+        let btc = e.store().position("PF_XBTUSD:long").unwrap();
+        assert_eq!(btc.contracts, 2.0, "{bad}");
+        assert!(e.store().position("PF_ETHUSD:short").is_some(), "{bad}");
+    }
+}
+#[test]
 fn rest_positions_preserve_ws_notional_liquidation_and_confirm_actual_isolation() {
     let (mut e, s) = ready();
     message(&mut e, s, NOW, POSITION);
@@ -1035,8 +1143,7 @@ fn filtered_market_rows_are_skipped_while_listed_rows_commit() {
     let logs: Vec<_> = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),
@@ -1236,8 +1343,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) if message.contains("stops re-reading") => warned = true,

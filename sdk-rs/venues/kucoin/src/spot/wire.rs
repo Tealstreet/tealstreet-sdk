@@ -302,6 +302,14 @@ impl OrderRow<'_> {
         })
     }
 }
+/// What a private list row that failed to decode still says about its identity.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RowIdentity<'a> {
+    pub currency: &'a str,
+    pub id: &'a str,
+    pub order_id: &'a str,
+}
 #[derive(Deserialize)]
 pub struct Account<'a> {
     pub currency: &'a str,

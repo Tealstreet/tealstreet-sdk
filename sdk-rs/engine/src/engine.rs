@@ -154,32 +154,10 @@ struct PendingSignature {
     deadline: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LogLevel {
-    Info,
-    Warning,
-    Error,
-}
-
-impl From<LogLevel> for Level {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Info => Self::Info,
-            LogLevel::Warning => Self::Warn,
-            LogLevel::Error => Self::Error,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
-    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
-    Log {
-        level: LogLevel,
-        message: String,
-    },
     Event(LogEvent),
     /// Error diagnostic attributed to a command; completion owns its outcome.
     CommandError {
@@ -211,6 +189,8 @@ pub enum Notice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fill {
+    /// Native execution identity, distinct from the order identity when reported.
+    pub id: Option<String>,
     pub order_id: String,
     pub symbol: String,
     pub side: OrderSide,
@@ -1228,16 +1208,6 @@ impl<P> Cx<'_, P> {
         }
     }
 
-    /// Unstructured shim kept until venues emit [`Cx::event`].
-    pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        push_log(
-            &mut self.io.actions,
-            self.io.min_level,
-            level,
-            message.into(),
-        );
-    }
-
     /// Whether an event at `level` reaches the host; check before formatting
     /// an expensive Debug message.
     pub fn logs(&self, level: Level) -> bool {
@@ -1330,7 +1300,7 @@ impl<P> Cx<'_, P> {
     pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
         let message = message.into();
         if command == 0 {
-            self.log(LogLevel::Error, message);
+            self.notice(Level::Error, log_code::COMMAND_FAILED, message);
         } else {
             self.io
                 .actions
@@ -1537,12 +1507,13 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     }
     // Only missing tickers can still leave a private account usable (no prices).
     let level = if missing == ["tickers"] {
-        LogLevel::Warning
+        Level::Warn
     } else {
-        LogLevel::Error
+        Level::Error
     };
-    cx.log(
+    cx.notice(
         level,
+        log_code::STARTUP_INCOMPLETE,
         format!(
             "Startup incomplete: still waiting for {}",
             missing.join(", ")
@@ -1741,10 +1712,17 @@ impl<V: Venue> Engine<V> {
 
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
-        self.io.actions.push(Action::Notice(Notice::Log {
-            level: LogLevel::Error,
-            message: error.to_owned(),
-        }));
+        push_event(
+            &mut self.io.actions,
+            &mut self.io.health,
+            self.io.min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::PUBLIC_FEED_REJECTED,
+                message: error.to_owned(),
+                fields: Vec::new(),
+            },
+        );
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
@@ -1894,10 +1872,17 @@ impl<V: Venue> Engine<V> {
             && let Some(id) = command.completion_id()
             && !self.io.active_commands.insert(id)
         {
-            self.io.actions.push(Action::Notice(Notice::Log {
-                level: LogLevel::Error,
-                message: "Command ID is already in flight".into(),
-            }));
+            push_event(
+                &mut self.io.actions,
+                &mut self.io.health,
+                self.io.min_level,
+                LogEvent {
+                    level: Level::Error,
+                    code: log_code::COMMAND_DUPLICATE,
+                    message: "Command ID is already in flight".into(),
+                    fields: Vec::new(),
+                },
+            );
             return;
         }
         #[cfg(feature = "order-locks")]
@@ -2076,7 +2061,11 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if id.is_some_and(|id| cx.io.order_locks.contains(id)) {
-                        cx.log(LogLevel::Error, "Order command ID is already in flight");
+                        cx.notice(
+                            Level::Error,
+                            log_code::COMMAND_DUPLICATE,
+                            "Order command ID is already in flight",
+                        );
                         return;
                     }
                     if cx.io.order_locks.defer(&command) {
@@ -2277,10 +2266,17 @@ impl<V: Venue> Engine<V> {
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         if self.store.take_rejected_empty_catalogue() {
-            self.io.actions.push(Action::Notice(Notice::Log {
-                level: LogLevel::Warning,
-                message: EMPTY_CATALOGUE_WARNING.to_owned(),
-            }));
+            push_event(
+                &mut self.io.actions,
+                &mut self.io.health,
+                self.io.min_level,
+                LogEvent {
+                    level: Level::Warn,
+                    code: log_code::SNAPSHOT_DISCARDED,
+                    message: EMPTY_CATALOGUE_WARNING.to_owned(),
+                    fields: Vec::new(),
+                },
+            );
         }
         self.io.actions.drain(..)
     }
@@ -2469,7 +2465,7 @@ impl<V: Venue> Engine<V> {
         w.candles(&candles);
         let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 1);
+            w.begin_revision(section::FILLS, 2);
             w.u32(fills.len() as u32);
             let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
             w.u32s(orders);
@@ -2487,17 +2483,19 @@ impl<V: Venue> Engine<V> {
                 let symbol = w.string(&fill.symbol);
                 w.u32(symbol);
             }
-            if fills.iter().any(|(_, financials)| financials.is_some()) {
-                w.pad();
-                w.f64s(fills.iter().map(|(_, financials)| {
-                    financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
-                }));
-                w.f64s(
-                    fills
-                        .iter()
-                        .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
-                );
+            for (fill, _) in &fills {
+                let id = w.optional_string(fill.id.as_deref());
+                w.u32(id);
             }
+            w.pad();
+            w.f64s(fills.iter().map(|(_, financials)| {
+                financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
+            }));
+            w.f64s(
+                fills
+                    .iter()
+                    .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
+            );
             w.end();
         }
         let empty = w.is_empty();
@@ -2577,23 +2575,6 @@ fn apply_signature(
         }
     }
     Ok(())
-}
-
-// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
-// would otherwise each inline a copy (the per-venue wasm budget is tight).
-#[inline(never)]
-fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
-    let enabled = match level {
-        LogLevel::Info => Level::Info,
-        LogLevel::Warning => Level::Warn,
-        LogLevel::Error => Level::Error,
-    };
-    if enabled >= min_level {
-        actions.push(Action::Notice(Notice::Log {
-            level,
-            message: crate::log::cap(message),
-        }));
-    }
 }
 
 /// The longest a repeating retried-read failure goes without an Error. Below the
@@ -2696,6 +2677,7 @@ mod streaming_tests {
 
     fn execution() -> Fill {
         Fill {
+            id: None,
             order_id: "9007199254740995".into(),
             symbol: "A".into(),
             side: OrderSide::Buy,
@@ -2705,7 +2687,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn fill_financials_leave_revision_one_bytes_identical_when_absent() {
+    fn revision_two_fills_preserve_absent_identity_and_financial_values() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -2740,10 +2722,12 @@ mod streaming_tests {
                 expected.extend(value.to_le_bytes());
             }
             expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
-            expected.extend(0u32.to_le_bytes()); // Section padding.
+            expected.extend(crate::wire::NONE.to_le_bytes()); // Missing execution identity.
+            expected.extend(f64::NAN.to_le_bytes());
+            expected.extend(f64::NAN.to_le_bytes());
             assert_eq!(
                 fills, expected,
-                "absent financials must preserve the symbol-bearing revision-one payload"
+                "revision two represents absent financials and identity explicitly"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
         }
@@ -2786,7 +2770,7 @@ mod streaming_tests {
             .unwrap()
             .1;
         assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 3);
-        assert_eq!(fills.len(), 152);
+        assert_eq!(fills.len(), 160);
         let rows: Vec<_> = fills[40..88]
             .as_chunks::<8>()
             .0
@@ -2795,8 +2779,8 @@ mod streaming_tests {
             .collect();
         assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
         assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        assert_eq!(&fills[100..104], &[0; 4]);
-        let floats: Vec<_> = fills[104..]
+        assert_eq!(&fills[100..112], &[255; 12]);
+        let floats: Vec<_> = fills[112..]
             .as_chunks::<8>()
             .0
             .iter()
@@ -2827,7 +2811,7 @@ mod streaming_tests {
         }
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(matches!(actions.as_slice(), [
-            Action::Notice(Notice::Log { level: LogLevel::Error, message: background }),
+            Action::Notice(Notice::Event(crate::log::LogEvent { level: Level::Error, message: background, code: log_code::COMMAND_FAILED, .. })),
             Action::Notice(Notice::CommandError { command: 7, message }),
             Action::Notice(Notice::CommandFailed { command: 7, error: result }),
         ] if background == "background error" && message == "command error" && result.legacy_text() == *message));
@@ -3712,6 +3696,7 @@ mod streaming_tests {
                 },
             );
             cx.fill(Fill {
+                id: None,
                 order_id: "9007199254740995".into(),
                 symbol: "A".into(),
                 side: OrderSide::Buy,
@@ -3840,6 +3825,7 @@ mod streaming_tests {
         // A pending fill would promote the flush to a full frame (MARKETS first).
         engine.io.fills.push((
             Fill {
+                id: None,
                 order_id: "filled-order".into(),
                 symbol: "ORPHAN".into(),
                 side: OrderSide::Buy,
@@ -3869,8 +3855,8 @@ mod streaming_tests {
         );
         assert_eq!(
             fills.len(),
-            40,
-            "one fill includes a padded symbol-reference tail"
+            56,
+            "one revision-two fill includes identity and financial columns"
         );
         let reference = u32::from_le_bytes(fills[32..36].try_into().unwrap()) as usize;
         let strings = sections
@@ -4725,10 +4711,10 @@ mod signing_tests {
         let actions: Vec<_> = engine.drain_actions().collect();
         assert!(matches!(
             actions.as_slice(),
-            [Action::Notice(Notice::Log {
-                level: LogLevel::Error,
+            [Action::Notice(Notice::Event(crate::log::LogEvent {
+                level: Level::Error,
                 ..
-            })]
+            }))]
         ));
         // A newly added read must not complete an older write with the same ID.
         engine.handle(
@@ -4740,10 +4726,10 @@ mod signing_tests {
         );
         assert!(matches!(
             engine.drain_actions().collect::<Vec<_>>().as_slice(),
-            [Action::Notice(Notice::Log {
-                level: LogLevel::Error,
+            [Action::Notice(Notice::Event(crate::log::LogEvent {
+                level: Level::Error,
                 ..
-            })]
+            }))]
         ));
         assert!(engine.io.active_commands.contains(&1));
         assert!(engine.io.order_locks.contains(1));
@@ -5156,12 +5142,14 @@ mod startup_watch_tests {
         }
     }
 
-    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
+    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(Level, String)> {
         engine.handle(now, Event::PollScaleChanged { scale: 1.0 });
         engine
             .drain_actions()
             .filter_map(|action| match action {
-                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                Action::Notice(Notice::Event(crate::log::LogEvent { level, message, .. })) => {
+                    Some((level, message))
+                }
                 _ => None,
             })
             .collect()
@@ -5262,16 +5250,20 @@ mod startup_watch_tests {
         let logs: Vec<_> = engine
             .drain_actions()
             .filter_map(|action| match action {
-                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                Action::Notice(Notice::Event(crate::log::LogEvent { level, message, .. })) => {
+                    Some((level, message))
+                }
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            logs,
-            [(LogLevel::Warning, EMPTY_CATALOGUE_WARNING.to_owned())]
-        );
+        assert_eq!(logs, [(Level::Warn, EMPTY_CATALOGUE_WARNING.to_owned())]);
         assert_eq!(engine.store().markets().len(), 1);
+        assert_eq!(engine.health().snapshots_discarded, 1);
         assert!(engine.drain_actions().next().is_none());
+        engine.set_log_level(Level::Error);
+        engine.store_mut().set_markets(Vec::new());
+        assert!(engine.drain_actions().next().is_none());
+        assert_eq!(engine.health().snapshots_discarded, 2);
     }
 
     #[test]
@@ -5290,7 +5282,7 @@ mod startup_watch_tests {
         assert_eq!(
             notices(&mut engine, STARTUP_WATCH_MS),
             [(
-                LogLevel::Error,
+                Level::Error,
                 "Startup incomplete: still waiting for tickers, balance, orders, positions"
                     .to_owned()
             )]
@@ -5304,7 +5296,7 @@ mod startup_watch_tests {
         assert_eq!(
             notices(&mut engine, repeat),
             [(
-                LogLevel::Warning,
+                Level::Warn,
                 "Startup incomplete: still waiting for tickers".to_owned()
             )]
         );
@@ -5385,6 +5377,7 @@ mod placement_ack_tests {
                 cx.store.remove_orders(&[id]);
             } else if let Some(id) = text.strip_prefix("fill:") {
                 cx.fill(Fill {
+                    id: None,
                     order_id: id.into(),
                     symbol: "BTCUSDT".into(),
                     side: OrderSide::Buy,
@@ -5822,6 +5815,7 @@ mod fill_frame_tests {
             cx.store.upsert_order(order());
             if text == "fill" {
                 cx.fill(Fill {
+                    id: None,
                     order_id: "7".into(),
                     symbol: "A".into(),
                     side: OrderSide::Buy,

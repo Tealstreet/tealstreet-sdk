@@ -1139,6 +1139,7 @@ impl BitunixFutures {
                                 price.is_finite() && price > 0.0
                             }) {
                                 cx.fill(Fill {
+                                    id: None,
                                     order_id: o.order_id.to_string(),
                                     symbol: o.symbol.to_string(),
                                     side,

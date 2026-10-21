@@ -114,9 +114,10 @@ Hosts forward events and write Warn+ to stderr/console with no client.
 PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
 HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`,
 `logLevel` engine option, `EngineHost.health()`/`onEvent`, native `event` notices,
-DO `log` notices with `code` and `fields`); ~~(2) redaction sweep with a test that fails on
-secrets in any notice~~ (every private replay checks every notice); ~~(3) engine-level ws and auth counting~~ (reconnects per socket role, engine-initiated closes, `deactivate` and auth-kind failures, last private frame); ~~(4) venue batches assigning codes and fixing levels (keep message text stable)~~ (every venue emits coded events; retried reads use `Cx::retried_failure`: a repeat of the same failure is a warning, re-raised as an Error every 90 s and whenever the text changes; optional child-leg failures are Errors); (5) health monitor
-and tealstreet-next on codes; (6) delete the shim.
+DO coded event notices); ~~(2) redaction sweep with a test that fails on
+secrets in any notice~~ (every private replay checks every notice); ~~(3) engine-level ws and auth counting~~ (reconnects per socket role, engine-initiated closes, `deactivate` and auth-kind failures, last private frame); ~~(4) venue batches assigning codes and fixing levels (keep message text stable)~~ (every venue emits coded events; retried reads use `Cx::retried_failure`: a repeat of the same failure is a warning, re-raised as an Error every 90 s and whenever the text changes; optional child-leg failures are Errors); (5) ~~SDK health monitor on codes and getHealth()~~ (structured event/legacy
+metadata bridge; authoritative counters separate from observed reports);
+tealstreet-next callers remain cutover items in RUST_CUTOVER_CALLERS.md; ~~(6) delete the shim~~ (engine/startup codes; one Level/Event path across hosts).
 
 tealstreet-next: `exchangeAccountController.ts:180-383`,
 `apps/cli/src/exchange-manager.ts:203`, `apps/cli/src/error-classifier.ts`,

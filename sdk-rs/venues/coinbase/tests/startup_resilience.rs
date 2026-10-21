@@ -39,10 +39,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
-                Action::Notice(Notice::Log {
-                    level: safe_cex_engine::LogLevel::Error,
-                    ..
-                }) | Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Error,
                     ..
                 }))
@@ -75,5 +72,5 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 1);
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }

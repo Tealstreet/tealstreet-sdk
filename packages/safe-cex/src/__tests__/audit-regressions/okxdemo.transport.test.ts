@@ -19,6 +19,18 @@ const options: ExchangeOptions = {
 };
 
 describe('OKX Demo transport and metadata', () => {
+  it('uses the default TLS port for every global and EEA live/demo channel', () => {
+    for (const [region, liveHost, demoHost] of [
+      ['okx', 'ws.okx.com', 'wspap.okx.com'],
+      ['okxeu', 'wseea.okx.com', 'wseeapap.okx.com'],
+    ] as const) {
+      for (const channel of ['public', 'private', 'business'] as const) {
+        expect(BASE_WS_URLS[region][channel].livenet).toBe(`wss://${liveHost}/ws/v5/${channel}`);
+        expect(BASE_WS_URLS[region][channel].testnet).toBe(`wss://${demoHost}/ws/v5/${channel}`);
+      }
+    }
+  });
+
   it('uses the OKX runtime with demo mode forced on', () => {
     const exchange = new OKXDemoExchange('okxdemo', options, new DefaultStore());
 
@@ -31,9 +43,9 @@ describe('OKX Demo transport and metadata', () => {
 
   it('uses official direct OKX demo websocket endpoints', () => {
     expect(BASE_URLS.okx.testnet).toBe('https://openapi.okx.com');
-    expect(BASE_WS_URLS.okx.public.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/public');
-    expect(BASE_WS_URLS.okx.private.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/private');
-    expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com:8443/ws/v5/business');
+    expect(BASE_WS_URLS.okx.public.testnet).toBe('wss://wspap.okx.com/ws/v5/public');
+    expect(BASE_WS_URLS.okx.private.testnet).toBe('wss://wspap.okx.com/ws/v5/private');
+    expect(BASE_WS_URLS.okx.business.testnet).toBe('wss://wspap.okx.com/ws/v5/business');
   });
 
   it('uses the OKX EU runtime with EEA demo mode forced on', () => {
@@ -48,9 +60,9 @@ describe('OKX Demo transport and metadata', () => {
 
   it('uses official direct OKX EU demo websocket endpoints', () => {
     expect(BASE_URLS.okxeu.testnet).toBe('https://eea.okx.com');
-    expect(BASE_WS_URLS.okxeu.public.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/public');
-    expect(BASE_WS_URLS.okxeu.private.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/private');
-    expect(BASE_WS_URLS.okxeu.business.testnet).toBe('wss://wseeapap.okx.com:8443/ws/v5/business');
+    expect(BASE_WS_URLS.okxeu.public.testnet).toBe('wss://wseeapap.okx.com/ws/v5/public');
+    expect(BASE_WS_URLS.okxeu.private.testnet).toBe('wss://wseeapap.okx.com/ws/v5/private');
+    expect(BASE_WS_URLS.okxeu.business.testnet).toBe('wss://wseeapap.okx.com/ws/v5/business');
   });
 
   it('is registered as a REST-proxied, WS-direct separate exchange variant', async () => {
