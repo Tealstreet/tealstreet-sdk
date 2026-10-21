@@ -364,6 +364,12 @@ fn candle(k: &Kline, rest: bool) -> Candle {
 }
 impl Venue for BitunixFutures {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            host_clock: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx);
     }

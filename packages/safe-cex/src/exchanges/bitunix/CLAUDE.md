@@ -745,3 +745,9 @@ degradation/recovery. HTTP 418/429 honor `Retry-After` (60-second default); nati
 `10005`/`10006` wait 60 seconds even with missing/null data, while `10001` remains a network
 failure. Malformed public previews are not copied into diagnostics. Private,
 financial history and trading policies remain separate.
+
+Rust Bitunix declares synchronized host-clock input. The SDK adopts that capability
+before the first engine start and supplies its virtual clock for authenticated
+REST and private-login timestamps, including later socket epochs. Signing keeps
+its existing millisecond flooring and byte format. This does not add automatic
+signature-rejection retries or resend writes.

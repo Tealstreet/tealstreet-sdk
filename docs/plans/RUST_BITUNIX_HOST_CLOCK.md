@@ -22,3 +22,10 @@ follows the pending Bitunix source queue and integrates actual preceding landing
 
 The audit's separate signature-rejection resend and venue server-sync protocol
 remain owner decisions; this phase closes only synchronized SDK host-time input.
+
+Plan and implementation independent reviews CLEAR. The original native record
+fails the full-capability assertion and the original SDK fixture passes a clock
+skewed by ten minutes (false-capability control passes). With the correction,
+both real native timestamp checks and both SDK controls pass. Bitunix/Binance
+native, the default combined-host capability fixture, 22 SDK clock/capability
+tests, package typecheck/lint and strict Clippy/fmt/bans pass.
