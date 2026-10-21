@@ -30,3 +30,11 @@ branch. It touches the same read/currentness paths: integrate actual landing
 in the agreed later order and rerun CI before any eventual merge. Respect all
 owner/live-capture exclusions from RUST_PORT_WIRE_SWEEP; no new budgets,
 local release WASM builds, replay matrices, timing gates or load tests.
+
+Plan audit: clear with one required release fix. Synchronous signing failure must
+mark only its balance serial answered before scheduling ordinary repair; no HTTP
+was sent, so coalescing must not fabricate a ten-second in-flight wait. Existing
+position-mode ACK financial regressions remain mandatory. Add refused, malformed
+and transport-lost mode ACK controls that never advance the balance write fence.
+When #1662 later integrates, retain its pause gate before any issue timestamp or
+serial mutation and use the balance serial/write revision for auth currentness.
