@@ -8,9 +8,10 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
+import { classifiedError, exchangeErrorTags } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
-import { isRustVenue, RustEngineExchange } from '../exchanges/rust/rust.exchange';
+import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
@@ -243,6 +244,7 @@ export class ExchangeWorker {
           {
             sendToSentry: effectiveSendToSentry,
             suppressConsoleLog,
+            classified: classifiedError(error),
             sentryData: {
               error: serializableError,
               tags: {
@@ -250,6 +252,8 @@ export class ExchangeWorker {
                 module: 'ExchangeWorker',
                 exchange: this._exchangeName,
                 account: this._accountName,
+                // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
+                ...exchangeErrorTags(error),
                 ...splitExtra.sentryTags,
                 ...workerSentryControl.tags,
               },
@@ -337,7 +341,7 @@ export class ExchangeWorker {
       if (!loader) {
         throw new Error(`Unknown exchange: ${this._exchangeName}`);
       }
-      const runsOnRust = this._options.engine === 'rust' && isRustVenue(this._exchangeName);
+      const runsOnRust = runsOnRustEngine(this._exchangeName, this._options);
       const Exchange = runsOnRust ? RustEngineExchange : await loader();
       if (startupToken !== this._startupToken) {
         return false;
@@ -1098,6 +1102,7 @@ export class ExchangeWorker {
         'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
       name: 'EngineDeadError',
       code: 'ENGINE_DEAD',
+      kind: 'internal',
     });
     // Stop TWAPs while their handler context is still current, so the final
     // completed state reaches the main thread that persists and resumes them.

@@ -288,11 +288,13 @@ impl WeexFutures {
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials {
-            self.account.socket = Some(cx.connect_with_headers_channel(
-                PRIVATE_WS,
-                credentials.ws_headers(cx.now),
-                safe_cex_engine::SocketChannel::Private,
-            ));
+            self.account.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(PRIVATE_WS)
+                        .headers(credentials.ws_headers(cx.now))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                ),
+            );
             self.account.supervisor.connecting(cx);
         }
     }

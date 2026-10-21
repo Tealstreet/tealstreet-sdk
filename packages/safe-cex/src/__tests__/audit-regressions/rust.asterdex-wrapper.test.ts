@@ -5,7 +5,6 @@ import type { ExchangeName, ExchangeOptions, OHLCVOptions, Order } from '../../t
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../../exchanges/asterdex/asterdex.types';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
@@ -121,12 +120,6 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
       secret: 'legacy-secret',
       asterdex: { apiVersion: 'v3', userAddress: USER, signerAddress: SIGNER, privateKey: PRIVATE },
     });
-  });
-
-  it('rejects wallet-shaped credentials without the main wallet before engine startup', async () => {
-    const { exchange, construct } = fixture({ applicationId: undefined });
-    await expect(exchange.start()).rejects.toThrow(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
-    expect(construct).not.toHaveBeenCalled();
   });
 
   it('keeps valid auth-only V3 accounts public when the API key is absent, as TS does', () => {

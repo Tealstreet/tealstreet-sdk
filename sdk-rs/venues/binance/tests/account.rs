@@ -1102,3 +1102,21 @@ fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapsho
         .collect();
     assert_eq!(ids, ["1", "3"]);
 }
+
+#[test]
+fn listen_key_failures_back_off_from_5s_to_the_60s_cap() {
+    let mut h = ready();
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.advance(500.0);
+    for delay in [5_000.0, 10_000.0, 20_000.0, 40_000.0, 60_000.0, 60_000.0] {
+        h.respond("/fapi/v1/listenKey", 503, "unavailable");
+        let retry = h.now + delay;
+        assert!(
+            h.timers.iter().any(|(_, at)| *at == retry),
+            "next listen key retry after {delay} ms"
+        );
+        h.advance(delay);
+        assert!(h.has_request("/fapi/v1/listenKey"));
+    }
+}

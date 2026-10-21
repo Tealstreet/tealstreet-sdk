@@ -108,7 +108,9 @@ fn private_socket(actions: &[Action]) -> SocketId {
     actions
         .iter()
         .find_map(|action| match action {
-            Action::WsConnectWithHeaders { socket, .. } => Some(*socket),
+            Action::WsConnect {
+                socket, headers, ..
+            } if !headers.is_empty() => Some(*socket),
             _ => None,
         })
         .unwrap()
@@ -120,7 +122,7 @@ fn documented_private_snapshots_and_browser_rest_fallback() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnectWithHeaders { .. }))
+            .any(|a| matches!(a, Action::WsConnect { headers, .. } if !headers.is_empty()))
     );
     for request in requests(&actions) {
         assert!(
@@ -286,11 +288,15 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         .windows(2)
         .find_map(|pair| match (&pair[0], &pair[1]) {
             (
-                Action::WsConnectWithHeaders {
-                    socket: private, ..
+                Action::WsConnect {
+                    socket: private,
+                    headers,
+                    ..
                 },
                 Action::SetTimer { timer, at_ms },
-            ) if *private == socket && *at_ms == NOW + 5000.0 => Some(*timer),
+            ) if !headers.is_empty() && *private == socket && *at_ms == NOW + 5000.0 => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("private socket watchdog");
@@ -309,7 +315,7 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         })
         .unwrap();
     e.handle(NOW + 32_000.0, Event::TimerFired { timer });
-    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnectWithHeaders {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
+    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnect {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
 }
 
 #[test]
@@ -1055,4 +1061,30 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
     );
     assert!(e.store().order("702345678901234600").is_none());
     assert_eq!(e.store().orders().len(), 3);
+}
+#[test]
+fn plain_limit_order_events_carry_no_trigger_type() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    complete(&mut e, &actions, "[]", "[]");
+    // WEEX order events put CONTRACT_PRICE with triggerPrice 0 on plain limit rows.
+    e.handle(NOW, Event::WsMessage { socket, text: r#"{"e":"orders","d":[{"id":"702345678901234601","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"0.02","price":"69500","triggerPrice":"0","triggerPriceType":"CONTRACT_PRICE","updatedTime":"1773295701000"}]}"# });
+    let order = e.store().order("702345678901234601").unwrap();
+    assert_eq!(order.trigger_type, None);
+}
+#[test]
+fn protective_algo_row_typed_market_keeps_its_working_type() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234502,"symbol":"BTCUSDT","side":"SELL","type":"MARKET","planType":"STOP_LOSS","reduceOnly":true,"algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"68000","workingType":"MARK_PRICE","updateTime":1773295700000}]"#,
+    );
+    let order = e.store().order("812345678901234502").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(
+        order.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
 }

@@ -75,7 +75,9 @@ pub struct KrakenSpot {
     poll: Option<TimerId>,
     markets_in_flight: bool,
     tickers_in_flight: bool,
-    catalogue_incomplete: bool,
+    /// Bases whose USD route the last catalogue read rejected as malformed.
+    rejected_routes: HashSet<String>,
+    ticker_reseed: bool,
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
@@ -110,7 +112,8 @@ impl KrakenSpot {
             poll: None,
             markets_in_flight: false,
             tickers_in_flight: false,
-            catalogue_incomplete: false,
+            rejected_routes: HashSet::new(),
+            ticker_reseed: false,
             retries: vec![],
         }
     }
@@ -122,6 +125,7 @@ impl KrakenSpot {
             }
             Pending::Tickers { .. } => {
                 self.tickers_in_flight = false;
+                self.ticker_reseed = false;
                 self.discovery.failed(cx, true);
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -157,8 +161,12 @@ impl KrakenSpot {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket =
-            Some(cx.connect_channel("wss://ws.kraken.com/v2", SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://ws.kraken.com/v2")
+                    .channel(SocketChannel::Public),
+            ),
+        );
         self.public.open = false;
     }
     fn subscribe(
@@ -223,18 +231,23 @@ impl KrakenSpot {
         let mut pairs = HashMap::new();
         let mut identities = HashMap::new();
         let mut rejected = false;
+        let mut rejected_routes = HashSet::new();
         map_each::<&serde_json::value::RawValue>(text, |key, raw| {
             if key.ends_with(".d") {
                 return;
             }
-            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+            let mut reject = |wsname: &str| {
                 rejected = true;
+                rejected_routes.extend(rejected_usd_route(&key, wsname));
                 safe_cex_engine::startup::skipped_row(cx);
+            };
+            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+                let name = serde_json::from_str::<PairName<'_>>(raw.get());
+                reject(name.as_ref().map_or("", |n| &n.wsname));
                 return;
             };
             let Some((base, quote)) = p.wsname.split_once('/') else {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             };
             if base.is_empty()
@@ -243,8 +256,7 @@ impl KrakenSpot {
                 || quote.trim() != quote
                 || quote.contains('/')
             {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             let base = asset(base);
@@ -255,15 +267,13 @@ impl KrakenSpot {
             let pd = p.pair_decimals.unwrap_or(2);
             let ad = p.lot_decimals.unwrap_or(8);
             if pd > 18 || ad > 18 || p.ordermin < 0. {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             let symbol = p.wsname.to_string();
             let pretty = format!("{base}{quote}");
             if pairs.contains_key(&symbol) {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             for id in [&*key, &*p.altname, &symbol, &pretty] {
@@ -305,6 +315,9 @@ impl KrakenSpot {
         if markets.is_empty() {
             return Err("No supported Kraken Spot market rows".into());
         }
+        let added = markets
+            .iter()
+            .any(|market| !self.pairs.contains_key(&market.symbol));
         let recovered: Vec<_> = markets
             .iter()
             .filter(|market| {
@@ -325,7 +338,7 @@ impl KrakenSpot {
             .collect();
         self.pairs = pairs;
         self.identities = identities;
-        self.catalogue_incomplete = rejected;
+        self.rejected_routes = rejected_routes;
         if rejected {
             self.discovery.failed(cx, false);
         } else {
@@ -337,12 +350,21 @@ impl KrakenSpot {
                 self.subscribe(cx, "subscribe", "ticker", batch, None);
             }
         }
-        self.revalue_pending_balances(cx);
+        self.ticker_reseed |= added && cx.store.loaded().tickers;
+        if added {
+            self.revalue_after_catalogue(cx);
+        } else {
+            self.revalue_pending_balances(cx);
+        }
         if self.public.socket.is_none() {
             self.connect(cx);
         }
         self.private_start(cx);
-        self.tickers(cx);
+        // A persistently rejected pair re-reads only the catalogue; tickers are
+        // re-seeded when the read lists a new pair.
+        if !cx.store.loaded().tickers || added {
+            self.tickers(cx);
+        }
         Ok(())
     }
     fn tickers_response(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> Result<(), String> {
@@ -622,6 +644,7 @@ impl Venue for KrakenSpot {
             }
             Pending::Tickers { .. } => {
                 self.tickers_in_flight = false;
+                self.ticker_reseed = false;
                 self.tickers_response(cx, text)
             }
             Pending::Candles { command, .. } => {

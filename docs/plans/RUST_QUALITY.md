@@ -20,7 +20,11 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
   `StartupFailed{error}` rejects `start()`; Bybit fails startup on definitive
   key rejections (10003/10004 after resend/10010/33004) of its signed fee read.
-- Secrets in logs: 53 log sites interpolate raw bodies (broader sweep remains).
+- Secrets in logs: ~~53 log sites interpolate raw bodies (broader sweep remains).~~
+  Swept: direct body interpolation is gone. Non-2xx `HTTP {status}: {body}`
+  failures keep the venue's error envelope as an actionable message. Every
+  private replay now fails if any log line or command result quotes a replay
+  credential or a signed query (`harness/notice-leaks.mjs`).
   ~~Bitrue logs whole private frames (`bitrue/src/account.rs:700`), Bybit logs
   the signed request body (`bybit/src/lib.rs:550`); native transport errors
   include signed URLs (`hosts/native/src/transport.rs:390,404`).~~ Fixed at
@@ -28,8 +32,14 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   all-notice credential/URL regressions. Current reqwest body-stream errors
   already omit URLs; that path is regression coverage, not a reproduced fix.
   Ordinary business rejection messages remain actionable.
-- Native and Durable Object hosts drop logs with no client attached; an
-  oversized native broadcast disconnects every peer (`server.rs:386`).
+- ~~Native and Durable Object hosts drop logs with no client attached.~~ Fixed:
+  Warn+ goes to stderr/console with no client, and log notices are cut to fit
+  before broadcast. ~~An oversized native broadcast disconnects every peer
+  (`server.rs:386`).~~ An oversized delta frame is sent as ordered segments
+  that share its string table; other oversized notices are replaced by a bounded
+  warning, and an oversized completion settles its command with an error. Only
+  a single section larger than the limit still makes peers resnapshot, and that
+  is logged.
 
 ## Error handling
 
@@ -69,8 +79,8 @@ shared parser per venue family, replacing `malformed` flags; (3) TS toast on
 rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
 `StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
 `StartupFailed`, BreakoutProp and Bybit landed); (6)
-app and chaser read `kind`/`outcome`; (7) wasm panic disposes the engine and
-surfaces `Internal`.
+app and chaser read `kind`/`outcome`; ~~(7) wasm panic disposes the engine and
+surfaces `Internal`~~ (`EngineDeadError` carries `kind: 'internal'`).
 
 tealstreet-next: `exchangeAccountController.ts`, `createLimitOrder.ts`,
 `createMarketOrder.ts`, `createScaledOrder.ts` (reads `partialOrderIds`),
@@ -94,9 +104,11 @@ closes, reconnects, auth failures, HTTP failures, rate limited, snapshots
 discarded, rows skipped, last private message) exposed via `getHealth()`.
 Hosts forward events and write Warn+ to stderr/console with no client.
 
-PRs: (1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
-HTTP failure, no-client fallback; (2) redaction sweep with a test that fails on
-secrets in any notice; (3) engine-level ws and auth counting; (4) venue batches
+PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
+HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`,
+`logLevel` engine option, `EngineHost.health()`/`onEvent`, native `event` notices,
+DO `log` notices with `code` and `fields`); ~~(2) redaction sweep with a test that fails on
+secrets in any notice~~ (every private replay checks every notice); (3) engine-level ws and auth counting; (4) venue batches
 assigning codes and fixing levels (keep message text stable); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.
 
@@ -128,7 +140,8 @@ Medium:
 5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
    row keeps the store's copy. Structurally ends the one-bad-row-discards-the-
    snapshot class (~50 hand-rolled `invalid` flags).
-6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
+6. Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts
+   (crate and host wiring done; TS credential checks moving in batches);
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
@@ -151,7 +164,8 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`), one `SocketSpec`.
+(done: `engine::test_support`), ~~one `SocketSpec`~~ (done: `Cx::connect` takes
+a `SocketSpec`; one `Action::WsConnect` carries headers).
 ~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
 `windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,

@@ -410,7 +410,8 @@ impl Hyperliquid {
         {
             self.connection.supervisor.connecting(cx);
         }
-        self.connection.socket = Some(cx.connect_channel(self.ws(), channel));
+        self.connection.socket =
+            Some(cx.connect(safe_cex_engine::SocketSpec::new(self.ws()).channel(channel)));
     }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -1195,7 +1196,9 @@ impl Venue for Hyperliquid {
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }
-                if cx.store.loaded().markets {
+                // A complete but empty universe applies no catalogue (the store
+                // never applies an empty one); later scopes are still discovered.
+                if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, "");
                 }
             }
@@ -1282,7 +1285,7 @@ impl Venue for Hyperliquid {
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }
-                if cx.store.loaded().markets {
+                if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, &dex);
                 }
             }

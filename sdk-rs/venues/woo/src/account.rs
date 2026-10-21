@@ -141,6 +141,8 @@ struct OrdersJoin {
 }
 #[derive(Default)]
 pub struct Account {
+    /// An algo STOP was skipped because no price existed to classify it.
+    stop_awaiting_price: bool,
     pub(crate) supervisor: Supervisor,
     authenticated: bool,
     connection: Connection,
@@ -420,10 +422,10 @@ impl Woo {
             }
         }
     }
-    /// Whether exposure on an unlisted native symbol could belong to a skipped catalogue row.
+    /// Whether exposure on an unlisted native symbol sits on a catalogue row skipped as
+    /// malformed. An anonymous skipped row names no market, so it holds nothing.
     fn catalogue_may_list(&self, native: &str) -> bool {
-        native.starts_with("PERP_")
-            && (self.skipped_anonymous || self.skipped_markets.contains(native))
+        native.starts_with("PERP_") && self.skipped_markets.contains(native)
     }
     // Exposure the store cannot show must be visible once, not every poll.
     fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {
@@ -533,10 +535,18 @@ impl Woo {
         };
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.connection.socket = Some(cx.connect_channel(
-            format!("{host}{}",self.options.application_id.as_deref().unwrap_or("undefined")),
-            SocketChannel::Private,
-        ));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{host}{}",
+                    self.options
+                        .application_id
+                        .as_deref()
+                        .unwrap_or("undefined")
+                ))
+                .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::replace(&mut self.account.started, true) {
@@ -1112,7 +1122,15 @@ impl Woo {
                         skipped.add(Some(row_id(leaf, *algo)));
                         continue;
                     }
-                    if let Some(order) = self.account_map_order(cx, leaf, *algo, parent) {
+                    let order = self.account_map_order(cx, leaf, *algo, parent);
+                    if order.is_none()
+                        && *algo
+                        && leaf.algo_type == "STOP"
+                        && !cx.store.loaded().tickers
+                    {
+                        self.account.stop_awaiting_price = true;
+                    }
+                    if let Some(order) = order {
                         if *algo {
                             classifications.push((
                                 order.id.clone(),
@@ -1432,6 +1450,13 @@ impl Woo {
                     }
                     cx.store.set_orders(combined);
                     self.account_metadata(cx);
+                    // A read built before the ticker seed skipped its stops; once
+                    // prices exist, re-read at once instead of at the next poll.
+                    if std::mem::take(&mut self.account.stop_awaiting_price)
+                        && cx.store.loaded().tickers
+                    {
+                        self.account_orders_read(cx);
+                    }
                 }
             }
             Request::Leverage {

@@ -1192,9 +1192,20 @@ a product scope yields no usable rows, valid rows from the other product merge
 into the existing catalogue and that read is retried. Private startup begins
 once the catalogue loads, independent of the ticker seed. `fetchLeverage` reads
 cross `leverage-info` for one symbol (flat symbols have no position row to
-carry it). Account config is guarded by an in-flight flag: a failed startup
-read clears it and the account retry timer reads again; once configured it is
-re-read every 30 s (a failed poll waits for the next interval), and a posMode
+carry it). Account config is guarded by an in-flight flag. Until the first
+config read succeeds, any failure (429, 5xx, transport, non-JSON, malformed or
+unknown-code envelope) retries through `startup::Backoff` (1 s doubling to 30 s,
+forever); a 418/429 waits at least its `Retry-After`, else 10 s (the discovery
+default), before the retry. Only documented key refusals end startup with one `StartupFailed`:
+REST 50101/50103/50104/50105/50111/50114/50119 (`AuthInvalid`), 50100/50110/50120
+(`AuthPermission`), and 50113 after one re-signed resend; timestamp codes
+50102/50112 stay transient. Before the account is ready, a private/business
+socket login refused with 60001/60003/60005/60024/60032 fails startup too; other
+login errors (60009 etc.) reconnect with backoff. A rejection stops config
+retries and closes and retires the private and business sockets; a refused
+trading key also emits `Deactivate` (a read-only key does not). Invalid read-only
+credentials fail startup with `InvalidInput` before any request. Once configured
+config is re-read every 30 s (a failed poll waits for the next interval), and a posMode
 or acctLv changed in the OKX app updates the hedged flag and reconciles
 positions instead of rejecting orders.
 

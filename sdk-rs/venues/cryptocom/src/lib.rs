@@ -14,7 +14,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
     num,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Default)]
@@ -44,6 +44,7 @@ pub enum Pending {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
         skipped: Skipped,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -90,6 +91,9 @@ pub struct Cryptocom {
     rest: &'static str,
     sockets: [Connection; 2],
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    // Instruments rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -171,6 +175,7 @@ impl Cryptocom {
                     rows: vec![],
                     indexes: HashMap::new(),
                     skipped: Skipped::default(),
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -203,6 +208,8 @@ impl Cryptocom {
             options,
             sockets: [Connection::new(false), Connection::new(true)],
             discovery: Default::default(),
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -224,13 +231,14 @@ impl Cryptocom {
             "wss://stream.crypto.com"
         };
         let kind = if channel == 0 { "market" } else { "user" };
-        self.sockets[channel].socket = Some(cx.connect_channel(
-            format!("{root}/exchange/v1/{kind}"),
-            if channel == 0 {
-                safe_cex_engine::SocketChannel::Public
-            } else {
-                safe_cex_engine::SocketChannel::Private
-            },
+        self.sockets[channel].socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(format!("{root}/exchange/v1/{kind}")).channel(
+                if channel == 0 {
+                    safe_cex_engine::SocketChannel::Public
+                } else {
+                    safe_cex_engine::SocketChannel::Private
+                },
+            ),
         ));
     }
 
@@ -533,6 +541,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 // Other instrument types carry fields this venue never reads.
                 let key = serde_json::from_str::<InstrumentKey>(item);
@@ -552,7 +561,13 @@ impl Venue for Cryptocom {
                             rows.push(market);
                         }
                     }
-                    Err(_) => skipped.add(key.ok().and_then(|k| k.symbol)),
+                    Err(_) => {
+                        let symbol = key.ok().and_then(|k| k.symbol);
+                        skipped.add(symbol);
+                        if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
+                            malformed.insert(symbol.into());
+                        }
+                    }
                 }
             }
             Pending::Tickers { rows, skipped } => {
@@ -622,6 +637,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
@@ -636,9 +652,33 @@ impl Venue for Cryptocom {
                     self.discovery.failed(cx, false);
                     return;
                 }
-                self.indexes = indexes;
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    let mut indexes = indexes;
+                    for (market, index) in std::mem::take(&mut self.indexes) {
+                        indexes.entry(market).or_insert(index);
+                    }
+                    self.indexes = indexes;
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    self.indexes = indexes;
+                    rows
+                };
                 cx.store.set_markets(rows);
-                self.discovery.succeeded(cx, &false);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|symbol| cx.store.market(symbol).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.discovery.failed(cx, false);
+                } else {
+                    self.discovery.succeeded(cx, &false);
+                }
+                if refresh {
+                    return;
+                }
                 self.discovery_read(cx, true);
                 if self.credentials.is_some() {
                     self.private_start(cx);
@@ -820,6 +860,58 @@ impl Venue for Cryptocom {
                 .map(|(symbol, s)| (symbol.as_str(), &s.book)),
         )
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("Crypto.com stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]
