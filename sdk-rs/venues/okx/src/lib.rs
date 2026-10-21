@@ -150,6 +150,8 @@ pub struct Okx {
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    /// Discovery retries wait out a rate-limit window the venue announced.
+    discovery_paused_until: f64,
     catalogue_incomplete: bool,
     ticker_reading: bool,
     ticker_refresh_pending: bool,
@@ -195,6 +197,7 @@ impl Okx {
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
             startup: Default::default(),
+            discovery_paused_until: 0.0,
             catalogue_incomplete: false,
             ticker_reading: false,
             ticker_refresh_pending: false,
@@ -415,13 +418,12 @@ impl Okx {
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
         }
-        let socket = cx.connect_channel(
-            self.socket_url(channel),
-            match channel {
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new(self.socket_url(channel)).channel(match channel {
                 PUBLIC => safe_cex_engine::SocketChannel::Public,
                 BUSINESS => safe_cex_engine::SocketChannel::Business,
                 _ => safe_cex_engine::SocketChannel::Private,
-            },
+            }),
         );
         let c = &mut self.connections[channel];
         c.socket = Some(socket);
@@ -739,7 +741,8 @@ impl Okx {
                 self.ticker_reading = false;
                 self.ticker_refresh_pending = false;
             }
-            self.startup.failed(cx, markets);
+            let pause = self.discovery_paused_until - cx.now;
+            self.startup.failed_after(cx, markets, pause);
         }
     }
 }
@@ -1122,6 +1125,14 @@ impl Venue for Okx {
             }
             other => other,
         };
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.account.config_pause_ms =
+                safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+        }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())
         } else {
@@ -1152,7 +1163,8 @@ impl Venue for Okx {
                 self.catalogue_incomplete = incomplete;
                 // A partial catalogue commits so private reads start, and is re-read.
                 if incomplete || self.catalogue_partial {
-                    self.startup.failed(cx, true);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, true, pause);
                 } else {
                     self.startup.succeeded(cx, &true);
                 }
@@ -1221,7 +1233,8 @@ impl Venue for Okx {
                 self.ticker_reading = false;
                 let refresh = std::mem::take(&mut self.ticker_refresh_pending);
                 if incomplete {
-                    self.startup.failed(cx, false);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, false, pause);
                 } else {
                     self.startup.succeeded(cx, &false);
                 }

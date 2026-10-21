@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Action, Command, Event, Query, SocketChannel, SocketId, wire};
 use safe_cex_venue_paradex::Options;
 use support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 const POSITION: &str = r#"{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG","size":"2","average_entry_price":"100","unrealized_pnl":"4","realized_positional_pnl":"1","last_updated_at":1700000000000}"#;
 const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","instruction":"GTC","time_in_force":"GTC","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
 fn options() -> Options {
@@ -1027,6 +1030,127 @@ fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remai
 }
 
 #[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (h, _) = loaded();
+    let mut e = h.e;
+    let now = 1_700_000_001_000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.ends_with("/positions")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.ends_with("/positions") || r.url.ends_with("/orders") {
+                r#"{"results":[]}"#
+            } else if r.url.ends_with("/account/margin") {
+                r#"{"configs":[]}"#
+            } else {
+                r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
+#[test]
 fn unmapped_perpetual_rows_are_skipped_and_protect_only_their_own_identity() {
     let (mut h, socket) = loaded();
     authenticate(&mut h, socket);
@@ -1299,4 +1423,39 @@ fn duplicated_out_of_scope_order_rows_do_not_invalidate_the_snapshot() {
     assert_eq!(h.e.store().order("123").map(|o| o.price), Some(97.));
     assert!(h.e.store().order("124").is_none());
     assert!(h.e.store().order("126").is_none());
+}
+
+#[test]
+fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit() {
+    let (mut h, _) = loaded();
+    assert_eq!(h.e.store().setting("BTC-USD-PERP").unwrap().leverage, 20.);
+    h.timer(h.now + 10_000.);
+    h.reply("/positions", &format!("{{\"results\":[{POSITION}]}}"));
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#,
+    );
+    h.reply("/orders", &format!("{{\"results\":[{ORDER}]}}"));
+    h.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"ETH-USD-PERP","leverage":5},{"market":"BTC-USD-PERP","leverage":-3},{"leverage":7}]}"#,
+    );
+    let store = h.e.store();
+    assert_eq!(store.setting("ETH-USD-PERP").unwrap().leverage, 5.);
+    assert_eq!(store.setting("BTC-USD-PERP").unwrap().leverage, 20.);
+    let logs: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    for message in [
+        "Paradex skipped malformed margin row BTC-USD-PERP",
+        "Paradex skipped malformed margin row without a market",
+    ] {
+        assert!(logs.contains(&message), "{message}");
+    }
+    assert!(!logs.iter().any(|l| l.contains("-3")));
 }

@@ -30,7 +30,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
       start: noActions,
       command: (json) => {
         const command = JSON.parse(json);
-        if (command.op === 'setTickerSymbols') return '[]';
+        if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
         commands.push(command);
         // KuCoin spot leverage is fixed: the engine confirms 1x rails for the symbol.
         if (command.op === 'setLeverage') rails = { [command.symbol]: { buyLeverage: 1, sellLeverage: 1 } };

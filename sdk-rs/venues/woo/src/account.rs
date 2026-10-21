@@ -535,10 +535,18 @@ impl Woo {
         };
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.connection.socket = Some(cx.connect_channel(
-            format!("{host}{}",self.options.application_id.as_deref().unwrap_or("undefined")),
-            SocketChannel::Private,
-        ));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{host}{}",
+                    self.options
+                        .application_id
+                        .as_deref()
+                        .unwrap_or("undefined")
+                ))
+                .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::replace(&mut self.account.started, true) {
@@ -546,7 +554,7 @@ impl Woo {
         }
         self.account_connect(cx);
         self.account_refresh(cx);
-        self.account.timer = Some(cx.set_timer(2000.0));
+        self.account.timer = Some(cx.set_poll_timer(2000.0));
     }
     fn account_info_read(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.info_pending {
@@ -1911,7 +1919,7 @@ impl Woo {
             return true;
         }
         if self.account.timer == Some(timer) {
-            self.account.timer = Some(cx.set_timer(2000.0));
+            self.account.timer = Some(cx.set_poll_timer(2000.0));
             self.account.tick += 1;
             self.account
                 .terminal

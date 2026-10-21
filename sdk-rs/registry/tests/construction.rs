@@ -122,6 +122,21 @@ fn custom_endpoints_belong_to_hyrotrader_only() {
     construct("hyrotrader", &format!("{{{endpoints}}}")).unwrap();
 }
 
+#[test]
+fn log_level_accepts_the_four_levels_and_refuses_anything_else() {
+    for level in ["debug", "info", "warn", "error"] {
+        construct(
+            "binance",
+            &format!(r#"{{"publicDataOnly":true,"logLevel":"{level}"}}"#),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        rejected("binance", r#"{"publicDataOnly":true,"logLevel":"warning"}"#),
+        "logLevel must be debug, info, warn or error"
+    );
+}
+
 const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 

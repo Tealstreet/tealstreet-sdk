@@ -306,17 +306,18 @@ fn margin_type_is_refused_on_a_cross_only_account() {
 }
 
 #[test]
-fn an_invalid_open_order_row_names_the_order_and_fails_the_snapshot() {
+fn an_invalid_open_order_row_is_rejected_by_identity_while_peers_commit() {
     let overfilled = OPEN_ORDERS.replace(r#""executedQty":"0""#, r#""executedQty":"0.50""#);
     let h = ready_with(&overfilled);
     assert!(
         h.logs
             .iter()
-            .any(|log| log == "Binance open order row has invalid economics: order 1917641"),
+            .any(|log| log == "Binance open order x-s3vFFRQpresting has invalid economics"),
         "{:?}",
         h.logs
     );
     assert!(h.engine.store().order("x-s3vFFRQpresting").is_none());
+    assert!(h.engine.store().order("abc").is_some());
 }
 
 #[test]

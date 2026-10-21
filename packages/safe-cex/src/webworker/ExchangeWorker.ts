@@ -1106,6 +1106,7 @@ export class ExchangeWorker {
         'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
       name: 'EngineDeadError',
       code: 'ENGINE_DEAD',
+      kind: 'internal',
     });
     // Stop TWAPs while their handler context is still current, so the final
     // completed state reaches the main thread that persists and resumes them.
