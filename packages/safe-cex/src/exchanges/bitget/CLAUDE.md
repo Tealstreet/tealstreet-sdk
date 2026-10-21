@@ -885,13 +885,36 @@ are skipped within a batch; explicit caller IDs still fail preflight if no
 order can honor them. Sized full-position stops emit a downgrade warning.
 
 Classic history recognizes forced-close long/short suffixes and absent profit
-as zero. Unmappable REST position or order rows warn and retain the entire
-previous authoritative snapshot, including when a valid peer maps; partial
-catalogues cannot prove missing owned exposure or protective orders absent.
-Actual empty lists clear state. Independent private stream updates can still
-apply valid peers. Row-level authoritative replacement awaits identity-preserving
-reconciliation. Malformed envelopes and failed reads never clear good state. Busy
+as zero. An unmappable or malformed REST position/order row (including one on
+a market missing from a partial catalogue) is skipped with a redacted warning
+and keeps only its own stored copy: orders by native id (preset TP/SL children
+follow their parent id), positions by symbol and side (no side keeps both legs;
+no symbol keeps every stored position). Valid peers still update; a skipped row
+with no stored copy waits for the next snapshot. Actual empty lists clear state.
+Rust inverse positions size coin quantity by the row's own mark price, then
+ticker mark/last, then entry (TS skips the row mark), so a snapshot read before
+tickers load is not sized at entry.
+Malformed envelopes and failed reads never clear good state. Busy
 Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
 invalid bounds fail visibly before writes. UTA one-way fills retain their
-execution-derived position leg. Startup retry and Confirm audit items remain
-outside this change.
+execution-derived position leg. The Confirm audit item remains outside this
+change.
+
+Rust private startup is gated on the `/api/v3/account/settings` probe, at
+startup and after a late `40085` promotion. 40084 detects Classic; a 200 with
+valid settings detects UTA. A first-probe transport or HTML 5xx failure keeps
+the TS fallback to Classic (a later 40085 promotes). Every other failure (429/418,
+5xx or system-code envelopes, non-JSON, malformed settings, unknown codes, and
+transport failures once UTA is confirmed) retries through `startup::Backoff`
+(1 s doubling to 30 s, forever), so polling never stalls undetected. Before the
+account loads, only documented key refusals end startup with one
+`StartupFailed`: 40001/40006/40011/40012/40037 or an "environment is incorrect"
+message (`AuthInvalid`), 40014/40018 (`AuthPermission`), and 40009 after one
+re-signed resend; timestamp codes stay transient. A UTA account on inverse or
+testnet fails startup as `Unsupported`, a missing passphrase or invalid
+read-only credentials as `InvalidInput`. Before the account loads, a socket login
+refused with 30011/30012 (`event: "error"` or `login`) fails startup; other login
+errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
+account timers and retires the private socket; a refused trading key also emits
+`Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
+and the probe retry waits out that window; transport failures keep plain backoff.

@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, Response, SocketId, TimerId,
 };
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
@@ -25,7 +25,12 @@ struct Session {
     urls: Vec<String>,
     kind: &'static str,
     positions: Option<String>,
+    products: Option<String>,
+    orders: Option<String>,
+    breakdown: Option<String>,
     logs: Vec<String>,
+    /// Logs at `LogLevel::Error`, also present in `logs`.
+    errors: Vec<String>,
     sends: Vec<(SocketId, String)>,
     // Private sockets only; the unopened public feed has its own supervisor.
     closes: Vec<SocketId>,
@@ -51,7 +56,11 @@ impl Session {
             urls: vec![],
             kind,
             positions: None,
+            products: None,
+            orders: None,
+            breakdown: None,
             logs: vec![],
+            errors: vec![],
             sends: vec![],
             closes: vec![],
             privates: vec![],
@@ -84,8 +93,11 @@ impl Session {
                     self.private = Some(socket);
                     self.privates.push(socket)
                 }
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
-                    self.logs.push(message.to_string())
+                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
+                    if level == LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
                 }
                 Action::WsSend { socket, text } => self.sends.push((socket, text)),
                 Action::WsClose { socket } if self.privates.contains(&socket) => {
@@ -112,7 +124,7 @@ impl Session {
         } else if url.contains("/cfm/balance_summary") {
             CFM_BALANCE.into()
         } else if url.contains("/portfolios/portfolio-one") {
-            BREAKDOWN.into()
+            self.breakdown.clone().unwrap_or_else(|| BREAKDOWN.into())
         } else if url.contains("/intx/portfolio/") {
             INTX_BALANCE.into()
         } else if url.contains("/intx/positions/") {
@@ -124,10 +136,12 @@ impl Session {
                 .clone()
                 .unwrap_or_else(|| CFM_POSITIONS.into())
         } else if url.contains("/orders/historical/batch") {
-            r#"{"orders":[],"has_next":false}"#.into()
+            self.orders
+                .clone()
+                .unwrap_or_else(|| r#"{"orders":[],"has_next":false}"#.into())
         } else if url.contains("/products") {
             if url.contains("contract_expiry_type=PERPETUAL") {
-                INTX.into()
+                self.products.clone().unwrap_or_else(|| INTX.into())
             } else if url.contains("product_type=FUTURE") {
                 CFM.into()
             } else {
@@ -940,7 +954,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {
@@ -1464,4 +1478,245 @@ fn private_resent_snapshot_on_the_same_connection_expires_without_user_frames() 
     assert!(s.closes.is_empty());
     s.advance(resent + 35_000.0);
     assert_eq!(s.closes, [socket]);
+}
+
+impl Session {
+    /// Answers reads and fires timers until `done` holds.
+    fn poll_until(&mut self, done: impl Fn(&Self) -> bool) {
+        for _ in 0..80 {
+            let requests = self.collect();
+            if requests.is_empty() {
+                if done(self) {
+                    return;
+                }
+                self.fire();
+            }
+            for r in requests {
+                self.answer(r);
+            }
+        }
+        panic!("condition never held");
+    }
+}
+
+#[test]
+fn position_row_without_a_symbol_keeps_stored_positions_while_valid_peers_commit() {
+    let mut s = Session::new("INTX", false);
+    s.products = Some(INTX.replace(
+        "}]}",
+        &format!(
+            "}},{}]}}",
+            INTX.trim_start_matches(r#"{"products":["#)
+                .trim_end_matches("]}")
+                .replace("BTC", "ETH")
+        ),
+    ));
+    let row = |symbol: &str, side: &str, size: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_{side}","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
+        )
+    };
+    let positions = |rows: &[String]| Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")));
+    s.positions = positions(&[
+        row("BTC-PERP-INTX", "LONG", "2"),
+        row("ETH-PERP-INTX", "LONG", "1"),
+    ]);
+    let mut s = s.ready();
+    let eth = s.e.store().position("ETH-PERP-INTX").unwrap().clone();
+    assert_eq!(eth.contracts, 1.0);
+    s.logs.clear();
+
+    s.positions = positions(&[
+        row("BTC-PERP-INTX", "LONG", "3"),
+        r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#.into(),
+    ]);
+    s.poll_until(|s| s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0);
+    assert_eq!(s.e.store().position("ETH-PERP-INTX"), Some(&eth));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped unmappable position without a symbol")
+    );
+    assert!(!s.logs.iter().any(|l| l.contains('7')));
+
+    s.positions = positions(&[row("BTC-PERP-INTX", "LONG", "3")]);
+    s.poll_until(|s| s.e.store().position("ETH-PERP-INTX").unwrap().contracts == 0.0);
+}
+
+#[test]
+fn order_row_without_an_id_keeps_stored_orders_while_valid_peers_commit() {
+    let mut s = Session::new("INTX", false).ready();
+    let orders = |rows: &[String]| {
+        Some(format!(
+            r#"{{"orders":[{}],"has_next":false}}"#,
+            rows.join(",")
+        ))
+    };
+    let a = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let b = user_order("order-b", "BTC-PERP-INTX", "OPEN", "0", "2");
+    s.orders = orders(&[a.clone(), b]);
+    s.poll_until(|s| s.e.store().order("order-b").is_some());
+    let stored = s.e.store().order("order-b").unwrap().clone();
+    s.logs.clear();
+
+    let moved = a.replace(r#""limit_price":"100""#, r#""limit_price":"101""#);
+    s.orders = orders(&[
+        moved.clone(),
+        r#"{"status":"OPEN","limit_price":"7"}"#.into(),
+    ]);
+    s.poll_until(|s| s.e.store().order("order-a").unwrap().price == 101.0);
+    assert_eq!(s.e.store().order("order-b"), Some(&stored));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped unmappable order without an id")
+    );
+
+    s.orders = orders(&[moved]);
+    s.poll_until(|s| s.e.store().order("order-b").is_none());
+    assert_eq!(s.e.store().orders().len(), 1);
+}
+
+#[test]
+fn one_invalid_spot_holding_keeps_its_stored_copy_while_valid_peers_commit() {
+    let holding = |asset: &str, total: &str, free: &str| {
+        format!(
+            r#"{{"asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
+        )
+    };
+    let breakdown = |rows: &[String]| {
+        Some(format!(
+            r#"{{"breakdown":{{"spot_positions":[{}]}}}}"#,
+            rows.join(",")
+        ))
+    };
+    let total = |s: &Session, asset: &str| {
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == asset)
+            .map(|c| c.balance.total)
+    };
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = breakdown(&[holding("BTC", "1.5", "1"), holding("ETH", "3", "3")]);
+    let mut s = s.ready();
+    assert_eq!(total(&s, "ETH"), Some(3.0));
+    s.logs.clear();
+
+    s.breakdown = breakdown(&[holding("BTC", "2", "1"), holding("ETH", "4", "9")]);
+    s.poll_until(|s| total(s, "BTC") == Some(2.0));
+    assert_eq!(total(&s, "ETH"), Some(3.0));
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l == "Coinbase skipped invalid spot holding ETH")
+    );
+    assert!(!s.logs.iter().any(|l| l.contains('9')));
+
+    s.breakdown = breakdown(&[holding("BTC", "2", "1")]);
+    s.poll_until(|s| total(s, "ETH").is_none());
+}
+
+fn intx_position(symbol: &str, size: &str) -> String {
+    format!(
+        r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_LONG","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
+    )
+}
+fn intx_positions(rows: &[String]) -> Option<String> {
+    Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")))
+}
+const SYMBOLLESS_POSITION: &str = r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#;
+impl Session {
+    /// Answers every read, positions last in each batch, until `done` holds.
+    fn poll_positions_last_until(&mut self, done: impl Fn(&Self) -> bool) {
+        for _ in 0..80 {
+            let (positions, mut requests): (Vec<_>, Vec<_>) = self
+                .collect()
+                .into_iter()
+                .partition(|r| r.url.contains("/intx/positions/"));
+            requests.extend(positions);
+            if requests.is_empty() {
+                if done(self) {
+                    return;
+                }
+                self.fire();
+            }
+            for r in requests {
+                self.answer(r);
+                if done(self) {
+                    return;
+                }
+            }
+        }
+        panic!("condition never held");
+    }
+}
+
+#[test]
+fn startup_position_row_without_a_symbol_is_an_error_logged_once_until_a_clean_snapshot() {
+    let mut s = Session::new("INTX", false);
+    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    let mut s = s.ready();
+    let message = "Coinbase skipped unmappable position without a symbol";
+    assert_eq!(s.errors, [message]);
+    let reads = |s: &Session| {
+        s.urls
+            .iter()
+            .filter(|u| u.contains("/intx/positions/"))
+            .count()
+    };
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 1);
+
+    s.positions = intx_positions(&[]);
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen + 1);
+    assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 2);
+    // The flat copies it now keeps make the recurrence a warning.
+    assert_eq!(s.errors.len(), 1);
+}
+
+#[test]
+fn intx_upnl_sums_committed_positions_including_retained_copies_across_a_balance_poll() {
+    let mut s = Session::new("INTX", false);
+    s.products = Some(INTX.replace(
+        "}]}",
+        &format!(
+            "}},{}]}}",
+            INTX.trim_start_matches(r#"{"products":["#)
+                .trim_end_matches("]}")
+                .replace("BTC", "ETH")
+        ),
+    ));
+    s.positions = intx_positions(&[
+        intx_position("BTC-PERP-INTX", "2"),
+        intx_position("ETH-PERP-INTX", "1"),
+    ]);
+    let mut s = s.ready();
+    assert_eq!(s.e.store().balance().upnl, 30.0);
+
+    // BTC now 3 (UPnL 30); the symbol-less row keeps ETH's stored copy (UPnL 10).
+    s.positions = intx_positions(&[
+        intx_position("BTC-PERP-INTX", "3"),
+        SYMBOLLESS_POSITION.into(),
+    ]);
+    s.poll_positions_last_until(|s| {
+        s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0
+    });
+    assert_eq!(s.e.store().balance().upnl, 40.0);
+
+    let reads = |s: &Session| {
+        s.urls
+            .iter()
+            .filter(|u| u.contains("/intx/portfolio/"))
+            .count()
+    };
+    let seen = reads(&s);
+    s.poll_until(|s| reads(s) > seen);
+    assert_eq!(s.e.store().balance().upnl, 40.0);
 }

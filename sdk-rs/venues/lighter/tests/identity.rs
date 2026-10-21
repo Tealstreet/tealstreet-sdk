@@ -64,7 +64,6 @@ fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
             Action::Http(_)
             | Action::SignPayload { .. }
             | Action::WsConnect { .. }
-            | Action::WsConnectWithHeaders { .. }
             | Action::WsSend { .. }
             | Action::SetTimer { .. } => {
                 panic!("identity completion must not start another lifecycle")

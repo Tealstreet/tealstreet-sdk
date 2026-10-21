@@ -4,9 +4,9 @@
 #![allow(clippy::result_large_err)]
 
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{HttpRequest, Method, RequestId, SocketId};
+use safe_cex_engine::{Command, Engine, HttpRequest, Method, Notice, RequestId, SocketId};
 use safe_cex_native::{
-    HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
+    Host, HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
     SocketChannel, SocketChannelRule, Transport,
 };
 use serde::Deserialize;
@@ -1543,4 +1543,311 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
         drop(outgoing);
     }
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn signed_request_urls_are_absent_from_connection_and_body_errors() {
+    let (listener, _origin) = listener().await;
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let transport = NetworkTransport::new();
+    let (sender, mut events) = mpsc::unbounded_channel();
+    transport.request(
+        http_request(
+            800,
+            format!("http://{address}/private?api_key=secret-key&signature=secret-signature"),
+        ),
+        sender,
+    );
+    match next(&mut events).await {
+        HostEvent::HttpFailed(_, error) => {
+            assert!(!error.contains("secret-key"), "{error}");
+            assert!(!error.contains("secret-signature"), "{error}");
+            assert!(!error.contains("http://"), "{error}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    // Truncated bodies fail only after response headers, through reqwest's body error path.
+    let (listener, _) = self::listener().await;
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\nconnection: close\r\n\r\nx")
+            .await
+            .unwrap();
+    });
+    let (sender, mut events) = mpsc::unbounded_channel();
+    transport.request(
+        http_request(801, format!("{origin}/private?signature=secret-signature")),
+        sender,
+    );
+    loop {
+        match next(&mut events).await {
+            HostEvent::HttpFailed(_, error) => {
+                assert!(!error.contains("secret-signature"), "{error}");
+                assert!(!error.contains("http://"), "{error}");
+                break;
+            }
+            HostEvent::HttpStart { .. } | HostEvent::HttpChunk(..) => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn signed_requests_never_follow_cross_origin_redirects() {
+    let (target, target_origin) = listener().await;
+    let (source, source_origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = source.accept().await.unwrap();
+        let request = request_text(&mut stream).await;
+        assert!(request.contains("secret-api-key"));
+        stream.write_all(format!("HTTP/1.1 307 Temporary Redirect\r\nlocation: {target_origin}/stolen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()).await.unwrap();
+    });
+    let (sender, mut events) = mpsc::unbounded_channel();
+    let mut request = http_request(802, source_origin);
+    request.headers.push(("X-Api-Key", "secret-api-key".into()));
+    NetworkTransport::new().request(request, sender);
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::HttpStart { status: 307, .. }
+    ));
+    assert!(matches!(next(&mut events).await, HostEvent::HttpEnd(_)));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), target.accept())
+            .await
+            .is_err()
+    );
+    server.await.unwrap();
+}
+
+const NOTICE_API_KEY: &str = "native-notice-api-key-sentinel";
+const NOTICE_SIGNATURE: &str = "native-notice-signature-sentinel";
+
+/// Keep Binance's real startup/command error paths; only route their requests to loopback.
+struct NoticeNetwork {
+    network: NetworkTransport,
+    signed_url: String,
+    account_route: bool,
+}
+impl Transport for NoticeNetwork {
+    fn connect(
+        &self,
+        _: SocketId,
+        _: String,
+        _: safe_cex_native::Events,
+    ) -> mpsc::UnboundedSender<String> {
+        // This test exercises real HTTP failures without opening exchange sockets.
+        mpsc::unbounded_channel().0
+    }
+    fn request(&self, mut request: HttpRequest, events: safe_cex_native::Events) {
+        request.url.clone_from(&self.signed_url);
+        if self.account_route {
+            request.route = None;
+        }
+        request
+            .headers
+            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
+        self.network.request(request, events);
+    }
+}
+
+async fn signed_network_notices(origin: &str) -> Vec<Notice> {
+    routed_signed_network_notices(origin, NetworkTransport::new(), false).await
+}
+
+async fn routed_signed_network_notices(
+    origin: &str,
+    network: NetworkTransport,
+    account_route: bool,
+) -> Vec<Notice> {
+    let signed_url =
+        format!("{origin}/private?api_key={NOTICE_API_KEY}&signature={NOTICE_SIGNATURE}");
+    let engine = Engine::new(safe_cex_venue_binance::BinanceFutures::new(
+        safe_cex_venue_binance::Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+    ));
+    let transport = NoticeNetwork {
+        network,
+        signed_url: signed_url.clone(),
+        account_route,
+    };
+    let (commands, inbox) = mpsc::unbounded_channel();
+    let (notices, mut emitted) = mpsc::unbounded_channel();
+    let host = tokio::spawn(Host::new(engine, transport).run(
+        inbox,
+        Duration::from_millis(10),
+        |_| {},
+        move |notice| {
+            notices.send(notice).unwrap();
+        },
+    ));
+    commands
+        .send(Command::FetchCandles {
+            command: 411,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        })
+        .unwrap();
+    let mut collected = Vec::new();
+    let mut startup_failed = false;
+    let mut command_failed = false;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !startup_failed || !command_failed {
+            let notice = emitted.recv().await.expect("native host emitted a failure notice");
+            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Startup read failed; retry scheduled");
+            command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) } | Notice::CommandFailed { command: 411, .. });
+            collected.push(notice);
+        }
+    }).await.expect("real network failures reached startup log and command completion");
+    drop(commands);
+    host.await.unwrap();
+    while let Some(notice) = emitted.recv().await {
+        collected.push(notice);
+    }
+    // Inspect every notice, not only Log or the transport's intermediate event.
+    for notice in &collected {
+        let rendered = format!("{notice:?}");
+        let payload = match notice {
+            Notice::Log { message, .. } => message.clone(),
+            Notice::Event(event) => event.message.clone(),
+            Notice::CommandDone { result, .. } => match result {
+                Ok(value) | Err(value) => value.clone(),
+            },
+            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {
+                error.legacy_text()
+            }
+            Notice::CommandError { message, .. } => message.clone(),
+            // Debug rendering above inspects every remaining field.
+            Notice::CommandProgress { .. } | Notice::Deactivate => String::new(),
+        };
+        for forbidden in [
+            NOTICE_API_KEY,
+            NOTICE_SIGNATURE,
+            signed_url.as_str(),
+            "http://",
+            "https://",
+        ] {
+            assert!(
+                !rendered.contains(forbidden) && !payload.contains(forbidden),
+                "native notice exposed authentication material: {rendered}"
+            );
+        }
+    }
+    collected
+}
+
+#[tokio::test]
+async fn signed_connection_and_body_failures_cannot_leak_through_any_native_notice() {
+    let (refused, refused_origin) = listener().await;
+    drop(refused);
+    let connection_notices = signed_network_notices(&refused_origin).await;
+    assert!(!connection_notices.is_empty());
+
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        // Binance startup and a real FetchCandles command both use NetworkTransport.
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = request_text(&mut stream).await;
+            assert!(request.contains(NOTICE_API_KEY));
+            assert!(request.contains(NOTICE_SIGNATURE));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\nconnection: close\r\n\r\nx")
+                .await
+                .unwrap();
+        }
+    });
+    let body_notices = signed_network_notices(&origin).await;
+    assert!(!body_notices.is_empty());
+    server.await.unwrap();
+}
+
+fn rejected_proxy_token(calls: Arc<AtomicUsize>) -> ProxyTokenProvider {
+    Arc::new(move || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Err(format!(
+                "Token refresh failed: {NOTICE_API_KEY} https://token.invalid/refresh?signature={NOTICE_SIGNATURE}"
+            ))
+        })
+    })
+}
+
+fn assert_proxy_authorization_notices(notices: &[Notice]) {
+    // Startup discovery logs a fixed retry warning; the command carries the cause.
+    assert!(notices.iter().any(|notice| matches!(notice,
+        Notice::CommandDone { command: 411, result: Err(message) }
+            if message.contains("Proxy authorization failed")
+    )));
+}
+
+#[tokio::test]
+async fn proxy_token_provider_failures_cannot_leak_through_direct_authorization_notices() {
+    let (listener, origin) = listener().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let plan = RoutingPlan {
+        http: HttpRoute {
+            authorize: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
+    // Exercise account routing through the actual venue's startup and command error paths.
+    let notices = routed_signed_network_notices(&origin, transport, true).await;
+    assert_proxy_authorization_notices(&notices);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_notices() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            socket
+                .send(Message::text(r#"{"type":"serverTime"}"#))
+                .await
+                .unwrap();
+            while let Some(message) = socket.next().await {
+                assert!(
+                    !matches!(message, Ok(Message::Text(_) | Message::Binary(_))),
+                    "failed token provider must not send authentication or HTTP payloads"
+                );
+            }
+        }
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let plan = RoutingPlan {
+        http: HttpRoute {
+            mode: HttpRouteMode::How,
+            tunnel_url: Some(origin.replacen("http://", "ws://", 1)),
+            // Leave direct authorization disabled to reach HOW's separate token boundary.
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
+    let notices = routed_signed_network_notices(&origin, transport, true).await;
+    assert_proxy_authorization_notices(&notices);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
 }

@@ -365,57 +365,150 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     h.ws(&order_event("123", "2", "partially_filled"));
     assert!(h.e.store().orders().is_empty());
 }
+// BAD-USDT is skipped as malformed (zero leverage cap); ETH-USD is deliberately
+// filtered (inverse); MISSING-USDT is not listed at all.
+const PARTIAL_INSTRUMENTS: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"},{"instId":"BAD-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BAD","quoteCurrency":"USDT","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"0"},{"instId":"ETH-USD","instType":"SWAP","contractType":"inverse","baseCurrency":"ETH","quoteCurrency":"USD","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"50"}]}"#;
+const BALANCES: &str =
+    r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#;
+const WORKING: &str = r#"{"instId":"BTC-USDT","instType":"SWAP","orderCategory":"normal","orderId":"working","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}"#;
+
 #[test]
-fn unmapped_owned_position_rejects_scope_but_zero_and_other_products_are_ignored() {
-    for (quantity, kind, rejected) in [
-        ("4", "SWAP", true),
-        ("0", "SWAP", false),
-        ("4", "SPOT", false),
+fn owned_position_on_malformed_market_rejects_scope_but_other_missing_rows_are_skipped() {
+    for (inst, quantity, kind, rejected) in [
+        ("BAD-USDT", "4", "SWAP", true),
+        ("BAD-USDT", "0", "SWAP", false),
+        ("BAD-USDT", "4", "SPOT", false),
+        ("ETH-USD", "4", "SWAP", false),
+        ("MISSING-USDT", "4", "SWAP", false),
     ] {
-        let mut h = Harness::new();
+        let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
         h.seed();
         let previous = h.e.store().positions().to_vec();
         let balance = h.e.store().balance().clone();
         h.e.handle(10_000., Event::TimerFired { timer: h.tick });
         h.collect();
         let known = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"2\"");
-        h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"MISSING-USDT","instType":"{kind}","positions":"{quantity}"}}]}}"#));
+        h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"{inst}","instType":"{kind}","positions":"{quantity}"}}]}}"#));
         if rejected {
             assert_eq!(h.e.store().positions(), previous);
             assert_eq!(*h.e.store().balance(), balance);
             assert!(!h.pending.iter().any(|r| r.url.contains("asset/balances")));
             assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position has unavailable market metadata"))));
         } else {
-            h.reply(
-                "balances",
-                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
-            );
+            h.reply("balances", BALANCES);
+            assert_eq!(h.e.store().positions().len(), 1, "{inst} {kind} {quantity}");
             assert_eq!(h.e.store().positions()[0].contracts, 0.002);
         }
     }
 }
 #[test]
-fn unmapped_initial_position_does_not_claim_empty_account_loaded() {
-    let mut h = Harness::new();
+fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    h.modes();
+    let filtered = POSITION
+        .replace("BTC-USDT", "ETH-USD")
+        .replace(
+            "\"maintenanceMargin\":\"0.72\"",
+            "\"maintenanceMargin\":\"1.28\"",
+        )
+        .replace("\"unrealizedPnl\":\"0.5\"", "\"unrealizedPnl\":\"2\"");
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{POSITION},{filtered}]}}"#),
+    );
+    h.reply("balances", BALANCES);
+    let filtered_order = WORKING
+        .replace("BTC-USDT", "ETH-USD")
+        .replace("\"working\"", "\"external\"");
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{WORKING},{filtered_order}]}}"#),
+    );
+    // The skipped row still advances the page cursor.
+    let next = h.take("orders-pending");
+    assert!(next.url.contains("after=external"));
+    h.respond(next, r#"{"code":"0","data":[]}"#);
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let store = h.e.store();
+    let loaded = store.loaded();
+    assert!(loaded.positions && loaded.balance && loaded.orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    // Account totals still count the native row outside the catalogue.
+    assert_eq!(store.balance().used, 2.0);
+    assert_eq!(store.balance().upnl, 2.5);
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "working");
+    for kind in ["position", "order"] {
+        let needle = format!("Skipping BloFin {kind} on uncatalogued market ETH-USD");
+        assert!(
+            h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))),
+            "{kind}"
+        );
+    }
+}
+#[test]
+fn malformed_market_initial_position_does_not_claim_empty_account_loaded() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     h.modes();
     h.reply(
         "account/positions",
-        r#"{"code":"0","data":[{"instId":"MISSING-USDT","positions":"2"}]}"#,
+        r#"{"code":"0","data":[{"instId":"BAD-USDT","positions":"2"}]}"#,
     );
     assert!(!h.e.store().loaded().positions);
     assert!(!h.e.store().loaded().balance);
 }
 #[test]
-fn unmapped_working_order_rejects_authoritative_order_scope() {
-    let mut h = Harness::new();
+fn working_order_on_malformed_market_rejects_authoritative_order_scope() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
     let previous = h.e.store().orders().to_vec();
     h.e.handle(10_000., Event::TimerFired { timer: h.tick });
     h.collect();
-    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"MISSING-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
+    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BAD-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
     assert_eq!(h.e.store().orders(), previous);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
+}
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    assert!(h.e.store().market_by_id("BAD-USDT").is_none());
+    let retry = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("partial catalogue retry");
+    h.seed();
+    h.actions.clear();
+    h.e.handle(1000., Event::TimerFired { timer: retry });
+    h.collect();
+    h.reply(
+        "instruments",
+        &PARTIAL_INSTRUMENTS.replace("\"maxLeverage\":\"0\"", "\"maxLeverage\":\"20\""),
+    );
+    assert!(
+        h.e.store().market_by_id("BAD-USDT").is_some(),
+        "repaired market"
+    );
+    assert!(h.e.store().market_by_id("BTC-USDT").is_some());
+    assert!(
+        h.pending.is_empty(),
+        "no ticker reseed or private restart: {:?}",
+        h.pending
+    );
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::SetTimer { .. })),
+        "{:?}",
+        h.actions
+    );
+    assert!(h.e.store().loaded().positions);
 }
 
 // Drive the actual account loop through slow/fast updates, a parked stale callback,
@@ -446,7 +539,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -457,7 +550,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -471,12 +564,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -487,9 +580,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -505,7 +598,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -594,17 +687,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     engine.handle(
         now,
         Event::PollScaleChanged {
-            scale: 100.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
-    engine.handle(now + 100.0, Event::TimerFired { timer });
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let reads: Vec<_> = output
         .iter()
@@ -617,7 +710,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     // Keep any next periodic timer for a loop that rearms before HTTP completes.
     for r in reads {
         engine.handle(
-            now + 100.0,
+            now + 1_500.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -632,15 +725,15 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     let next = output
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 200.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == now + 3_000.0 => Some(*timer),
             _ => None,
         })
         .expect("next account tick");
-    engine.handle(now + 200.0, Event::TimerFired { timer: next });
+    engine.handle(now + 3_000.0, Event::TimerFired { timer: next });
     engine.drain_actions().for_each(drop);
-    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
-            now + 200.0 + offset,
+            now + 3_000.0 + offset,
             Event::PollScaleChanged {
                 scale: interval_ms / POLL_MS,
             },
@@ -655,7 +748,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 40_200.0]);
+            assert_eq!(times, vec![now + 43_000.0]);
         }
     }
 }
@@ -1697,4 +1790,70 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
     assert!(h.actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Log { message, .. })
             if message.contains("Malformed BloFin order row"))));
+}
+fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
+    actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+        _ => None,
+    })
+}
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let (retry, at) = new_timer(&h.actions)
+        .filter(|(_, at)| *at == 1000.0)
+        .expect("partial catalogue retry");
+    h.seed();
+    h.ws(&format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{WORKING}]}}"#
+    ));
+    assert!(h.e.store().order("working").is_some());
+    let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
+    h.e.handle(at, Event::TimerFired { timer: retry });
+    h.collect();
+    // BTC-USDT drops out of the list while BAD-USDT stays malformed.
+    h.reply(
+        "instruments",
+        &PARTIAL_INSTRUMENTS.replacen("BTC-USDT", "SOL-USDT", 1),
+    );
+    assert_eq!(h.e.store().market_by_id("BTC-USDT"), Some(&listed));
+    assert!(h.e.store().market_by_id("SOL-USDT").is_some());
+    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{POSITION}]}}"#),
+    );
+    h.reply("balances", BALANCES);
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{WORKING}]}}"#),
+    );
+    while h.pending.iter().any(|r| r.url.contains("orders-pending")) {
+        h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    }
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let store = h.e.store();
+    assert!(store.loaded().positions && store.loaded().balance && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert!(store.order("working").is_some());
+}
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let mut retry = new_timer(&h.actions).filter(|(_, at)| *at == 1000.0);
+    let mut rereads = 0;
+    while let Some((timer, at)) = retry.take() {
+        h.e.handle(at, Event::TimerFired { timer });
+        h.collect();
+        h.actions.clear();
+        h.reply("instruments", PARTIAL_INSTRUMENTS);
+        rereads += 1;
+        retry = new_timer(&h.actions);
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
 }

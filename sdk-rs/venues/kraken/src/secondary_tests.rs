@@ -48,26 +48,36 @@ fn probe(venue: Kraken) -> ProbeVenue<Kraken, impl FnMut(&mut Kraken, &mut Cx<'_
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(probe(Kraken::new(options())));
+    let options = options();
+    let mut primary_signer = sign::Signer::new(options.secret.as_deref().unwrap()).unwrap();
+    let mut read_signer =
+        sign::Signer::new(&options.read_credentials.as_ref().unwrap().secret).unwrap();
+    // Reserve bounds before dispatch: creating a signer must not reset its shared counter.
+    let primary_bound: u64 = primary_signer
+        .nonce(1700000000000.0)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let read_bound: u64 = read_signer.nonce(1700000000000.0).unwrap().parse().unwrap();
+    let mut engine = Engine::new(probe(Kraken::new(options)));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);
+    let mut previous = [read_bound, primary_bound];
     for request in requests {
         let expected = if request.method == Method::Get {
             "read-key"
         } else {
             "primary-key"
         };
-        let opts = options();
-        let secret = if request.method == Method::Get {
-            opts.read_credentials.as_ref().unwrap().secret.as_str()
+        let (signer, bound) = if request.method == Method::Get {
+            (&read_signer, read_bound)
         } else {
-            opts.secret.as_deref().unwrap()
+            (&primary_signer, primary_bound)
         };
-        let mut signer = sign::Signer::new(secret).unwrap();
         let nonce = request
             .headers
             .iter()
@@ -75,14 +85,14 @@ fn secondary_get_keeps_primary_mutations() {
             .unwrap()
             .1
             .as_str();
+        let nonce_number = nonce.parse::<u64>().unwrap();
+        assert!(nonce_number > bound);
+        let index = usize::from(request.method != Method::Get);
         assert!(
-            nonce.parse::<u64>().unwrap()
-                >= signer
-                    .nonce(1700000000000.0)
-                    .unwrap()
-                    .parse::<u64>()
-                    .unwrap()
+            nonce_number > previous[index],
+            "same signer nonce must increase for each request"
         );
+        previous[index] = nonce_number;
         assert_eq!(
             request
                 .headers
@@ -111,10 +121,11 @@ fn invalid_secondary_identity_stops_startup_before_io() {
     opts.read_credentials.as_mut().unwrap().secret.clear();
     let mut engine = Engine::new(Kraken::new(opts));
     engine.start(1700000000000.0);
-    assert!(!engine.drain_actions().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-    )));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
 }
 
 #[test]

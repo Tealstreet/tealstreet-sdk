@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -299,6 +299,7 @@ fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
 fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
     let mut e = safe_cex_engine::Engine::new(safe_cex_venue_mexc::MexcFutures::new(
         safe_cex_venue_mexc::Options {
+            recv_window: None,
             read_credentials: None,
             key: Some("key".into()),
             secret: Some("secret".into()),
@@ -705,24 +706,125 @@ fn absent_terminal_regular_rows_are_removed_and_tombstones_cannot_be_restored_by
     assert!(e.store().order("739113577038255617").is_none());
 }
 
-#[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let (mut e, _, reads, _) = private_started();
-    let request = reads
-        .iter()
-        .find(|r| r.url.contains("open_positions"))
-        .unwrap();
-    response(
-        &mut e,
-        request,
-        &format!(
-            r#"{{"success":true,"code":0,"data":[{}]}}"#,
-            POSITION.replace("BTC_USDT", "MISSING_USDT")
+// BTC_USDT is valid, HIDE_USDT deliberately hidden, BAD_USDT malformed (zero contract size).
+fn catalogue_with(bad_contract_size: &str) -> String {
+    let contract = |symbol: &str, extra: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","baseCoin":"X","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true{extra},"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500}}"#
+        )
+    };
+    format!(
+        r#"{{"success":true,"code":0,"data":[{},{},{}]}}"#,
+        contract("BTC_USDT", r#","contractSize":0.0001"#),
+        contract("HIDE_USDT", r#","isHidden":true,"contractSize":1"#),
+        contract(
+            "BAD_USDT",
+            &format!(r#","contractSize":{bad_contract_size}"#)
         ),
-    );
-    assert!(!e.store().loaded().positions);
+    )
+}
+
+fn answer_snapshot(e: &mut TestEngine, reads: Vec<safe_cex_engine::HttpRequest>, positions: &str) {
+    for request in reads {
+        let body = if request.url.contains("assets") {
+            r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000,"unrealized":6,"frozenBalance":0}]}"#.to_owned()
+        } else if request.url.contains("open_positions") {
+            format!(r#"{{"success":true,"code":0,"data":[{positions}]}}"#)
+        } else if request.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.to_owned()
+        };
+        response(e, &request, &body);
+    }
+}
+
+#[test]
+fn owned_position_on_filtered_market_is_skipped_and_the_snapshot_commits() {
+    let (mut e, _, reads, _) = private_started_with_markets(&catalogue_with("0"));
+    let hidden = POSITION
+        .replace("BTC_USDT", "HIDE_USDT")
+        .replace("739113577038255616", "1");
+    answer_snapshot(&mut e, reads, &format!("{POSITION},{hidden}"));
+    let loaded = e.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    assert_eq!(e.store().balance().total, 1000.0);
+    let positions = e.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].symbol, "BTCUSDT");
+    assert!(e.store().order("739113577038255617").is_some());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. }) if message.contains("uncatalogued market HIDEUSDT"))));
+}
+
+#[test]
+fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
+    let (mut e, socket, reads, _) = private_started_with_markets(&catalogue_with("0"));
+    answer_snapshot(&mut e, reads, POSITION);
+    assert!(e.store().loaded().positions);
+    assert_eq!(e.store().positions()[0].contracts, 0.006);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    let bad = POSITION
+        .replace("BTC_USDT", "BAD_USDT")
+        .replace("739113577038255616", "1");
+    let changed = POSITION.replace("\"holdVol\":60", "\"holdVol\":90");
+    answer_snapshot(&mut e, reads, &format!("{changed},{bad}"));
+    let positions = e.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, 0.006, "previous snapshot kept");
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
+    let mut e = Engine::new(MexcFutures::new(Options {
+        read_credentials: None,
+        public_data_only: false,
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        recv_window: None,
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, &catalogue_with("0"));
+    assert!(e.store().market("BTCUSDT").is_some());
+    assert!(e.store().market("BADUSDT").is_none());
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("position_mode")))
+    );
+    let retry = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1100.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("partial catalogue retry");
+    e.handle(1100.0, Event::TimerFired { timer: retry });
+    let reread = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("contract/detail"))
+        .expect("catalogue re-read");
+    response(&mut e, &reread, &catalogue_with("1"));
+    assert!(
+        e.store().market("BADUSDT").is_some(),
+        "repaired market loaded"
+    );
+    assert!(e.store().market("BTCUSDT").is_some());
+    let after: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !after
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
+    assert!(
+        !after.iter().any(|a| matches!(a, Action::SetTimer { .. })),
+        "a complete re-read schedules no further retry"
+    );
 }
 
 #[test]
@@ -782,7 +884,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -793,7 +895,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -807,12 +909,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -823,9 +925,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -841,7 +943,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -1119,6 +1221,7 @@ fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
     let mut e = Engine::new(MexcFutures::new(Options {
         read_credentials: None,
         public_data_only: false,
+        recv_window: None,
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
     }));
@@ -1252,4 +1355,63 @@ fn transient_mode_failures_keep_retrying_without_failing_startup() {
         assert!(startup_failure(&actions).is_none(), "{status} {body}");
         assert!(mode_retried(&mut e, actions, 30_000.0), "{status} {body}");
     }
+}
+
+#[test]
+fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
+    let (mut e, socket, reads, _, retry) = private_started_with_retry(&catalogue_with("0"));
+    answer_snapshot(&mut e, reads, POSITION);
+    assert_eq!(e.store().positions().len(), 1);
+    let listed = e.store().market("BTCUSDT").cloned().unwrap();
+    e.handle(
+        1100.0,
+        Event::TimerFired {
+            timer: retry.expect("partial catalogue retry"),
+        },
+    );
+    let reread = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("contract/detail"))
+        .expect("catalogue re-read");
+    // BTC_USDT is now paused (state 1), which the catalogue filters out.
+    let paused = catalogue_with("0").replacen(r#""state":0"#, r#""state":1"#, 1);
+    response(&mut e, &reread, &paused);
+    assert_eq!(e.store().market("BTCUSDT"), Some(&listed));
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    answer_snapshot(&mut e, reads, POSITION);
+    let loaded = e.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "BTCUSDT");
+    assert!(e.store().order("739113577038255617").is_some());
+}
+
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let (mut e, _, _, _, mut retry) = private_started_with_retry(&catalogue_with("0"));
+    let (mut rereads, mut warned) = (0, false);
+    while let Some(timer) = retry.take() {
+        e.handle(1100.0, Event::TimerFired { timer });
+        let reread = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("contract/detail"))
+            .expect("catalogue re-read");
+        response(&mut e, &reread, &catalogue_with("0"));
+        rereads += 1;
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, .. } => retry = Some(timer),
+                Action::Notice(Notice::Log {
+                    level: LogLevel::Warning,
+                    message,
+                }) if message.contains("stops re-reading") => warned = true,
+                _ => {}
+            }
+        }
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(warned);
+    assert!(e.store().market("BTCUSDT").is_some());
 }

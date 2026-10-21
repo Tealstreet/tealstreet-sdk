@@ -102,7 +102,7 @@ impl Coinbase {
         let headers = match headers {
             Ok(headers) => headers,
             Err(error) => {
-                self.on_request_failed(cx, request.pending, &error);
+                self.fail_unsent(cx, request.pending, &error);
                 self.dispatch(cx);
                 return;
             }
@@ -110,7 +110,7 @@ impl Coinbase {
         if let Pending::Trading(pending) = &request.pending
             && let Err(error) = self.trading_before_dispatch(cx, pending)
         {
-            self.on_request_failed(cx, request.pending, &error);
+            self.fail_unsent(cx, request.pending, &error);
             self.dispatch(cx);
             return;
         }
@@ -139,5 +139,15 @@ impl Coinbase {
         self.rest.timer = None;
         self.dispatch(cx);
         true
+    }
+}
+
+impl Coinbase {
+    /// A request that failed before it was sent.
+    fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Trading(request) => self.trading_unsent(cx, request, error),
+            other => self.on_request_failed(cx, other, error),
+        }
     }
 }

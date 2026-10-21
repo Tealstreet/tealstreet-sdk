@@ -3,13 +3,21 @@ use crate::{
     wire::{Id, N, Rest, checked},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, VenueError, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 pub struct Request {
     pub command: CommandId,
     step: Step,
+}
+impl Request {
+    /// A read (FetchLeverage) has no write outcome to classify.
+    pub(crate) fn is_read(&self) -> bool {
+        self.step.method == Method::Get
+    }
 }
 struct Step {
     method: Method,
@@ -51,12 +59,14 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     keep_going: bool,
-    error: Option<String>,
+    error: Option<VenueError>,
     collect: bool,
     total: usize,
     waiting: Option<Waiting>,
     scopes: HashSet<String>,
     superseded: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -976,6 +986,7 @@ impl Orderly {
             waiting: None,
             scopes,
             superseded: false,
+            effective: false,
         })
     }
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -987,9 +998,10 @@ impl Orderly {
                 .iter()
                 .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
         {
-            cx.done(
+            cx.fail(
                 id,
-                Err("Bybit BBO and TickSize controls are not supported by Orderly".into()),
+                not_sent("Bybit BBO and TickSize controls are not supported by Orderly")
+                    .kind(ErrorKind::Unsupported),
             );
             return;
         }
@@ -998,7 +1010,7 @@ impl Orderly {
             || !cx.store.loaded().positions
             || !cx.store.loaded().balance
         {
-            cx.done(id, Err("Orderly private account is not ready".into()));
+            cx.fail(id, not_sent("Orderly private account is not ready"));
             return;
         }
         if let Command::CancelSymbolOrders { symbol, .. } = &command {
@@ -1029,11 +1041,10 @@ impl Orderly {
                     _ => false,
                 };
                 if affected {
-                    cx.done(
+                    cx.fail(
                         trade_id(&queued).unwrap(),
-                        Err(
-                            "Orderly queued order mutation was superseded by bulk cancellation"
-                                .into(),
+                        not_sent(
+                            "Orderly queued order mutation was superseded by bulk cancellation",
                         ),
                     );
                 } else {
@@ -1047,9 +1058,10 @@ impl Orderly {
                 let waiting = if affected && !job.keep_going {
                     job.superseded = true;
                     job.steps.clear();
-                    job.error = Some(
-                        "Orderly remaining writes were superseded by bulk cancellation".into(),
-                    );
+                    // The current step may already be in flight, so nothing is proven.
+                    job.error = Some(VenueError::new(
+                        "Orderly remaining writes were superseded by bulk cancellation",
+                    ));
                     job.waiting.take()
                 } else {
                     None
@@ -1065,7 +1077,7 @@ impl Orderly {
             }
         }
         if self.trading.queue.len() >= 100 {
-            cx.done(id, Err("Orderly trading queue is full".into()));
+            cx.fail(id, not_sent("Orderly trading queue is full"));
             return;
         }
         if self.trading.active.is_some() {
@@ -1079,7 +1091,7 @@ impl Orderly {
             }
             Err(e) => {
                 cx.command_error(id, &e);
-                cx.done(id, Err(e));
+                cx.fail(id, not_sent(e));
                 self.trade_queued(cx);
             }
         }
@@ -1095,15 +1107,16 @@ impl Orderly {
         };
         let Some(mut step) = job.steps.pop_front() else {
             let job = self.trading.active.take().unwrap();
-            if let Some(message) = job.error {
-                // Whole failures still use the plain path until Orderly migrates to `fail`.
-                if job.ids.is_empty() {
-                    cx.done(job.command, Err(message));
-                } else {
-                    let error =
-                        VenueError::new(message).partial(&job.ids, job.total, job.ids.len());
-                    cx.fail(job.command, error);
+            if let Some(mut error) = job.error {
+                if (job.effective || !job.ids.is_empty())
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
+                    error.outcome = None;
                 }
+                cx.fail(
+                    job.command,
+                    error.partial(&job.ids, job.total, job.ids.len()),
+                );
             } else {
                 cx.done(
                     job.command,
@@ -1175,7 +1188,7 @@ impl Orderly {
                     Pending::Trade(Request { command, step }),
                 );
             }
-            Err(e) => self.trade_failed(cx, Request { command, step }, &e),
+            Err(e) => self.trade_failed(cx, Request { command, step }, not_sent(e)),
         }
     }
     pub(crate) fn trade_response(
@@ -1186,10 +1199,11 @@ impl Orderly {
     ) {
         let write = request.step.method != Method::Get;
         if write && (response.status == 408 || (500..600).contains(&response.status)) {
+            let error = format!("Orderly HTTP {}: {}", response.status, response.body);
             self.trade_lost(
                 cx,
                 request,
-                &format!("Orderly HTTP {}: {}", response.status, response.body),
+                VenueError::new(error).outcome(Outcome::Unknown),
             );
             return;
         }
@@ -1487,11 +1501,30 @@ impl Orderly {
         })();
         if let Err(e) = result {
             if unknown_ack {
-                self.trade_lost(cx, request, &e);
+                self.trade_lost(cx, request, VenueError::new(e).outcome(Outcome::Unknown));
             } else {
-                self.trade_failed(cx, request, &e);
+                let mut error = answer_failure(response, e);
+                if !write {
+                    // A read has no write outcome to classify.
+                    error.outcome = None;
+                    self.trade_failed(cx, request, error);
+                } else if error.outcome == Some(Outcome::Unknown) {
+                    // Server-side codes may follow execution: reconcile like a lost write.
+                    self.trade_lost(cx, request, error);
+                } else {
+                    self.trade_failed(cx, request, error);
+                }
             }
             return;
+        }
+        if write
+            && let Some(job) = self
+                .trading
+                .active
+                .as_mut()
+                .filter(|j| j.command == request.command)
+        {
+            job.effective = true;
         }
         if self
             .trading
@@ -1502,10 +1535,20 @@ impl Orderly {
             self.trade_next(cx);
         }
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         self.finish_failed_trade(cx, request, error, false);
     }
-    pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn trade_lost(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         self.finish_failed_trade(cx, request, error, true);
         self.account_after_uncertain_write(cx);
     }
@@ -1513,7 +1556,7 @@ impl Orderly {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: VenueError,
         uncertain: bool,
     ) {
         match request.step.effect {
@@ -1565,7 +1608,7 @@ impl Orderly {
             }
             _ => {}
         }
-        cx.command_error(request.command, error);
+        cx.command_error(request.command, &error.message);
         let Some(job) = self
             .trading
             .active
@@ -1574,8 +1617,11 @@ impl Orderly {
         else {
             return;
         };
-        if job.error.is_none() {
-            job.error = Some(error.into());
+        // The first failure names the error; any lost leg makes the outcome unknown.
+        let lost = uncertain || error.outcome == Some(Outcome::Unknown);
+        let first = job.error.get_or_insert(error);
+        if lost {
+            first.outcome = Some(Outcome::Unknown);
         }
         // Bulk cancellation's two families are independent writes, not replacements.
         if !job.keep_going {
@@ -1676,7 +1722,10 @@ impl Orderly {
             self.trading.detached.push((wait, job.scopes.clone()));
             job.steps.clear();
             job.error = Some(
-                "Orderly protective state is unconfirmed; no subsequent write was sent".into(),
+                VenueError::new(
+                    "Orderly protective state is unconfirmed; no subsequent write was sent",
+                )
+                .outcome(Outcome::Unknown),
             );
             self.trade_next(cx);
         } else if self.wait_satisfied(cx) {
@@ -1702,4 +1751,40 @@ struct Waiting {
     snapshot: u64,
     timer: safe_cex_engine::TimerId,
     deadline: f64,
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// An explicit refusal (`success: false` or a 4xx). Orderly's server-side and
+/// duplicate-request codes do not prove nothing happened.
+fn answer_failure(response: Response<'_>, message: String) -> VenueError {
+    #[derive(Deserialize)]
+    struct Code {
+        code: Option<i64>,
+    }
+    let error = VenueError::new(message);
+    let code = serde_json::from_str::<Code>(response.body)
+        .ok()
+        .and_then(|c| c.code);
+    let error = match code {
+        Some(code) => error.venue_code(code.to_string()),
+        None => error,
+    };
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match (response.status, code) {
+        (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
+        (_, Some(-1007)) => error,
+        (401, _) | (_, Some(-1001 | -1002)) => rejected(error, ErrorKind::AuthInvalid),
+        (403, _) => rejected(error, ErrorKind::AuthPermission),
+        (429, _) | (_, Some(-1003)) => rejected(error, ErrorKind::RateLimited),
+        (400..=499, _) | (_, Some(-1004 | -1005 | -1006 | -1008 | -1103..=-1101)) => {
+            rejected(error, ErrorKind::Rejected)
+        }
+        // A 2xx `success: false` without a documented code.
+        _ if serde_json::from_str::<crate::wire::Rest<'_>>(response.body).is_ok() => error,
+        _ => error.outcome(Outcome::Unknown),
+    }
 }

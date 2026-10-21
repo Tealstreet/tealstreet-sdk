@@ -1,7 +1,8 @@
 //! Documented PerpetualV2 envelopes and aop_p execution/position payloads.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, LogLevel, Notice, RequestId, Response, SocketId,
+    TimerId,
 };
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -1157,7 +1158,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -1168,7 +1169,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -1182,12 +1183,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -1198,9 +1199,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -1216,7 +1217,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -1305,17 +1306,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     engine.handle(
         now,
         Event::PollScaleChanged {
-            scale: 100.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
-    engine.handle(now + 100.0, Event::TimerFired { timer });
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let reads: Vec<_> = output
         .iter()
@@ -1328,7 +1329,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     // Keep any next periodic timer for a loop that rearms before HTTP completes.
     for r in reads {
         engine.handle(
-            now + 100.0,
+            now + 1_500.0,
             Event::HttpFailed {
                 request: r.id,
                 error: "account unavailable",
@@ -1336,9 +1337,9 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         );
     }
     engine.drain_actions().for_each(drop);
-    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
-            now + 100.0 + offset,
+            now + 1_500.0 + offset,
             Event::PollScaleChanged {
                 scale: interval_ms / POLL_MS,
             },
@@ -1353,12 +1354,39 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 2100.0]);
+            assert_eq!(times, vec![now + 3_500.0]);
         }
     }
 }
 #[test]
 fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    }));
+    e.start(NOW);
+    let a: Vec<_> = e.drain_actions().collect();
+    let partial = PRODUCTS.replace(
+        r#"{"symbol":"ETHUSDC""#,
+        r#"{"symbol":"MISSINGUSDT","type":"PerpetualV2","settleCurrency":"USDT"},{"symbol":"ETHUSDC""#,
+    );
+    response(&mut e, NOW, request(&a, "products").id, 200, &partial);
+    let a: Vec<_> = e.drain_actions().collect();
+    response(
+        &mut e,
+        NOW,
+        request(&a, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., &BTC.replace("BTCUSDT", "MISSINGUSDT")),
+    );
+    assert!(!e.store().loaded().positions);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn owned_position_outside_settled_catalogue_is_skipped_as_an_error() {
     let (mut e, actions, _) = started();
     response(
         &mut e,
@@ -1367,9 +1395,10 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
         200,
         &envelope("USDT", 1000., 69., &BTC.replace("BTCUSDT", "MISSINGUSDT")),
     );
-    assert!(!e.store().loaded().positions);
+    assert!(e.store().positions().is_empty());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+            if message == "Phemex skipped MISSINGUSDT position on an unavailable market")));
 }
 
 #[test]
@@ -1541,4 +1570,123 @@ fn bad_stream_position_row_still_applies_the_frame_balance() {
     assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
     assert_ne!(e.store().balance().used, before);
     assert_eq!(e.store().balance().used, 80. + 19.);
+}
+#[test]
+fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
+    let short = ETH
+        .replace("\"Long\"", "\"Short\"")
+        .replace("\"Buy\"", "\"Sell\"")
+        .replace("\"size\":\"1\"", "\"size\":\"2\"");
+    let cycle = |e: &mut Engine<PhemexPerpetuals>, prior: &[Action], at: f64, usdc: &str| {
+        e.handle(
+            at,
+            Event::TimerFired {
+                timer: timer(prior, at),
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        response(
+            e,
+            at,
+            request(&actions, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., BTC),
+        );
+        response(
+            e,
+            at,
+            request(&actions, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 25., usdc),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let logs = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Log { level, message }) => Some((*level, message.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (actions, logs)
+    };
+    let (mut e, a, socket) = started();
+    response(
+        &mut e,
+        NOW,
+        request(&a, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., BTC),
+    );
+    response(
+        &mut e,
+        NOW,
+        request(&a, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 19., &format!("{ETH},{short}")),
+    );
+    assert_eq!(e.store().position("ETHUSDC:short").unwrap().contracts, 2.);
+    // BTC +10, ETH long +100, ETH short -200 at the seeded marks.
+    assert_eq!(e.store().balance().upnl, -90.);
+    authenticate(&mut e, socket);
+    let seeded: Vec<_> = e.drain_actions().collect();
+
+    // A zero entry is unmappable; an owned row off the market list has no stored copy.
+    let long = ETH.replace("\"size\":\"1\"", "\"size\":\"3\"");
+    let bad_short = short.replace("1900", "0");
+    let missing = ETH.replace("ETHUSDC", "MISSINGUSDC");
+    let (actions, logs) = cycle(
+        &mut e,
+        &seeded,
+        NOW + 2_000.,
+        &format!("{long},{bad_short},{missing}"),
+    );
+    assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 3.);
+    assert_eq!(e.store().position("ETHUSDC:short").unwrap().contracts, 2.);
+    assert_eq!(e.store().balance().used, 69. + 25.);
+    // UPnL derives from the committed rows: the fresh long and the retained short.
+    let derived = 10. + 300. - 200.;
+    assert_eq!(e.store().balance().upnl, derived);
+    assert_eq!(e.store().balance().total, 1000. + 200. - derived);
+    for (level, message) in [
+        (
+            LogLevel::Warning,
+            "Phemex skipped unmappable ETHUSDC position row",
+        ),
+        (
+            LogLevel::Error,
+            "Phemex skipped MISSINGUSDC position on an unavailable market",
+        ),
+    ] {
+        assert!(
+            logs.iter().any(|(l, m)| *l == level && m == message),
+            "{message}"
+        );
+    }
+    assert!(
+        !logs
+            .iter()
+            .any(|(_, l)| l.contains('{') || l.contains("1900"))
+    );
+    // A WS account push recomputes the same rule over the same rows.
+    e.handle(NOW + 2_100., Event::WsMessage { socket, text:
+        r#"{"timestamp":1700000002100000000,"accounts_p":[{"currency":"USDC","accountBalanceRv":"200","totalUsedBalanceRv":"25"}]}"# });
+    assert_eq!(e.store().balance().upnl, derived);
+    assert_eq!(e.store().balance().total, 1000. + 200. - derived);
+
+    // The same skips on the next poll are not reported again.
+    let skipped = |logs: &[(LogLevel, String)]| {
+        logs.iter()
+            .filter(|(_, m)| m.starts_with("Phemex skipped"))
+            .count()
+    };
+    let rows = format!("{long},{bad_short},{missing}");
+    let (actions, logs) = cycle(&mut e, &actions, NOW + 4_000., &rows);
+    assert_eq!(skipped(&logs), 0);
+
+    let (actions, _) = cycle(&mut e, &actions, NOW + 6_000., &long);
+    assert!(e.store().position("ETHUSDC:short").is_none());
+    assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 3.);
+    // A clean slice re-arms them: a recurrence is reported again.
+    let (_, logs) = cycle(&mut e, &actions, NOW + 8_000., &rows);
+    assert_eq!(skipped(&logs), 2);
 }

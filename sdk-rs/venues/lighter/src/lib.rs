@@ -15,7 +15,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 fn revalue_position(position: &mut Position, price: f64) {
@@ -29,7 +29,7 @@ fn revalue_position(position: &mut Position, price: f64) {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub testnet: bool,
     pub robinhood: bool,
@@ -43,6 +43,15 @@ pub struct Options {
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_key_index);
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -143,12 +152,14 @@ struct CandleState {
     in_flight: bool,
 }
 pub struct Lighter {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     limits: limits::Limits,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
+    /// Native ids and symbols of spot markets, whose private rows belong to another product.
+    spot_markets: HashSet<String>,
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, Interval), CandleState>,
@@ -167,6 +178,7 @@ fn supported(interval: Interval) -> bool {
 }
 impl Lighter {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -174,6 +186,7 @@ impl Lighter {
             limits: limits::Limits::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
+            spot_markets: HashSet::new(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -215,6 +228,9 @@ impl Lighter {
             "USDC"
         }
     }
+    fn spot_market(&self, id_or_symbol: &str) -> bool {
+        !id_or_symbol.is_empty() && self.spot_markets.contains(id_or_symbol)
+    }
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
         self.symbols.get(id).map(String::as_str)
     }
@@ -242,8 +258,12 @@ impl Lighter {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket =
-            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws_url())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         self.public.open = false;
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
@@ -853,7 +873,12 @@ impl Venue for Lighter {
             Pending::Markets { rows, metadata, .. } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m) => {
-                        if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
+                        if m.market_type.eq_ignore_ascii_case("spot") {
+                            self.spot_markets.insert(format!("{:.0}", m.market_id));
+                            self.spot_markets.insert(m.symbol.to_string());
+                            return;
+                        }
+                        if m.status != "active" {
                             return;
                         }
                         let size = m

@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -27,6 +27,14 @@ pub struct Options {
     pub vault: Option<String>,
     pub builder: Option<Builder>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Builder {
     pub b: String,
@@ -99,7 +107,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     spot: bool,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
@@ -121,6 +129,7 @@ pub struct Hyperliquid {
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             spot: false,
@@ -245,7 +254,8 @@ impl Hyperliquid {
         {
             self.connection.supervisor.connecting(cx);
         }
-        self.connection.socket = Some(cx.connect_channel(self.ws(), channel));
+        self.connection.socket =
+            Some(cx.connect(safe_cex_engine::SocketSpec::new(self.ws()).channel(channel)));
     }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -280,6 +290,11 @@ impl Hyperliquid {
         }
         for market in &markets {
             self.excluded.remove(&market.id.to_ascii_lowercase());
+            // Account start seeded only the markets known then.
+            if self.account.started && cx.store.setting(&market.symbol).is_none() {
+                let seed = self.seed_setting(market);
+                cx.store.update_setting(&market.symbol, |s| *s = seed);
+            }
         }
         let mut all = cx.store.markets().to_vec();
         for market in markets {
@@ -381,6 +396,15 @@ impl Hyperliquid {
     }
     fn coin<'a>(&'a self, cx: &'a Cx<'_, Pending>, symbol: &str) -> Option<&'a str> {
         cx.store.market(symbol).map(|m| m.id.as_str())
+    }
+    /// Every catalogue read has succeeded, so an unknown coin is not a pending retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.core_discovery_incomplete
+            && self.startup.idle()
+            && self
+                .dex_names
+                .iter()
+                .all(|d| self.advanced_scopes.contains(d))
     }
     /// A coin TS hides by design (delisted or unquoted), as opposed to unknown.
     pub(crate) fn excluded_coin(&self, coin: &str) -> bool {
@@ -937,7 +961,8 @@ impl Venue for Hyperliquid {
         self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if !(200..300).contains(&response.status) {
+        // Trade answers keep their status so a refusal can be told from a lost write.
+        if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             self.on_request_failed(
                 cx,
                 pending,
@@ -1018,7 +1043,9 @@ impl Venue for Hyperliquid {
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }
-                if cx.store.loaded().markets {
+                // A complete but empty universe applies no catalogue (the store
+                // never applies an empty one); later scopes are still discovered.
+                if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, "");
                 }
             }
@@ -1105,7 +1132,7 @@ impl Venue for Hyperliquid {
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }
-                if cx.store.loaded().markets {
+                if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, &dex);
                 }
             }

@@ -161,8 +161,9 @@ pub struct MarginSummary {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Clearinghouse<'a> {
+    /// Rows parse one by one so a malformed row cannot discard its neighbours.
     #[serde(borrow)]
-    pub asset_positions: Vec<AssetPosition<'a>>,
+    pub asset_positions: Vec<&'a serde_json::value::RawValue>,
     #[serde(default)]
     pub margin_summary: Option<MarginSummary>,
     #[serde(default)]

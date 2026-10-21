@@ -57,6 +57,7 @@ struct TestVenue {
     received: Rc<RefCell<Vec<String>>>,
     started: Rc<Cell<usize>>,
     poll_scales: Rc<RefCell<Vec<f64>>>,
+    poll_intervals: Rc<RefCell<Vec<f64>>>,
     poll_timer: Option<TimerId>,
 }
 impl Venue for TestVenue {
@@ -99,15 +100,13 @@ impl Venue for TestVenue {
         }]);
         cx.connect("test");
         cx.book_changed("BTCUSDT");
+        // A 1 s native cadence: a scale is the host's interval in seconds.
+        self.poll_timer = Some(cx.set_poll_timer(1_000.0));
     }
     fn on_poll_scale(&mut self, cx: &mut Cx<'_, ()>, scale: f64) {
         self.poll_scales.borrow_mut().push(scale);
-        if let Some(timer) = self.poll_timer.take() {
-            cx.clear_timer(timer);
-        }
-        // A 1ms native cadence keeps huge finite scales as huge finite deadlines.
-        if scale.is_finite() {
-            self.poll_timer = Some(cx.set_timer(scale));
+        if let Some(interval) = self.poll_timer.and_then(|timer| cx.poll_interval(timer)) {
+            self.poll_intervals.borrow_mut().push(interval);
         }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -163,6 +162,7 @@ struct Fixture {
     observed: Rc<RefCell<Vec<Command>>>,
     received: Rc<RefCell<Vec<String>>>,
     poll_scales: Rc<RefCell<Vec<f64>>>,
+    poll_intervals: Rc<RefCell<Vec<f64>>>,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<std::io::Result<()>>,
 }
@@ -176,6 +176,7 @@ impl Fixture {
         let observed = Rc::new(RefCell::new(Vec::new()));
         let received = Rc::new(RefCell::new(Vec::new()));
         let poll_scales = Rc::new(RefCell::new(Vec::new()));
+        let poll_intervals = Rc::new(RefCell::new(Vec::new()));
         for (label, tape, commands) in [
             ("a", a.clone(), observed.clone()),
             ("b", Tape::default(), Rc::new(RefCell::new(Vec::new()))),
@@ -191,6 +192,7 @@ impl Fixture {
                 received: received.clone(),
                 started: Rc::default(),
                 poll_scales: poll_scales.clone(),
+                poll_intervals: poll_intervals.clone(),
                 poll_timer: None,
             });
             engine.set_public_feed_policy(policy).unwrap();
@@ -210,6 +212,7 @@ impl Fixture {
             observed,
             received,
             poll_scales,
+            poll_intervals,
             shutdown,
             task,
         }
@@ -678,6 +681,7 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
                 received: Rc::default(),
                 started: started.clone(),
                 poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
                 poll_timer: None,
             };
             let transport_calls = Rc::new(Cell::new(0));
@@ -778,20 +782,22 @@ async fn invalid_websocket_polling_controls_have_no_venue_effects() {
 }
 
 #[tokio::test]
-async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
+async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
     LocalSet::new()
         .run_until(async {
             let fixture = Fixture::new(config()).await;
             let mut socket = fixture.connect("a").await;
             frame(&mut socket).await;
-            send(&mut socket, r#"{"op":"setPollScale","scale":1e308}"#).await;
+            // Scales of the venue's 1 s cadence: 1e308 ms, then 0.001 ms.
+            send(&mut socket, r#"{"op":"setPollScale","scale":1e305}"#).await;
             send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
             assert!(
                 matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }),
                 "host must continue serving commands around a huge deadline"
             );
-            assert_eq!(*fixture.poll_scales.borrow(), [1e308]);
-            // Null emits ClearTimer for the parked deadline, then a normal future
+            assert_eq!(*fixture.poll_intervals.borrow(), [120_000.]);
+            send(&mut socket, r#"{"op":"setPollScale","scale":0.000001}"#).await;
+            // Null emits ClearTimer for the bounded deadline, then a normal future
             // timer must still work. Account shutdown cancels that timer as usual.
             send(&mut socket, r#"{"op":"setPollScale","scale":null}"#).await;
             send(&mut socket, r#"{"op":"setPollScale","scale":2.5}"#).await;
@@ -800,7 +806,10 @@ async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
                 reply(&mut socket).await,
                 Reply::Done { command: 2, .. }
             ));
-            assert_eq!(*fixture.poll_scales.borrow(), [1e308, f64::INFINITY, 2.5]);
+            assert_eq!(
+                *fixture.poll_intervals.borrow(),
+                [120_000., 1_000., f64::INFINITY, 2500.]
+            );
             fixture.stop().await;
         })
         .await;

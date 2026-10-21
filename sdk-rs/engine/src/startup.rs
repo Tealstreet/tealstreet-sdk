@@ -1,10 +1,12 @@
-//! Public discovery retry policy. Venues rebuild requests to refresh signatures.
+//! Startup read retry policy, public discovery and private gates alike. Venues
+//! rebuild requests to refresh signatures.
 use crate::{Cx, LogLevel, TimerId};
 
 struct Read<K> {
     key: K,
     attempts: u32,
     timer: Option<TimerId>,
+    due: f64,
 }
 
 pub struct Backoff<K> {
@@ -22,8 +24,35 @@ impl<K: PartialEq> Backoff<K> {
             .any(|read| &read.key == key && read.timer.is_some())
     }
 
+    /// No read has failed without a later success.
+    pub fn idle(&self) -> bool {
+        self.reads.is_empty()
+    }
+
     /// At most one retry per independent read; no write request enters this API.
     pub fn failed<P>(&mut self, cx: &mut Cx<'_, P>, key: K) {
+        self.failed_after(cx, key, 0.0);
+    }
+
+    /// As `failed`, waiting at least `minimum_ms`: a venue rate-limit or ban
+    /// window must not be retried into, since bans escalate and block trading.
+    pub fn failed_after<P>(&mut self, cx: &mut Cx<'_, P>, key: K, minimum_ms: f64) {
+        let minimum = if minimum_ms.is_finite() {
+            minimum_ms.max(0.0)
+        } else {
+            0.0
+        };
+        // A ban covers the whole host, so reads already waiting wait it out too.
+        let until = cx.now + minimum;
+        for read in &mut self.reads {
+            if let Some(timer) = read.timer
+                && read.due < until
+            {
+                cx.clear_timer(timer);
+                read.timer = Some(cx.set_timer(minimum));
+                read.due = until;
+            }
+        }
         let index = match self.reads.iter().position(|read| read.key == key) {
             Some(index) => index,
             None => {
@@ -31,6 +60,7 @@ impl<K: PartialEq> Backoff<K> {
                     key,
                     attempts: 0,
                     timer: None,
+                    due: 0.0,
                 });
                 self.reads.len() - 1
             }
@@ -40,12 +70,12 @@ impl<K: PartialEq> Backoff<K> {
             return;
         }
         read.attempts = read.attempts.saturating_add(1);
-        let delay = (1_000u32 << read.attempts.saturating_sub(1).min(5)).min(30_000);
-        read.timer = Some(cx.set_timer(f64::from(delay)));
-        cx.log(
-            LogLevel::Warning,
-            "Public discovery read failed; retry scheduled",
-        );
+        let delay = crate::backoff::Backoff::new(1_000.0, 5, 30_000.0)
+            .delay(read.attempts.saturating_sub(1))
+            .max(minimum);
+        read.timer = Some(cx.set_timer(delay));
+        read.due = cx.now + delay;
+        cx.log(LogLevel::Warning, "Startup read failed; retry scheduled");
     }
 
     pub fn succeeded<P>(&mut self, cx: &mut Cx<'_, P>, key: &K) {
@@ -65,6 +95,25 @@ impl<K: Clone> Backoff<K> {
         read.timer = None;
         Some(read.key.clone())
     }
+}
+
+/// Longest honoured `Retry-After`: real IP bans can exceed minutes, but an
+/// absurd or overflowing value must not stall an account indefinitely.
+pub const MAX_RATE_LIMIT_PAUSE_MS: f64 = 3_600_000.0;
+
+/// The pause a rate-limited response asks for: `Retry-After` seconds on a 418
+/// or 429 (capped at an hour), else `default_ms` for those statuses, else none.
+pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f64 {
+    if !matches!(response.status, 418 | 429) {
+        return 0.0;
+    }
+    response
+        .header("retry-after")
+        .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+        .filter(|seconds| !seconds.is_nan() && *seconds > 0.0)
+        .map_or(default_ms, |seconds| {
+            (seconds * 1_000.0).min(MAX_RATE_LIMIT_PAUSE_MS)
+        })
 }
 
 /// Do not expose raw catalogue rows, which can arrive through authenticated APIs.
@@ -347,5 +396,38 @@ mod rows_tests {
             .collect();
         assert_eq!(partial, [Some(1), None, Some(3)]);
         assert!(rows::<u32>("[1,").is_err());
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
+    use crate::Response;
+
+    fn pause(status: u16, headers: &str) -> f64 {
+        rate_limit_pause_ms(
+            &Response {
+                status,
+                headers,
+                body: "",
+            },
+            30_000.0,
+        )
+    }
+
+    #[test]
+    fn retry_after_is_honoured_up_to_an_hour_and_never_unbounded() {
+        assert_eq!(pause(429, "Retry-After: 120"), 120_000.0);
+        assert_eq!(pause(418, ""), 30_000.0);
+        assert_eq!(pause(500, "Retry-After: 120"), 0.0);
+        assert_eq!(pause(429, "Retry-After: 86400"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: 1e308"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: inf"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: NaN"), 30_000.0);
+        assert_eq!(pause(429, "Retry-After: -5"), 30_000.0);
+        assert_eq!(
+            pause(429, "Retry-After: Wed, 21 Oct 2026 07:28:00 GMT"),
+            30_000.0
+        );
     }
 }

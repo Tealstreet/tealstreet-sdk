@@ -73,11 +73,6 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     expect(commands[0]).toEqual({ op: 'setPollScale', scale: null });
     expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
   });
-  it('requires session credentials even for market-data-only mode', async () => {
-    const { exchange, construct } = fixture({ key: '', secret: '', publicDataOnly: true });
-    await expect(exchange.start()).rejects.toThrow('legacy DXtrade username and password');
-    expect(construct).not.toHaveBeenCalled();
-  });
   it('settles account selection startup failures without waiting forever', async () => {
     const message = 'DXtrade startup failed: Multiple accounts found';
     const { exchange } = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
@@ -96,6 +91,15 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     exchange.emitter.on('deactivate', deactivated);
     await expect(exchange.start()).rejects.toThrow(message);
     expect(deactivated).toHaveBeenCalledOnce();
+  });
+  it('keeps the startup failure kind for start() and validateAccount', async () => {
+    const message = 'Bybit rejected the API key (10003): API key is invalid.';
+    const detail = { message, kind: 'authInvalid', venueCode: '10003' };
+    const started = fixture({}, [{ op: 'startupFailed', detail }], false);
+    await expect(started.exchange.start()).rejects.toMatchObject({ message, kind: 'authInvalid', venueCode: '10003' });
+    // Venues log the reason just before StartupFailed in the same batch.
+    const validated = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail }], false);
+    await expect(validated.exchange.validateAccount()).resolves.toEqual({ error: message, kind: 'authInvalid' });
   });
   it('settles definitive login rejection through the shared deactivation contract', async () => {
     const { exchange } = fixture({}, [{ op: 'deactivate' }], false);

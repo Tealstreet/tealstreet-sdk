@@ -5,6 +5,7 @@ use crate::{
     wire::StrictNumber as Number,
 };
 use alloy_primitives::U256;
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
@@ -30,14 +31,13 @@ pub enum Request {
     Margins {
         revision: u64,
         rows: Vec<(String, f64)>,
-        invalid: bool,
         boot: bool,
     },
     Positions {
         revision: u64,
         started: f64,
         rows: Vec<Position>,
-        invalid: bool,
+        coverage: SnapshotCoverage<String>,
         cycle: bool,
     },
     Balance {
@@ -48,6 +48,7 @@ pub enum Request {
         revision: u64,
         rows: Vec<NativeOrder>,
         seen: HashSet<String>,
+        coverage: SnapshotCoverage<String>,
         invalid: bool,
         cycle: bool,
     },
@@ -138,7 +139,7 @@ struct Queued {
 }
 
 pub struct Account {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     started: bool,
     credentials: Option<Credentials>,
     token: Option<String>,
@@ -182,6 +183,7 @@ pub struct Account {
 
 impl Account {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             started: false,
@@ -518,7 +520,13 @@ impl Account {
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
-            self.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Private));
+            self.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(self.ws())
+                        .channel(SocketChannel::Private)
+                        .binary(),
+                ),
+            );
             self.supervisor.connecting(cx);
         }
     }
@@ -976,7 +984,6 @@ impl Account {
             Pending::Account(Request::Margins {
                 revision: self.margins_revision,
                 rows: vec![],
-                invalid: false,
                 boot,
             }),
         );
@@ -999,7 +1006,7 @@ impl Account {
                 revision: self.positions_revision,
                 started: cx.now,
                 rows: vec![],
-                invalid: false,
+                coverage: SnapshotCoverage::default(),
                 cycle,
             }),
         );
@@ -1036,6 +1043,7 @@ impl Account {
                 revision: self.orders_revision,
                 rows: vec![],
                 seen: HashSet::new(),
+                coverage: SnapshotCoverage::default(),
                 invalid: false,
                 cycle,
             }),
@@ -1054,60 +1062,104 @@ impl Account {
         });
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
-        if matches!(request, Request::Positions { .. } | Request::Orders { .. }) {
-            match registered_market(
-                cx,
-                &self.excluded_perps,
-                item,
-                matches!(request, Request::Positions { .. }),
-            ) {
-                Ok(false) => return,
-                Err(()) => {
-                    match request {
-                        Request::Positions { invalid, .. } | Request::Orders { invalid, .. } => {
-                            *invalid = true
-                        }
-                        _ => {}
-                    };
-                    return;
-                }
-                Ok(true) => {}
-            }
-        }
+        let registered = registered_market(
+            cx,
+            &self.excluded_perps,
+            item,
+            matches!(request, Request::Positions { .. }),
+        );
         match request {
-            Request::Margins { rows, invalid, .. } => {
+            Request::Margins { rows, .. } => {
                 match serde_json::from_str::<Margin<'_>>(item) {
                     Ok(row) if !row.market.is_empty() && row.leverage.0 > 0. => {
                         rows.push((row.market.into(), row.leverage.0))
                     }
-                    _ => *invalid = true,
+                    // Settings are upserts: a skipped row leaves its stored leverage as is.
+                    _ => cx.log(
+                        LogLevel::Warning,
+                        match row_market(item) {
+                            Some(market) => {
+                                format!("Paradex skipped malformed margin row {market}")
+                            }
+                            None => "Paradex skipped malformed margin row without a market".into(),
+                        },
+                    ),
                 }
             }
-            Request::Positions { rows, invalid, .. } => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(row) => match map_position(&row, cx) {
-                        Ok(Some(p)) => rows.push(p),
-                        Ok(None) => {}
-                        Err(_) => *invalid = true,
-                    },
-                    Err(_) => *invalid = true,
+            Request::Positions { rows, coverage, .. } => {
+                match registered {
+                    // Other products, excluded perpetuals and flat unknown rows.
+                    Ok(false) => return,
+                    Ok(true) => {
+                        if let Ok(Ok(position)) = serde_json::from_str::<PositionRow<'_>>(item)
+                            .map(|row| map_position(&row, cx))
+                        {
+                            return rows.extend(position);
+                        }
+                    }
+                    Err(()) => {}
                 }
+                let market = row_market(item);
+                cx.log(
+                    LogLevel::Warning,
+                    match (market, registered) {
+                        (Some(market), Ok(_)) => {
+                            format!("Paradex skipped unmappable position {market}")
+                        }
+                        (Some(market), Err(())) => {
+                            format!("Paradex skipped position {market} on an unknown market")
+                        }
+                        (None, _) => "Paradex skipped unmappable position without a market".into(),
+                    },
+                );
+                coverage.reject(market.map(Into::into));
             }
             Request::Orders {
                 rows,
                 seen,
+                coverage,
                 invalid,
                 ..
-            } => match serde_json::from_str::<NativeOrder>(item) {
-                Ok(row)
-                    if map_order(&row).is_ok()
-                        && OrderVersion::new(&row).is_ok()
-                        && seen.insert(row.id.clone()) =>
-                {
-                    rows.push(row)
+            } => {
+                // Out-of-scope rows drop first; a repeat among them proves nothing.
+                if registered == Ok(false) {
+                    return;
                 }
-                _ => *invalid = true,
-            },
+                let row = serde_json::from_str::<NativeOrder>(item);
+                if let Ok(row) = &row
+                    && !row.id.is_empty()
+                    && !seen.insert(row.id.clone())
+                {
+                    *invalid = true;
+                    return;
+                }
+                if let Ok(row) = row
+                    && registered == Ok(true)
+                    && map_order(&row).is_ok()
+                    && OrderVersion::new(&row).is_ok()
+                {
+                    return rows.push(row);
+                }
+                #[derive(Deserialize)]
+                struct Identity {
+                    id: String,
+                }
+                let id = serde_json::from_str::<Identity>(item)
+                    .ok()
+                    .map(|row| row.id)
+                    .filter(|id| !id.is_empty());
+                cx.log(
+                    LogLevel::Warning,
+                    match (&id, registered.is_err() && row_market(item).is_some()) {
+                        (Some(id), true) => {
+                            format!("Paradex skipped order {id} on an unknown market")
+                        }
+                        (Some(id), false) => format!("Paradex skipped unmappable order {id}"),
+                        (None, _) => "Paradex skipped unmappable order without an id".into(),
+                    },
+                );
+                coverage.reject(id);
+            }
             _ => {}
         }
     }
@@ -1193,13 +1245,10 @@ impl Account {
             Request::Margins {
                 revision,
                 rows,
-                invalid,
                 boot,
             } => {
                 self.margins_busy = false;
-                if invalid {
-                    cx.log(LogLevel::Warning, "Invalid Paradex margin snapshot");
-                } else if revision == self.margins_revision {
+                if revision == self.margins_revision {
                     for (symbol, leverage) in rows {
                         cx.store.update_setting(&symbol, |s| {
                             s.leverage = leverage;
@@ -1217,11 +1266,11 @@ impl Account {
                 revision,
                 started,
                 rows,
-                invalid,
+                coverage,
                 cycle,
             } => {
                 self.positions_busy = false;
-                if !invalid && revision == self.positions_revision {
+                if revision == self.positions_revision {
                     let mut snapshot = Vec::new();
                     for row in rows {
                         let updated = row.last_update.unwrap_or(started);
@@ -1241,6 +1290,14 @@ impl Account {
                             snapshot.push(row);
                         }
                     }
+                    // Kept before the closure pass so skipped rows never record a close.
+                    for old in cx.store.positions() {
+                        if !coverage.allows_absence(&old.symbol)
+                            && !snapshot.iter().any(|row| row.symbol == old.symbol)
+                        {
+                            snapshot.push(old.clone());
+                        }
+                    }
                     for old in cx.store.positions() {
                         if !snapshot.iter().any(|row| row.symbol == old.symbol) {
                             self.position_versions
@@ -1249,8 +1306,6 @@ impl Account {
                     }
                     cx.store.set_positions(snapshot);
                     self.update_upnl(cx);
-                } else if invalid {
-                    cx.log(LogLevel::Warning, "Invalid Paradex positions snapshot");
                 }
                 if cycle {
                     self.balance(cx, true);
@@ -1270,6 +1325,7 @@ impl Account {
             Request::Orders {
                 revision,
                 rows,
+                coverage,
                 invalid,
                 cycle,
                 ..
@@ -1313,6 +1369,18 @@ impl Account {
                             }
                         } else {
                             self.terminal_order(&row.id);
+                        }
+                    }
+                    for current in cx.store.orders() {
+                        if !coverage.allows_absence(&current.id)
+                            && current.status == OrderStatus::Open
+                            && !self.terminals.contains(&current.id)
+                            && !mapped.iter().any(|o: &Order| o.id == current.id)
+                        {
+                            mapped.push(current.clone());
+                            if let Some(row) = self.native.get(&current.id) {
+                                native.insert(current.id.clone(), row.clone());
+                            }
                         }
                     }
                     self.native = native;
@@ -1987,6 +2055,18 @@ fn decimal8(mantissa: i64) -> String {
     format!("{sign}{integer}.{}", fraction.trim_end_matches('0'))
 }
 
+/// The market a row names, when it names one.
+fn row_market(raw: &str) -> Option<&str> {
+    #[derive(Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        market: &'a str,
+    }
+    serde_json::from_str::<Identity<'_>>(raw)
+        .ok()
+        .map(|row| row.market)
+        .filter(|market| !market.is_empty())
+}
 fn registered_market(
     cx: &Cx<'_, Pending>,
     excluded_perps: &HashSet<String>,

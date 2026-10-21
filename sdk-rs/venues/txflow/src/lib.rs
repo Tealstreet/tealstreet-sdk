@@ -19,7 +19,7 @@ use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -28,6 +28,14 @@ pub struct Options {
     pub application_id: Option<String>,
     pub vault: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         if !self.testnet {
@@ -47,6 +55,8 @@ pub enum Pending {
     Meta {
         rows: Vec<Instrument>,
         valid: bool,
+        /// A malformed row was skipped, so an unknown asset may be listed.
+        skipped: bool,
     },
     Ticker {
         asset: u32,
@@ -106,7 +116,7 @@ struct Sub<'a> {
     instrument_id: Option<u32>,
 }
 pub struct TxFlow {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::AccountState,
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
@@ -124,9 +134,11 @@ pub struct TxFlow {
     ticker_timer: Option<TimerId>,
     discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
+    catalogue_partial: bool,
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: Default::default(),
@@ -146,6 +158,7 @@ impl TxFlow {
             ticker_timer: None,
             discovery: Default::default(),
             live_tickers: Default::default(),
+            catalogue_partial: false,
         }
     }
     pub(crate) fn rest(&self) -> &'static str {
@@ -153,6 +166,10 @@ impl TxFlow {
     }
     pub(crate) fn asset(&self, _cx: &Cx<'_, Pending>, symbol: &str) -> Option<u32> {
         self.assets.get(symbol).copied()
+    }
+    /// The catalogue is complete and its read awaits no retry; ticker seeds do not list assets.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && !self.discovery.waiting(&None)
     }
     pub(crate) fn symbol(&self, asset: u32) -> Option<&str> {
         self.instruments.get(&asset).map(|row| row.name.as_str())
@@ -208,6 +225,7 @@ impl TxFlow {
             Pending::Meta {
                 rows: Vec::new(),
                 valid: true,
+                skipped: false,
             },
         );
     }
@@ -263,14 +281,16 @@ impl TxFlow {
         if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             conn.supervisor.connecting(cx);
         }
-        conn.socket = Some(cx.connect_channel(
-            format!(
-                "{}/{}",
-                REST_URL.replacen("https:", "wss:", 1),
-                if api { "api-ws" } else { "ws" }
+        conn.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{}/{}",
+                    REST_URL.replacen("https:", "wss:", 1),
+                    if api { "api-ws" } else { "ws" }
+                ))
+                .channel(channel),
             ),
-            channel,
-        ));
+        );
     }
     fn subscribe(
         &mut self,
@@ -855,11 +875,19 @@ impl Venue for TxFlow {
             return;
         }
         match pending {
-            Pending::Meta { rows, valid } => {
+            Pending::Meta {
+                rows,
+                valid,
+                skipped,
+            } => {
                 if !valid || !Header::valid(response.body) {
                     self.on_request_failed(
                         cx,
-                        Pending::Meta { rows, valid: false },
+                        Pending::Meta {
+                            rows,
+                            valid: false,
+                            skipped,
+                        },
                         "Invalid TxFlow metadata",
                     );
                     return;
@@ -902,6 +930,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "Duplicate or ambiguous TxFlow historical identities",
                     );
@@ -933,6 +962,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "No supported TxFlow markets",
                     );
@@ -945,6 +975,7 @@ impl Venue for TxFlow {
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
+                            skipped: false,
                         },
                         "Duplicate TxFlow tradable market identities",
                     );
@@ -953,6 +984,7 @@ impl Venue for TxFlow {
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
+                self.catalogue_partial = skipped;
                 self.ticker_queue = ticker_queue;
                 self.ticker_seeded.clear();
                 self.historical_assets = historical_assets;
@@ -1033,9 +1065,12 @@ impl Venue for TxFlow {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Meta { rows, valid: _ } => match serde_json::from_str(item) {
+            Pending::Meta { rows, skipped, .. } => match serde_json::from_str(item) {
                 Ok(row) => rows.push(row),
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    *skipped = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
                 Ok(row) => rows.push(row.candle()),

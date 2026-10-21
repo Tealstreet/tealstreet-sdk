@@ -369,7 +369,7 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
 }
 
 #[test]
-fn failed_account_config_is_retried_by_the_account_timer() {
+fn failed_account_config_is_retried_by_the_startup_backoff() {
     let mut engine = Engine::new(Okx::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -394,12 +394,12 @@ fn failed_account_config_is_retried_by_the_account_timer() {
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
-                at_ms: 5_002.,
+                at_ms: 1_002.,
             } => Some(timer),
             _ => None,
         })
         .unwrap();
-    engine.handle(5_002., Event::TimerFired { timer });
+    engine.handle(1_002., Event::TimerFired { timer });
     let config = actions(&mut engine)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -427,4 +427,51 @@ fn failed_account_config_is_retried_by_the_account_timer() {
     }
     let loaded = engine.store().loaded();
     assert!(loaded.balance && loaded.orders && loaded.positions);
+}
+
+#[test]
+fn catalogue_rate_limit_retry_waits_for_retry_after() {
+    let mut engine = Engine::new(Okx::new(Options::default()));
+    engine.start(0.);
+    let Action::Http(request) = actions(&mut engine).remove(0) else {
+        panic!("catalogue request")
+    };
+    engine.handle(
+        0.,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 429,
+                headers: "Retry-After: 120",
+                body: "",
+            },
+        },
+    );
+    let mut timers = Vec::new();
+    let mut retried_at = None;
+    let mut now = 0.;
+    loop {
+        for action in actions(&mut engine) {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::Http(r) if r.url.contains("/api/v5/public/instruments") => {
+                    retried_at.get_or_insert(now);
+                }
+                _ => {}
+            }
+        }
+        if retried_at.is_some() || timers.is_empty() {
+            break;
+        }
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (timer, at) = timers.remove(0);
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    assert_eq!(
+        retried_at,
+        Some(120_000.),
+        "catalogue retried only after Retry-After"
+    );
 }

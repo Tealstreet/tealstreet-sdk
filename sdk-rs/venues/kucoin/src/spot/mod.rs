@@ -92,7 +92,7 @@ struct SpotBook {
     last: f64,
 }
 pub struct KucoinSpot {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
@@ -117,6 +117,7 @@ pub struct KucoinSpot {
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = (!options.public_data_only)
             .then(|| {
                 options
@@ -970,14 +971,13 @@ impl Venue for KucoinSpot {
                             cx.now as u64,
                             channel,
                         );
-                        c.socket = Some(cx.connect_channel(
-                            url,
+                        c.socket = Some(cx.connect(safe_cex_engine::SocketSpec::new(url).channel(
                             if channel == 1 {
                                 SocketChannel::Private
                             } else {
                                 SocketChannel::Public
                             },
-                        ));
+                        )));
                     }
                     _ => {
                         cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
@@ -1479,6 +1479,54 @@ impl KucoinSpot {
                 Err("KuCoin Spot public trades are not implemented in TS".into()),
             ),
             Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, Ok("[]".into())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod security_credentials {
+    use super::*;
+    use safe_cex_crypto::secrets::EraseSecrets;
+    #[test]
+    fn spot_owns_both_credential_copies_in_scrubbing_carriers() {
+        let mut venue = KucoinSpot::new(Options {
+            key: Some("private-key".into()),
+            secret: Some("private-secret".into()),
+            passphrase: Some("private-passphrase".into()),
+            broker: Some(sign::BrokerOptions {
+                partner: "partner".into(),
+                broker_key: "private-broker-key".into(),
+                broker_name: "broker".into(),
+                verify: None,
+            }),
+            ..Options::default()
+        });
+        let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+        assert!(venue.credentials.is_some());
+        venue.options.erase_secrets();
+        venue.credentials.as_mut().unwrap().erase_secrets();
+        assert!(venue.options.secret.is_none());
+        assert!(venue.options.broker.as_ref().unwrap().broker_key.is_empty());
+        let credentials = venue.credentials.as_ref().unwrap();
+        assert!(credentials.secret.is_empty() && credentials.passphrase.is_empty());
+        assert!(credentials.broker.as_ref().unwrap().broker_key.is_empty());
+    }
+    #[test]
+    fn incomplete_and_public_only_credentials_keep_a_scrubbing_owner() {
+        for (key, public_data_only) in [
+            (None, false),
+            (Some(String::new()), false),
+            (Some("key".into()), true),
+        ] {
+            let venue = KucoinSpot::new(Options {
+                key,
+                secret: Some("private-secret".into()),
+                passphrase: Some("private-passphrase".into()),
+                public_data_only,
+                ..Options::default()
+            });
+            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+            assert!(venue.credentials.is_none());
         }
     }
 }

@@ -4,6 +4,8 @@ import type { WasmEngineLike } from './host.mjs';
 export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
   constructor(venue: string, optionsJson: string);
+  /** JSON-encoded health counters. */
+  health(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;

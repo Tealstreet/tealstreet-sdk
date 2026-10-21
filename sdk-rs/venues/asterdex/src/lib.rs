@@ -21,7 +21,7 @@ use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -37,6 +37,16 @@ pub struct Options {
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_secret);
+    }
 }
 
 struct Urls {
@@ -129,7 +139,7 @@ struct BookState {
 }
 
 pub struct AsterDex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     version: Version,
     credentials: Option<Credentials>,
     read_credentials: Option<Credentials>,
@@ -154,6 +164,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let user = nonempty(options.auth_user_address.as_deref())
             .or_else(|| nonempty(options.application_id.as_deref()));
         let signer = nonempty(options.auth_signer_address.as_deref())
@@ -293,7 +304,9 @@ impl AsterDex {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
 
@@ -1191,28 +1204,11 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
 
 fn reset_pending(pending: &mut Pending) {
     match pending {
-        Pending::Account(account::Request::Positions {
-            rows,
-            settings,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
+        Pending::Account(account::Request::Positions { rows, settings, .. }) => {
+            *rows = Default::default();
             settings.clear();
-            skipped.clear();
-            *invalid = false;
         }
-        Pending::Account(account::Request::Orders {
-            rows,
-            skipped,
-            invalid,
-            ..
-        }) => {
-            rows.clear();
-            skipped.clear();
-            *invalid = false;
-        }
+        Pending::Account(account::Request::Orders { rows, .. }) => *rows = Default::default(),
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
         Pending::ExchangeInfo { rows, skipped } => {

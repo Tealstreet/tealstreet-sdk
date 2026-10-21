@@ -2,6 +2,8 @@
 pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -13,6 +15,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const CURRENCIES: [&str; 2] = ["USDT", "USDC"];
 const RETAINED_EVENTS: usize = 20_000;
 const SNAPSHOT_DEADLINE_MS: f64 = 20_000.;
+const SKIP_LOG_LIMIT: usize = 4_096;
 const SOCKET: Config = Config {
     connect_timeout_ms: 15_000.,
     auth_timeout_ms: Some(SNAPSHOT_DEADLINE_MS),
@@ -33,14 +36,54 @@ pub struct Request {
     currency: usize,
     write_revision: u64,
     slice_revision: u64,
-    positions: Vec<Position>,
+    positions: SnapshotBuilder<String, Position>,
     contexts: HashMap<String, Context>,
     versions: HashMap<String, u64>,
-    /// Symbols whose rows failed to map; the store keeps their positions.
-    skipped: HashSet<String>,
-    /// A row without a usable symbol: keep every stored position of this slice.
-    unattributed: bool,
-    invalid: bool,
+    /// An owned row sits outside a catalogue still loading; the slice keeps its last snapshot.
+    hold: bool,
+}
+impl Request {
+    /// Rejects every position id a row on `symbol` may carry; its legs keep their stored copies.
+    /// An owned row with no stored copy is reported as an error: it commits as flat.
+    fn reject(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        logged: &mut HashSet<String>,
+        symbol: &str,
+        size: f64,
+        message: String,
+    ) {
+        let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
+        let level = if size != 0. && !stored {
+            LogLevel::Error
+        } else {
+            LogLevel::Warning
+        };
+        let key = format!("{}:{symbol}", CURRENCIES[self.currency]);
+        log_skip(cx, logged, key, level, message);
+        for id in [
+            symbol.to_owned(),
+            format!("{symbol}:long"),
+            format!("{symbol}:short"),
+        ] {
+            self.positions.reject(Some(id));
+        }
+    }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.log(level, message);
+    }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
 /// Only an HTTP read started after the failure can prove which of its orders exist.
@@ -110,6 +153,8 @@ pub struct State {
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
+    /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
+    skip_logged: HashSet<String>,
 }
 impl State {
     pub fn new() -> Self {
@@ -310,12 +355,10 @@ impl PhemexPerpetuals {
                 currency,
                 write_revision: self.account.write_revision,
                 slice_revision: self.account.slices[currency].revision,
-                positions: vec![],
+                positions: SnapshotBuilder::default(),
                 contexts: HashMap::new(),
                 versions: HashMap::new(),
-                skipped: HashSet::new(),
-                unattributed: false,
-                invalid: false,
+                hold: false,
             };
             self.request(
                 cx,
@@ -330,8 +373,12 @@ impl PhemexPerpetuals {
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.supervisor.connecting(cx);
-        self.account.socket =
-            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Private));
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
         self.account.authenticated = false;
         self.account.snapshot = false;
         self.account.snapshot_revision = self.account.order_revision;
@@ -353,7 +400,7 @@ impl PhemexPerpetuals {
             0
         };
         let wait = if self.account.failed {
-            2_000. * 2f64.powi(self.account.failures.min(4) as i32 - 1)
+            Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures)
         } else {
             2_000.
         };
@@ -378,34 +425,60 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
-        // A bad row never blocks the slice's balance; its positions keep the store's copy.
+        // A bad row keeps its positions' stored copies and never blocks the slice's balance,
+        // unless it is owned on a market that unsettled discovery may still list.
         let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
-            cx.log(
-                LogLevel::Warning,
+            let currency = CURRENCIES[request.currency];
+            let stored = cx.store.positions().iter().any(|p| {
+                cx.store
+                    .market(&p.symbol)
+                    .is_some_and(|m| m.quote == currency)
+            });
+            log_skip(
+                cx,
+                &mut self.account.skip_logged,
+                format!("{currency}:"),
+                if stored {
+                    LogLevel::Warning
+                } else {
+                    LogLevel::Error
+                },
                 "Phemex skipped an unreadable position row",
             );
-            request.unattributed = true;
+            request.positions.reject(None);
             return;
         };
         let symbol = row.symbol.to_ascii_uppercase();
         let Some(market) = cx.store.market(&symbol) else {
-            if row.size != 0.0 {
-                request.invalid = true;
+            if row.size != 0.0 && self.discovery_settled() {
+                let message = format!("Phemex skipped {symbol} position on an unavailable market");
+                request.reject(
+                    cx,
+                    &mut self.account.skip_logged,
+                    &symbol,
+                    row.size,
+                    message,
+                );
+            } else if row.size != 0.0 {
                 cx.log(
                     LogLevel::Warning,
                     "Phemex owned position market unavailable; preserving previous snapshot",
                 );
+                request.hold = true;
             }
             return;
         };
         if market.quote != CURRENCIES[request.currency]
             || (!row.currency.is_empty() && row.currency != CURRENCIES[request.currency])
         {
-            cx.log(
-                LogLevel::Warning,
-                format!("Phemex skipped {symbol} position with mismatched settlement"),
+            let message = format!("Phemex skipped {symbol} position with mismatched settlement");
+            request.reject(
+                cx,
+                &mut self.account.skip_logged,
+                &symbol,
+                row.size,
+                message,
             );
-            request.skipped.insert(symbol);
             return;
         }
         let prior = request
@@ -414,11 +487,14 @@ impl PhemexPerpetuals {
             .copied()
             .or_else(|| self.account.context(&row.symbol.to_ascii_uppercase()));
         let Some((context, position)) = row.map(cx.store, prior) else {
-            cx.log(
-                LogLevel::Warning,
-                format!("Phemex skipped unmappable {symbol} position row"),
+            let message = format!("Phemex skipped unmappable {symbol} position row");
+            request.reject(
+                cx,
+                &mut self.account.skip_logged,
+                &symbol,
+                row.size,
+                message,
             );
-            request.skipped.insert(symbol);
             return;
         };
         request
@@ -447,7 +523,7 @@ impl PhemexPerpetuals {
         if !(200..300).contains(&response.status)
             || envelope.code != 0
             || envelope.data.account.currency != CURRENCIES[request.currency]
-            || request.invalid
+            || request.hold
             || envelope.data.account.used < 0.
         {
             self.account_failed(cx, request, "invalid account-position snapshot");
@@ -462,22 +538,20 @@ impl PhemexPerpetuals {
         if request.write_revision == self.account.write_revision
             && request.slice_revision == self.account.slices[currency].revision
         {
-            let kept = |p: &Position| request.unattributed || request.skipped.contains(&p.symbol);
-            let mut positions: Vec<_> = cx
-                .store
-                .positions()
-                .iter()
-                .filter(|p| {
+            let (mut positions, slice): (Vec<_>, Vec<_>) =
+                cx.store.positions().iter().cloned().partition(|p| {
                     cx.store
                         .market(&p.symbol)
                         .is_none_or(|m| m.quote != CURRENCIES[currency])
-                        || kept(p) && !request.positions.iter().any(|r| r.id == p.id)
-                })
-                .cloned()
-                .collect();
+                });
             // A successful full slice also versions omissions. Keep exact native versions
             // for present rows: fresh authoritative REST may contain a long-lived position.
-            let present: HashSet<_> = request.positions.iter().map(|p| p.id.clone()).collect();
+            let present: HashSet<_> = request
+                .positions
+                .rows()
+                .iter()
+                .map(|p| p.id.clone())
+                .collect();
             let mut known: HashSet<_> = self.account.position_versions.keys().cloned().collect();
             known.extend(cx.store.positions().iter().map(|p| p.id.clone()));
             known.extend(request.versions.keys().cloned());
@@ -487,8 +561,7 @@ impl PhemexPerpetuals {
                     .store
                     .market(symbol)
                     .is_some_and(|m| m.quote == CURRENCIES[currency])
-                    || request.unattributed
-                    || request.skipped.contains(symbol)
+                    || !request.positions.allows_absence(&key)
                 {
                     continue;
                 }
@@ -510,11 +583,27 @@ impl PhemexPerpetuals {
                     self.account.position_absent.insert(key);
                 }
             }
-            positions.extend(request.positions);
+            // A clean slice re-arms its skip logs; otherwise only the symbols it mapped.
+            let prefix = format!("{}:", CURRENCIES[currency]);
+            if request.positions.rejected() == 0 {
+                self.account
+                    .skip_logged
+                    .retain(|key| !key.starts_with(&prefix));
+            } else {
+                for p in request.positions.rows() {
+                    if request.positions.allows_absence(&p.id) {
+                        self.account
+                            .skip_logged
+                            .remove(&format!("{prefix}{}", p.symbol));
+                    }
+                }
+            }
+            positions.extend(request.positions.commit(slice, |p| p.id.clone()));
             cx.store.set_positions(positions);
             for (symbol, context) in request.contexts {
                 self.account.install_context(cx, &symbol, context, true);
             }
+            // Derived over the committed slice, retained copies included, as WS pushes do.
             let upnl = currency_upnl(cx, currency);
             self.account.slices[currency].balance = Balance {
                 // Account pushes use the same raw field and subtract this currency's UPnL.
@@ -1344,7 +1433,7 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
             entry.reading = false;
             entry.failures = entry.failures.saturating_add(1);
-            let wait = 2_000. * 2f64.powi(entry.failures.min(5) as i32 - 1);
+            let wait = Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures);
             entry.not_before = entry.not_before.max(cx.now + wait);
         }
         // Keep the cause, never the response body.

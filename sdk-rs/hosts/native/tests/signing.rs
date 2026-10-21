@@ -44,14 +44,14 @@ async fn unconfigured_and_rejected_native_signers_fail_closed() {
     for transport in [
         NetworkTransport::new(),
         NetworkTransport::new()
-            .with_payload_signer(Arc::new(|_| Box::pin(async { Err("denied".into()) }))),
+            .with_payload_signer(Arc::new(|_| Box::pin(async { Err("https://venue.test/private?signature=private-signature Authorization: private-token".into()) }))),
     ] {
         let (events, mut inbox) = mpsc::unbounded_channel();
         transport.sign_payload(RequestId(8), payload(), 1000, events);
         match inbox.recv().await.unwrap() {
             HostEvent::PayloadSignFailed(id, error) => {
                 assert_eq!(id, RequestId(8));
-                assert!(error == "denied" || error == "Payload signing is not configured");
+                assert!(error == "Payload signing failed" || error == "Payload signing is not configured");
             }
             other => panic!("unexpected signer event: {other:?}"),
         }

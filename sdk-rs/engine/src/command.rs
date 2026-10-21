@@ -123,6 +123,18 @@ enum CommandIn {
         command: u32,
         tier: String,
     },
+    FetchBalanceInfo {
+        command: u32,
+    },
+    FetchClosedPositions {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -305,6 +317,23 @@ impl From<CommandIn> for Command {
             CommandIn::SetAccountTier { command, tier } => Self::Venue {
                 command,
                 action: crate::VenueAction::SetAccountTier { tier },
+            },
+            CommandIn::FetchBalanceInfo { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchBalanceInfo,
+            },
+            CommandIn::FetchClosedPositions {
+                command,
+                symbol,
+                from,
+                to,
+            } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol,
+                    from_ms: from,
+                    to_ms: to,
+                },
             },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchMaxLeverage { command, symbol } => {
@@ -555,6 +584,30 @@ mod tests {
         );
     }
     #[test]
+    fn balance_info_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchBalanceInfo","command":8}"#).unwrap(),
+            Command::Venue {
+                command: 8,
+                action: crate::VenueAction::FetchBalanceInfo,
+            }
+        );
+    }
+    #[test]
+    fn closed_positions_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchClosedPositions","command":7,"from":1,"to":2}"#).unwrap(),
+            Command::Venue {
+                command: 7,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol: None,
+                    from_ms: Some(1.0),
+                    to_ms: Some(2.0),
+                },
+            }
+        );
+    }
+    #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
         for op in ["getAccount", "fetchAccount"] {
             assert_eq!(
@@ -776,6 +829,80 @@ mod tests {
         ] {
             assert!(decode_host_input(json).is_err(), "must reject {json}");
         }
+    }
+
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    #[cfg(feature = "polling-control")]
+    struct PollVenue;
+    #[cfg(feature = "polling-control")]
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    #[cfg(feature = "polling-control")]
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351's decode bound: the host's absolute interval, sent as a scale
+    // of the native cadence, still cannot flood a venue or overflow a timer.
+    #[test]
+    #[cfg(feature = "polling-control")]
+    fn polling_intervals_cannot_create_request_floods_or_overflow_timers() {
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1.0, 1_000.0),
+            (2_000.0, 2_000.0),
+            (1e300, 120_000.0),
+        ] {
+            let json = format!(r#"{{"op":"setPollScale","scale":{}}}"#, input / 2_000.0);
+            let HostInput::PollScaleChanged { scale, ceiling_ms } =
+                decode_host_input(&json).unwrap()
+            else {
+                panic!("{json} must decode as a polling control")
+            };
+            let armed = armed_after(|engine| {
+                engine.handle(0.0, crate::Event::PollCeilingChanged { ceiling_ms });
+                engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+            });
+            assert_eq!(armed, [expected], "{json}");
+        }
+        // A finite scale whose product overflows is still capped; it never pauses.
+        let json = r#"{"op":"setPollScale","scale":1e308}"#;
+        let HostInput::PollScaleChanged { scale, .. } = decode_host_input(json).unwrap() else {
+            panic!("{json} must decode as a polling control")
+        };
+        let armed = armed_after(|engine| {
+            engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+        });
+        assert_eq!(armed, [120_000.0], "overflowing product takes the cap");
     }
 
     #[test]

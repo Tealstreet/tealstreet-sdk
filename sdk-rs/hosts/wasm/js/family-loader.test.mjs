@@ -50,7 +50,7 @@ test('every family is a Cargo feature, a web import and a host venue name', () =
   const cargo = readFileSync(new URL('../Cargo.toml', import.meta.url), 'utf8');
   const features = cargo.slice(cargo.indexOf('[features]'), cargo.indexOf('[dependencies]'));
   const web = readFileSync(new URL('./engine.web.mjs', import.meta.url), 'utf8');
-  const host = readFileSync(new URL('../src/lib.rs', import.meta.url), 'utf8');
+  const host = readFileSync(new URL('../../../registry/src/lib.rs', import.meta.url), 'utf8');
   for (const family of venueFamilies) {
     assert.match(features, new RegExp(`^${family} = \\[`, 'm'), `${family} feature`);
     assert.ok(web.includes(`case '${family}': return import('../pkg/web/${family}/safe_cex_wasm.js');`), `${family} import`);

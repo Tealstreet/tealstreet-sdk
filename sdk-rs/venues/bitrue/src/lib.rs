@@ -14,11 +14,11 @@ use safe_cex_engine::{
     TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::HashMap;
-use wire::{CandleWire, Contract, Message, Payload};
+use std::collections::{HashMap, HashSet};
+use wire::{CandleWire, Contract, ContractKey, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
@@ -26,6 +26,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub recv_window: u32,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -47,7 +58,7 @@ pub enum Job {
     Markets {
         rows: Vec<Market>,
         contracts: HashMap<String, ContractInfo>,
-        failed: bool,
+        malformed: HashSet<String>,
     },
     Account(account::Request),
     Trade(trading::Request),
@@ -108,7 +119,7 @@ struct SocketRead {
     timer: TimerId,
 }
 pub struct Bitrue {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     contracts: HashMap<String, ContractInfo>,
@@ -118,6 +129,9 @@ pub struct Bitrue {
     candles: HashMap<(String, Interval), u32>,
     reads: HashMap<String, Vec<SocketRead>>,
     startup_retry: safe_cex_engine::startup::Backoff<()>,
+    // Contracts rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     deferred: Vec<Command>,
 }
 #[derive(Serialize)]
@@ -207,6 +221,7 @@ fn candle(row: &CandleWire<'_>, multiplier: f64) -> Option<Candle> {
 }
 impl Bitrue {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -218,6 +233,8 @@ impl Bitrue {
             candles: HashMap::new(),
             reads: HashMap::new(),
             startup_retry: Default::default(),
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             deferred: Vec::new(),
         }
     }
@@ -324,11 +341,11 @@ impl Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed,
+                malformed,
             } => {
                 rows.clear();
                 contracts.clear();
-                *failed = false;
+                malformed.clear();
             }
             Job::Account(r) => r.reset(),
             Job::History(r) => r.reset(),
@@ -345,7 +362,7 @@ impl Bitrue {
             Job::Markets {
                 rows: Vec::new(),
                 contracts: HashMap::new(),
-                failed: false,
+                malformed: HashSet::new(),
             },
         );
     }
@@ -354,7 +371,9 @@ impl Bitrue {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(safe_cex_engine::SocketSpec::new(PUBLIC).channel(SocketChannel::Public)),
+        );
     }
     fn subscription(
         &self,
@@ -576,12 +595,16 @@ impl Venue for Bitrue {
             .store
             .markets()
             .iter()
-            .enumerate()
-            .map(|(i, m)| (i as u32, m.symbol.clone()))
+            .map(|m| m.symbol.clone())
             .collect();
-        for (i, symbol) in markets {
+        for symbol in markets {
+            // A refreshed catalogue can re-index markets; ticker rows keep their slots.
+            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                continue;
+            };
             let channel = topic(&symbol, "ticker");
-            self.channels.insert(channel.clone(), Channel::Ticker(i));
+            self.channels
+                .insert(channel.clone(), Channel::Ticker(ticker));
             self.subscription(cx, "sub", &channel, None, None, None);
         }
         for symbol in self.books.keys().cloned().collect::<Vec<_>>() {
@@ -635,8 +658,9 @@ impl Venue for Bitrue {
             Some(Channel::Ticker(index)) => {
                 let multiplier = cx
                     .store
-                    .markets()
+                    .tickers()
                     .get(*index as usize)
+                    .and_then(|t| cx.store.market(&t.symbol))
                     .map_or(1.0, |m| m.precision.amount);
                 cx.store.update_ticker_at(*index, |t| {
                     t.last = data.close.unwrap_or_default().0;
@@ -727,16 +751,20 @@ impl Venue for Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed: _,
+                malformed,
             } => match serde_json::from_str::<Contract<'_>>(item) {
                 Ok(row) => {
                     let parts: Vec<_> = row.symbol.split('-').collect();
-                    if parts.len() != 3
-                        || row.multiplier.0 <= 0.0
+                    if parts.len() != 3 {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    if row.multiplier.0 <= 0.0
                         || row.max_market_volume.0 <= 0.0
                         || row.price_precision > 18
                     {
                         safe_cex_engine::startup::skipped_row(cx);
+                        malformed.insert(row.symbol.to_string());
                         return;
                     }
                     contracts.insert(
@@ -778,7 +806,14 @@ impl Venue for Bitrue {
                         maker_fee: Some(0.001),
                     });
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    if let Ok(key) = serde_json::from_str::<ContractKey<'_>>(item)
+                        && key.symbol.split('-').count() == 3
+                    {
+                        malformed.insert(key.symbol.into_owned());
+                    }
+                }
             },
             Job::Account(r) => self.account_item(cx, r, item),
             Job::Trade(r) => self.trade_item(cx, r, item),
@@ -805,15 +840,40 @@ impl Venue for Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed,
+                malformed,
             } => {
-                if failed || !(200..300).contains(&response.status) || rows.is_empty() {
+                if !(200..300).contains(&response.status) || rows.is_empty() {
                     cx.log(LogLevel::Warning, "Bitrue contracts read failed");
                     self.startup_retry.failed(cx, ());
                     return;
                 }
-                self.startup_retry.succeeded(cx, &());
+                let refresh = cx.store.loaded().markets;
+                let mut contracts = contracts;
+                let rows = if refresh {
+                    for (symbol, contract) in std::mem::take(&mut self.contracts) {
+                        contracts.entry(symbol).or_insert(contract);
+                    }
+                    let merged = keep_listed(cx.store.markets(), rows);
+                    cx.store.set_markets(merged);
+                    Vec::new()
+                } else {
+                    rows
+                };
                 self.contracts = contracts;
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|symbol| cx.store.market(symbol).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.startup_retry.failed(cx, ());
+                } else {
+                    self.startup_retry.succeeded(cx, &());
+                }
+                if refresh {
+                    return;
+                }
                 let tickers = rows
                     .iter()
                     .map(|m| Ticker {
@@ -1073,6 +1133,58 @@ impl Venue for Bitrue {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("Bitrue stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

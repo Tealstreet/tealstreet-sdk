@@ -10,7 +10,7 @@ mod wire;
 
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Book};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -18,6 +18,13 @@ pub struct Options {
     pub paradex_address: Option<String>,
     pub subkey_address: Option<String>,
     pub payload_signer: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.subkey_address);
+    }
 }
 
 impl Options {
@@ -44,7 +51,7 @@ pub enum Pending {
 }
 
 pub struct Paradex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
@@ -53,8 +60,9 @@ pub struct Paradex {
 
 impl Paradex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
-            account: account::Account::new(options.clone()),
+            account: account::Account::new((*options).clone()),
             trading: trading::Trading::default(),
             history: history::History,
             options,
