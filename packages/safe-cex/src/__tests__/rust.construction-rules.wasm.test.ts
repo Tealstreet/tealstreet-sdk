@@ -87,7 +87,13 @@ it.each([
     asterdex: { apiVersion },
   }));
   try {
-    expect(JSON.parse(engine.construction!())).toEqual({ asterdexApiVersion: expected });
+    expect(JSON.parse(engine.construction!())).toEqual({
+      asterdexApiVersion: expected,
+      bridge: {
+        spot: false, demo: false, primaryCredentialsOnly: false, payloadSigning: false,
+        apiKeyIndexRequired: false, isolatedBookSubscriptions: true,
+      },
+    });
     const actions = JSON.parse(engine.start(1_700_000_000_000));
     expect(actions.some((action: { url?: string }) => action.url?.includes(`/fapi/${expected}/time`))).toBe(true);
   } finally {
