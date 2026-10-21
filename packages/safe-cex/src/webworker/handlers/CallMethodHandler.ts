@@ -1,4 +1,5 @@
 import { serializeCommandError } from '../../commandOutcome';
+import { historyCompletenessOf } from '../../historyCompleteness';
 import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
@@ -20,6 +21,14 @@ export class CallMethodHandler extends BaseHandler {
     );
   }
 
+  private replySuccess = (requestId: string, result: unknown) => {
+    const completeness = historyCompletenessOf(result);
+    this._ctx.postMessage({
+      op: 'callMethod:done',
+      data: { requestId, result, success: true, ...(completeness ? { completeness } : {}) },
+    });
+  };
+
   handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[]) => {
     let result: any = null;
     if (logging) {
@@ -31,7 +40,7 @@ export class CallMethodHandler extends BaseHandler {
         if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
         result = await (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
-        this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+        this.replySuccess(requestId, result);
         return;
       }
       switch (method) {
@@ -116,7 +125,7 @@ export class CallMethodHandler extends BaseHandler {
       if (logging) {
         console.log('Method called', method, result);
       }
-      this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+      this.replySuccess(requestId, result);
     } catch (e: any) {
       console.error('Error calling method', e);
       const serializedError = serializeCommandError(e);

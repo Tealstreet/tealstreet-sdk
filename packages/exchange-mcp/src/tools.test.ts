@@ -189,3 +189,19 @@ describe('order tools', () => {
     expect(cancelOrders).toHaveBeenCalledWith([order('2', 'ETHUSDT')]);
   });
 });
+
+it.each(['get_order_history', 'get_fills', 'get_closed_pnl', 'get_income'])(
+  '%s preserves the incomplete marker while adding UTC fields', async (name) => {
+    const rows = Object.defineProperty([{ timestamp: 1 }], 'incomplete', { value: true });
+    const exchange = {
+      fetchHistoricalOrders: async () => rows,
+      fetchHistoricalFills: async () => rows,
+      fetchClosedPnl: async () => rows,
+      fetchIncomeHistory: async () => rows,
+    };
+    const result = await run(name, exchange, {});
+    expect(result).toHaveProperty('incomplete', true);
+    expect(Object.getOwnPropertyDescriptor(result, 'incomplete')?.enumerable).toBe(false);
+    expect(rows).toEqual([{ timestamp: 1 }]);
+  },
+);

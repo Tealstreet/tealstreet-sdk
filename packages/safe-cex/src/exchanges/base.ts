@@ -20,6 +20,7 @@ import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import { withHistoryCompleteness } from '../historyCompleteness';
 import {
   AccountGreeks,
   Candle,
@@ -1798,8 +1799,9 @@ export class BaseExchange implements Exchange {
           clearTimeout(timeout);
           this.emitter.off('callMethod:done', handleDone);
           if (event.success) {
-            resolve(event.result);
-            this.afterMethodCalledInWorker(event.result, method, ...args);
+            const result = withHistoryCompleteness(event.result, event.completeness);
+            resolve(result);
+            this.afterMethodCalledInWorker(result, method, ...args);
           } else {
             reject(deserializeCommandError(event.result));
           }

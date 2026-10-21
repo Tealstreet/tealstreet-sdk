@@ -123,3 +123,20 @@ describe('Rust journal paths follow the TS venue declarations', () => {
     await expect(exchange.fetchHistoricalPositions({ account: 'a' })).rejects.toThrow('no journal records path declared');
   });
 });
+
+
+it.each([
+  ['bybit', 'fetchClosedPositions'],
+  ['bybit', 'fetchOrderHistory'],
+  ['okx', 'fetchClosedPositions'],
+  ['blofin', 'fetchClosedPositions'],
+  ['woo', 'fetchOrderHistory'],
+] as const)('%s preserves incomplete %s through an empty derived history', async (name, axis) => {
+  const responses = { fetchClosedPositions: [], fetchOrderHistory: [] };
+  Object.defineProperty(responses[axis], 'incomplete', { value: true });
+  const { exchange } = make(name, responses);
+  const rows = await exchange.fetchHistoricalPositions({ account: 'account', from: 1, to: 2 });
+  expect(rows).toEqual([]);
+  expect(rows).toHaveProperty('incomplete', true);
+  expect(Object.getOwnPropertyDescriptor(rows, 'incomplete')?.enumerable).toBe(false);
+});

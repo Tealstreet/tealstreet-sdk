@@ -26,6 +26,9 @@ export {
 
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
+export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
+
 export { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 
 export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
