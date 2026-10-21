@@ -67,3 +67,17 @@ retained copy errors; a prior warning may escalate once. Coinbase includes
 spot holdings and REST, user-snapshot and deferred-detail orders. Existing
 reconciliation and parse-site notice timing stay intact. Retention tests cover
 terminal/symbol fences, repeat suppression, recovery and missing-copy upgrades.
+
+### Orderly margin-mode row isolation
+
+Plan: change `Request::Modes.rows` to the existing `SnapshotBuilder` so rejected
+symbols retain their old default while accepted peers commit. Recover the
+symbol independently if mode decoding fails; an unidentified row protects the
+old map's scope. Keep the structural `invalid` flag and settings-revision fence,
+valid-empty clearing, broker suffixes, empty-mode-as-Cross, and existing accepted
+duplicate last-wins behavior. Use fixed `row.skipped` diagnostics without raw
+payloads. Full-engine startup regressions preseed the private defaults cache
+and check identified/unidentified rejection, replacements, empty/duplicate
+rows, failed envelopes and a newer settings revision. Verify Orderly plus
+Binance, strict Clippy/fmt, independent review and full CI. Merge remains held
+behind the overseer's #1602/#1487 queue until it is lifted.
