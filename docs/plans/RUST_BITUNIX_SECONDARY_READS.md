@@ -34,3 +34,8 @@ secondary signer disabled. Restored production passes 372 combined native tests,
 actual registry construction, 33 native routing tests, 328 focused SDK tests plus
 the matrix case, package typecheck/lint and strict touched Clippy/fmt/bans. Four
 Bitunix routing cases added; all 70 existing fixture cases unchanged.
+
+CI caught the native unit consumer's exact fixture count still pinned to 70.
+Updated only that test assertion to 74; all 70 prior cases remain unchanged. The
+actual native unit matrix consumer now passes, along with native-host strict
+Clippy/fmt/bans; independent one-line test-delta review CLEAR.
