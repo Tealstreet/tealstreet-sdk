@@ -32,6 +32,13 @@ const REPAIR_MS: f64 = 750.0;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
+    Metadata {
+        command: u32,
+        symbol: String,
+        revision: u64,
+        generation: u64,
+        leverage: Option<(f64, f64)>,
+    },
     ListenKey {
         epoch: u64,
     },
@@ -82,8 +89,8 @@ pub struct Account {
     repair: Option<TimerId>,
     orders_revision: u64,
     positions_revision: u64,
-    /// Leverage/margin settings changes, which fence a leverage read.
     settings_revision: u64,
+    metadata_generations: HashMap<String, u64>,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -285,16 +292,48 @@ impl Account {
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
     }
-    /// Fences a leverage read against newer settings from a config event,
-    /// a position snapshot or a settings write.
-    pub fn settings_revision(&self) -> u64 {
-        self.settings_revision
-    }
-    pub fn bump_settings(&mut self) {
-        self.settings_revision = self.settings_revision.wrapping_add(1);
-    }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
+    }
+    pub fn settings_changed(&mut self) {
+        self.settings_revision = self.settings_revision.wrapping_add(1);
+    }
+    pub fn fetch_metadata(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        command: u32,
+        symbol: String,
+    ) {
+        let Some(credentials) = credentials else {
+            cx.fail(
+                command,
+                metadata_error("BingX metadata requires credentials"),
+            );
+            return;
+        };
+        let Some(market) = cx.store.market(&symbol) else {
+            cx.fail(command, metadata_error("Unknown BingX market"));
+            return;
+        };
+        let native = market.id.clone();
+        let generation = self.metadata_generations.entry(symbol.clone()).or_default();
+        *generation = generation.wrapping_add(1);
+        Self::request(
+            cx,
+            credentials,
+            Method::Get,
+            crate::paths::LEVERAGE,
+            Params::new().str("symbol", &native),
+            Request::Metadata {
+                command,
+                symbol,
+                revision: self.settings_revision,
+                generation: *generation,
+                leverage: None,
+            },
+            false,
+        );
     }
     /// Keeps earlier malformed markets the new catalogue still lacks; returns the
     /// malformed count before and after.
@@ -365,7 +404,8 @@ impl Account {
                 ArrayAt::EnvelopeField("data")
             }
         });
-        crate::issue(
+        let scope = auth_scope(&request);
+        let id = crate::issue(
             cx,
             Some(credentials),
             method,
@@ -374,6 +414,9 @@ impl Account {
             at,
             Pending::Account(request),
         );
+        if let Some(scope) = scope {
+            tag_read(cx, id, method, credentials, scope);
+        }
     }
 
     fn fetch_key(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -797,6 +840,79 @@ impl Account {
             return;
         }
         match request {
+            Request::Metadata {
+                command,
+                symbol,
+                revision,
+                generation,
+                leverage,
+            } => {
+                if revision != self.settings_revision
+                    || self.metadata_generations.get(&symbol) != Some(&generation)
+                {
+                    cx.fail(
+                        command,
+                        metadata_error(
+                            "BingX settings changed during metadata read; refresh metadata",
+                        ),
+                    );
+                    return;
+                }
+                if let Some((buy, sell)) = leverage {
+                    let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
+                    let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
+                        Ok("ISOLATED") => MarginType::Isolated,
+                        Ok("CROSSED") => MarginType::Cross,
+                        _ => {
+                            cx.fail(command, metadata_error("Invalid BingX margin metadata"));
+                            return;
+                        }
+                    };
+                    self.bump_positions();
+                    cx.store.update_setting(&symbol, |s| {
+                        s.leverage = buy;
+                        s.buy_leverage = Some(buy);
+                        s.sell_leverage = Some(sell);
+                        s.margin_type = Some(margin);
+                    });
+                    cx.done(
+                        command,
+                        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
+                    );
+                } else {
+                    let parsed = serde_json::from_str::<Data<Leverage>>(response.body);
+                    let Some(rails) = parsed
+                        .ok()
+                        .map(|p| p.data)
+                        .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
+                    else {
+                        cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
+                        return;
+                    };
+                    let Some(market) = cx.store.market(&symbol) else {
+                        cx.fail(
+                            command,
+                            metadata_error("BingX market disappeared during metadata read"),
+                        );
+                        return;
+                    };
+                    Self::request(
+                        cx,
+                        credentials,
+                        Method::Get,
+                        "/openApi/swap/v2/trade/marginType",
+                        Params::new().str("symbol", &market.id),
+                        Request::Metadata {
+                            command,
+                            symbol,
+                            revision,
+                            generation,
+                            leverage: Some((rails.long_leverage, rails.short_leverage)),
+                        },
+                        false,
+                    );
+                }
+            }
             Request::ListenKey { .. } => {
                 self.key_in_flight = false;
                 let parsed = serde_json::from_str::<ListenKey<'_>>(response.body);
@@ -930,7 +1046,7 @@ impl Account {
                     rows.extend(kept);
                     cx.store.set_positions(rows);
                     if !settings.is_empty() {
-                        self.bump_settings();
+                        self.settings_changed();
                     }
                     for (symbol, value) in settings {
                         cx.store.update_setting(&symbol, |s| *s = value);
@@ -1023,6 +1139,7 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
+            Request::Metadata { command, .. } => cx.fail(command, metadata_error(error)),
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1060,26 +1177,52 @@ impl Account {
                     self.balance_revision = self.balance_revision.wrapping_add(1);
                     self.fetch_balance(cx, credentials);
                 }
-                let candidates = [
+                let mut selected = None;
+                for (index, rows) in [
                     &event.a.positions,
                     &event.a.balances,
                     &event.a.legacy_positions,
-                ];
-                if let Some(rows) = candidates
-                    .into_iter()
-                    .find(|rows| rows.iter().any(|p| !p.s.is_empty() && p.pa.is_some()))
+                ]
+                .into_iter()
+                .enumerate()
                 {
+                    let has_position = rows.iter().any(|raw| {
+                        serde_json::from_str::<PositionIntent<'_>>(raw.get())
+                            .ok()
+                            .is_some_and(|p| !p.s.is_empty())
+                    });
+                    // P/p are dedicated position arrays; malformed-only updates need repair too.
+                    if has_position || (!rows.is_empty() && index != 1) {
+                        selected = Some((rows, index == 1));
+                        break;
+                    }
+                }
+                if let Some((rows, balances)) = selected {
                     self.bump_positions();
-                    for p in rows {
-                        self.on_position(cx, p);
+                    for raw in rows {
+                        if balances
+                            && !serde_json::from_str::<PositionIntent<'_>>(raw.get())
+                                .ok()
+                                .is_some_and(|p| !p.s.is_empty())
+                        {
+                            continue;
+                        }
+                        match serde_json::from_str::<PositionUpdate<'_>>(raw.get()) {
+                            Ok(p) if !p.s.is_empty() && p.pa.is_some() => self.on_position(cx, &p),
+                            _ => cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                "Skipping malformed BingX position update; REST repair scheduled",
+                            ),
+                        }
                     }
                     self.schedule_repair(cx);
                 }
             }
             "ACCOUNT_CONFIG_UPDATE" => {
                 if let Some(config) = event.ac {
+                    self.settings_changed();
                     self.bump_positions();
-                    self.bump_settings();
                     let symbol = config.s.replace('-', "");
                     let hedged = cx.store.hedged();
                     if config.l > 0.0 {
@@ -1498,6 +1641,83 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
+}
+
+/// Tag an account read with the credential slot that actually signs it.
+pub(crate) fn tag_read(
+    cx: &mut Cx<'_, Pending>,
+    id: safe_cex_engine::RequestId,
+    method: Method,
+    credentials: &Credentials,
+    scope: safe_cex_engine::AccountReadScope,
+) {
+    let slot = if method == Method::Get && credentials.read.is_some() {
+        safe_cex_engine::CredentialSlot::Secondary
+    } else {
+        safe_cex_engine::CredentialSlot::Primary
+    };
+    cx.tag_account_read(id, slot, scope);
+}
+
+pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match request {
+        Request::PositionMode { .. } => Settings,
+        Request::Balance { .. } => Balance,
+        Request::Positions { .. } => Positions,
+        Request::OpenOrders { .. } => Orders,
+        _ => return None,
+    })
+}
+impl crate::Bingx {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        // A first signature rejection is re-signed once; only the final answer counts.
+        let pending = match pending {
+            Pending::Signed(signed)
+                if !signed.resent && crate::signature_rejected(response.body) =>
+            {
+                return None;
+            }
+            Pending::Signed(signed) => &signed.inner,
+            pending => pending,
+        };
+        let Pending::Account(request) = pending else {
+            return None;
+        };
+        auth_scope(request)?;
+        #[derive(serde::Deserialize)]
+        struct Evidence {
+            code: i64,
+        }
+        let evidence: Evidence = serde_json::from_str(response.body).ok()?;
+        if matches!(evidence.code, 100001 | 100004 | 100413 | 100419) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || evidence.code != 0 {
+            return None;
+        }
+        let valid = match request {
+            Request::PositionMode { .. } => {
+                serde_json::from_str::<ModeEnvelope>(response.body).is_ok()
+            }
+            Request::Balance { failed, .. } => !failed,
+            // Undecodable rows are skipped individually; a signed code-0 page
+            // still proves the credential was accepted.
+            Request::Positions { .. } | Request::OpenOrders { .. } => true,
+            _ => false,
+        };
+        valid.then_some(Accepted)
+    }
+}
+
+/// Metadata reads do not submit a trading effect, including failed confirmations.
+pub(crate) fn metadata_error(message: impl Into<String>) -> safe_cex_engine::VenueError {
+    safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }
 
 #[cfg(test)]

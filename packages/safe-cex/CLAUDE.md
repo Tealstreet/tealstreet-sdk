@@ -166,7 +166,10 @@ never from venue names, and adopts it once the engine exists (`ensureHost` or
 `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
 published rails, and `onMetadata` answers from those rails once a metadata
 refresh has loaded them but asks the venue for a symbol not yet refreshed (the
-worker only asks when the active symbol has no rails). Missing history axes
+worker only asks when the active symbol has no rails). `onReadAndMetadata`
+keeps explicit reads fresh and also refreshes a selected symbol through
+`updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
+venues. Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
 once the engine exists. `account` also gates the engine: `FetchAccount` to a
 venue whose record says `unsupported` is refused before the venue runs, so a
@@ -1276,3 +1279,15 @@ Custom provider upgrade headers require a capable host and are checked before
 engine construction. History `orderId`/`status` filters fail explicitly rather
 than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
 for native IDs, margin modes, caller IDs and socket capacity.
+
+
+## Native credential polling feedback
+
+Rust account-read notices carry the construction-time signer slot and read
+scope, never credentials or response bodies. Bounded counters isolate primary
+and secondary Account/Balance/Orders/Positions/Settings failures; only matching
+accepted evidence clears a counter. Their maximum drives the existing Base
+polling policy, including server slowdown and Infinity. Unknown, public,
+unsigned and retry-intermediate results do not clear or create failures.
+Coinbase currently uses primary JWT credentials only: saved read fields and
+their proxy are dropped from effective options with a warning before startup.

@@ -15,7 +15,8 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
+    Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -61,11 +62,6 @@ pub enum Pending {
         rows: Vec<Candle>,
         valid: bool,
     },
-    Leverage {
-        command: CommandId,
-        symbol: String,
-        revision: u64,
-    },
     Signed(Box<Signed>),
 }
 
@@ -88,7 +84,7 @@ pub(crate) fn issue(
     params: Params,
     at: Option<ArrayAt>,
     pending: Pending,
-) {
+) -> RequestId {
     let (url, headers, body) = params
         .clone()
         .into_request(method, path, credentials, cx.now);
@@ -107,10 +103,10 @@ pub(crate) fn issue(
     match at {
         Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
         None => cx.request(method, url, headers, body, pending),
-    };
+    }
 }
 
-fn signature_rejected(body: &str) -> bool {
+pub(crate) fn signature_rejected(body: &str) -> bool {
     serde_json::from_str::<Rejection<'_>>(body).is_ok_and(|r| {
         r.code == Some(100_001)
             || r.msg
@@ -319,6 +315,10 @@ impl Bingx {
             params
                 .clone()
                 .into_request(method, path, self.credentials.as_ref(), cx.now);
+        let scope = match &inner {
+            Pending::Account(request) => account::auth_scope(request),
+            _ => None,
+        };
         let pending = Pending::Signed(Box::new(Signed {
             inner,
             method,
@@ -327,10 +327,13 @@ impl Bingx {
             at,
             resent: true,
         }));
-        match at {
+        let id = match at {
             Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
             None => cx.request(method, url, headers, body, pending),
         };
+        if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
+            account::tag_read(cx, id, method, credentials, scope);
+        }
     }
 
     /// The seed's ticker slot for a native symbol; after commit, the store's.
@@ -654,111 +657,23 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
     }
 }
 
-impl Bingx {
-    /// A fresh read of the symbol's long/short rails, as the TS adapter does.
-    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
-        let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
-            cx.fail(command, format!("unknown market {symbol}"));
-            return;
-        };
-        if self.credentials.is_none() {
-            cx.fail(command, String::from("BingX leverage requires credentials"));
-            return;
-        }
-        issue(
-            cx,
-            self.credentials.as_ref(),
-            Method::Get,
-            paths::LEVERAGE,
-            Params::new().str("symbol", &market_id),
-            None,
-            Pending::Leverage {
-                command,
-                symbol,
-                revision: self.account.settings_revision(),
-            },
-        );
-    }
-    fn on_leverage(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: &str,
-        revision: u64,
-        response: Response<'_>,
-    ) {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Rails {
-            #[serde(deserialize_with = "wire::number")]
-            long_leverage: f64,
-            #[serde(deserialize_with = "wire::number")]
-            short_leverage: f64,
-        }
-        #[derive(Deserialize)]
-        struct Envelope {
-            data: Rails,
-        }
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Fetched {
-            buy_leverage: f64,
-            sell_leverage: f64,
-        }
-        let rails = success(response).and_then(|()| {
-            let envelope: Envelope = serde_json::from_str(response.body)
-                .map_err(|e| format!("invalid BingX leverage response: {e}"))?;
-            let Rails {
-                long_leverage,
-                short_leverage,
-            } = envelope.data;
-            if long_leverage > 0.0 && short_leverage > 0.0 {
-                Ok((long_leverage, short_leverage))
-            } else {
-                Err("invalid BingX leverage response: non-positive leverage".into())
-            }
-        });
-        let (long, short) = match rails {
-            Ok(rails) => rails,
-            Err(error) => {
-                cx.command_error(command, &error);
-                cx.fail(command, error);
-                return;
-            }
-        };
-        // Settings changed during the read are newer than this snapshot: answer
-        // them instead, so the caller's store cannot regress either.
-        let (long, short) = if self.account.settings_revision() == revision {
-            cx.store.update_setting(symbol, |s| {
-                s.leverage = long;
-                s.buy_leverage = Some(long);
-                s.sell_leverage = Some(short);
-            });
-            (long, short)
-        } else {
-            cx.store
-                .setting(symbol)
-                .and_then(|s| Some((s.buy_leverage?, s.sell_leverage?)))
-                .unwrap_or((long, short))
-        };
-        match serde_json::to_string(&Fetched {
-            buy_leverage: long,
-            sell_leverage: short,
-        }) {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error.to_string()),
-        }
-    }
-}
-
 impl Venue for Bingx {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
-            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -839,7 +754,7 @@ impl Venue for Bingx {
             Pending::Identity(_) => {}
             Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
-            Pending::Trade(_) | Pending::Leverage { .. } => {}
+            Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::Markets { rows, skipped } => {
                 if rows.len() == rows.capacity() {
@@ -973,11 +888,11 @@ impl Venue for Bingx {
                 return;
             }
             Pending::Trade(request) => {
+                if request.changes_settings() {
+                    self.account.settings_changed();
+                }
                 self.account.bump_orders();
                 self.account.bump_positions();
-                if request.changes_settings() {
-                    self.account.bump_settings();
-                }
                 let reconcile = (request.changes_settings() || request.reconciles_orders())
                     && success(response).is_ok();
                 let accepted = request.accepts_placement(response);
@@ -997,14 +912,6 @@ impl Venue for Bingx {
                     self.account.on_response(cx, request, response, c);
                 }
                 self.observe_orders(cx);
-                return;
-            }
-            Pending::Leverage {
-                command,
-                symbol,
-                revision,
-            } => {
-                self.on_leverage(cx, command, &symbol, revision, response);
                 return;
             }
             pending => pending,
@@ -1182,7 +1089,7 @@ impl Venue for Bingx {
                 }
                 return;
             }
-            Pending::Candles { command, .. } | Pending::Leverage { command, .. } => {
+            Pending::Candles { command, .. } => {
                 cx.command_error(command, error);
                 cx.fail(command, error);
                 return;
@@ -1255,11 +1162,27 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if matches!(
+            &command,
+            Command::SetLeverage { .. }
+                | Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+        ) {
+            self.account.settings_changed();
+        }
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
             return;
         }
         match command {
+            Command::FetchLeverage { command, symbol } => {
+                if self.trading.settings_pending() {
+                    cx.fail(command, account::metadata_error("BingX settings write is still pending; refresh metadata after it completes"));
+                } else {
+                    self.account
+                        .fetch_metadata(cx, self.credentials.as_ref(), command, symbol);
+                }
+            }
             Command::Query { command, query } => {
                 self.history
                     .query(cx, self.credentials.as_ref(), command, query)
@@ -1358,18 +1281,9 @@ impl Venue for Bingx {
                     },
                 );
             }
-            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             other => {
                 self.account.bump_orders();
                 self.account.bump_positions();
-                if matches!(
-                    other,
-                    Command::SetLeverage { .. }
-                        | Command::SetMarginType { .. }
-                        | Command::SetPositionMode { .. }
-                ) {
-                    self.account.bump_settings();
-                }
                 if !self.trading.command(cx, self.credentials.as_ref(), other) {
                     cx.notice(
                         Level::Warn,

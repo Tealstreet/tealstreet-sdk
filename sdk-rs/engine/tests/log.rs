@@ -56,6 +56,13 @@ impl Venue for Logger {
                     ErrorKind::Rejected
                 }),
             ),
+            Some(("notice", message)) => cx.notice(Level::Warn, code::ROW_SKIPPED, message),
+            Some(("history", message)) => cx.event(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
+                message,
+                vec![("command", 77u32.into())],
+            ),
             Some(("log", message)) => cx.notice(Level::Info, code::STARTUP_PROGRESS, message),
             Some(("warn", message)) => cx.notice(Level::Warn, code::REQUEST_FAILED, message),
             Some((level, message)) => {
@@ -150,6 +157,27 @@ fn events_below_the_host_minimum_are_dropped_but_still_counted() {
             ..
         })]
     ));
+}
+
+#[test]
+fn incomplete_history_marker_survives_an_error_only_threshold() {
+    let mut engine = engine();
+    engine.set_log_level(Level::Error);
+    assert!(send(&mut engine, "warn:ordinary coded warning").is_empty());
+    assert!(send(&mut engine, "notice:ordinary structured warning").is_empty());
+    assert!(send(&mut engine, "info:ordinary structured event").is_empty());
+    let notices = send(
+        &mut engine,
+        &format!("history:{}", "é".repeat(MAX_LOG_BYTES)),
+    );
+    let [Notice::Event(event)] = notices.as_slice() else {
+        panic!("coverage marker must survive: {notices:?}");
+    };
+    assert_eq!(event.level, Level::Warn);
+    assert_eq!(event.code, code::HISTORY_INCOMPLETE);
+    assert_eq!(event.fields, vec![("command", Value::Num(77.0))]);
+    assert!(event.message.len() <= MAX_LOG_BYTES);
+    assert!(event.message.ends_with('…'));
 }
 
 #[test]

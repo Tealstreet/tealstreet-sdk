@@ -35,6 +35,9 @@ class CommandDiagnosticCallbackError extends Error {
 class CommandProgressCallbackError extends Error {
   constructor(cause) { super('Command progress callback failed', { cause }); }
 }
+class AccountAuthCallbackError extends Error {
+  constructor(cause) { super('Account authentication callback failed', { cause }); }
+}
 let nextReceiptSession = 0;
 
 function receiptSession() {
@@ -225,8 +228,12 @@ export class EngineHost {
   command(command, options) {
     if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
     let timeoutMs;
-    try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
-    catch (error) { return Promise.reject(error); }
+    let onEvent;
+    try {
+      timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs);
+      onEvent = options?.onEvent;
+      if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
+    } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
@@ -238,7 +245,7 @@ export class EngineHost {
       receiptKey: `${this.receiptSession ??= receiptSession()}:${reply}`, commandId: reply, orderIdentities: [] };
     const promise = reply === undefined
       ? Promise.resolve()
-      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity }));
+      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));
     try {
       const startedAt = this.transport.now();
       const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply });
@@ -561,7 +568,7 @@ export class EngineHost {
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
       catch (error) {
-        if (error instanceof CommandProgressCallbackError || error instanceof CommandDiagnosticCallbackError) { callbackFailure ??= error; continue; }
+        if (error instanceof CommandProgressCallbackError || error instanceof CommandDiagnosticCallbackError || error instanceof AccountAuthCallbackError) { callbackFailure ??= error; continue; }
         if (!(error instanceof UnknownEngineActionError)) throw error;
         unknown ??= error;
       }
@@ -571,7 +578,7 @@ export class EngineHost {
       // ordinary rejection that a caller could mistake for a safe retry.
       // Diagnostic listeners may have already displayed the command error
       // before throwing. Reporting their own failure must not add another toast.
-      const level = callbackFailure instanceof CommandDiagnosticCallbackError ? 'warning' : 'error';
+      const level = callbackFailure instanceof CommandProgressCallbackError ? 'error' : 'warning';
       let reported = false;
       try {
         if (this.handlers.onLog) {
@@ -730,18 +737,36 @@ export class EngineHost {
       case 'deactivate':
         this.handlers.onDeactivate?.();
         break;
+      case 'accountAuth': {
+        if (!['primary', 'secondary'].includes(action.credential)
+          || !['account', 'balance', 'orders', 'positions', 'settings'].includes(action.scope)
+          || !['accepted', 'rejected'].includes(action.outcome)
+          || Object.keys(action).some((key) => !['op', 'credential', 'scope', 'outcome'].includes(key))) {
+          throw new UnknownEngineActionError('Invalid account authentication action');
+        }
+        try {
+          this.handlers.onAccountAuth?.(Object.freeze({ credential: action.credential, scope: action.scope, outcome: action.outcome }));
+        } catch (cause) { throw new AccountAuthCallbackError(cause); }
+        break;
+      }
       case 'startupFailed':
         this.handlers.onStartupFailed?.(action.detail);
         break;
       case 'event': {
         const { level, code, message, fields = {} } = action;
-        // A history read that could not be walked completely names its command.
-        if (code === 'history.incomplete' && typeof fields.command === 'number') {
-          const pending = this.commands.get(fields.command);
-          if (pending) pending.incomplete = true;
-        }
-        if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
+        // Registering the per-call handler before dispatch also covers synchronous events.
+        const command = fields?.command;
+        const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
+          ? this.commands.get(command) : undefined;
+        if (code === 'history.incomplete' && pending) pending.incomplete = true;
+        const event = { level, code, message, fields };
+        let callbackFailure;
+        try { pending?.onEvent?.(event); }
+        catch (cause) { callbackFailure = new CommandDiagnosticCallbackError(cause); }
+        if (this.handlers.onEvent) this.handlers.onEvent(event);
         else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
+        // A broken per-command observer cannot skip a later native completion.
+        if (callbackFailure) throw callbackFailure;
         break;
       }
       case 'commandError': {

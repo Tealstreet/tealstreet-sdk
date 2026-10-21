@@ -251,6 +251,7 @@ enum Control {
         client: u64,
         outgoing: mpsc::Sender<Outgoing>,
         cancel: watch::Sender<bool>,
+        account_auth: bool,
         ready: oneshot::Sender<Result<(), &'static str>>,
     },
     Command {
@@ -265,12 +266,18 @@ enum Control {
     Leave(u64),
 }
 
+/// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
+/// `accountAuth` notices; the negotiated protocol stays v1.
+pub const ACCOUNT_AUTH_PROTOCOL: &str = "safe-cex-frame.account-auth";
+
 struct Peer {
     outgoing: mpsc::Sender<Outgoing>,
     cancel: watch::Sender<bool>,
     books: HashSet<String>,
     candles: HashSet<(String, Interval)>,
     tickers: Option<HashSet<String>>,
+    /// Offered ACCOUNT_AUTH_PROTOCOL: older v1 clients reject unknown notices.
+    account_auth: bool,
 }
 struct Pending {
     client: Option<u64>,
@@ -316,8 +323,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             tokio::select! {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
-                    Some(Control::Join { client, outgoing, cancel, ready }) => {
-                        let _ = ready.send(self.join(client, outgoing, cancel));
+                    Some(Control::Join { client, outgoing, cancel, account_auth, ready }) => {
+                        let _ = ready.send(self.join(client, outgoing, cancel, account_auth));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
@@ -350,6 +357,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         client: u64,
         outgoing: mpsc::Sender<Outgoing>,
         cancel: watch::Sender<bool>,
+        account_auth: bool,
     ) -> Result<(), &'static str> {
         if self.peers.len() >= self.config.max_clients_per_account {
             return Err("account client limit reached");
@@ -374,6 +382,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth,
             },
         );
         Ok(())
@@ -423,6 +432,18 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         self.send(client, Outgoing::Text(text));
                     }
                 }
+                Notice::AccountAuth {
+                    credential,
+                    scope,
+                    outcome,
+                } => self.broadcast_to(
+                    Outgoing::Text(encode_notice(ServerNotice::AccountAuth {
+                        credential,
+                        scope,
+                        outcome,
+                    })),
+                    |peer| peer.account_auth,
+                ),
                 Notice::StartupFailed { error } => {
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
@@ -454,9 +475,48 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         );
                     }
                 }
-                Notice::Event(event) => {
+                Notice::Event(mut event) => {
+                    let owner = if let Some(index) =
+                        event.fields.iter().position(|(key, _)| *key == "command")
+                    {
+                        // Reject ambiguous fields and values that cannot name a native u32 command.
+                        if event.fields[index + 1..]
+                            .iter()
+                            .any(|(key, _)| *key == "command")
+                        {
+                            continue;
+                        }
+                        let Value::Num(command) = &event.fields[index].1 else {
+                            continue;
+                        };
+                        if !command.is_finite()
+                            || command.fract() != 0.0
+                            || *command < 0.0
+                            || *command > f64::from(u32::MAX)
+                        {
+                            continue;
+                        }
+                        let Some(pending) = self.pending.get(&(*command as u32)) else {
+                            continue;
+                        };
+                        let Some(client) = pending
+                            .client
+                            .filter(|client| self.peers.contains_key(client))
+                        else {
+                            continue;
+                        };
+                        event.fields[index].1 = Value::from(pending.original);
+                        Some(client)
+                    } else {
+                        // A coverage marker without an owner is not a background diagnostic.
+                        if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
+                            continue;
+                        }
+                        None
+                    };
                     let level = event.level.as_str();
-                    self.broadcast_log(
+                    self.route_log(
+                        owner,
                         level,
                         event.level >= Level::Warn,
                         |message| {
@@ -477,8 +537,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
     /// with no client attached Warn+ goes to stderr instead of being dropped.
-    fn broadcast_log(
+    fn route_log(
         &mut self,
+        owner: Option<u64>,
         level: &str,
         warn: bool,
         encode: impl Fn(&str) -> Arc<str>,
@@ -513,7 +574,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
             text = encode(&message[..fits]);
         }
         if text.len() <= limit {
-            self.broadcast(Outgoing::Text(text));
+            if let Some(client) = owner {
+                self.send(client, Outgoing::Text(text));
+            } else {
+                self.broadcast(Outgoing::Text(text));
+            }
         }
     }
 
@@ -620,10 +685,29 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
+    /// Account-auth notices reach only the peers that opted in to them.
+    fn broadcast_to(&mut self, message: Outgoing, recipient: impl Fn(&Peer) -> bool) {
+        let message = match message {
+            Outgoing::Text(text) if text.len() > self.config.max_frame_bytes => {
+                match self.oversized_notice(text.len()) {
+                    Some(notice) => notice,
+                    None => return,
+                }
+            }
+            message => message,
+        };
+        self.deliver_to(message, recipient);
+    }
+
     fn deliver(&mut self, message: Outgoing) {
+        self.deliver_to(message, |_| true)
+    }
+
+    fn deliver_to(&mut self, message: Outgoing, recipient: impl Fn(&Peer) -> bool) {
         let gone: Vec<_> = self
             .peers
             .iter()
+            .filter(|(_, peer)| recipient(peer))
             .filter_map(|(client, peer)| {
                 peer.outgoing
                     .try_send(message.clone())
@@ -898,6 +982,11 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ServerNotice<'a> {
+    AccountAuth {
+        credential: safe_cex_engine::CredentialSlot,
+        scope: safe_cex_engine::AccountReadScope,
+        outcome: safe_cex_engine::AuthOutcome,
+    },
     CommandError {
         command: u32,
         message: &'a str,
@@ -1054,6 +1143,7 @@ async fn connection(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut selected = None;
+    let mut account_auth = false;
     // Tungstenite requires an unboxed HTTP error response in this callback.
     #[allow(clippy::result_large_err)]
     let callback = |request: &Request, mut response: Response| {
@@ -1065,6 +1155,9 @@ async fn connection(
         let version = protocols
             .split(',')
             .any(|protocol| protocol.trim() == "safe-cex-frame.v1");
+        account_auth = protocols
+            .split(',')
+            .any(|protocol| protocol.trim() == ACCOUNT_AUTH_PROTOCOL);
         let mut bearer = protocols
             .split(',')
             .filter_map(|protocol| protocol.trim().strip_prefix("bearer."));
@@ -1127,6 +1220,7 @@ async fn connection(
         client,
         outgoing,
         cancel,
+        account_auth,
         ready,
     };
     let joined = async {
@@ -1232,6 +1326,45 @@ mod tests {
             cx.done(socket.0, "[]".into());
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            if text == "auth" {
+                let request = cx.request(
+                    safe_cex_engine::Method::Get,
+                    "https://fixture/account".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                cx.tag_account_read(
+                    request,
+                    safe_cex_engine::CredentialSlot::Secondary,
+                    safe_cex_engine::AccountReadScope::Orders,
+                );
+                return;
+            }
+            if let Some(command) = text.strip_prefix("event:") {
+                let fields = match command {
+                    "missing" => Vec::new(),
+                    "string" => vec![("command", Value::from("2"))],
+                    "boolean" => vec![("command", Value::Bool(true))],
+                    "duplicate" => vec![("command", 2u32.into()), ("command", 2u32.into())],
+                    value => vec![("command", Value::Num(value.parse().expect("event command")))],
+                };
+                cx.event(
+                    Level::Warn,
+                    safe_cex_engine::log::code::HISTORY_INCOMPLETE,
+                    "\"é".repeat(400),
+                    fields,
+                );
+                return;
+            }
+            if text == "background" {
+                cx.notice(
+                    Level::Warn,
+                    safe_cex_engine::log::code::ROW_SKIPPED,
+                    "background warning",
+                );
+                return;
+            }
             if let Some(command) = text.strip_prefix("error:") {
                 let command = command.parse().expect("error command");
                 cx.command_error(command, "placement rejected");
@@ -1249,6 +1382,14 @@ mod tests {
         }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn account_auth_outcome(
+            &self,
+            _: &(),
+            _: &Response<'_>,
+            _: f64,
+        ) -> Option<safe_cex_engine::AuthOutcome> {
+            Some(safe_cex_engine::AuthOutcome::Rejected)
+        }
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
         fn on_command(&mut self, _: &mut Cx<'_, ()>, command: Command) {
@@ -1267,6 +1408,223 @@ mod tests {
             mpsc::unbounded_channel().0
         }
         fn request(&self, _: HttpRequest, _: Events) {}
+    }
+
+    fn event_actor(
+        max_frame_bytes: usize,
+    ) -> (Account<Stub, NoTransport>, Vec<mpsc::Receiver<Outgoing>>) {
+        let mut actor = Account::new(
+            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            ServerConfig {
+                max_frame_bytes,
+                ..ServerConfig::default()
+            },
+        );
+        let mut receivers = Vec::new();
+        for client in [1, 2] {
+            let (outgoing, receiver) = mpsc::channel(8);
+            let (cancel, _) = watch::channel(false);
+            actor.peers.insert(
+                client,
+                Peer {
+                    outgoing,
+                    cancel,
+                    books: HashSet::new(),
+                    candles: HashSet::new(),
+                    tickers: None,
+                    account_auth: false,
+                },
+            );
+            receivers.push(receiver);
+            actor.command(
+                client,
+                Command::FetchLeverage {
+                    command: 77,
+                    symbol: "BTC-USD".into(),
+                },
+            );
+        }
+        (actor, receivers)
+    }
+
+    fn emit_event(actor: &mut Account<Stub, NoTransport>, text: &str) {
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text,
+            },
+        );
+        actor.execute();
+    }
+
+    fn receive_notice(receiver: &mut mpsc::Receiver<Outgoing>) -> serde_json::Value {
+        let Ok(Outgoing::Text(message)) = receiver.try_recv() else {
+            panic!("expected a text notice");
+        };
+        serde_json::from_str(&message).unwrap()
+    }
+
+    #[test]
+    fn command_events_translate_overlapping_external_ids_before_done_without_broadcasting() {
+        let (mut actor, mut receivers) = event_actor(4096);
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "event:1",
+            },
+        );
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        let event = receive_notice(&mut receivers[0]);
+        assert_eq!(event["code"], "history.incomplete");
+        assert_eq!(event["fields"]["command"].as_f64(), Some(77.0));
+        let done = receive_notice(&mut receivers[0]);
+        assert_eq!(done["type"], "done");
+        assert_eq!(done["command"], 77);
+        assert!(receivers[1].try_recv().is_err());
+        assert!(receivers[0].try_recv().is_err());
+        emit_event(&mut actor, "event:2");
+        assert_eq!(
+            receive_notice(&mut receivers[1])["fields"]["command"].as_f64(),
+            Some(77.0)
+        );
+        assert!(receivers[0].try_recv().is_err());
+    }
+
+    #[test]
+    fn command_events_suppress_malformed_unowned_and_disconnected_ids() {
+        let (mut actor, mut receivers) = event_actor(4096);
+        for text in [
+            "event:string",
+            "event:boolean",
+            "event:duplicate",
+            "event:missing",
+            "event:1.5",
+            "event:-1",
+            "event:4294967296",
+            "event:NaN",
+            "event:inf",
+            "event:999",
+        ] {
+            emit_event(&mut actor, text);
+            assert!(receivers[0].try_recv().is_err(), "{text}");
+            assert!(receivers[1].try_recv().is_err(), "{text}");
+        }
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        receive_notice(&mut receivers[0]);
+        emit_event(&mut actor, "event:1");
+        assert!(receivers[0].try_recv().is_err());
+        assert!(receivers[1].try_recv().is_err());
+        actor.leave(2);
+        emit_event(&mut actor, "event:2");
+        assert!(
+            receivers[0].try_recv().is_err(),
+            "departed diagnostics cannot migrate"
+        );
+        emit_event(&mut actor, "background");
+        assert_eq!(receive_notice(&mut receivers[0])["code"], "row.skipped");
+    }
+
+    #[test]
+    fn command_event_diagnostics_remain_bounded_without_disconnect_or_owner_leak() {
+        let (mut actor, mut receivers) = event_actor(180);
+        emit_event(&mut actor, "event:1");
+        let Ok(Outgoing::Text(message)) = receivers[0].try_recv() else {
+            panic!("bounded event");
+        };
+        assert!(message.len() <= 180);
+        let event: serde_json::Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(event["fields"]["command"].as_f64(), Some(77.0));
+        assert_eq!(event["code"], "history.incomplete");
+        assert!(event["message"].as_str().unwrap().starts_with("\"é"));
+        assert!(receivers[1].try_recv().is_err());
+        assert_eq!(actor.peers.len(), 2);
+        assert_eq!(actor.pending.len(), 2);
+    }
+
+    #[test]
+    fn credential_evidence_reaches_all_account_peers_without_command_ownership_or_cross_account_leaks()
+     {
+        let mut actors = Vec::new();
+        let mut receivers = Vec::new();
+        for _ in 0..2 {
+            let mut actor = Account::new(
+                Host::new(
+                    Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                    NoTransport,
+                ),
+                ServerConfig::default(),
+            );
+            let mut peers = Vec::new();
+            for client in [1, 2] {
+                let (outgoing, receiver) = mpsc::channel(8);
+                let (cancel, _) = watch::channel(false);
+                actor.peers.insert(
+                    client,
+                    Peer {
+                        outgoing,
+                        cancel,
+                        books: HashSet::new(),
+                        candles: HashSet::new(),
+                        tickers: None,
+                        // Client 2 is a v1 client that never offered the notice.
+                        account_auth: client == 1,
+                    },
+                );
+                peers.push(receiver);
+            }
+            receivers.push(peers);
+            actors.push(actor);
+        }
+        actors[0].host.engine.handle(
+            0.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "auth",
+            },
+        );
+        actors[0].host.engine.handle(
+            1.,
+            Event::HttpResponse {
+                request: safe_cex_engine::RequestId(1),
+                response: Response {
+                    status: 401,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        actors[0].execute();
+        let Ok(Outgoing::Text(message)) = receivers[0][0].try_recv() else {
+            panic!("account auth notice")
+        };
+        assert_eq!(
+            message.as_ref(),
+            r#"{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"}"#
+        );
+        for peer in &mut receivers[0] {
+            assert!(
+                peer.try_recv().is_err(),
+                "only opted-in peers receive it, once"
+            );
+        }
+        for peer in &mut receivers[1] {
+            assert!(peer.try_recv().is_err());
+        }
+        assert!(actors.iter().all(|actor| actor.pending.is_empty()));
     }
 
     #[test]
@@ -1290,6 +1648,7 @@ mod tests {
                     books: HashSet::new(),
                     candles: HashSet::new(),
                     tickers: None,
+                    account_auth: false,
                 },
             );
             receivers.push(receiver);
@@ -1362,6 +1721,7 @@ mod tests {
                     books: HashSet::new(),
                     candles: HashSet::new(),
                     tickers: None,
+                    account_auth: false,
                 },
             );
             receivers.push(receiver);
@@ -1465,6 +1825,7 @@ mod tests {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth: false,
             },
         );
         actor.command(
@@ -1632,6 +1993,7 @@ mod tests {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth: false,
             },
         );
         (frames, canceled)
@@ -1755,7 +2117,9 @@ mod tests {
         actor.host.engine.start((actor.host.clock)());
         actor.execute();
         let (outgoing, mut messages) = mpsc::channel(4);
-        actor.join(7, outgoing, watch::channel(false).0).unwrap();
+        actor
+            .join(7, outgoing, watch::channel(false).0, false)
+            .unwrap();
         assert!(matches!(messages.recv().await, Some(Outgoing::Frame(_))));
         let Some(Outgoing::Text(text)) = messages.recv().await else {
             panic!("startup failure was not replayed");
@@ -1785,6 +2149,7 @@ mod tests {
                 books: HashSet::new(),
                 candles: HashSet::new(),
                 tickers: None,
+                account_auth: false,
             },
         );
         // The engine cap is larger than this client frame limit.

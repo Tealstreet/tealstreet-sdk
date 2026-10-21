@@ -68,6 +68,9 @@ export interface EngineHandlers {
   /** Called once after a WASM trap makes this host terminal and releases its I/O. */
   onDead?(error: EngineDeadError): void;
   onDeactivate?(): void;
+  /** Typed native evidence for one configured signer and private-read scope.
+   * No transport/body inference, command ownership or implicit error reporting. */
+  onAccountAuth?(result: AccountAuthResult): void;
   /** Startup cannot complete; the account should fail `start` with this. */
   onStartupFailed?(detail: VenueErrorDetail): void;
   /** One frame per flush; transfer it, don't copy it. */
@@ -81,11 +84,18 @@ export interface EngineHandlers {
    * retain the same key after a deadline; consumers may merge receipt tuples.
    * Complete events are idempotent and may repeat for duplicate native done. */
   onCommandProgress?(event: CommandProgress): void;
-  /** Structured events at or above the engine's `logLevel` option; Info+ also
-   * reach `onLog` when this is absent. */
+  /** Structured events at or above the engine's `logLevel` option, plus semantic
+   * history.incomplete markers regardless of level; Info+ also reach `onLog`
+   * when this is absent. */
   onEvent?(event: EngineEvent): void;
   /** A socket opened, received its first frame, or closed; never per frame. */
   onSocketChange?(): void;
+}
+
+export interface AccountAuthResult {
+  readonly credential: 'primary' | 'secondary';
+  readonly scope: 'account' | 'balance' | 'orders' | 'positions' | 'settings';
+  readonly outcome: 'accepted' | 'rejected';
 }
 
 export interface OrderIdentityReceipt {
@@ -216,6 +226,11 @@ export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
    * Host metadata: never sent to the native engine or venue. */
   timeoutMs?: number;
+  /** Command-bound events while this request remains pending, including synchronous
+   * dispatch. Internal fields.command is unchanged; routing hosts translate it.
+   * Installed before dispatch and released on settlement, timeout or disposal.
+   * Observer failures cannot replace the native result. */
+  onEvent?(event: EngineEvent): void;
 }
 
 export interface EngineEvent {
