@@ -1,7 +1,13 @@
 # Coinbase Rust integration
 
 Both `coinbase` and saved-account `coinbasespot` load `RustEngineExchange` from
-both SDK registries. The engine implementation is `sdk-rs/venues/coinbase/`;
+both SDK registries. **Exception, hosted remote signing:** a keyless account
+with a `remoteSigner` runs the TS venue (`coinbase.exchange.ts`,
+`coinbasespot.exchange.ts`, restored from master) through
+`exchanges/hostedSigningVenues.ts`, and a browser `RustEngineExchange` signs
+`signHttpRequest`/`signWsAuth` through it, because the engine cannot sign
+remotely (`docs/plans/RUST_REMOTE_SIGNING.md`). Keep those files byte-for-byte
+master behaviour; they are removed when the engine signs remotely. The engine implementation is `sdk-rs/venues/coinbase/`;
 `docs/plans/RUST_COINBASE.md` records the scope, protocol evidence and gates.
 The frozen Advanced Trade TypeScript adapter lives only in
 `src/__tests__/reference/coinbase/` for independent replay and old regression tests.

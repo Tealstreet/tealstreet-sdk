@@ -9,6 +9,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 import throttle from 'lodash/throttle';
 
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
+import { hostedSigningVenues, isKeylessRemoteSigned } from '../exchanges/hostedSigningVenues';
 import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
@@ -338,7 +339,10 @@ export class ExchangeWorker {
         throw new Error(`Unknown exchange: ${this._exchangeName}`);
       }
       const runsOnRust = runsOnRustEngine(this._exchangeName, this._options);
-      const Exchange = runsOnRust ? RustEngineExchange : await loader();
+      const hosted = isKeylessRemoteSigned(this._exchangeName, this._options)
+        ? hostedSigningVenues[this._exchangeName]
+        : undefined;
+      const Exchange = runsOnRust ? RustEngineExchange : await (hosted ?? loader)();
       if (startupToken !== this._startupToken) {
         return false;
       }
