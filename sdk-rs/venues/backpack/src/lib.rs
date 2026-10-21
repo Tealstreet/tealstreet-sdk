@@ -1,5 +1,6 @@
 //! Backpack perpetuals on the sans-I/O engine.
 mod account;
+mod depth_query;
 mod history;
 mod identity;
 mod sign;
@@ -42,6 +43,9 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     Identity(CommandId),
+    BookQuery {
+        command: CommandId,
+    },
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -536,6 +540,7 @@ impl Venue for Backpack {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
+            order_book_query: true,
             host_clock: true,
             ..safe_cex_engine::Capabilities::BASE
         }
@@ -773,6 +778,10 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::BookQuery { command } = pending {
+            self.book_query_response(cx, command, response);
+            return;
+        }
         if let Pending::Identity(command) = pending {
             self.identity_response(cx, command, response);
             return;
@@ -992,6 +1001,10 @@ impl Venue for Backpack {
             return;
         }
         match pending {
+            Pending::BookQuery { command } => cx.fail(
+                command,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
                 let error = safe_cex_engine::VenueError::new(error)
@@ -1148,6 +1161,15 @@ impl Venue for Backpack {
                     true,
                 );
             }
+            Command::FetchOrderBook {
+                command, symbol, ..
+            } => self.get(
+                cx,
+                "/api/v1/depth",
+                [("symbol".into(), symbol)].into(),
+                Pending::BookQuery { command },
+                false,
+            ),
             Command::Query { command, query } => self.history_command(cx, command, query),
             command => self.trade_command(cx, command),
         }

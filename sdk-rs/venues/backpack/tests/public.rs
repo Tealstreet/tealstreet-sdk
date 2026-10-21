@@ -543,3 +543,81 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
     e.handle(2.0, Event::WsMessage { socket, text });
     assert_eq!(e.store().ticker("ETH_USDC_PERP").unwrap().last, 2100.0);
 }
+
+#[test]
+fn rest_query_success_failure_and_stream_resubscription_have_independent_state() {
+    use safe_cex_engine::Notice;
+    let (mut e, socket) = seed();
+    let snapshot = subscribe(&mut e);
+    reply(&mut e, &snapshot, SNAP);
+    e.drain_actions().for_each(drop);
+    let query = |e: &mut Driver, command| {
+        e.handle(
+            1.0,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: "SOL_USDC_PERP".into(),
+                limit: Some(1),
+            }),
+        );
+        http(e, "depth")
+    };
+    let request = query(&mut e, 77);
+    delta(&mut e, socket, 11, 11);
+    reply(&mut e, &request, r#"{"bids":[["900.00","7"]],"asks":[]}"#);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:77,result}) if result.contains("900.00"))));
+    assert_eq!(
+        e.venue().book("SOL_USDC_PERP").unwrap().bids(),
+        [(140.0, 5.0), (139.0, 2.0)]
+    );
+    let request = query(&mut e, 78);
+    e.handle(
+        2.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "unavailable",
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 78, .. })))
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::WsConnect { .. } | Action::WsClose { .. }
+    )));
+    delta(&mut e, socket, 12, 12);
+    assert!(
+        e.venue().book("SOL_USDC_PERP").is_some(),
+        "query failure cannot disturb stream sequence"
+    );
+    e.drain_actions().for_each(drop);
+    let request = query(&mut e, 79);
+    e.handle(
+        3.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "SOL_USDC_PERP".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    let new_snapshot = subscribe(&mut e);
+    reply(&mut e, &request, r#"{"bids":[],"asks":[]}"#);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 79, .. }))),
+        "independent query survives subscription generation replacement"
+    );
+    assert!(e.venue().book("SOL_USDC_PERP").is_none());
+    reply(&mut e, &new_snapshot, SNAP);
+    assert_eq!(
+        e.venue().book("SOL_USDC_PERP").unwrap().bids(),
+        [(140.0, 1.0), (139.0, 2.0)]
+    );
+}
