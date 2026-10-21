@@ -1221,7 +1221,9 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   verification: a rejected TP no longer drops the queued SL, and wrong-side
   brackets reject before any write instead of placing a bare entry).
 - Batches that fail midway must return placed ids with the error (~~Paradex~~,
-  ~~Binance COIN-M~~, ~~Bitrue cancels~~ repaired; see their venue sections).
+  ~~Binance COIN-M~~, ~~Bitrue cancels~~, ~~BingX sequential placements~~ repaired;
+  BingX preserves acknowledged IDs in typed and legacy partial-error details
+  after a later rejection, transport loss or malformed acknowledgement).
 - ~~Paradex leverage serialized as a float~~ (repaired). KuCoin's explicit
   leverage setter already serializes a string (`65c110dca78`); its optional
   placement leverage is numeric. No current endpoint evidence proves `20.0`
