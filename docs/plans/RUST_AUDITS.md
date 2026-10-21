@@ -1084,8 +1084,15 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   ~~one malformed SBE frame recycles the public socket (`public.rs:388`)~~ — malformed frames
   now drop without clearing books/socket or refreshing liveness; subsequent valid
   sequence gaps still recover only the affected book (native regressions).
-- Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
-  of 0 rejects order; history fails on one row; stale uPnL after WS close;
+- Low: ~~one unmappable order row discards refresh~~ (row isolation keeps its
+  stored copy while valid peers commit); ~~leverage-0 config row~~ (only positive
+  valid configuration leverage is admitted; bad rows preserve cached settings);
+  ~~stale uPnL after WS close~~ (closing removes the leg and recomputes aggregate
+  UPnL). Existing regressions cover row isolation, invalid configs and REST/WS
+  closure; zero-config behavior is source-verified, not a dedicated test claim.
+  RISKY retained: explicit zero TP/SL rejects before entry dispatch rather than
+  silently dropping requested protection; malformed financial-history rows fail
+  visibly rather than returning a plausible incomplete ledger.
   ~~README says remote signing rejected~~ — corrected to the landed payload
   signing contract exercised by the delegated-signing regressions.
 

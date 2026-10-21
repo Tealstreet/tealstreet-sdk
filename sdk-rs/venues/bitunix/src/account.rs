@@ -341,9 +341,9 @@ impl BitunixFutures {
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
                 }
-                cx.notice(Level::Error, code::REQUEST_FAILED, error);
+                cx.retried_failure("bitunix.account:1", error);
             }
-            _ => cx.notice(Level::Error, code::REQUEST_FAILED, error),
+            _ => cx.retried_failure("bitunix.account:2", error),
         }
     }
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, socket: safe_cex_engine::SocketId) {
