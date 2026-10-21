@@ -128,6 +128,11 @@ publication traversal to avoid retaining duplicate generated code. Their row
 admission and error policies remain separate; refresh keeps its strict envelope
 and atomic catalogue validation. CI measures the optimized WASM and replay costs.
 
+Refresh shares startup's discovery cooldown helper: HTTP 200 `retCode:10006`
+fails the coalesced callers once and retains the catalogue. A later explicit
+refresh is refused until the later valid reset timestamp or `Retry-After` hint; success
+headers alone do not pause discovery. Refresh does not retry the failed walk.
+
 A completed refresh moves its staged rows and product metadata into the commit
 assembly. Each category/status list is consumed once, preserving duplicate
 precedence and atomic publication while avoiding redundant deep clones. The

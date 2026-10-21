@@ -247,11 +247,7 @@ impl BybitLinear {
         {
             return;
         }
-        let pause = if response.status == 403 {
-            600_000.0
-        } else {
-            safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0)
-        };
+        let pause = discovery_rate_limit_pause_ms(&response, cx.now);
         self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         if let Some((code, message)) = venue_error(&response) {
             let kind = if pause > 0.0 {

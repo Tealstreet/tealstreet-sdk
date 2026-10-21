@@ -397,3 +397,164 @@ fn a_shared_consumer_refuses_independent_discovery_before_any_refresh_io() {
     );
     assert!(actions.iter().any(|action|matches!(action,Action::Notice(Notice::CommandFailed{command:50,error}) if error.kind==Some(ErrorKind::Unsupported))));
 }
+
+mod envelope_rate_limits {
+    use super::*;
+    use safe_cex_engine::{ErrorKind, Event, Notice, Response, VenueError};
+
+    fn reply(h: &mut Harness, path: &str, headers: &str, body: &str) {
+        let request = h.take(path);
+        h.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers,
+                body,
+            },
+        });
+    }
+
+    fn limited_once(h: &Harness, command: u32) -> &VenueError {
+        let mut failures = h.notices.iter().filter_map(|notice| match notice {
+            Notice::CommandFailed { command: id, error } if *id == command => Some(error),
+            _ => None,
+        });
+        let error = failures.next().expect("one rate-limited completion");
+        assert!(failures.next().is_none(), "a waiter must fail only once");
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == command).count(), 1);
+        error
+    }
+
+    #[test]
+    fn refresh_envelope_limits_preserve_catalogue_and_wait_for_the_later_hint() {
+        for with_list in [false, true] {
+            for (reset_ms, retry_seconds, wait_ms) in [
+                (Some(25_000.0), None, 25_000.0),
+                (None, Some(45), 45_000.0),
+                (Some(25_000.0), Some(45), 45_000.0),
+                (Some(45_000.0), Some(25), 45_000.0),
+            ] {
+                let mut h = Harness::new();
+                let before = h.engine.store().markets().to_vec();
+                let labels = h
+                    .engine
+                    .store()
+                    .instrument_classifications()
+                    .unwrap()
+                    .to_vec();
+                let auth = h.engine.health().auth_failures;
+                refresh(&mut h, 60);
+                refresh(&mut h, 61);
+                assert_eq!(h.requests.len(), 2, "coalesced waiters share one walk");
+                // Retain a peer response to prove that a late completion cannot commit.
+                let peer = h.take("status=PreLaunch");
+                let mut body: Value = if with_list {
+                    serde_json::from_str(&page(&["BTCUSDT", "SOLUSDT"], "", "staged")).unwrap()
+                } else {
+                    json!({"result":{}})
+                };
+                body["retCode"] = json!(10006);
+                body["retMsg"] = json!("Too many visits!");
+                let mut headers = String::new();
+                if let Some(delay) = reset_ms {
+                    headers.push_str(&format!(
+                        "X-Bapi-Limit-Reset-Timestamp: {}\r\n",
+                        h.now + delay
+                    ));
+                }
+                if let Some(seconds) = retry_seconds {
+                    headers.push_str(&format!("Retry-After: {seconds}\r\n"));
+                }
+                reply(&mut h, "instruments-info", &headers, &body.to_string());
+                for command in [60, 61] {
+                    assert_eq!(
+                        limited_once(&h, command).venue_code.as_deref(),
+                        Some("10006")
+                    );
+                }
+                assert_eq!(h.engine.store().markets(), before);
+                assert_eq!(
+                    h.engine.store().instrument_classifications().unwrap(),
+                    labels
+                );
+                assert!(h.requests.is_empty(), "failed refresh must not retry");
+                refresh(&mut h, 62);
+                assert_eq!(limited_once(&h, 62).retry_after_ms, Some(wait_ms));
+                assert!(
+                    h.requests.is_empty(),
+                    "cooldown must refuse a new walk before I/O"
+                );
+                h.reply(peer.id, 200, PRELAUNCH);
+                assert_eq!(h.engine.store().markets(), before);
+                assert_eq!(
+                    h.engine.store().instrument_classifications().unwrap(),
+                    labels
+                );
+                limited_once(&h, 60);
+                limited_once(&h, 61);
+                h.advance(wait_ms - 1.0);
+                assert!(h.requests.is_empty(), "cooldown may not schedule discovery");
+                refresh(&mut h, 63);
+                assert_eq!(limited_once(&h, 63).retry_after_ms, Some(1.0));
+                assert!(h.requests.is_empty());
+                assert_eq!(h.engine.store().markets(), before);
+                h.advance(1.0);
+                refresh(&mut h, 64);
+                assert_eq!(
+                    h.requests.len(),
+                    2,
+                    "refresh resumes at the cooldown boundary"
+                );
+                assert!(h.result(64).is_none());
+                h.respond("status=PreLaunch", 200, PRELAUNCH);
+                h.respond(
+                    "instruments-info",
+                    200,
+                    &page(&["BTCUSDT", "SOLUSDT"], "", "fresh"),
+                );
+                assert!(h.result(64).unwrap().is_ok());
+                assert!(h.engine.store().market("SOLUSDT").is_some());
+                assert!(h.engine.store().market("ETHUSDT").is_none());
+                limited_once(&h, 60);
+                limited_once(&h, 61);
+                assert_eq!(h.engine.health().auth_failures, auth);
+                assert!(!h.deactivated);
+            }
+        }
+    }
+
+    #[test]
+    fn successful_refresh_headers_do_not_poison_the_next_refresh() {
+        let mut h = Harness::new();
+        refresh(&mut h, 70);
+        let headers = format!(
+            "X-Bapi-Limit-Reset-Timestamp: {}\r\nRetry-After: 120\r\n",
+            h.now + 120_000.0
+        );
+        reply(&mut h, "status=PreLaunch", &headers, PRELAUNCH);
+        reply(
+            &mut h,
+            "instruments-info",
+            &headers,
+            &page(&["BTCUSDT"], "", "first"),
+        );
+        assert!(h.result(70).unwrap().is_ok());
+        assert!(h.requests.is_empty());
+        refresh(&mut h, 71);
+        assert!(h.result(71).is_none());
+        assert_eq!(
+            h.requests.len(),
+            2,
+            "success headers are not rate-limit evidence"
+        );
+        h.respond("status=PreLaunch", 200, PRELAUNCH);
+        h.respond(
+            "instruments-info",
+            200,
+            &page(&["BTCUSDT", "SOLUSDT"], "", "next"),
+        );
+        assert!(h.result(71).unwrap().is_ok());
+        assert!(h.engine.store().market("SOLUSDT").is_some());
+    }
+}
