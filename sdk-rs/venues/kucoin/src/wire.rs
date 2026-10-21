@@ -35,6 +35,28 @@ pub struct Message<'a> {
     pub data: Option<&'a RawValue>,
 }
 
+/// The identity of a contract row that failed to decode.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstrumentKey<'a> {
+    #[serde(borrow)]
+    pub symbol: std::borrow::Cow<'a, str>,
+    #[serde(borrow, default)]
+    pub settle_currency: Option<std::borrow::Cow<'a, str>>,
+    #[serde(borrow, default)]
+    pub quote_currency: Option<std::borrow::Cow<'a, str>>,
+}
+impl InstrumentKey<'_> {
+    /// Unless its settlement is readable and not USDT, the row may be one this venue lists.
+    pub fn in_scope(&self) -> bool {
+        self.settle_currency
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or(self.quote_currency.as_deref())
+            .is_none_or(|quote| quote == "USDT")
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instrument<'a> {

@@ -899,7 +899,19 @@ impl Venue for Orderly {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_lost(cx, request, error),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network);
+                if request.is_read() {
+                    self.trade_failed(cx, request, error)
+                } else {
+                    self.trade_lost(
+                        cx,
+                        request,
+                        error.outcome(safe_cex_engine::Outcome::Unknown),
+                    )
+                }
+            }
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
