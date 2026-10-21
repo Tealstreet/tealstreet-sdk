@@ -154,32 +154,10 @@ struct PendingSignature {
     deadline: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LogLevel {
-    Info,
-    Warning,
-    Error,
-}
-
-impl From<LogLevel> for Level {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Info => Self::Info,
-            LogLevel::Warning => Self::Warn,
-            LogLevel::Error => Self::Error,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
-    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
-    Log {
-        level: LogLevel,
-        message: String,
-    },
     Event(LogEvent),
     /// Error diagnostic attributed to a command; completion owns its outcome.
     CommandError {
@@ -1230,16 +1208,6 @@ impl<P> Cx<'_, P> {
         }
     }
 
-    /// Unstructured shim kept until venues emit [`Cx::event`].
-    pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        push_log(
-            &mut self.io.actions,
-            self.io.min_level,
-            level,
-            message.into(),
-        );
-    }
-
     /// Whether an event at `level` reaches the host; check before formatting
     /// an expensive Debug message.
     pub fn logs(&self, level: Level) -> bool {
@@ -1332,7 +1300,7 @@ impl<P> Cx<'_, P> {
     pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
         let message = message.into();
         if command == 0 {
-            self.log(LogLevel::Error, message);
+            self.notice(Level::Error, log_code::COMMAND_FAILED, message);
         } else {
             self.io
                 .actions
@@ -1539,12 +1507,13 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     }
     // Only missing tickers can still leave a private account usable (no prices).
     let level = if missing == ["tickers"] {
-        LogLevel::Warning
+        Level::Warn
     } else {
-        LogLevel::Error
+        Level::Error
     };
-    cx.log(
+    cx.notice(
         level,
+        log_code::STARTUP_INCOMPLETE,
         format!(
             "Startup incomplete: still waiting for {}",
             missing.join(", ")
@@ -1743,10 +1712,17 @@ impl<V: Venue> Engine<V> {
 
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
-        self.io.actions.push(Action::Notice(Notice::Log {
-            level: LogLevel::Error,
-            message: error.to_owned(),
-        }));
+        push_event(
+            &mut self.io.actions,
+            &mut self.io.health,
+            self.io.min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::PUBLIC_FEED_REJECTED,
+                message: error.to_owned(),
+                fields: Vec::new(),
+            },
+        );
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
@@ -1896,10 +1872,17 @@ impl<V: Venue> Engine<V> {
             && let Some(id) = command.completion_id()
             && !self.io.active_commands.insert(id)
         {
-            self.io.actions.push(Action::Notice(Notice::Log {
-                level: LogLevel::Error,
-                message: "Command ID is already in flight".into(),
-            }));
+            push_event(
+                &mut self.io.actions,
+                &mut self.io.health,
+                self.io.min_level,
+                LogEvent {
+                    level: Level::Error,
+                    code: log_code::COMMAND_DUPLICATE,
+                    message: "Command ID is already in flight".into(),
+                    fields: Vec::new(),
+                },
+            );
             return;
         }
         #[cfg(feature = "order-locks")]
@@ -2078,7 +2061,11 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if id.is_some_and(|id| cx.io.order_locks.contains(id)) {
-                        cx.log(LogLevel::Error, "Order command ID is already in flight");
+                        cx.notice(
+                            Level::Error,
+                            log_code::COMMAND_DUPLICATE,
+                            "Order command ID is already in flight",
+                        );
                         return;
                     }
                     if cx.io.order_locks.defer(&command) {
@@ -2279,10 +2266,17 @@ impl<V: Venue> Engine<V> {
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         if self.store.take_rejected_empty_catalogue() {
-            self.io.actions.push(Action::Notice(Notice::Log {
-                level: LogLevel::Warning,
-                message: EMPTY_CATALOGUE_WARNING.to_owned(),
-            }));
+            push_event(
+                &mut self.io.actions,
+                &mut self.io.health,
+                self.io.min_level,
+                LogEvent {
+                    level: Level::Warn,
+                    code: log_code::SNAPSHOT_DISCARDED,
+                    message: EMPTY_CATALOGUE_WARNING.to_owned(),
+                    fields: Vec::new(),
+                },
+            );
         }
         self.io.actions.drain(..)
     }
@@ -2583,23 +2577,6 @@ fn apply_signature(
     Ok(())
 }
 
-// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
-// would otherwise each inline a copy (the per-venue wasm budget is tight).
-#[inline(never)]
-fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
-    let enabled = match level {
-        LogLevel::Info => Level::Info,
-        LogLevel::Warning => Level::Warn,
-        LogLevel::Error => Level::Error,
-    };
-    if enabled >= min_level {
-        actions.push(Action::Notice(Notice::Log {
-            level,
-            message: crate::log::cap(message),
-        }));
-    }
-}
-
 /// The longest a repeating retried-read failure goes without an Error. Below the
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
@@ -2834,7 +2811,7 @@ mod streaming_tests {
         }
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(matches!(actions.as_slice(), [
-            Action::Notice(Notice::Log { level: LogLevel::Error, message: background }),
+            Action::Notice(Notice::Event(crate::log::LogEvent { level: Level::Error, message: background, code: log_code::COMMAND_FAILED, .. })),
             Action::Notice(Notice::CommandError { command: 7, message }),
             Action::Notice(Notice::CommandFailed { command: 7, error: result }),
         ] if background == "background error" && message == "command error" && result.legacy_text() == *message));
@@ -4734,10 +4711,10 @@ mod signing_tests {
         let actions: Vec<_> = engine.drain_actions().collect();
         assert!(matches!(
             actions.as_slice(),
-            [Action::Notice(Notice::Log {
-                level: LogLevel::Error,
+            [Action::Notice(Notice::Event(crate::log::LogEvent {
+                level: Level::Error,
                 ..
-            })]
+            }))]
         ));
         // A newly added read must not complete an older write with the same ID.
         engine.handle(
@@ -4749,10 +4726,10 @@ mod signing_tests {
         );
         assert!(matches!(
             engine.drain_actions().collect::<Vec<_>>().as_slice(),
-            [Action::Notice(Notice::Log {
-                level: LogLevel::Error,
+            [Action::Notice(Notice::Event(crate::log::LogEvent {
+                level: Level::Error,
                 ..
-            })]
+            }))]
         ));
         assert!(engine.io.active_commands.contains(&1));
         assert!(engine.io.order_locks.contains(1));
@@ -5165,12 +5142,14 @@ mod startup_watch_tests {
         }
     }
 
-    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
+    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(Level, String)> {
         engine.handle(now, Event::PollScaleChanged { scale: 1.0 });
         engine
             .drain_actions()
             .filter_map(|action| match action {
-                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                Action::Notice(Notice::Event(crate::log::LogEvent { level, message, .. })) => {
+                    Some((level, message))
+                }
                 _ => None,
             })
             .collect()
@@ -5271,16 +5250,20 @@ mod startup_watch_tests {
         let logs: Vec<_> = engine
             .drain_actions()
             .filter_map(|action| match action {
-                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                Action::Notice(Notice::Event(crate::log::LogEvent { level, message, .. })) => {
+                    Some((level, message))
+                }
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            logs,
-            [(LogLevel::Warning, EMPTY_CATALOGUE_WARNING.to_owned())]
-        );
+        assert_eq!(logs, [(Level::Warn, EMPTY_CATALOGUE_WARNING.to_owned())]);
         assert_eq!(engine.store().markets().len(), 1);
+        assert_eq!(engine.health().snapshots_discarded, 1);
         assert!(engine.drain_actions().next().is_none());
+        engine.set_log_level(Level::Error);
+        engine.store_mut().set_markets(Vec::new());
+        assert!(engine.drain_actions().next().is_none());
+        assert_eq!(engine.health().snapshots_discarded, 2);
     }
 
     #[test]
@@ -5299,7 +5282,7 @@ mod startup_watch_tests {
         assert_eq!(
             notices(&mut engine, STARTUP_WATCH_MS),
             [(
-                LogLevel::Error,
+                Level::Error,
                 "Startup incomplete: still waiting for tickers, balance, orders, positions"
                     .to_owned()
             )]
@@ -5313,7 +5296,7 @@ mod startup_watch_tests {
         assert_eq!(
             notices(&mut engine, repeat),
             [(
-                LogLevel::Warning,
+                Level::Warn,
                 "Startup incomplete: still waiting for tickers".to_owned()
             )]
         );

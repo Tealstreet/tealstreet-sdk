@@ -9,7 +9,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -57,9 +57,9 @@ impl Request {
     ) {
         let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
         let level = if size != 0. && !stored {
-            LogLevel::Error
+            Level::Error
         } else {
-            LogLevel::Warning
+            Level::Warn
         };
         let key = format!("{}:{symbol}", CURRENCIES[self.currency]);
         log_skip(cx, logged, key, level, message);
@@ -77,14 +77,14 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: String,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.notice(Level::from(level), code::ROW_SKIPPED, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
@@ -440,11 +440,7 @@ impl PhemexPerpetuals {
                 cx,
                 &mut self.account.skip_logged,
                 format!("{currency}:"),
-                if stored {
-                    LogLevel::Warning
-                } else {
-                    LogLevel::Error
-                },
+                if stored { Level::Warn } else { Level::Error },
                 "Phemex skipped an unreadable position row",
             );
             request.positions.reject(None);

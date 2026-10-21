@@ -120,7 +120,6 @@ impl Harness {
                     );
                     self.startup_failures.push(error);
                 }
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::Deactivate) => {
                     assert!(

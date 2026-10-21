@@ -450,7 +450,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]
@@ -465,7 +465,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("invalid secret"))));
     assert!(
         !actions
             .iter()
