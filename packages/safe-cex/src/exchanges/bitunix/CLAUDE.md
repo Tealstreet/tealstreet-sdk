@@ -745,3 +745,10 @@ degradation/recovery. HTTP 418/429 honor `Retry-After` (60-second default); nati
 `10005`/`10006` wait 60 seconds even with missing/null data, while `10001` remains a network
 failure. Malformed public previews are not copied into diagnostics. Private,
 financial history and trading policies remain separate.
+
+Rust engine transport honors explicit `tealstreetWsRoute: true` on the first
+public-shard, private and futures/business socket attempt, selecting that channel's
+declared proxy. False/unset keeps two silent direct attempts before fallback;
+feed identities remain independent. The engine's native routing plan uses the
+same selection. The shared resolver and TS socket classes retain their existing
+fallback contract, and a direct transport still reports unsupported proxy routing.

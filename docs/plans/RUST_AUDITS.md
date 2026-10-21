@@ -512,7 +512,9 @@ Remaining resilience and completeness findings are independent of request parity
   rejection without `data` is ignored (`account.rs:744`).
 - Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
   login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
-  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; book kept
+  only on `op:"pong"` (`lib.rs:394`); ~~`tealstreetWsRoute` not honoured~~ (engine hosts now select each declared
+  Bitunix proxy on the first connection when explicitly requested; false/unset
+  retain two silent direct attempts and existing fallback recovery); book kept
   while disconnected; secondary read keys dropped; `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted

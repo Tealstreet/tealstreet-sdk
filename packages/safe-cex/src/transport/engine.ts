@@ -191,7 +191,19 @@ const publicWsRoutes = (
     : undefined;
 
 const resolved = (exchange: ExchangeName, options: ExchangeOptions, provider: TransportProvider) => {
-  const routing = provider.wsRouting(exchange, options);
+  const declared = provider.wsRouting(exchange, options);
+  // Bitunix's TS sockets choose their declared fallback on this explicit option.
+  // Normalize the same policy for engine hosts without changing TS consumers.
+  const forceBitunix = (route: ResolvedWs): ResolvedWs =>
+    exchange === 'bitunix' && options.tealstreetWsRoute && route.fallback
+      ? { tunnelled: true, host: route.fallback }
+      : route;
+  const routing = {
+    ...declared,
+    wsPublic: forceBitunix(declared.wsPublic),
+    wsPrivate: forceBitunix(declared.wsPrivate),
+    wsBusiness: forceBitunix(declared.wsBusiness),
+  };
   const restRouting =
     (exchange === 'grvt' || exchange === 'blofin') && options.tealstreetTunnel && !options.tealstreetProxy
       ? provider.wsRouting(exchange, { ...options, tealstreetProxy: true })
