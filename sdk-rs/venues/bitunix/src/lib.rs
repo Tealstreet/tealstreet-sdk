@@ -1,5 +1,6 @@
 //! Bitunix USDT futures: sans-I/O public and account state machines.
 mod account;
+mod error;
 mod history;
 mod sign;
 mod trading;

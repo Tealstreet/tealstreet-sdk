@@ -335,7 +335,14 @@ impl BitunixFutures {
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Candles { command } => cx.fail(command, error),
-            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Trade(request) => {
+                let kind = if self.credentials.is_none() {
+                    safe_cex_engine::ErrorKind::AuthInvalid
+                } else {
+                    safe_cex_engine::ErrorKind::Internal
+                };
+                self.trade_error(cx, request, crate::error::not_sent(error, kind));
+            }
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 if let Some(command) = read.after {

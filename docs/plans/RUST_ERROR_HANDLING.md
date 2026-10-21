@@ -17,9 +17,9 @@ from `feat/rust-bridge-fixes` (claude-bridge); this lane builds on them.
 
 All five landed on `feat/rust-rewrite` (2026-10-21).
 
-## Bitunix follow-up plan (2026-10-21)
+## Bitunix follow-up (2026-10-21)
 
-The subsequently landed Bitunix port still returns bare command failures.
+The subsequently landed Bitunix port returned bare command failures.
 Add one strict native-code parser and classified failures while retaining native
 message text. HTTP status takes precedence over body codes; dispatched writes
 with transport loss, HTTP 408/5xx or malformed acknowledgement remain Unknown.
@@ -35,3 +35,22 @@ Regress preflight, transport and HTTP/native precedence, malformed codes,
 partial batches/cancels, successful settings before failure and recovery races.
 Run focused Bitunix/Binance tests, touched fmt/strict Clippy and bans; obtain an
 independent review, then land on green CI under the lane's merge guard.
+
+Implemented one classified command failure path with a strict integer native
+code decoder. Native network error 10001 and undocumented codes remain Unknown
+on writes; documented key/permission/rate/input/business refusals retain their
+codes and messages. HTTP status owns classification even when its body carries
+a different native error. Malformed batch peers preserve observed IDs and
+confirmed cancellations, including malformed ancillary fields and incomplete
+acknowledgement counts. Independent later batch legs retain their existing
+progression, then finish once with partial IDs. A successful single code-zero
+acknowledgement retains the existing generated/client-ID identity fallback.
+
+The two baseline smoke regressions reproduced missing preflight/transport
+classification. Focused regressions cover status precedence, malformed native
+codes/acknowledgements, partial effects, sticky Unknown and recovery fencing.
+Independent adversarial review found and resolved three acknowledgement
+preservation gaps. No automatic retries or caller changes are introduced.
+
+Validation: 359 Bitunix/Binance native tests plus the final focused 13
+regressions, touched fmt, strict Clippy and bans pass.
