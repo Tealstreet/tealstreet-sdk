@@ -115,10 +115,10 @@
       "note": "Requested by claude-uhj71c (overseer-approved) after #1448: TS prices positions at an all-zero placeholder ticker before the first quote. ApeX +cp0-2 balance.total/upnl, -cp3 (Rust now matches TS); Bitrue +cp0/cp1 positions[0].unrealizedPnl beside the existing cp2. To be confirmed against this head's CI."
     },
     "coinbaseTapeClock20261021": {
-      "note": "Coinbase private replays (coinbase INTX/CFM/Spot and coinbasespot Spot, ES256 and EdDSA) run on a virtual tape clock that continues from frozen startup, with TS ES256 signed synchronously, and staged reads open only after their command's write is acknowledged. Both order censuses fire at fixed tape times, so the record-86 and checkpoint-12 census races are gone and each algorithm pair yields identical paths. Each entry is exactly the path set seen in 5 identical local runs per tape (Node 22). Race groups and paths no longer seen were removed; INTX checkpoints 5-10 and CFM checkpoints 13-14 carry specific causes (native one-census terminal retention, pending-cancel status, TS rejected-cancel and stale-census defects). Tape hashes unchanged."
+      "note": "Coinbase private replays (coinbase INTX/CFM/Spot and coinbasespot Spot, ES256 and EdDSA) run on a virtual tape clock that continues from frozen startup, with TS ES256 signed synchronously, and staged reads open only after their command's write is acknowledged. Both order censuses fire at fixed tape times, so the record-86 and checkpoint-12 census races are gone and each algorithm pair yields identical paths. Each entry is exactly the path set seen in 5 identical local runs per tape (Node 22). Race groups and paths no longer seen were removed; INTX checkpoints 5-10 and CFM checkpoints 13-14 carry specific causes (native one-census terminal retention, pending-cancel status, TS rejected-cancel and stale-census defects). Tape hashes unchanged. Follow-up: CFM checkpoints 6-12 and Spot checkpoints 6-10 moved out of the broad lifecycle group into cause-specific groups (native CFM census retention, TS Spot census retention, pending-cancel status, TS rejected-cancel defect); paths and tape hashes unchanged."
     },
     "weexTapeClock20261021": {
-      "note": "WEEX private replay runs on the virtual tape clock. The generator now (a) gives each open-order/algo snapshot and write the stage of its command, and snapshots are served only after that command's write is acknowledged; (b) adds the documented Order Channel events that production sends 100 ms after the t=4100 cancels (61, 63), the t=4500 TP placement (64) and the t=5300 symbol cancel (60, 64), plus the missing post-cancel empty algo snapshot; (c) moves every command 100 ms off the 2 s TS tick and native REST cycles, so no poll ties a command. Tape rehashed; checkpoints renumbered. Every path below is identical across 5 local runs at the PR head (Node 22) and carries its specific cause. Prior hash entry replaced (no generator can emit it)."
+      "note": "WEEX private replay runs on the virtual tape clock. The generator now (a) gives each open-order/algo snapshot and write the stage of its command, and snapshots are served only after that command's write is acknowledged; (b) adds the documented Order Channel events that production sends 100 ms after the t=4100 cancels (61, 63), the t=4500 TP placement (64) and the t=5300 symbol cancel (60, 64), plus the missing post-cancel empty algo snapshot; (c) moves every command 100 ms off the 2 s TS tick and native REST cycles, so no poll ties a command. Tape rehashed; checkpoints renumbered. Every path below is identical across 5 local runs at the PR head (Node 22) and carries its specific cause. Prior hash entry replaced (no generator can emit it). Follow-up: the conditional-65 placeOrders moved from t=6100 to t=6300, after native's t=6250 reconciliation and off the TS 2 s tick, so checkpoint 8 no longer compares native-retained canceled rows; it shows only the placement-acknowledgement lag. Native now keeps 65's generated client ID to the end of the tape. Tape rehashed."
     }
   },
   "failures": [
@@ -9887,82 +9887,10 @@
           "keys": [
             "checkpoint 1 account.orders.length",
             "checkpoint 1 account.orders[4]",
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[2].status",
-            "checkpoint 10 account.orders[4].filled",
-            "checkpoint 10 account.orders[4].id",
-            "checkpoint 10 account.orders[4].price",
-            "checkpoint 10 account.orders[4].remaining",
-            "checkpoint 10 account.orders[4].side",
-            "checkpoint 10 account.orders[4].status",
-            "checkpoint 10 account.orders[4].type",
-            "checkpoint 10 account.orders[5]",
-            "checkpoint 11 account.orders.length",
-            "checkpoint 11 account.orders[2].status",
-            "checkpoint 11 account.orders[4].filled",
-            "checkpoint 11 account.orders[4].id",
-            "checkpoint 11 account.orders[4].price",
-            "checkpoint 11 account.orders[4].remaining",
-            "checkpoint 11 account.orders[4].side",
-            "checkpoint 11 account.orders[4].status",
-            "checkpoint 11 account.orders[4].type",
-            "checkpoint 11 account.orders[5]",
-            "checkpoint 12 account.orders.length",
-            "checkpoint 12 account.orders[2].status",
-            "checkpoint 12 account.orders[4].filled",
-            "checkpoint 12 account.orders[4].id",
-            "checkpoint 12 account.orders[4].price",
-            "checkpoint 12 account.orders[4].remaining",
-            "checkpoint 12 account.orders[4].side",
-            "checkpoint 12 account.orders[4].status",
-            "checkpoint 12 account.orders[4].type",
-            "checkpoint 12 account.orders[5]",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders.length",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 6 account.orders[4].filled",
-            "checkpoint 6 account.orders[4].id",
-            "checkpoint 6 account.orders[4].price",
-            "checkpoint 6 account.orders[4].remaining",
-            "checkpoint 6 account.orders[4].side",
-            "checkpoint 6 account.orders[4].status",
-            "checkpoint 6 account.orders[4].type",
-            "checkpoint 6 account.orders[5]",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 7 account.orders[4].filled",
-            "checkpoint 7 account.orders[4].id",
-            "checkpoint 7 account.orders[4].price",
-            "checkpoint 7 account.orders[4].remaining",
-            "checkpoint 7 account.orders[4].side",
-            "checkpoint 7 account.orders[4].status",
-            "checkpoint 7 account.orders[4].type",
-            "checkpoint 7 account.orders[5]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 8 account.orders[4].filled",
-            "checkpoint 8 account.orders[4].id",
-            "checkpoint 8 account.orders[4].price",
-            "checkpoint 8 account.orders[4].remaining",
-            "checkpoint 8 account.orders[4].side",
-            "checkpoint 8 account.orders[4].status",
-            "checkpoint 8 account.orders[4].type",
-            "checkpoint 8 account.orders[5]",
-            "checkpoint 9 account.orders.length",
-            "checkpoint 9 account.orders[2].status",
-            "checkpoint 9 account.orders[4].filled",
-            "checkpoint 9 account.orders[4].id",
-            "checkpoint 9 account.orders[4].price",
-            "checkpoint 9 account.orders[4].remaining",
-            "checkpoint 9 account.orders[4].side",
-            "checkpoint 9 account.orders[4].status",
-            "checkpoint 9 account.orders[4].type",
-            "checkpoint 9 account.orders[5]"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -9987,18 +9915,6 @@
             "checkpoint 7 account.settings[1].leverage",
             "checkpoint 8 account.settings[1].leverage",
             "checkpoint 9 account.settings[1].leverage"
-          ]
-        },
-        {
-          "divergence": "Protective parent/child identity is absent or differs between implementations.",
-          "keys": [
-            "checkpoint 10 account.orders[4].parentId",
-            "checkpoint 11 account.orders[4].parentId",
-            "checkpoint 12 account.orders[4].parentId",
-            "checkpoint 6 account.orders[4].parentId",
-            "checkpoint 7 account.orders[4].parentId",
-            "checkpoint 8 account.orders[4].parentId",
-            "checkpoint 9 account.orders[4].parentId"
           ]
         },
         {
@@ -10096,6 +10012,100 @@
             "checkpoint 14 account.orders[2].type",
             "checkpoint 14 account.orders[3]",
             "checkpoint 14 account.orders[2].parentId"
+          ]
+        },
+        {
+          "divergence": "CFM checkpoints 6-12 (t=9600-18300): native still lists filled market order 40 (status closed), so stop 50 is row 5 in native and row 4 in TS. Native's commit carries over any order changed after a census pass began, and only a pass that starts after the change removes it. A CFM pass reads about 11 status pages (FUTURE and SPOT) through the single REST queue, one request per 334 ms, between balance, portfolio, position and product reads, so it takes about 5 s. Order 40 filled at t=7800 while a pass was running; the first pass started after the t=9600 and t=11400 cancels begins at t=14420 and commits at about t=19100, so native keeps filled 40 for about 11 s and canceled 12 and 30 for about 9.5 s and 7.7 s. INTX's census is 5 pages, about half as long, so it lags one census. Production-visible: CFM users see finished orders in the native order list for 8-11 s.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 11 account.orders.length",
+            "checkpoint 11 account.orders[4].filled",
+            "checkpoint 11 account.orders[4].id",
+            "checkpoint 11 account.orders[4].price",
+            "checkpoint 11 account.orders[4].remaining",
+            "checkpoint 11 account.orders[4].side",
+            "checkpoint 11 account.orders[4].status",
+            "checkpoint 11 account.orders[4].type",
+            "checkpoint 11 account.orders[5]",
+            "checkpoint 12 account.orders.length",
+            "checkpoint 12 account.orders[4].filled",
+            "checkpoint 12 account.orders[4].id",
+            "checkpoint 12 account.orders[4].price",
+            "checkpoint 12 account.orders[4].remaining",
+            "checkpoint 12 account.orders[4].side",
+            "checkpoint 12 account.orders[4].status",
+            "checkpoint 12 account.orders[4].type",
+            "checkpoint 12 account.orders[5]",
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[4].filled",
+            "checkpoint 6 account.orders[4].id",
+            "checkpoint 6 account.orders[4].price",
+            "checkpoint 6 account.orders[4].remaining",
+            "checkpoint 6 account.orders[4].side",
+            "checkpoint 6 account.orders[4].status",
+            "checkpoint 6 account.orders[4].type",
+            "checkpoint 6 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 11 account.orders[4].parentId",
+            "checkpoint 12 account.orders[4].parentId",
+            "checkpoint 6 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].parentId"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 11 account.orders[2].status",
+            "checkpoint 12 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -10296,53 +10306,10 @@
         {
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[2].status",
-            "checkpoint 10 account.orders[4].filled",
-            "checkpoint 10 account.orders[4].id",
-            "checkpoint 10 account.orders[4].price",
-            "checkpoint 10 account.orders[4].remaining",
-            "checkpoint 10 account.orders[4].side",
-            "checkpoint 10 account.orders[4].status",
-            "checkpoint 10 account.orders[4].type",
-            "checkpoint 10 account.orders[5]",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 7 account.orders[4].filled",
-            "checkpoint 7 account.orders[4].id",
-            "checkpoint 7 account.orders[4].price",
-            "checkpoint 7 account.orders[4].remaining",
-            "checkpoint 7 account.orders[4].side",
-            "checkpoint 7 account.orders[4].status",
-            "checkpoint 7 account.orders[4].type",
-            "checkpoint 7 account.orders[5]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 8 account.orders[4].filled",
-            "checkpoint 8 account.orders[4].id",
-            "checkpoint 8 account.orders[4].price",
-            "checkpoint 8 account.orders[4].remaining",
-            "checkpoint 8 account.orders[4].side",
-            "checkpoint 8 account.orders[4].status",
-            "checkpoint 8 account.orders[4].type",
-            "checkpoint 8 account.orders[5]",
-            "checkpoint 9 account.orders.length",
-            "checkpoint 9 account.orders[2].status",
-            "checkpoint 9 account.orders[4].filled",
-            "checkpoint 9 account.orders[4].id",
-            "checkpoint 9 account.orders[4].price",
-            "checkpoint 9 account.orders[4].remaining",
-            "checkpoint 9 account.orders[4].side",
-            "checkpoint 9 account.orders[4].status",
-            "checkpoint 9 account.orders[4].type",
-            "checkpoint 9 account.orders[5]"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -10367,15 +10334,6 @@
             "checkpoint 7 account.settings[0].leverage",
             "checkpoint 8 account.settings[0].leverage",
             "checkpoint 9 account.settings[0].leverage"
-          ]
-        },
-        {
-          "divergence": "Protective parent/child identity is absent or differs between implementations.",
-          "keys": [
-            "checkpoint 10 account.orders[4].parentId",
-            "checkpoint 7 account.orders[4].parentId",
-            "checkpoint 8 account.orders[4].parentId",
-            "checkpoint 9 account.orders[4].parentId"
           ]
         },
         {
@@ -10419,6 +10377,68 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "Spot checkpoints 7-10 (t=11400-14900): TS still lists filled market order 40 (status closed) until its census, paced at one request per second, lands at checkpoint 11 (t=16600); native's 6-page spot census removed it by checkpoint 7. Stop 50 is therefore row 5 in TS and row 4 in native. Production-visible: TS shows the filled market order about 5 s longer.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].parentId"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -10619,53 +10639,10 @@
         {
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[2].status",
-            "checkpoint 10 account.orders[4].filled",
-            "checkpoint 10 account.orders[4].id",
-            "checkpoint 10 account.orders[4].price",
-            "checkpoint 10 account.orders[4].remaining",
-            "checkpoint 10 account.orders[4].side",
-            "checkpoint 10 account.orders[4].status",
-            "checkpoint 10 account.orders[4].type",
-            "checkpoint 10 account.orders[5]",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 7 account.orders[4].filled",
-            "checkpoint 7 account.orders[4].id",
-            "checkpoint 7 account.orders[4].price",
-            "checkpoint 7 account.orders[4].remaining",
-            "checkpoint 7 account.orders[4].side",
-            "checkpoint 7 account.orders[4].status",
-            "checkpoint 7 account.orders[4].type",
-            "checkpoint 7 account.orders[5]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 8 account.orders[4].filled",
-            "checkpoint 8 account.orders[4].id",
-            "checkpoint 8 account.orders[4].price",
-            "checkpoint 8 account.orders[4].remaining",
-            "checkpoint 8 account.orders[4].side",
-            "checkpoint 8 account.orders[4].status",
-            "checkpoint 8 account.orders[4].type",
-            "checkpoint 8 account.orders[5]",
-            "checkpoint 9 account.orders.length",
-            "checkpoint 9 account.orders[2].status",
-            "checkpoint 9 account.orders[4].filled",
-            "checkpoint 9 account.orders[4].id",
-            "checkpoint 9 account.orders[4].price",
-            "checkpoint 9 account.orders[4].remaining",
-            "checkpoint 9 account.orders[4].side",
-            "checkpoint 9 account.orders[4].status",
-            "checkpoint 9 account.orders[4].type",
-            "checkpoint 9 account.orders[5]"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -10690,15 +10667,6 @@
             "checkpoint 7 account.settings[0].leverage",
             "checkpoint 8 account.settings[0].leverage",
             "checkpoint 9 account.settings[0].leverage"
-          ]
-        },
-        {
-          "divergence": "Protective parent/child identity is absent or differs between implementations.",
-          "keys": [
-            "checkpoint 10 account.orders[4].parentId",
-            "checkpoint 7 account.orders[4].parentId",
-            "checkpoint 8 account.orders[4].parentId",
-            "checkpoint 9 account.orders[4].parentId"
           ]
         },
         {
@@ -10742,6 +10710,68 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "Spot checkpoints 7-10 (t=11400-14900): TS still lists filled market order 40 (status closed) until its census, paced at one request per second, lands at checkpoint 11 (t=16600); native's 6-page spot census removed it by checkpoint 7. Stop 50 is therefore row 5 in TS and row 4 in native. Production-visible: TS shows the filled market order about 5 s longer.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].parentId"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -16249,82 +16279,10 @@
           "keys": [
             "checkpoint 1 account.orders.length",
             "checkpoint 1 account.orders[4]",
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[2].status",
-            "checkpoint 10 account.orders[4].filled",
-            "checkpoint 10 account.orders[4].id",
-            "checkpoint 10 account.orders[4].price",
-            "checkpoint 10 account.orders[4].remaining",
-            "checkpoint 10 account.orders[4].side",
-            "checkpoint 10 account.orders[4].status",
-            "checkpoint 10 account.orders[4].type",
-            "checkpoint 10 account.orders[5]",
-            "checkpoint 11 account.orders.length",
-            "checkpoint 11 account.orders[2].status",
-            "checkpoint 11 account.orders[4].filled",
-            "checkpoint 11 account.orders[4].id",
-            "checkpoint 11 account.orders[4].price",
-            "checkpoint 11 account.orders[4].remaining",
-            "checkpoint 11 account.orders[4].side",
-            "checkpoint 11 account.orders[4].status",
-            "checkpoint 11 account.orders[4].type",
-            "checkpoint 11 account.orders[5]",
-            "checkpoint 12 account.orders.length",
-            "checkpoint 12 account.orders[2].status",
-            "checkpoint 12 account.orders[4].filled",
-            "checkpoint 12 account.orders[4].id",
-            "checkpoint 12 account.orders[4].price",
-            "checkpoint 12 account.orders[4].remaining",
-            "checkpoint 12 account.orders[4].side",
-            "checkpoint 12 account.orders[4].status",
-            "checkpoint 12 account.orders[4].type",
-            "checkpoint 12 account.orders[5]",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders.length",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 6 account.orders[4].filled",
-            "checkpoint 6 account.orders[4].id",
-            "checkpoint 6 account.orders[4].price",
-            "checkpoint 6 account.orders[4].remaining",
-            "checkpoint 6 account.orders[4].side",
-            "checkpoint 6 account.orders[4].status",
-            "checkpoint 6 account.orders[4].type",
-            "checkpoint 6 account.orders[5]",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 7 account.orders[4].filled",
-            "checkpoint 7 account.orders[4].id",
-            "checkpoint 7 account.orders[4].price",
-            "checkpoint 7 account.orders[4].remaining",
-            "checkpoint 7 account.orders[4].side",
-            "checkpoint 7 account.orders[4].status",
-            "checkpoint 7 account.orders[4].type",
-            "checkpoint 7 account.orders[5]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 8 account.orders[4].filled",
-            "checkpoint 8 account.orders[4].id",
-            "checkpoint 8 account.orders[4].price",
-            "checkpoint 8 account.orders[4].remaining",
-            "checkpoint 8 account.orders[4].side",
-            "checkpoint 8 account.orders[4].status",
-            "checkpoint 8 account.orders[4].type",
-            "checkpoint 8 account.orders[5]",
-            "checkpoint 9 account.orders.length",
-            "checkpoint 9 account.orders[2].status",
-            "checkpoint 9 account.orders[4].filled",
-            "checkpoint 9 account.orders[4].id",
-            "checkpoint 9 account.orders[4].price",
-            "checkpoint 9 account.orders[4].remaining",
-            "checkpoint 9 account.orders[4].side",
-            "checkpoint 9 account.orders[4].status",
-            "checkpoint 9 account.orders[4].type",
-            "checkpoint 9 account.orders[5]"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -16349,18 +16307,6 @@
             "checkpoint 7 account.settings[1].leverage",
             "checkpoint 8 account.settings[1].leverage",
             "checkpoint 9 account.settings[1].leverage"
-          ]
-        },
-        {
-          "divergence": "Protective parent/child identity is absent or differs between implementations.",
-          "keys": [
-            "checkpoint 10 account.orders[4].parentId",
-            "checkpoint 11 account.orders[4].parentId",
-            "checkpoint 12 account.orders[4].parentId",
-            "checkpoint 6 account.orders[4].parentId",
-            "checkpoint 7 account.orders[4].parentId",
-            "checkpoint 8 account.orders[4].parentId",
-            "checkpoint 9 account.orders[4].parentId"
           ]
         },
         {
@@ -16458,6 +16404,100 @@
             "checkpoint 14 account.orders[2].type",
             "checkpoint 14 account.orders[3]",
             "checkpoint 14 account.orders[2].parentId"
+          ]
+        },
+        {
+          "divergence": "CFM checkpoints 6-12 (t=9600-18300): native still lists filled market order 40 (status closed), so stop 50 is row 5 in native and row 4 in TS. Native's commit carries over any order changed after a census pass began, and only a pass that starts after the change removes it. A CFM pass reads about 11 status pages (FUTURE and SPOT) through the single REST queue, one request per 334 ms, between balance, portfolio, position and product reads, so it takes about 5 s. Order 40 filled at t=7800 while a pass was running; the first pass started after the t=9600 and t=11400 cancels begins at t=14420 and commits at about t=19100, so native keeps filled 40 for about 11 s and canceled 12 and 30 for about 9.5 s and 7.7 s. INTX's census is 5 pages, about half as long, so it lags one census. Production-visible: CFM users see finished orders in the native order list for 8-11 s.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 11 account.orders.length",
+            "checkpoint 11 account.orders[4].filled",
+            "checkpoint 11 account.orders[4].id",
+            "checkpoint 11 account.orders[4].price",
+            "checkpoint 11 account.orders[4].remaining",
+            "checkpoint 11 account.orders[4].side",
+            "checkpoint 11 account.orders[4].status",
+            "checkpoint 11 account.orders[4].type",
+            "checkpoint 11 account.orders[5]",
+            "checkpoint 12 account.orders.length",
+            "checkpoint 12 account.orders[4].filled",
+            "checkpoint 12 account.orders[4].id",
+            "checkpoint 12 account.orders[4].price",
+            "checkpoint 12 account.orders[4].remaining",
+            "checkpoint 12 account.orders[4].side",
+            "checkpoint 12 account.orders[4].status",
+            "checkpoint 12 account.orders[4].type",
+            "checkpoint 12 account.orders[5]",
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[4].filled",
+            "checkpoint 6 account.orders[4].id",
+            "checkpoint 6 account.orders[4].price",
+            "checkpoint 6 account.orders[4].remaining",
+            "checkpoint 6 account.orders[4].side",
+            "checkpoint 6 account.orders[4].status",
+            "checkpoint 6 account.orders[4].type",
+            "checkpoint 6 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 11 account.orders[4].parentId",
+            "checkpoint 12 account.orders[4].parentId",
+            "checkpoint 6 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].parentId"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 11 account.orders[2].status",
+            "checkpoint 12 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -16969,17 +17009,10 @@
         {
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
-            "checkpoint 10 account.orders[2].status",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 9 account.orders[2].status"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -17060,7 +17093,7 @@
           ]
         },
         {
-          "divergence": "Earlier native open-order reconciliation removes closed market order 40; TS retains that FILLED row. Stop order 50 shifts from index 5 to 4, so these literal row paths reflect lifecycle retention and alignment, not same-order economic disagreement.",
+          "divergence": "Spot checkpoints 7-10 (t=11400-14900): TS still lists filled market order 40 (status closed) until its census, paced at one request per second, lands at checkpoint 11 (t=16600); native's 6-page spot census removed it by checkpoint 7. Stop 50 is therefore row 5 in TS and row 4 in native. Production-visible: TS shows the filled market order about 5 s longer.",
           "keys": [
             "checkpoint 10 account.orders.length",
             "checkpoint 10 account.orders[4].filled",
@@ -17102,6 +17135,23 @@
             "checkpoint 9 account.orders[4].status",
             "checkpoint 9 account.orders[4].type",
             "checkpoint 9 account.orders[5]"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -17302,53 +17352,10 @@
         {
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[2].status",
-            "checkpoint 10 account.orders[4].filled",
-            "checkpoint 10 account.orders[4].id",
-            "checkpoint 10 account.orders[4].price",
-            "checkpoint 10 account.orders[4].remaining",
-            "checkpoint 10 account.orders[4].side",
-            "checkpoint 10 account.orders[4].status",
-            "checkpoint 10 account.orders[4].type",
-            "checkpoint 10 account.orders[5]",
             "checkpoint 4 account.orders.length",
             "checkpoint 4 account.orders[4]",
             "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[5]",
-            "checkpoint 6 account.orders[1].status",
-            "checkpoint 6 account.orders[2].status",
-            "checkpoint 7 account.orders.length",
-            "checkpoint 7 account.orders[2].status",
-            "checkpoint 7 account.orders[3].status",
-            "checkpoint 7 account.orders[4].filled",
-            "checkpoint 7 account.orders[4].id",
-            "checkpoint 7 account.orders[4].price",
-            "checkpoint 7 account.orders[4].remaining",
-            "checkpoint 7 account.orders[4].side",
-            "checkpoint 7 account.orders[4].status",
-            "checkpoint 7 account.orders[4].type",
-            "checkpoint 7 account.orders[5]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[2].status",
-            "checkpoint 8 account.orders[4].filled",
-            "checkpoint 8 account.orders[4].id",
-            "checkpoint 8 account.orders[4].price",
-            "checkpoint 8 account.orders[4].remaining",
-            "checkpoint 8 account.orders[4].side",
-            "checkpoint 8 account.orders[4].status",
-            "checkpoint 8 account.orders[4].type",
-            "checkpoint 8 account.orders[5]",
-            "checkpoint 9 account.orders.length",
-            "checkpoint 9 account.orders[2].status",
-            "checkpoint 9 account.orders[4].filled",
-            "checkpoint 9 account.orders[4].id",
-            "checkpoint 9 account.orders[4].price",
-            "checkpoint 9 account.orders[4].remaining",
-            "checkpoint 9 account.orders[4].side",
-            "checkpoint 9 account.orders[4].status",
-            "checkpoint 9 account.orders[4].type",
-            "checkpoint 9 account.orders[5]"
+            "checkpoint 5 account.orders[5]"
           ]
         },
         {
@@ -17373,15 +17380,6 @@
             "checkpoint 7 account.settings[0].leverage",
             "checkpoint 8 account.settings[0].leverage",
             "checkpoint 9 account.settings[0].leverage"
-          ]
-        },
-        {
-          "divergence": "Protective parent/child identity is absent or differs between implementations.",
-          "keys": [
-            "checkpoint 10 account.orders[4].parentId",
-            "checkpoint 7 account.orders[4].parentId",
-            "checkpoint 8 account.orders[4].parentId",
-            "checkpoint 9 account.orders[4].parentId"
           ]
         },
         {
@@ -17425,6 +17423,68 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "Spot checkpoints 7-10 (t=11400-14900): TS still lists filled market order 40 (status closed) until its census, paced at one request per second, lands at checkpoint 11 (t=16600); native's 6-page spot census removed it by checkpoint 7. Stop 50 is therefore row 5 in TS and row 4 in native. Production-visible: TS shows the filled market order about 5 s longer.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].parentId"
+          ]
+        },
+        {
+          "divergence": "Native shows a canceled order as canceling until a census confirms the cancel (12 at checkpoint 6, 30 at checkpoint 7); TS marks it canceled from the batch_cancel acknowledgement.",
+          "keys": [
+            "checkpoint 6 account.orders[1].status",
+            "checkpoint 7 account.orders[3].status"
+          ]
+        },
+        {
+          "divergence": "Coinbase rejects the cancel of order 13 (batch_cancel result success:false). TS marks 13 canceled anyway and keeps it so until its census; native keeps 13 open. TS defect, documented in KNOWN_TS_FIXES.coinbase.",
+          "keys": [
+            "checkpoint 10 account.orders[2].status",
+            "checkpoint 6 account.orders[2].status",
+            "checkpoint 7 account.orders[2].status",
+            "checkpoint 8 account.orders[2].status",
+            "checkpoint 9 account.orders[2].status"
           ]
         }
       ]
@@ -47557,7 +47617,7 @@
     },
     {
       "venue": "weex",
-      "tapeSha256": "81c326365094af297b3fe0858be065bb71c8409a0365ba3f392e214f4d18ca95",
+      "tapeSha256": "06949561e158132137671d7a3aad0b5bc3f5c91f4eb34832b501e5306258cf4e",
       "tape": "sdk-rs/harness/tapes/weex-private.jsonl",
       "diagnostics": [
         {
@@ -47654,7 +47714,7 @@
           ]
         },
         {
-          "divergence": "TS shows an order placed through placeOrders only after its next private order event or REST read; native inserts the acknowledged placement at once. At these placement checkpoints TS lacks 61/62 (t=2500, event at 2800), conditional 63 (t=3300, event at 3600) and TP 64 (t=4500, event at 4600), so the remaining rows sit at different indexes.",
+          "divergence": "TS shows an order placed through placeOrders only after its next private order event or REST read; native inserts the acknowledged placement at once. At these placement checkpoints TS lacks 61/62 (t=2500, event at 2800), conditional 63 (t=3300, event at 3600), TP 64 (t=4500, event at 4600) and conditional 65 (t=6300, event at 6400), so the remaining rows sit at different indexes.",
           "keys": [
             "checkpoint 1 account.orders.length",
             "checkpoint 1 account.orders[1]",
@@ -47682,7 +47742,18 @@
             "checkpoint 5 account.orders[1].timeInForce",
             "checkpoint 5 account.orders[1].trigger",
             "checkpoint 5 account.orders[1].type",
-            "checkpoint 5 account.orders[2]"
+            "checkpoint 5 account.orders[2]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[0].amount",
+            "checkpoint 8 account.orders[0].clientOrderId",
+            "checkpoint 8 account.orders[0].id",
+            "checkpoint 8 account.orders[0].price",
+            "checkpoint 8 account.orders[0].remaining",
+            "checkpoint 8 account.orders[0].side",
+            "checkpoint 8 account.orders[0].symbol",
+            "checkpoint 8 account.orders[0].timeInForce",
+            "checkpoint 8 account.orders[0].type",
+            "checkpoint 8 account.orders[1]"
           ]
         },
         {
@@ -47702,27 +47773,10 @@
           ]
         },
         {
-          "divergence": "Native sets trigger last_price on plain LIMIT rows (61, 60) taken from order-channel events, which carry triggerPriceType CONTRACT_PRICE with triggerPrice 0; TS leaves trigger null. Native mapping issue, reported for follow-up.",
+          "divergence": "Native keeps the client ID it generated when placing conditional 65 at t=6300; the venue's order event and REST rows omit it, so TS, which reads those, shows null. Native would replace the row at its next REST reconciliation (t=8250), after the tape ends.",
           "keys": [
-            "checkpoint 4 account.orders[1].trigger",
-            "checkpoint 7 account.orders[0].trigger"
-          ]
-        },
-        {
-          "divergence": "At checkpoint 8 (t=6100, placeOrders of conditional 65) TS lists only 62: the REST read it schedules 250 ms after the t=5400 cancel events already dropped canceled 60/64, and it has not yet seen 65. Native still holds canceled 60/64 until its next 2 s REST reconciliation (t=6250) and inserted 65 from its acknowledgement.",
-          "keys": [
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[0].amount",
-            "checkpoint 8 account.orders[0].id",
-            "checkpoint 8 account.orders[0].price",
-            "checkpoint 8 account.orders[0].remaining",
-            "checkpoint 8 account.orders[0].side",
-            "checkpoint 8 account.orders[0].status",
-            "checkpoint 8 account.orders[0].symbol",
-            "checkpoint 8 account.orders[0].trigger",
-            "checkpoint 8 account.orders[1]",
-            "checkpoint 8 account.orders[2]",
-            "checkpoint 8 account.orders[3]"
+            "account orders[0].clientOrderId",
+            "checkpoint 9 account.orders[0].clientOrderId"
           ]
         }
       ]

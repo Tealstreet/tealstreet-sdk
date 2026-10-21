@@ -1153,6 +1153,7 @@ impl BybitLinear {
         }
         cx.store.set_tickers(tickers);
         self.tickers_ready = true;
+        self.reclassify_unpriced_tpsl(cx);
         let category = self.category;
         for other in self.categories() {
             // A category without seeded data waits; a connected one is already live.
