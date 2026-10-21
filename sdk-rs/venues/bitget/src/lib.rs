@@ -15,6 +15,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
@@ -101,7 +102,7 @@ impl Default for Connection {
 
 pub struct BitgetFutures {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
-    discovery: safe_cex_engine::startup::Backoff<bool>,
+    discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
@@ -112,7 +113,38 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
 }
 
+fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
+    let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
+    let rejection = envelope
+        .as_ref()
+        .filter(|e| e.code.0.is_some_and(|code| code != 0.0));
+    let code = rejection.map(|e| e.code.get().to_string());
+    safe_cex_engine::startup::public_response_error(
+        response.status,
+        code.as_deref(),
+        rejection.map(|e| e.msg.as_str()),
+    )
+}
+
 impl BitgetFutures {
+    fn public_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        tickers: bool,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.discovery.failed_after(
+            cx,
+            if tickers {
+                DiscoveryRead::Tickers
+            } else {
+                DiscoveryRead::Markets
+            },
+            0.0,
+            error,
+        );
+    }
+
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
@@ -744,10 +776,26 @@ impl Venue for BitgetFutures {
             .map_err(|e| e.to_string())
             .and_then(Envelope::checked);
         if let Err(error) = valid {
+            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Tickers { .. }),
+                    discovery_error(&response),
+                );
+                return;
+            }
             self.on_request_failed(cx, pending, &error);
             return;
         }
         if response.status != 200 {
+            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Tickers { .. }),
+                    discovery_error(&response),
+                );
+                return;
+            }
             self.on_request_failed(
                 cx,
                 pending,
@@ -761,13 +809,18 @@ impl Venue for BitgetFutures {
                 invalid: false,
             } => {
                 if rows.is_empty() {
-                    self.discovery.failed(cx, false);
+                    self.public_failed(
+                        cx,
+                        false,
+                        safe_cex_engine::VenueError::new("Empty Bitget catalogue")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
                     return;
                 }
                 cx.store.set_markets(rows);
                 self.ticker_index = ticker_index(cx.store);
                 self.connect(cx, 0);
-                self.discovery.succeeded(cx, &false);
+                self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 self.discovery_read(cx, true);
                 self.start_private(cx);
             }
@@ -776,13 +829,18 @@ impl Venue for BitgetFutures {
                 invalid: false,
             } => {
                 if rows.is_empty() {
-                    self.discovery.failed(cx, true);
+                    self.public_failed(
+                        cx,
+                        true,
+                        safe_cex_engine::VenueError::new("Empty Bitget tickers")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
                     return;
                 }
                 self.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
                 self.ticker_index = ticker_index(cx.store);
-                self.discovery.succeeded(cx, &true);
+                self.discovery.succeeded(cx, DiscoveryRead::Tickers);
                 self.connect(cx, 1);
                 self.connect(cx, 2);
             }
@@ -791,7 +849,30 @@ impl Venue for BitgetFutures {
                 rows,
                 invalid: false,
             } => cx.done(command, serde_json::to_string(&rows).expect("candles")),
+            pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
+                cx,
+                matches!(pending, Pending::Tickers { .. }),
+                discovery_error(&response),
+            ),
             pending => self.on_request_failed(cx, pending, "invalid Bitget REST record"),
+        }
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Tickers { .. }),
+                safe_cex_engine::startup::public_response_error(status, None, None),
+            );
+        } else {
+            self.on_request_failed(cx, pending, error);
         }
     }
     fn on_stream_error(
@@ -800,6 +881,14 @@ impl Venue for BitgetFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            self.public_failed(
+                cx,
+                matches!(pending, Pending::Tickers { .. }),
+                discovery_error(&response),
+            );
+            return;
+        }
         if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0))
@@ -831,14 +920,22 @@ impl Venue for BitgetFutures {
                     self.resume_trading(cx);
                 }
             }
-            Pending::Markets { .. } => self.discovery.failed(cx, false),
-            Pending::Tickers { .. } => self.discovery.failed(cx, true),
+            Pending::Markets { .. } => self.public_failed(
+                cx,
+                false,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            ),
+            Pending::Tickers { .. } => self.public_failed(
+                cx,
+                true,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Identity(_) => unreachable!(),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if let Some(tickers) = self.discovery.on_timer(timer) {
-            self.discovery_read(cx, tickers);
+        if let Some(read) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, read == DiscoveryRead::Tickers);
             return;
         }
         self.account_timer(cx, timer);

@@ -5,6 +5,7 @@ const hmac = (text) => createHmac('sha256', 'replay-secret').update(text).digest
 const privateTopics = ['/spotMarket/tradeOrdersV2', '/account/balance'];
 export const kucoinspot = {
   rust: 'kucoinspot',
+  virtualPrivateClock: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoinspot.exchange.ts', className: 'KucoinSpotExchange', name: 'kucoinspot' },
   startupMessage: (record) => { try { return JSON.parse(record.text).type === 'welcome'; } catch { return false; } },
   volatileQueryFields: ['connectId'],
