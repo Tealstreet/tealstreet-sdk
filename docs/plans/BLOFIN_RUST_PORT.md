@@ -137,7 +137,11 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Borrowed history payloads stream into typed result rows; commands return the
   same JSON keys as Binance's history module. Preserve per-fill trade IDs,
   native-to-base execution quantities, fee sign conventions and time units.
-- Orders preserve TS's native quantity history shape. Income uses cursor paging
+- Order history reports `amount`/`filled` in base units (contracts times
+  `contractValue`), as open orders and fills do. This deliberately diverges from
+  TS, whose history shows 1 BTC as 1000 on BTC-USDT. Rows on markets missing from
+  the catalogue are dropped, as fills are, rather than reported in contracts.
+  Income uses cursor paging
   and client-side time windows because BloFin ignores begin/end on fills history;
   page failures fail the read rather than silently returning partial history.
 - Public trades and candle reads validate symbols/options; rare reads never
