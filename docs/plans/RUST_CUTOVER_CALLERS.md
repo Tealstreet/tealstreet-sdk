@@ -1714,6 +1714,15 @@ No extra polling or write retry is added. Malformed position-stream rows retain 
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
 
+### Backpack nullable trigger quantities
+
+Rust readbacks accept missing/null base quantity only when native trigger fields
+prove a positive amount and consistent execution. Orders remain visible and
+repairable under their real IDs; malformed ordinary quantities preserve prior
+state and fail rather than creating zero-size rows. This applies to account and
+order history reads and repair acknowledgements without changing method shapes,
+placement units, WS fields or cancellation identity.
+
 ### Lighter port-review confirmation and failures
 
 A Rust Lighter reduce-only limit order without matching known exposure now waits

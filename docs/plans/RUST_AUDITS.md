@@ -1205,8 +1205,12 @@ Signing, order payloads (incl. app stop shapes), amend, cancel and positions mat
   the Rust crate. ~~A mark-price failure or one bad ticker row
   blocks startup (`lib.rs:211,787`).~~ Bad rows skipped; startup proceeds on last
   price until marks load.
-- Low: ~~one bad fill row fails fill history (`history.rs:312`).~~ Verify live:
-  open-order rows with `"quantity": null`.
+- Low: ~~one bad fill row fails fill history (`history.rs:312`)~~;
+  ~~open-order rows with `"quantity": null`~~ now admit a missing/null base
+  quantity only when positive native triggerPrice/triggerQuantity and bounded
+  execution prove its amount. Account/history/repair share that guard. Ordinary
+  missing quantity now rejects instead of defaulting to zero; malformed fallback
+  retains prior state and cannot start cancellation. No live-schema claim is made.
 
 ### BreakoutProp (disabled in production)
 App stop payloads accepted; amend stricter than TS.
