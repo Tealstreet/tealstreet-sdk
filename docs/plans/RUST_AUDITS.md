@@ -965,6 +965,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
+  ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
+  carry the actual request command before retained rows complete. Both native
+  regressions check exact ownership and order at Error-only logging, preserving
+  row counts and existing window/cap policy.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.

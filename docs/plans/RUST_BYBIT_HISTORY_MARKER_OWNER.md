@@ -8,3 +8,7 @@ for exact owner/code/level/order and prove RED on original source. Run focused
 Bybit/Binance native tests, strict Clippy/fmt/bans, independent review and CI.
 Source merge holds for entropy1624: integrate its actual landing, rerun CI, use
 separate exact guard, merge on green and report actual pin.
+
+Both native regressions fail original source specifically on missing command
+fields. Fixed Bybit/Binance suite passes568 tests; strict Bybit Clippy/fmt/bans
+pass. Independent review CLEAR: only ownership added, policies unchanged.

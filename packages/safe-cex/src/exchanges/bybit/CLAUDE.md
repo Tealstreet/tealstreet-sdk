@@ -2035,3 +2035,8 @@ An older in-flight positions join cannot restore stale leverage/settings; it
 coalesces one fresh read after settling. A refused write leaves the authoritative
 read eligible. The fence adds no write retries and does not alter position-mode
 switch semantics.
+
+Rust closed-PnL and unbounded order-history page-cap warnings carry their actual
+native query command in `history.incomplete` before partial completion/window
+continuation. Existing rows, caps and error policies are preserved; the host can
+flag the owning partial array and route its warning without crossing callers.
