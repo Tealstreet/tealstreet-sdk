@@ -615,6 +615,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+
+- ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
+  carry the actual request command before retained rows complete. Both native
+  regressions check exact ownership and order at Error-only logging, preserving
+  row counts and existing window/cap policy.
+
 - ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
   and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
   their headers; reset and Retry-After hints extend all waiting category retries
@@ -695,6 +701,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   are resent.
 
 ### BloFin
+
+- ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
+  request command before retained rows complete. Its native cap regression
+  checks exact ownership and ordering even at Error-only log level.
+
 - High: ~~a failed or malformed startup ticker read blocks the private side
   without retry~~. #1356 (`d65119bea35`) starts private reads independently
   after usable markets and retries ticker discovery; #1615 (`c63acfc19c2`)
@@ -955,15 +966,22 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Rejected WS identities protect pending REST joins without globally starving
   unrelated rows, with coalesced read repair. Regression coverage includes both
   structural/numeric failures, missing IDs, duplicate keys, option update/close,
-  mode coherence and repeated WS rejects during REST walks. Remaining: Bitget
-  structural WS order/position array rejection. Preserve actual revision/mode
-  fences, strict financial execution coverage and Hyro's atomic handshake.
+  mode coherence and repeated WS rejects during REST walks.
+  ~~Bitget structural WS order/position array rejection~~: valid Classic/UTA
+  peers advance with identity/scope retention and coalesced read repair. Native
+  rejection observation times remain separate from financial timestamps; earlier
+  clean snapshots still fence older reads, while fresh REST-only peers can heal.
+  Partial/mixed account modes cannot corrupt global routing or manufacture initial
+  readiness. Plans/trailing metadata retain native cancel routes through the
+  existing revision/terminal fence. Regressions cover each boundary.
+  Preserve actual revision/mode fences, strict financial execution coverage and
+  Hyro's atomic handshake.
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
-  returned partial history unflagged and worker owners unwarned. Attribute to
+- History completeness: the sweep found fourteen query-associated ownership
+  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
+  partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never

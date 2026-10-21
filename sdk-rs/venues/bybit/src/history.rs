@@ -575,8 +575,9 @@ impl BybitLinear {
                 .as_ref()
                 .is_some_and(|c| walk.cursor.as_ref() != Some(c));
         if capped_orders {
-            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
                 "Bybit order history reached its page limit; older orders in this window are omitted",
+                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
             );
             walk.pages = 0;
             self.next_window(cx, command);
