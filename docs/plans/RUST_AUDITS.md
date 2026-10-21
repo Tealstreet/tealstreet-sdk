@@ -752,9 +752,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
   is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
 - ~~Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).~~
-  Fixed: a well-formed row of an unsupported type keeps its last known state (or is
-  reported as not shown) while other orders commit; malformed rows still preserve
-  the whole last-good snapshot. Hyro stays strict.
+  Fixed: ordinary REST/WS reads admit valid peers while rejected keyed rows keep
+  their stored copies; unidentified rows hold absence without freezing healthy
+  peers (#1620, `4592d985e8a`). Hyro retains its strict atomic handshake.
 - Low: ~~OHLCV from+limit~~ (a limit asks for the newest bars up to `to`, as
   TS); ~~no market refresh~~ (explicit atomic native catalogue refresh); ~~Hyro market filter;
   subscription breadth~~ (decided: USDT perpetuals only, Hyro's own rule; foreign
@@ -1058,11 +1058,13 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: the sweep found fourteen query-associated ownership
-  omissions in Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX, leaving
-  partial history unflagged and worker owners unwarned. Attribute to
-  the actual request before completion; preserve Warn semantics, result/error
-  policy and #1593's client isolation. Six background account-coverage markers
+- ~~History completeness: fourteen query-associated ownership omissions in
+  Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX left partial history
+  unflagged and worker owners unwarned.~~ #1627–#1633 attach the actual request
+  before completion, preserving Warn semantics and #1593's client isolation.
+  Bitunix additionally rejects failed history reads instead of returning truncated
+  success (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)).
+  Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
 

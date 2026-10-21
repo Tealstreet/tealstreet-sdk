@@ -33,16 +33,25 @@ Public startup repairs are evidenced by #1356/#1516; private keyed-row repairs
 by #1459/#1493/#1517/#1524/#1606. An alias inventory is not proof of every
 option's behavior, and generic diagnostics are not typed credential evidence.
 
-Confirmed implementation batches, each requiring a fresh landing branch,
-reproducing regression and independent review before landing:
+The implementation batches identified above have landed. The closing receipt
+rechecked each actual merge's parents/reviewed head, tree and landing ancestry;
+recorded own-file scopes also match. These are source/regression receipts, not
+new authenticated live captures.
 
-| Batch | Remaining production defect |
+| Batch | Actual merged repair evidence |
 | --- | --- |
-| BingX | Sequential placement failure loses earlier acknowledged IDs from typed failure; preserve native error and unknown-outcome policy. |
-| Bitunix | Public row admission/private startup, reconnect backoff, private keyed-row retention and WS-ID-triggered read starvation, explicit history failure/completeness, coded/throttled visible account-read failures, secondary GET signing plus egress, host clock, forced route and stale-book invalidation. Preserve write-revision fences and prerequisites. |
-| Bybit | Ordinary keyed REST orders/positions and structural WS orders/positions can starve valid peers; preserve Hyro handshake and execution completeness. Two owned history markers. |
-| Bitget | Structural WS order/position row admission; REST keyed retention already repaired. Keep financial fills strict. |
-| BloFin / Hyperliquid / OKX / Paradex / WEEX | Query-associated HISTORY_INCOMPLETE ownership: 1/1/3/1/5 sites respectively; Bitunix and Bybit account for the other three. Attribute the real command before completion, preserving result/error policy. |
+| Stale audit strikes | #1619 (`1ad3a79fb28`). |
+| BingX acknowledged placement IDs | #1617 (`4e2f92c2622`), preserving native failure/unknown-outcome policy. |
+| Bybit keyed REST/WS peers and leverage ACK fence | #1620 (`4592d985e8a`), #1621 (`7adb43c4beb`); Hyro strict handshake remains. |
+| Bitget structural WS peers | #1625 (`02a0db19f3c`), preserving identity/mode and native financial fields. |
+| Fourteen query-associated completeness markers | #1627 (`9a444620376`), #1628 (`d659c18c3f5`), #1629 (`a3c4e827722`), #1630 (`b2092b50aca`), #1631 (`e9049c794c8`), #1632 (`41cd4914a70`), #1633 (`a29812d8e49`). Warn semantics and caller isolation remain; Bitunix additionally rejects failed history reads instead of returning truncated success. |
+| Bitunix public startup, socket/book lifecycle, secondary GET and private rows/history | #1636 (`62adf7651b0`), #1639 (`77a5e5faaec`), #1640 (`93bb218ffda`), #1641 (`f156e3dc0aa`), #1643 (`163929bc0f5`), #1645 (`6642e51468b`). |
+| Bitunix clock, login controls and forced route | #1648 (`205ceb3fe8d`), #1649 (`fc5ab92248a`), #1650 (`b2059cce998`). |
+| Bitunix scheduling/keyed reads and scoped account recovery/balance progress | #1655 (`ba3d5bc69ee`), #1658 (`67e81cfc13b`), #1662 (`501fb664edb`), #1665 (`8f7b0cee3ff`). Write/prerequisite fences and no-write-retry policy remain. |
+
+The final remaining-defect recheck found two additional routine repairs:
+Bitunix per-symbol settings progress (#1668) and WEEX skipped empty-fill-identity
+visibility (#1670). Both remain open and are not included in the merged receipt.
 
 No production defect is established by cache-only `removeOrders`, caller-owned
 post-validation engine lifetime, optional candle `lastSide` without a mirrored
