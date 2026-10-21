@@ -641,8 +641,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   one odd instrument row aborts startup
   (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
   (`trading.rs:671`)~~ (explicit error).
-- Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
-  iso/cross warnings; 102143 not translated; history shape.
+- Low: ~~strict leverage fetch~~ (no user impact: the bridge turns a refused
+  read into `null` plus a warning, as TS returns `null`); ~~trigger TP/SL not
+  tick-rounded; missing iso/cross warnings; 102143 not translated~~; history
+  shape (order history reports contracts while open orders and fills report
+  base units; Rust preserves TS here by design, `BLOFIN_RUST_PORT.md`).
 - Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
   zero-size partial TP/SL rejected; amend checks order-detail (endpoint
   unexercised live); per-row cancel errors; empty snapshot commits; income

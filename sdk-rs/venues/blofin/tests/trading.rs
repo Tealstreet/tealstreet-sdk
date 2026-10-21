@@ -1464,3 +1464,95 @@ fn trading_failures_are_classified_without_changing_their_text() {
         );
     }
 }
+
+#[test]
+fn attached_take_profit_and_stop_loss_are_rounded_to_the_price_tick() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"takeProfit":65000.04,"stopLoss":55000.06}]"#,
+    );
+    let r = h.take("batch-orders");
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    let attached = &p[0]["attachAlgoOrders"][0];
+    assert_eq!(attached["tpTriggerPrice"], "65000");
+    assert_eq!(attached["slTriggerPrice"], "55000.1");
+}
+
+#[test]
+fn attached_trigger_that_rounds_to_zero_is_refused_before_any_write() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"stopLoss":0.04}]"#,
+    );
+    assert!(h.pending.is_empty());
+    assert!(done(&h));
+}
+
+#[test]
+fn multi_position_mode_refusal_explains_how_to_continue() {
+    for reply in [
+        r#"{"code":"102143","msg":"position selection required","data":[]}"#,
+        r#"{"code":"0","data":[{"orderId":"","code":"102143","msg":"position selection required"}]}"#,
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        place(
+            &mut h,
+            r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000}]"#,
+        );
+        let r = h.take("batch-orders");
+        h.respond(r, reply);
+        assert!(h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 7,
+                result: Err(error)
+            }) if error.contains("Turn off Multi-Position mode on BloFin")
+        )));
+    }
+}
+
+#[test]
+fn margin_type_change_warns_while_orders_are_open() {
+    for open in [false, true] {
+        let mut h = Harness::new();
+        h.modes();
+        h.reply("account/positions", r#"{"code":"0","data":[]}"#);
+        h.reply(
+            "balances",
+            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+        );
+        for path in [
+            "orders-pending",
+            "orders-tpsl-pending",
+            "orders-algo-pending",
+        ] {
+            h.reply(path, r#"{"code":"0","data":[]}"#);
+        }
+        if open {
+            seed_order(&mut h, "1", "");
+        }
+        h.e.handle(
+            1.0,
+            Event::Command(Command::SetMarginType {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+                isolated: true,
+            }),
+        );
+        h.collect();
+        let warned = h.actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::Log { message, .. })
+                    if message.starts_with("Changing margin type with open positions / orders")
+            )
+        });
+        assert_eq!(warned, open);
+        assert!(h.pending.iter().any(|r| r.url.contains("set-margin-mode")));
+    }
+}
