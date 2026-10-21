@@ -435,10 +435,14 @@ impl MexcFutures {
         {
             return Ok(None);
         }
-        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || raw.price_unit <= 0.0 {
+        let step = (raw.contract_size * raw.vol_unit).max(raw.contract_size);
+        let precision = Precision {
+            amount: step,
+            price: raw.price_unit,
+        };
+        if raw.contract_size <= 0.0 || raw.vol_unit <= 0.0 || !precision.is_tradable() {
             return Err(());
         }
-        let step = (raw.contract_size * raw.vol_unit).max(raw.contract_size);
         Ok(Some(Market {
             symbol: compact(&raw.symbol),
             pretty_symbol: Some(raw.symbol.to_string()),
@@ -446,10 +450,7 @@ impl MexcFutures {
             base: raw.base_coin.into_owned(),
             quote: raw.quote_coin.into_owned(),
             active: true,
-            precision: Precision {
-                amount: step,
-                price: raw.price_unit,
-            },
+            precision,
             limits: Limits {
                 amount: MinMax {
                     min: (raw.min_vol * raw.contract_size).max(step),

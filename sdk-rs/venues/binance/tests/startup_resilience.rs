@@ -289,3 +289,46 @@ fn catalogue_ip_ban_without_retry_after_waits_the_weight_pause() {
     h.reply(request, 418, "", "{}");
     assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 60_000.0);
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    let valid = r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"}]}"#;
+    for (field, bad) in [
+        ("\"tickSize\":\"0.10\"", "\"tickSize\":\"0\""),
+        ("\"stepSize\":\"0.001\"", "\"stepSize\":\"-1\""),
+        (
+            "{\"filterType\":\"PRICE_FILTER\",\"tickSize\":\"0.10\"},",
+            "",
+        ),
+    ] {
+        let broken = valid
+            .replace("BTCUSDT", "ETHUSDT")
+            .replace("\"BTC\"", "\"ETH\"")
+            .replacen(field, bad, 1);
+        let body = format!(r#"{{"symbols":[{valid},{broken}]}}"#);
+        let mut engine = public_engine();
+        engine.start(0.0);
+        let request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.contains("exchangeInfo") => Some(request),
+                _ => None,
+            })
+            .expect("catalogue request");
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        assert!(engine.store().market("BTCUSDT").is_some());
+        assert!(engine.store().market("ETHUSDT").is_none(), "{bad}");
+        assert!(engine.drain_actions().any(|action| matches!(action,
+            Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    }
+}

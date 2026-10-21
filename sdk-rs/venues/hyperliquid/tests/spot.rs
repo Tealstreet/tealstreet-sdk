@@ -1586,3 +1586,24 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
         "stale read restored a filled order"
     );
 }
+
+#[test]
+fn a_spot_market_without_a_positive_step_is_skipped_as_malformed() {
+    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let r = take_http(&mut e);
+    support::reply(
+        &mut e,
+        &r,
+        200,
+        &META.replace(
+            r#""name":"HFUN","index":2,"szDecimals":2"#,
+            r#""name":"HFUN","index":2,"szDecimals":400"#,
+        ),
+    );
+    assert!(e.store().market("PURR/USDC").is_some());
+    assert!(e.store().market("HFUN/USDC").is_none());
+}

@@ -44,7 +44,7 @@ fn fills_keep_independent_execution_ids_and_sub_lot_quantities() {
     assert_eq!(h.e.store().positions()[0].contracts, 0.004);
 }
 #[test]
-fn order_history_keeps_native_units_and_millisecond_times() {
+fn order_history_reports_base_units_and_millisecond_times() {
     let mut h = Harness::new();
     h.seed();
     query(
@@ -56,10 +56,16 @@ fn order_history_keeps_native_units_and_millisecond_times() {
             limit: None,
         },
     );
-    h.reply("orders-history",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderId":"12","side":"sell","positionSide":"net","orderType":"post_only","state":"canceled","price":"60000","size":"10","filledSize":"4","averagePrice":"59999","createTime":"1700000000000","updateTime":"1700000001000","reduceOnly":"true"}]}"#);
+    h.reply("orders-history",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderId":"12","side":"sell","positionSide":"net","orderType":"post_only","state":"canceled","price":"60000","size":"10","filledSize":"4","averagePrice":"59999","createTime":"1700000000000","updateTime":"1700000001000","reduceOnly":"true"},{"instId":"DELISTED-USDT","orderId":"13","side":"buy","positionSide":"net","orderType":"limit","state":"filled","price":"1","size":"10","filledSize":"10","createTime":"1700000000000"}]}"#);
     let rows = result(&h).unwrap();
-    assert_eq!(rows[0]["amount"], 10.0);
-    assert_eq!(rows[0]["filled"], 4.0);
+    // contractValue 0.001: 10 contracts are 0.01 BTC, as open orders and fills report.
+    assert_eq!(
+        rows.as_array().unwrap().len(),
+        1,
+        "an unknown market cannot be converted"
+    );
+    assert_eq!(rows[0]["amount"], 0.01);
+    assert_eq!(rows[0]["filled"], 0.004);
     assert_eq!(rows[0]["type"], "limit");
     assert_eq!(rows[0]["status"], "canceled");
     assert_eq!(rows[0]["createdTime"], 1700000000000.0);

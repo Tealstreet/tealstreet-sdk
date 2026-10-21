@@ -496,3 +496,24 @@ fn exchange_info_with_only_malformed_rows_retries_startup() {
     e.handle(1_773_295_710_000.0, Event::TimerFired { timer });
     request(e.drain_actions().collect(), "exchangeInfo");
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for bad in [
+        r#""pricePrecision":2,"quantityPrecision":3,"minOrderSize":"0""#,
+        r#""pricePrecision":2,"quantityPrecision":3,"minOrderSize":"-0.001""#,
+        r#""pricePrecision":400,"quantityPrecision":3"#,
+    ] {
+        let mut e = engine();
+        e.start(0.0);
+        let id = request(e.drain_actions().collect(), "exchangeInfo");
+        let info = format!(
+            r#"{{"symbols":[{{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6}},{{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT",{bad}}}]}}"#
+        );
+        response(&mut e, id, &info);
+        assert!(e.store().market("BTCUSDT").is_some());
+        assert!(e.store().market("ETHUSDT").is_none(), "{bad}");
+        assert!(e.drain_actions().any(|a| matches!(a,
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("ETHUSDT"))));
+    }
+}
