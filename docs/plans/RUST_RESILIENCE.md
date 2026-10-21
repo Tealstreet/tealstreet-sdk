@@ -28,7 +28,8 @@ bootstrap remainder handed over from the public-startup work
    Bitrue, KuCoin, OKX, Kraken futures, Backpack and GRVT catalogue-filtered
    rows belong to claude-cbzmw6; WOO/AsterDEX/WEEX/ApeX/Polymarket rows to the
    venues-b lane.
-7. Startup discovery retries honour 418/429 and `Retry-After` (next).
+7. Startup discovery retries honour 418/429 and `Retry-After` (#1481);
+   Bybit HTTP-200 retCode 10006 remains below.
 
 Not done, by decision: BreakoutProp authenticated discovery startup. The venue
 is disabled in production and preview (`enabled: false`,
@@ -37,3 +38,32 @@ production-impact rule the work has no user impact (overseer, 2026-10-21).
 
 Each fix has a reproducing regression; each PR gets adversarial sub-agent
 reviews posted on it.
+
+## Remaining resilience fixes (Codex, 2026-10-21)
+
+One PR each from current `feat/rust-rewrite`, in this order:
+
+1. Rejected-row severity: Binance/Coinbase/WEEX/Kraken futures order rows,
+   plus Coinbase spot holdings, report coded `row.skipped` at Error when no
+   stored copy is retained and Warn when one is kept. Preserve reconciliation,
+   terminal fences and identity matching. Keep bounded once-per-identity
+   reporting, permitting one escalation if a warned row loses its stored copy;
+   a mapped row or clean snapshot re-arms it. Rebuild on `Cx::notice`, treating
+   the pre-log-removal sketch as reference only. Regression tests exercise mixed
+   retained/missing rows, repeat suppression, recovery and terminal identity.
+2. Orderly margin-mode lists: isolate rejected rows and retain their symbol's
+   old value, with a coded skip notice; valid peer rows still commit.
+3. Bybit discovery: honour HTTP-200 retCode 10006 and its reset-timestamp
+   cooldown without shortening existing Retry-After/backoff protections.
+
+Each phase gets a failing regression before implementation, focused touched
+venue plus Binance tests, scoped formatting/Clippy, independent review, fresh
+CI and a separate fail-closed revert guard before its merge. No local release
+WASM builds, deployments or downstream application edits.
+
+Rejected-row severity implementation: the four venues use coded `row.skipped`
+notices and bounded severity-aware identity caches. A retained copy warns; no
+retained copy errors; a prior warning may escalate once. Coinbase includes
+spot holdings and REST, user-snapshot and deferred-detail orders. Existing
+reconciliation and parse-site notice timing stay intact. Retention tests cover
+terminal/symbol fences, repeat suppression, recovery and missing-copy upgrades.
