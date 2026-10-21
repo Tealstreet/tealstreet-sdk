@@ -1956,7 +1956,7 @@ fn poll_lists(h: &mut Harness, at: f64, positions: &str, orders: &str, tpsl: &st
     h.actions
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            Action::Notice(safe_cex_engine::Notice::Event(event)) => Some(event.message.clone()),
             _ => None,
         })
         .collect()

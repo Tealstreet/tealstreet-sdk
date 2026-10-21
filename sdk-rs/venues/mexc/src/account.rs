@@ -2,7 +2,6 @@
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
@@ -902,7 +901,7 @@ impl MexcFutures {
                         None => "MEXC skipped asset row without a currency".into(),
                     };
                     let key = format!("coin:{}", currency.as_deref().unwrap_or_default());
-                    self.log_skip(cx, key, LogLevel::Warning, message);
+                    self.log_skip(cx, key, Level::Warn, message);
                     snapshot.assets.reject(currency);
                 }
             },
@@ -935,9 +934,9 @@ impl MexcFutures {
                         .filter(|symbol| !symbol.is_empty());
                     let Some(symbol) = symbol else {
                         let level = if cx.store.positions().is_empty() {
-                            LogLevel::Error
+                            Level::Error
                         } else {
-                            LogLevel::Warning
+                            Level::Warn
                         };
                         let message = "MEXC skipped position row without a symbol";
                         self.log_skip(cx, "position:".into(), level, message);
@@ -948,16 +947,17 @@ impl MexcFutures {
                         && self.malformed_markets.contains(&symbol)
                     {
                         snapshot.bad = true;
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::SNAPSHOT_DISCARDED,
                             "MEXC owned position market unavailable; preserving previous snapshot",
                         );
                         return;
                     }
                     let level = if cx.store.positions().iter().any(|p| p.symbol == symbol) {
-                        LogLevel::Warning
+                        Level::Warn
                     } else {
-                        LogLevel::Error
+                        Level::Error
                     };
                     let message = format!("MEXC skipped malformed {symbol} position row");
                     self.log_skip(cx, format!("position:{symbol}"), level, message);
@@ -1024,11 +1024,11 @@ impl MexcFutures {
     ) {
         if id.is_empty() {
             let message = "MEXC skipped order row without an id";
-            self.log_skip(cx, "order:".into(), LogLevel::Warning, message);
+            self.log_skip(cx, "order:".into(), Level::Warn, message);
             snapshot.orders.reject(None);
         } else {
             let message = format!("MEXC skipped unmappable order {id} on {symbol}");
-            self.log_skip(cx, format!("order:{id}"), LogLevel::Warning, message);
+            self.log_skip(cx, format!("order:{id}"), Level::Warn, message);
             snapshot.orders.reject(Some(id.to_owned()));
         }
     }
@@ -1037,7 +1037,7 @@ impl MexcFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         key: String,
-        level: LogLevel,
+        level: Level,
         message: impl Into<String>,
     ) {
         let logged = &mut self.account.skip_logged;
@@ -1045,7 +1045,7 @@ impl MexcFutures {
             logged.clear();
         }
         if logged.insert(key) {
-            cx.log(level, message);
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.

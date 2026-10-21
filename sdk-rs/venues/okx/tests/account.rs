@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 mod support;
-use safe_cex_engine::{Action, Engine, Event, LogLevel, Notice};
+use safe_cex_engine::{Action, Engine, Event, Level, Notice};
 use safe_cex_venue_okx::{Okx, Options};
 use support::*;
 
@@ -339,10 +339,9 @@ fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     let errors: Vec<_> = actions(&mut e)
         .into_iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log {
-                level: LogLevel::Error,
-                message,
-            }) => Some(message),
+            Action::Notice(Notice::Event(event)) if event.level == Level::Error => {
+                Some(event.message)
+            }
             _ => None,
         })
         .collect();
@@ -712,9 +711,6 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
                 reply(&mut e, &action, &body, 5.0);
                 pending.extend(actions(&mut e));
             }
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
-                logs.push(message.clone())
-            }
             Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                 logs.push(event.message.clone())
             }
@@ -978,7 +974,6 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
                     reply(&mut e, &a, &body, 4.0);
                     pending.extend(actions(&mut e));
                 }
-                Action::Notice(Notice::Log { message, .. }) => logs.push(message.clone()),
                 Action::Notice(Notice::Event(event)) => logs.push(event.message.clone()),
                 _ => {}
             }

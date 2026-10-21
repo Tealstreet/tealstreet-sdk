@@ -2,7 +2,6 @@
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -179,23 +178,19 @@ fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: String,
-    level: LogLevel,
+    level: Level,
     message: String,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 /// A rejected row with no stored copy kept is an error: it commits as absent.
-fn skip_level(stored: bool) -> LogLevel {
-    if stored {
-        LogLevel::Warning
-    } else {
-        LogLevel::Error
-    }
+fn skip_level(stored: bool) -> Level {
+    if stored { Level::Warn } else { Level::Error }
 }
 /// Re-arms the skip logs of `prefix`: all of them after a clean read, else those `ids` mapped.
 fn rearm_skips<'a>(
@@ -355,7 +350,7 @@ impl Summary<'_> {
                             }
                         };
                         let key = format!("coin:{}", currency.as_deref().unwrap_or_default());
-                        log_skip(cx, logged, key, LogLevel::Warning, message);
+                        log_skip(cx, logged, key, Level::Warn, message);
                         rejected.extend(currency.clone());
                         coins.reject(currency);
                     }
@@ -1197,7 +1192,7 @@ impl Grvt {
                         cx,
                         &mut self.account.skip_logged,
                         format!("order:{label}"),
-                        LogLevel::Warning,
+                        Level::Warn,
                         message,
                     );
                 }

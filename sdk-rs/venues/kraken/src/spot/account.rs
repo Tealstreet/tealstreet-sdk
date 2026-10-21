@@ -1,7 +1,6 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
@@ -59,18 +58,12 @@ pub struct Account {
 }
 impl Account {
     /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
-    fn log_skip(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        key: String,
-        level: LogLevel,
-        message: String,
-    ) {
+    fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
         if self.skip_logged.len() >= SKIP_LOG_LIMIT {
             self.skip_logged.clear();
         }
         if self.skip_logged.insert(key) {
-            cx.log(level, message);
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
@@ -550,7 +543,7 @@ impl KrakenSpot {
         for currency in skipped {
             let message = format!("Kraken Spot skipped malformed {currency} balance");
             self.account
-                .log_skip(cx, format!("coin:{currency}"), LogLevel::Warning, message);
+                .log_skip(cx, format!("coin:{currency}"), Level::Warn, message);
             currencies.reject(Some(currency));
         }
         let current = revision == self.account.balance_revision;
@@ -633,12 +626,12 @@ impl KrakenSpot {
             if id.is_empty() {
                 let message = "Kraken Spot skipped order row without an id".to_owned();
                 self.account
-                    .log_skip(cx, "order:".into(), LogLevel::Warning, message);
+                    .log_skip(cx, "order:".into(), Level::Warn, message);
                 rows.reject(None);
             } else {
                 let message = format!("Kraken Spot skipped unmappable order {id}");
                 self.account
-                    .log_skip(cx, format!("order:{id}"), LogLevel::Warning, message);
+                    .log_skip(cx, format!("order:{id}"), Level::Warn, message);
                 rows.reject(Some(id));
             }
         }
@@ -1144,11 +1137,7 @@ impl KrakenSpot {
         } else {
             cx.store.order(&id).is_some()
         };
-        let level = if stored {
-            LogLevel::Warning
-        } else {
-            LogLevel::Error
-        };
+        let level = if stored { Level::Warn } else { Level::Error };
         let message = if id.is_empty() {
             "Kraken Spot skipped execution row without an order id".to_owned()
         } else {

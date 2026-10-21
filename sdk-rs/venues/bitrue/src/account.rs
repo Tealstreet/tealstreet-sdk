@@ -2,7 +2,6 @@
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
@@ -38,30 +37,27 @@ type SnapshotSettings<'a> = (
 );
 
 /// A skipped row is an error only when the store has no copy for it to keep.
-fn skip_level(stored: bool) -> LogLevel {
-    if stored {
-        LogLevel::Warning
-    } else {
-        LogLevel::Error
-    }
+fn skip_level(stored: bool) -> Level {
+    if stored { Level::Warn } else { Level::Error }
 }
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: &str,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key.to_owned()) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
-/// Every order id a malformed open-order row names, its children included.
-fn order_tree_ids(item: &str) -> Vec<String> {
+/// Every order id a malformed open-order row names, its children included, and
+/// whether some child's id is unreadable (it could be any cached child).
+fn order_tree_ids(item: &str) -> (Vec<String>, bool) {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Identity<'a> {
@@ -70,20 +66,24 @@ fn order_tree_ids(item: &str) -> Vec<String> {
         #[serde(borrow, default)]
         child_orders: Option<Vec<Identity<'a>>>,
     }
-    fn collect(row: Identity<'_>, ids: &mut Vec<String>) {
-        if let Some(id) = row.order_id.filter(|id| !id.is_empty()) {
-            ids.push(id.to_string());
+    fn collect(row: Identity<'_>, ids: &mut Vec<String>, unnamed: &mut bool) {
+        match row.order_id.filter(|id| !id.is_empty()) {
+            Some(id) => ids.push(id.to_string()),
+            None => *unnamed = true,
         }
         for child in row.child_orders.into_iter().flatten() {
-            collect(child, ids);
+            collect(child, ids, unnamed);
         }
     }
     let mut ids = Vec::new();
+    let mut unnamed = false;
     match serde_json::from_str::<Identity<'_>>(item) {
-        Ok(row) if row.order_id.as_ref().is_some_and(|id| !id.is_empty()) => collect(row, &mut ids),
+        Ok(row) if row.order_id.as_ref().is_some_and(|id| !id.is_empty()) => {
+            collect(row, &mut ids, &mut unnamed)
+        }
         _ => {}
     }
-    ids
+    (ids, unnamed)
 }
 enum OrderRead {
     Reconciled,
@@ -1583,7 +1583,17 @@ impl Bitrue {
                         self.map_order_tree(cx, symbol, &row, None)
                     });
                 let Ok(mapped) = mapped else {
-                    let ids = order_tree_ids(item);
+                    let (mut ids, unnamed_child) = order_tree_ids(item);
+                    if unnamed_child && let Some(parent) = ids.first().cloned() {
+                        // An unnamed child could be any cached child of its parent.
+                        ids.extend(
+                            cx.store
+                                .orders()
+                                .iter()
+                                .filter(|o| o.parent_id.as_deref() == Some(parent.as_str()))
+                                .map(|o| o.id.clone()),
+                        );
+                    }
                     let skips = &mut self.account.order_skips;
                     if let Some(id) = ids.first() {
                         let level = skip_level(ids.iter().any(|id| cx.store.order(id).is_some()));

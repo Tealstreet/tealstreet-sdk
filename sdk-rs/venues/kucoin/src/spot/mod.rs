@@ -4,7 +4,6 @@ mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
@@ -558,7 +557,7 @@ impl KucoinSpot {
             self.skip_logged.clear();
         }
         if self.skip_logged.insert(key) {
-            cx.log(LogLevel::Warning, message);
+            cx.notice(Level::Warn, code::ROW_SKIPPED, message);
         }
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.

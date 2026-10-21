@@ -1,7 +1,6 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
@@ -119,18 +118,12 @@ pub struct Account {
 }
 impl Account {
     /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
-    fn log_skip(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        key: String,
-        level: LogLevel,
-        message: String,
-    ) {
+    fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
         if self.skip_logged.len() >= SKIP_LOG_LIMIT {
             self.skip_logged.clear();
         }
         if self.skip_logged.insert(key) {
-            cx.log(level, message);
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
@@ -1228,12 +1221,12 @@ impl Kraken {
         if id.is_empty() {
             let message = "Kraken skipped order row without an id".to_owned();
             self.account
-                .log_skip(cx, "order:".into(), LogLevel::Warning, message);
+                .log_skip(cx, "order:".into(), Level::Warn, message);
             request.orders.reject(None);
         } else {
             let message = format!("Kraken skipped unmappable order {id}");
             self.account
-                .log_skip(cx, format!("order:{id}"), LogLevel::Warning, message);
+                .log_skip(cx, format!("order:{id}"), Level::Warn, message);
             request.orders.reject(Some(id.to_owned()));
         }
     }
@@ -1250,11 +1243,7 @@ impl Kraken {
             .positions()
             .iter()
             .any(|p| symbol.is_empty() || p.symbol == symbol);
-        let level = if stored {
-            LogLevel::Warning
-        } else {
-            LogLevel::Error
-        };
+        let level = if stored { Level::Warn } else { Level::Error };
         if symbol.is_empty() {
             let message = "Kraken skipped position row without a symbol".to_owned();
             self.account

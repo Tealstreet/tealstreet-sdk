@@ -678,10 +678,9 @@ fn mini_ticker_zero_unavailable_prices_preserve_quotes_and_apply_valid_fields() 
     }
     assert!(!e.drain_actions().any(|action| matches!(
         action,
-        Action::Notice(safe_cex_engine::Notice::Log { .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(
-                safe_cex_engine::LogEvent { .. }
-            ))
+        Action::Notice(safe_cex_engine::Notice::Event(
+            safe_cex_engine::LogEvent { .. }
+        ))
     )));
 }
 
@@ -700,9 +699,8 @@ fn mini_ticker_unknown_inactive_symbols_are_ignored_without_warning() {
     assert_eq!(e.store().tickers().len(), 1);
     assert!(!e.drain_actions().any(|action| matches!(
         action,
-        Action::Notice(safe_cex_engine::Notice::Log { .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(
-                safe_cex_engine::LogEvent { .. }
-            ))
+        Action::Notice(safe_cex_engine::Notice::Event(
+            safe_cex_engine::LogEvent { .. }
+        ))
     )));
 }

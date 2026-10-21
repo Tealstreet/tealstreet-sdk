@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::model::TimeInForce;
-use safe_cex_engine::{Action, Event, LogLevel, Notice};
+use safe_cex_engine::{Action, Event};
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -91,10 +91,9 @@ fn failed_second_order_snapshot_keeps_the_first_good_state() {
     assert_eq!(h.engine.store().orders().len(), 1);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(
-                safe_cex_engine::LogEvent { .. }
-            ))
+        Action::Notice(safe_cex_engine::Notice::Event(
+            safe_cex_engine::LogEvent { .. }
+        ))
     )));
 }
 #[test]
@@ -571,7 +570,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
 
 fn warned(h: &Harness, needle: &str) -> bool {
     h.actions.iter().any(|a| {
-        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
+        matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains(needle))
     })
 }
@@ -618,7 +617,7 @@ fn unmappable_snapshot_rows_are_skipped_and_keep_known_state() {
     let position_skips = h
         .actions
         .iter()
-        .filter(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("position row BTCUSD-PERP")))
+        .filter(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("position row BTCUSD-PERP")))
         .count();
     assert_eq!(position_skips, 1, "a persistent skip is logged once");
     let bad = r#"{"order_id":"9007199254740993","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"BUY","quantity":null}"#;
@@ -859,7 +858,7 @@ fn reconcile_with_lists(
     h.actions[start.min(h.actions.len())..]
         .iter()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log { message, .. }) => Some(message.clone()),
+            Action::Notice(safe_cex_engine::Notice::Event(event)) => Some(event.message.clone()),
             _ => None,
         })
         .collect()

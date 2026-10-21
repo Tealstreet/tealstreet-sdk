@@ -905,10 +905,7 @@ fn stale_headers_cannot_resurrect_session_while_refresh_login_is_incomplete() {
     assert!(!h.requests.iter().any(|r| r.url.ends_with("open_orders")));
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -931,10 +928,7 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
     assert!(!h.requests.iter().any(|r| r.url.ends_with("login")));
     assert!(!h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -1466,10 +1460,7 @@ fn skip_warnings(h: &Harness, kind: &str) -> usize {
     h.actions
         .iter()
         .filter(|a| {
-            matches!(a, Action::Notice(safe_cex_engine::Notice::Log {
-                level: safe_cex_engine::LogLevel::Warning,
-                message,
-            }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
+            matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains(&format!("GRVT {kind} row")))
         })
         .count()
 }
@@ -1616,23 +1607,23 @@ fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
         h.actions[start..]
             .iter()
             .filter_map(|a| match a {
-                Action::Notice(safe_cex_engine::Notice::Log { level, message })
-                    if message.contains("malformed GRVT position row") =>
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.message.contains("malformed GRVT position row") =>
                 {
-                    Some(*level)
+                    Some(event.level)
                 }
                 _ => None,
             })
             .collect::<Vec<_>>()
     };
-    use safe_cex_engine::LogLevel;
-    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [LogLevel::Error]);
+    use safe_cex_engine::Level;
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [Level::Error]);
     assert!(h.engine.store().positions().is_empty());
     assert_eq!(poll(&mut h, btc), []);
-    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [LogLevel::Warning]);
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [Level::Warn]);
     assert_eq!(poll(&mut h, btc), []);
     let bad = btc.replace("\"s\":\"-2\"", "\"s\":null");
-    assert_eq!(poll(&mut h, &bad), [LogLevel::Warning]);
+    assert_eq!(poll(&mut h, &bad), [Level::Warn]);
     assert_eq!(h.engine.store().positions()[0].contracts, 2.);
 }
 const FOREIGN_MALFORMED: &str = r#"{"r":[{"oi":"0x999","m":{"co":"66"}}]}"#;

@@ -2,7 +2,6 @@ use crate::sign::Params;
 use crate::wire::{Envelope, Message};
 use crate::{Cryptocom, Pending, Skipped, quoted};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -15,26 +14,22 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 const SKIP_LOG_LIMIT: usize = 4_096;
 
 /// A skipped row is an error only when the store has no copy for it to keep.
-fn skip_level(stored: bool) -> LogLevel {
-    if stored {
-        LogLevel::Warning
-    } else {
-        LogLevel::Error
-    }
+fn skip_level(stored: bool) -> Level {
+    if stored { Level::Warn } else { Level::Error }
 }
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
     logged: &mut HashSet<String>,
     key: &str,
-    level: LogLevel,
+    level: Level,
     message: impl Into<String>,
 ) {
     if logged.len() >= SKIP_LOG_LIMIT {
         logged.clear();
     }
     if logged.insert(key.to_owned()) {
-        cx.log(level, message);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
 }
 /// Commits a builder and splits off the stored copies its rejections kept.

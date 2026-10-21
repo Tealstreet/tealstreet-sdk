@@ -2,7 +2,6 @@
 use crate::wire::*;
 use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -486,12 +485,7 @@ impl Okx {
                             } else {
                                 format!("OKX skipped malformed {} balance row", e.ccy)
                             };
-                            self.log_skip(
-                                cx,
-                                format!("coin:{}", e.ccy),
-                                LogLevel::Warning,
-                                message,
-                            );
+                            self.log_skip(cx, format!("coin:{}", e.ccy), Level::Warn, message);
                             equity.reject((!e.ccy.is_empty()).then(|| e.ccy.to_owned()));
                         }
                     }
@@ -626,9 +620,9 @@ impl Okx {
     ) {
         let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
             let level = if cx.store.positions().is_empty() {
-                LogLevel::Error
+                Level::Error
             } else {
-                LogLevel::Warning
+                Level::Warn
             };
             let message = "OKX skipped position row without an instrument";
             self.log_skip(cx, "position:".into(), level, message);
@@ -637,9 +631,9 @@ impl Okx {
         };
         let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
         let level = if owned && !stored {
-            LogLevel::Error
+            Level::Error
         } else {
-            LogLevel::Warning
+            Level::Warn
         };
         let message = format!("OKX skipped unmappable {symbol} position row");
         self.log_skip(cx, format!("position:{symbol}"), level, message);
@@ -666,12 +660,12 @@ impl Okx {
             .collect();
         let Some(first) = ids.first() else {
             let message = "OKX skipped order row without an id";
-            self.log_skip(cx, "order:".into(), LogLevel::Warning, message);
+            self.log_skip(cx, "order:".into(), Level::Warn, message);
             rows.reject(None);
             return;
         };
         let message = format!("OKX skipped unmappable order {first}");
-        self.log_skip(cx, format!("order:{first}"), LogLevel::Warning, message);
+        self.log_skip(cx, format!("order:{first}"), Level::Warn, message);
         for id in ids {
             for suffix in ORDER_SUFFIXES {
                 rows.reject(Some(format!("{id}{suffix}")));
@@ -684,7 +678,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         key: String,
-        level: LogLevel,
+        level: Level,
         message: impl Into<String>,
     ) {
         let logged = &mut self.account.skip_logged;
@@ -692,7 +686,7 @@ impl Okx {
             logged.clear();
         }
         if logged.insert(key) {
-            cx.log(level, message);
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
 

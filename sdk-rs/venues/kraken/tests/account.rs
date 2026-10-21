@@ -1143,8 +1143,7 @@ fn filtered_market_rows_are_skipped_while_listed_rows_commit() {
     let logs: Vec<_> = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) => Some(message),
@@ -1344,8 +1343,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) if message.contains("stops re-reading") => warned = true,

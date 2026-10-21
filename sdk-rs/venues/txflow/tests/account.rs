@@ -770,7 +770,7 @@ fn a_failing_ticker_seed_read_does_not_block_account_start() {
 }
 #[test]
 fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
-    use safe_cex_engine::{Action, Notice};
+    use safe_cex_engine::Action;
     let orders =
         |rows: &[String]| format!(r#"{{"success":true,"code":0,"data":[{}]}}"#, rows.join(","));
     let order = |oid: u64, side: &str, sz: &str| {
@@ -804,8 +804,7 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
         let logs = e
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) => Some(message),
@@ -888,9 +887,6 @@ fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
         let logs = e
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { level, message }) => {
-                    Some((Level::from(level), message))
-                }
                 Action::Notice(Notice::Event(LogEvent { level, message, .. })) => {
                     Some((level, message))
                 }

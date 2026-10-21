@@ -401,7 +401,7 @@ impl Harness {
         self.actions
             .iter()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { message, .. }) => Some(message.clone()),
+                Action::Notice(Notice::Event(event)) => Some(event.message.clone()),
                 _ => None,
             })
             .collect()
@@ -439,6 +439,33 @@ fn one_malformed_order_row_keeps_its_stored_copy_while_valid_peers_commit() {
     h.reread(None, Some(&list(&[order("a", "BUY", 101)])));
     let ids: Vec<_> = h.e.store().orders().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, ["a"]);
+}
+#[test]
+fn a_malformed_child_without_an_id_keeps_the_cached_protective_child() {
+    let child = |id: &str| {
+        format!(
+            r#"{{{id}"type":"MARKET","conditionOrder":true,"triggerType":1,"triggerPrice":90,"triggerPriceType":1,"side":"BUY","status":"NEW","action":"OPEN","origQty":100,"executedQty":0}}"#
+        )
+    };
+    let tree = |children: &str| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":"parent","type":"LIMIT","side":"BUY","status":"NEW","action":"OPEN","price":100,"origQty":100,"executedQty":0,"childOrders":[{children}]}}]}}"#
+        )
+    };
+    let mut h = Harness::new();
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders", &tree(&child(r#""orderId":"child","#)));
+    let stored = h.e.store().order("child").unwrap().clone();
+    assert_eq!(stored.parent_id.as_deref(), Some("parent"));
+    let malformed = child("").replace(r#""side":"BUY""#, r#""side":"HOLD""#);
+    let logs = h.reread(None, Some(&tree(&malformed)));
+    assert_eq!(h.e.store().order("child"), Some(&stored));
+    assert!(h.e.store().order("parent").is_some());
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("Bitrue skipped malformed order row parent")),
+        "{logs:?}"
+    );
 }
 #[test]
 fn one_malformed_position_row_keeps_its_stored_copy_while_valid_peers_commit() {
@@ -607,7 +634,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
         h.ws(&rejected);
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
         h.private_retry(1_000.0);
         let request = h.take("listenKey");
         h.respond(
@@ -627,7 +654,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         );
         h.collect();
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
     }
 }
 #[test]
@@ -650,7 +677,7 @@ fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
     h.collect();
     h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
     assert_stream_notices_are_safe(&h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
 }
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
@@ -849,10 +876,7 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
     assert_eq!(h.e.store().orders().len(), 1);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log {
-            level: safe_cex_engine::LogLevel::Error,
-            ..
-        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Error,
             ..
         }))
@@ -889,7 +913,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
         h.actions
             .iter()
             .filter(|a| {
-                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
+                matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
             })
             .count()
     };
@@ -904,7 +928,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
     )));
 
     // A fresh failure after recovery starts again from the initial delay.
@@ -1207,7 +1231,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert!(
             !h.actions
                 .iter()
-                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
+                .any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
         );
     }
 }
@@ -1233,7 +1257,7 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         } else {
             "Bitrue account read failed"
         };
-        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
     }
 }
 
@@ -1421,4 +1445,54 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     }
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn unidentified_malformed_children_keep_cached_protection_while_valid_peers_commit() {
+    use serde_json::json;
+    for missing in [true, false] {
+        let mut h = Harness::new();
+        h.reply("/account", EMPTY);
+        let mut payload = json!({"code":"0","data":[
+            {"orderId":"parent","type":"LIMIT","side":"BUY","status":"NEW",
+             "action":"OPEN","price":100,"origQty":100,"executedQty":0,
+             "childOrders":[{"orderId":"child","type":"MARKET","conditionOrder":true,
+                 "triggerType":1,"triggerPrice":90,"triggerPriceType":1,"side":"BUY",
+                 "status":"NEW","action":"OPEN","origQty":100,"executedQty":0}]},
+            {"orderId":"peer","type":"LIMIT","side":"SELL","status":"NEW",
+             "action":"OPEN","price":120,"origQty":100,"executedQty":0}
+        ]});
+        h.reply("/openOrders", &payload.to_string());
+        let parent = h.e.store().order("parent").unwrap().clone();
+        let child = h.e.store().order("child").unwrap().clone();
+        assert_eq!(child.parent_id.as_deref(), Some("parent"));
+        assert_eq!(child.kind, OrderType::StopLoss);
+        assert_eq!(child.side, OrderSide::Sell);
+        assert!(child.reduce_only);
+        let damaged = payload["data"][0]["childOrders"][0]
+            .as_object_mut()
+            .unwrap();
+        if missing {
+            damaged.remove("orderId");
+        } else {
+            damaged.insert("orderId".into(), json!(""));
+        }
+        payload["data"][1]["price"] = json!(121);
+        h.reread(None, Some(&payload.to_string()));
+        assert_eq!(
+            h.e.store().order("parent"),
+            Some(&parent),
+            "missing={missing}"
+        );
+        assert_eq!(
+            h.e.store().order("child"),
+            Some(&child),
+            "missing={missing}"
+        );
+        assert_eq!(
+            h.e.store().order("peer").unwrap().price,
+            121.0,
+            "missing={missing}"
+        );
+    }
 }

@@ -1,7 +1,6 @@
 use crate::wire::{Envelope, Number};
 use crate::{Kucoin, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::LogLevel;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -766,12 +765,8 @@ impl Kucoin {
             skips.clear();
         }
         if skips.insert(symbol) {
-            let level = if stored {
-                LogLevel::Warning
-            } else {
-                LogLevel::Error
-            };
-            cx.log(level, message);
+            let level = if stored { Level::Warn } else { Level::Error };
+            cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
     pub(crate) fn account_response(
