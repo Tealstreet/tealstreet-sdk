@@ -33,6 +33,9 @@ fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Act
 }
 impl Harness {
     fn new() -> Self {
+        Self::with_markets(MARKET)
+    }
+    fn with_markets(markets: &str) -> Self {
         let mut h = Self {
             engine: Engine::new(Kucoin::new(Options {
                 key: Some("key".into()),
@@ -47,7 +50,7 @@ impl Harness {
         };
         h.engine.start(h.now);
         h.collect();
-        h.reply("/contracts/active", MARKET);
+        h.reply("/contracts/active", markets);
         h.reply("/allTickers", TICKERS);
         h.reply("/bullet-private",r#"{"code":"200000","data":{"token":"private-token","instanceServers":[{"endpoint":"wss://example.test/private","pingInterval":18000,"pingTimeout":10000}]}}"#);
         h.socket = h
@@ -838,36 +841,94 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
 }
 
+// ETHUSDCM is deliberately filtered (USDC-settled); BADUSDTM is malformed (numeric status).
+const PARTIAL_MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100},{"symbol":"ETHUSDCM","baseCurrency":"ETH","quoteCurrency":"USDC","settleCurrency":"USDC","status":"Open","lotSize":1,"tickSize":0.01,"multiplier":0.01,"maxOrderQty":100000,"maxLeverage":100},{"symbol":"BADUSDTM","baseCurrency":"BAD","quoteCurrency":"USDT","settleCurrency":"USDT","status":1,"lotSize":1,"tickSize":0.01,"multiplier":1,"maxOrderQty":100000,"maxLeverage":100}]}"#;
+
 #[test]
 fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
-    let mut h = Harness::new();
+    // A filtered market's position is skipped and the rest commits; a malformed one holds.
+    for (symbol, held) in [
+        ("ETHUSDCM", false),
+        ("MISSINGUSDTM", false),
+        ("BADUSDTM", true),
+    ] {
+        let mut h = Harness::with_markets(PARTIAL_MARKETS);
+        h.reply(
+            "/positions",
+            &format!(
+                r#"{{"code":"200000","data":[{}]}}"#,
+                POSITION.replace("XBTUSDTM", symbol)
+            ),
+        );
+        assert_eq!(h.engine.store().loaded().positions, !held, "{symbol}");
+        h.ws(
+            &format!("/contract/position:{symbol}"),
+            &POSITION.replace("XBTUSDTM", symbol),
+        );
+        assert!(h.engine.store().positions().is_empty(), "{symbol}");
+        let needle = if held {
+            "owned position market unavailable".to_owned()
+        } else {
+            format!("Skipping KuCoin position on uncatalogued market {symbol}")
+        };
+        assert!(h.actions.iter().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))), "{symbol}");
+    }
+}
+
+#[test]
+fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads() {
+    let mut h = Harness::with_markets(PARTIAL_MARKETS);
+    let filtered = POSITION.replace("XBTUSDTM", "ETHUSDCM");
     h.reply(
         "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION},{filtered}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    let filtered_order = ORDER
+        .replace("XBTUSDTM", "ETHUSDCM")
+        .replace("5cdfc138b21023a909e5ad55", "filtered-order");
+    h.reply(
+        "/orders?",
         &format!(
-            r#"{{"code":"200000","data":[{}]}}"#,
-            POSITION.replace("XBTUSDTM", "MISSINGUSDTM")
+            r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":2,"items":[{ORDER},{filtered_order}]}}}}"#
         ),
     );
-    assert!(!h.engine.store().loaded().positions);
-    h.ws(
-        "/contract/position:MISSINGUSDTM",
-        &POSITION.replace("XBTUSDTM", "MISSINGUSDTM"),
-    );
-    assert!(h.engine.store().positions().is_empty());
+    h.reply("/stopOrders?", EMPTY);
+    let store = h.engine.store();
+    let loaded = store.loaded();
+    assert!(loaded.positions && loaded.balance && loaded.orders);
+    assert_eq!(store.balance().total, 1010.0);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "5cdfc138b21023a909e5ad55");
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
 }
 
 #[test]
 fn unknown_working_order_rejects_unknown_lot_sizing_but_terminal_rows_do_not() {
-    for (status, loaded) in [("open", false), ("canceled", true)] {
-        let mut h = Harness::new();
-        let order = ORDER
-            .replace("XBTUSDTM", "MISSINGUSDTM")
-            .replace("open", status);
+    for (symbol, status, loaded) in [
+        ("BADUSDTM", "open", false),
+        ("BADUSDTM", "canceled", true),
+        ("ETHUSDCM", "open", true),
+        ("MISSINGUSDTM", "open", true),
+    ] {
+        let mut h = Harness::with_markets(PARTIAL_MARKETS);
+        let order = ORDER.replace("XBTUSDTM", symbol).replace("open", status);
         h.reply("/orders?", &Harness::page(&order, 1));
         h.reply("/stopOrders?", EMPTY);
-        assert_eq!(h.engine.store().loaded().orders, loaded);
+        assert_eq!(
+            h.engine.store().loaded().orders,
+            loaded,
+            "{symbol} {status}"
+        );
+        assert!(h.engine.store().orders().is_empty(), "{symbol} {status}");
         if !loaded {
             h.ws("/contractMarket/tradeOrders", &order);
             assert!(h.engine.store().orders().is_empty());
@@ -876,6 +937,43 @@ fn unknown_working_order_rejects_unknown_lot_sizing_but_terminal_rows_do_not() {
             assert_eq!(h.engine.store().orders()[0].amount, 0.01);
         }
     }
+}
+
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
+    let mut h = Harness::with_markets(PARTIAL_MARKETS);
+    assert!(h.engine.store().market("BADUSDT").is_none());
+    h.ready();
+    let i = h
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1610000001000.0))
+        .expect("partial catalogue retry");
+    let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
+        unreachable!()
+    };
+    h.actions.clear();
+    h.now = at_ms;
+    h.event(Event::TimerFired { timer });
+    h.reply(
+        "/contracts/active",
+        &PARTIAL_MARKETS.replace(r#""status":1"#, r#""status":"Open""#),
+    );
+    assert!(
+        h.engine.store().market("BADUSDT").is_some(),
+        "repaired market"
+    );
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+    assert!(
+        !h.actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::WsConnect { .. } | Action::SetTimer { .. }
+        )),
+        "no ticker reseed, account restart or further retry: {:?}",
+        h.actions
+    );
+    assert!(h.engine.store().loaded().positions);
+    assert_eq!(h.engine.store().positions().len(), 1);
 }
 
 #[test]

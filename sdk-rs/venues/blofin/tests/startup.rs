@@ -233,3 +233,28 @@ fn late_ticker_seed_preserves_live_fields_missing_peers_and_funding_only_updates
     assert_eq!((eth.volume, eth.quote_volume), (20., 4800.));
     assert_eq!(e.store().tickers().len(), 2);
 }
+#[test]
+fn empty_successful_catalogue_is_retried_not_committed() {
+    let mut e = Engine::new(Blofin::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.);
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, request, r#"{"code":"0","data":[]}"#);
+    assert!(!e.store().loaded().markets);
+    let request = retry(&mut e);
+    reply(
+        &mut e,
+        request,
+        &format!(r#"{{"code":"0","data":[{MARKET}]}}"#),
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+}

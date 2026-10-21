@@ -5,6 +5,7 @@ members = [
     "engine",
     "hosts/native",
     "hosts/wasm",
+    "registry",
     "venues/*",
 ]
 
@@ -25,6 +26,7 @@ js-sys = "0.3.106"
 # Internal
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
+safe-cex-venues = { path = "registry", default-features = false }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-bitrue = { path = "venues/bitrue" }
 safe-cex-venue-grvt = { path = "venues/grvt" }

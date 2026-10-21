@@ -66,6 +66,12 @@ pub struct Message<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct ContractIdentity<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract<'a> {
     #[serde(borrow)]
