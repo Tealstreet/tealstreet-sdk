@@ -315,8 +315,8 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 
 #1522's leverage reads use native signed symbol queries: BingX maps long/short
 rails to `buyLeverage`/`sellLeverage`; WEEX returns rails plus `marginType` from
-the symbol configuration. Revision fencing preserves newer settings when a
-configuration event or write races the read; failures leave native settings
+the symbol configuration. BingX fences against configuration events and settings
+writes; WEEX fences against settings writes. Failures leave native settings
 intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
 queries the venue; `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
