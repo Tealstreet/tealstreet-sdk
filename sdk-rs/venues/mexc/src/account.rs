@@ -1342,7 +1342,7 @@ impl MexcFutures {
             cx.command_error(*command, error);
             cx.fail(*command, error);
         } else {
-            cx.notice(Level::Error, code::REQUEST_FAILED, error);
+            cx.retried_failure("mexc.account:1339", error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);
