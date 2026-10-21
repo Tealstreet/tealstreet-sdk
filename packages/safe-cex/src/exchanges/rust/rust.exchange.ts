@@ -1650,18 +1650,17 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       this.host?.flush();
-      let leverage: FetchedLeverage;
-      if (this.requireCapabilities().leverageQuery === 'onRead')
-        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
-      else {
-        const cached = this.store.fetchedLeverage[symbol];
-        if (
-          !cached ||
-          !Number.isFinite(cached.buyLeverage) || cached.buyLeverage <= 0 ||
-          !Number.isFinite(cached.sellLeverage) || cached.sellLeverage <= 0
-        ) return null;
-        return cached;
-      }
+      const query = this.requireCapabilities().leverageQuery;
+      const cached = this.store.fetchedLeverage[symbol];
+      const usable =
+        cached &&
+        Number.isFinite(cached.buyLeverage) && cached.buyLeverage > 0 &&
+        Number.isFinite(cached.sellLeverage) && cached.sellLeverage > 0;
+      if (query === 'settings') return usable ? cached : null;
+      // Metadata-refreshed rails answer from settings once loaded; before the
+      // first refresh (a flat, freshly selected symbol) the venue is read.
+      if (query === 'onMetadata' && usable) return cached;
+      const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
       this.applier.applyLeverage(symbol, leverage);
       return leverage;

@@ -702,7 +702,9 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   the engine store never applies an empty catalogue and warns instead); book/candle
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX and
+  WEEX now read native rails `onRead`; MEXC reads a symbol its metadata refresh
+  has not covered yet); command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
   `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base
