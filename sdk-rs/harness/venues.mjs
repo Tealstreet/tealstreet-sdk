@@ -1340,6 +1340,7 @@ export const VENUES = {
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',
+    virtualPrivateClock: true,
     ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
     privateSocket: '/ws/',
     compareFillPrices: true,
