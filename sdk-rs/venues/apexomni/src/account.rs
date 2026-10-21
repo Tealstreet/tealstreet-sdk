@@ -14,6 +14,25 @@ use safe_cex_engine::{Command, CommandId, Cx, Fill, Response, SocketChannel, Soc
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+// Preserve native operand precision without snapping public sizes to lot steps.
+pub(crate) fn subtract(a: f64, b: f64) -> f64 {
+    let difference = a - b;
+    let factor =
+        10f64.powi(safe_cex_engine::num::decimals(a).max(safe_cex_engine::num::decimals(b)) as i32);
+    let scaled = difference * factor;
+    if !scaled.is_finite() {
+        return difference;
+    }
+    let floor = scaled.floor();
+    // Adding 0.5 can alter an already-integral float above 2^52.
+    let rounded = if scaled - floor < 0.5 {
+        floor
+    } else {
+        floor + 1.0
+    };
+    rounded / factor
+}
+
 pub enum Request {
     Identity {
         command: CommandId,
@@ -58,8 +77,16 @@ fn reject<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::Account;
+    use super::{Account, subtract};
     use safe_cex_engine::model::OrderStatus;
+
+    #[test]
+    fn subtraction_keeps_large_integral_values_and_finite_scaling_overflow() {
+        let integral = 4_503_599_627_370_497.0;
+        assert_eq!(subtract(integral, 0.0), integral);
+        assert_eq!(subtract(1e308, 1e-10), 1e308);
+        assert_eq!(subtract(5e-324, 0.0), 5e-324);
+    }
 
     #[test]
     fn retiring_order_guards_bounds_memory_and_invalidates_preexisting_reads() {
@@ -345,7 +372,7 @@ pub(crate) fn map_order(
         price,
         amount,
         filled,
-        remaining: amount - filled,
+        remaining: subtract(amount, filled),
         reduce_only: raw.reduce_only,
         close: None,
         client_order_id,

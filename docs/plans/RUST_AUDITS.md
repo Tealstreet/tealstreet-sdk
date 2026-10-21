@@ -1044,9 +1044,16 @@ Signing and payloads match; no confirmed highs.
   omni key seed kills read-only monitoring (`account.rs:504`).~~ Cancels fence by
   version with a 5 s hide (kept orders reappear with a warning); bad rows are
   skipped per row keeping stored copies and fills; a bad seed disables only placement.
-- Low: caller client id rejected on stops/brackets/splits; float remaining size;
-  zero-price candle rejects batch; leverage always sent. Unchecked: private
-  socket via Tealstreet proxy.
+- Low: ~~float remaining size~~ (operand-precision subtraction for mapped
+  orders and default-size amendments after late fills); ~~zero-price candle
+  rejects batch~~ (coded row skip retains sorted valid peers; malformed time,
+  envelopes and nonempty unusable results still fail). RISKY retained: caller
+  IDs on stops/brackets/splits violate the current one-native-order identity
+  contract without per-leg proofs; skipping explicit leverage writes from cached
+  equality can silently leave venue settings wrong. Native private socket routing
+  is host-owned via SocketChannel::Private/proxyConditional (static concern stale);
+  a live proxy lifecycle remains unverified.
+
 - Confirm (TS bugs Rust fixed): TS values positions at an all-zero placeholder
   ticker on startup, showing a fabricated loss (private tape: balance 1300 / upnl
   -300 while the real quote equals the 60000 entry and native PnL is 0) until its

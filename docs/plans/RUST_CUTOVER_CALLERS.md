@@ -1387,3 +1387,11 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+### ApeX Omni decimal remaining and candle row isolation
+
+Order displays/default amendments now preserve native decimal remainder (for
+example0.3-0.2 is0.1) without snapping to market amount precision. REST chart
+reads keep sorted valid candles when a typed zero-price row occurs and emit a
+coded warning; malformed or wholly unusable responses fail. Caller signatures,
+order IDs and explicit leverage-write semantics remain unchanged.

@@ -387,3 +387,23 @@ generated ID and preserves both virtual siblings when editing one leg.
    leverage writes as retained risks to change; revalidate private route ownership.
 4. Reproduce safe gaps, focused ApeX/Binance gates, touched fmt/strict Clippy/bans,
    independent review, caller/spec notes and exact-head CI; respect merge hold.
+
+- Reproduced 0.3-0.2 exposing0.09999999999999998 remaining and one zero-price
+  candle rejecting valid peers. Order maps now preserve operand decimal precision
+  without lot-step snapping; default amendments use the same subtraction for
+  both late-fill delta and replacement remaining. Integral scaled values above
+  2^52 are not rounded by adding0.5; scaled overflow retains the finite difference.
+- REST candles isolate typed invalid price/volume rows with row.skipped warnings
+  and preserve sorted valid peers. A valid empty symbol array succeeds; missing
+  symbol/envelope data, malformed fields, blank/negative/fractional timestamps and
+  a nonempty all-invalid response fail visibly. Live candle validation is unchanged.
+- Keep the one-native-order caller-ID contract, including protective/multi-leg
+  rejection. An explicit leverage command continues verifying by write rather
+  than assuming a possibly stale cache. Neither write behavior is broadened.
+  Static private transport is already host-owned via Private/proxyConditional;
+  no claim of live proxy-session validation is made.
+- Validation: both original regressions fail before repair;390 focused ApeX/
+  Binance tests pass, then the final3 unit tests pass including >2^52 integral,
+  scaled overflow and subnormal operands (391 unique tests). Touched formatting,
+  strict all-target Clippy and bans pass. Independent read-only review cleared
+  runtime behavior; its optional extreme-arithmetic coverage was added.
