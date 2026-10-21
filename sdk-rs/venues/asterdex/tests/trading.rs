@@ -20,7 +20,7 @@ impl Harness {
         })
     }
     fn options(options: Options) -> Self {
-        let mut engine = Engine::new(AsterDex::new(options));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(AsterDex::new(options));
         engine.store_mut().set_markets(vec![Market {
             id: "BTCUSDT".into(),
             symbol: "BTCUSDT".into(),

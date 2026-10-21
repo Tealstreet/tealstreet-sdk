@@ -82,7 +82,7 @@ fn ready_identity_policy(
     policy: safe_cex_engine::PublicFeedPolicy,
     hip_meta: &str,
 ) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
-    let mut e = Engine::new(Hyperliquid::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),

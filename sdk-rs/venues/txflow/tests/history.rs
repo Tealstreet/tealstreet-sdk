@@ -154,12 +154,13 @@ fn order_history_keeps_native_total_and_remaining_distinct() {
 }
 
 fn ready_with_retired(relisted: bool) -> Engine<TxFlow> {
-    let mut e = Engine::new(TxFlow::new(safe_cex_venue_txflow::Options {
-        testnet: true,
-        application_id: Some(WALLET.into()),
-        secret: Some(format!("0x{:064x}", 1)),
-        ..Default::default()
-    }));
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(TxFlow::new(safe_cex_venue_txflow::Options {
+            testnet: true,
+            application_id: Some(WALLET.into()),
+            secret: Some(format!("0x{:064x}", 1)),
+            ..Default::default()
+        }));
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     let mut meta: Value = serde_json::from_str(META).unwrap();

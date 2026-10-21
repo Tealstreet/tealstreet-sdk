@@ -29,6 +29,13 @@ impl H {
         private: bool,
         read_credentials: Option<safe_cex_engine::ReadCredentials>,
     ) -> Self {
+        Self::with_source(private, read_credentials, 17)
+    }
+    fn with_source(
+        private: bool,
+        read_credentials: Option<safe_cex_engine::ReadCredentials>,
+        seed: u64,
+    ) -> Self {
         let mut options = if private {
             Options {
                 key: Some("replay-key".into()),
@@ -44,7 +51,11 @@ impl H {
         };
         options.read_credentials = read_credentials;
         let mut h = Self {
-            e: Engine::new(KucoinSpot::new(options)),
+            e: Engine::new(
+                KucoinSpot::new(options),
+                Some(safe_cex_engine::test_support::seeded_entropy(seed)),
+            )
+            .unwrap(),
             actions: vec![],
             failures: vec![],
             requests: vec![],
@@ -539,14 +550,17 @@ fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
     }
 }
 #[test]
-fn generated_client_ids_are_unique_across_identically_started_engines() {
-    let mut left = H::new(true);
-    let mut right = H::new(true);
+fn generated_client_ids_follow_host_sources_across_identical_starts() {
+    // Independent production hosts have independent entropy. Explicit fixtures
+    // model distinct sources, and separately prove replay with the same source.
+    let mut left = H::with_source(true, None, 1);
+    let mut right = H::with_source(true, None, 2);
+    let mut replay = H::with_source(true, None, 1);
     assert_eq!(left.now, right.now);
     let mut order = place(None);
     order.client_order_id = None;
     let mut ids = Vec::new();
-    for h in [&mut left, &mut right] {
+    for h in [&mut left, &mut right, &mut replay] {
         h.command(Command::PlaceOrders {
             command: 1,
             orders: vec![order.clone()],
@@ -558,6 +572,7 @@ fn generated_client_ids_are_unique_across_identically_started_engines() {
         ids.push(id);
     }
     assert_ne!(ids[0], ids[1]);
+    assert_eq!(ids[0], ids[2], "same host source reproduces client IDs");
     assert!(
         ids.iter()
             .all(|id| id.bytes().all(|b| b.is_ascii_alphanumeric()))
@@ -1397,7 +1412,7 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
             "missing-passphrase" => read.passphrase = None,
             _ => unreachable!(),
         }
-        let mut e = Engine::new(KucoinSpot::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
             key: Some("replay-key".into()),
             secret: Some("replay-secret".into()),
             passphrase: (invalid != "missing-passphrase").then(|| "replay-passphrase".into()),

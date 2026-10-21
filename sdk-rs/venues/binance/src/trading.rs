@@ -206,18 +206,20 @@ fn number(value: f64) -> String {
 }
 
 impl BinanceFutures {
-    fn generated_id(&self) -> Result<String, String> {
+    fn generated_id(&self, cx: &Cx<'_, Pending>) -> Result<String, String> {
         #[cfg(test)]
         if let Some(generator) = self.trading.id_generator {
             return generated_id_with(generator);
         }
-        generated_id_with(safe_cex_crypto::uuid::uuid)
+        generated_id_with(|| {
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+        })
     }
 
-    fn client_id(&self, input: &Option<String>) -> Result<String, String> {
+    fn client_id(&self, cx: &Cx<'_, Pending>, input: &Option<String>) -> Result<String, String> {
         match input {
             Some(id) => Ok(id.clone()),
-            None => self.generated_id(),
+            None => self.generated_id(cx),
         }
     }
 
@@ -1043,7 +1045,10 @@ impl BinanceFutures {
             return Err("Client order ID requires one native order".into());
         }
         for p in &mut out {
-            p.set("newClientOrderId", self.client_id(&opts.client_order_id)?);
+            p.set(
+                "newClientOrderId",
+                self.client_id(cx, &opts.client_order_id)?,
+            );
         }
         for (kind, trigger) in [
             ("STOP_LOSS", opts.stop_loss),
@@ -1068,7 +1073,7 @@ impl BinanceFutures {
                 for mut part in
                     sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
                 {
-                    part.set("newClientOrderId", self.generated_id()?);
+                    part.set("newClientOrderId", self.generated_id(cx)?);
                     out.push(part);
                 }
             }
@@ -1167,7 +1172,7 @@ impl BinanceFutures {
             sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
         };
         for p in &mut out {
-            p.set("newClientOrderId", self.generated_id()?);
+            p.set("newClientOrderId", self.generated_id(cx)?);
         }
         for (kind, trigger) in [
             (OrderType::StopLoss, opts.stop_loss),
@@ -1404,7 +1409,7 @@ impl BinanceFutures {
                 params.set("reduceOnly", "true");
             }
             params.set("workingType", working_type(opts));
-            params.set("clientAlgoId", self.generated_id()?);
+            params.set("clientAlgoId", self.generated_id(cx)?);
             algo.push(params);
         } else {
             let mut params = Params::default();
@@ -1449,7 +1454,7 @@ impl BinanceFutures {
                 ));
             }
             for mut payload in payloads {
-                let id = self.client_id(&opts.client_order_id)?;
+                let id = self.client_id(cx, &opts.client_order_id)?;
                 payload.set("newClientOrderId", id);
                 regular.push(payload);
             }
@@ -1489,7 +1494,7 @@ impl BinanceFutures {
                 ..opts.clone()
             };
             params.set("workingType", working_type(&bracket));
-            params.set("clientAlgoId", self.generated_id()?);
+            params.set("clientAlgoId", self.generated_id(cx)?);
             algo.push(params);
         }
         Ok((regular, algo))
@@ -1537,7 +1542,7 @@ impl BinanceFutures {
         params.set("quantity", number(position.contracts));
         params.set("callbackRate", number(rate));
         params.set("priceProtect", "TRUE");
-        params.set("clientAlgoId", self.generated_id()?);
+        params.set("clientAlgoId", self.generated_id(cx)?);
         Ok(params)
     }
 }
@@ -2231,7 +2236,7 @@ mod audit_tests {
             ..Options::default()
         });
         venue.trading.id_generator = Some(injected_uuid);
-        let mut engine = Engine::new(venue);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         let info: SymbolInfo<'_> = serde_json::from_str(r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}"#).unwrap();
         engine
             .store_mut()

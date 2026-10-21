@@ -43,7 +43,7 @@ fn mainnet_and_invalid_agent_fail_before_io() {
             ..Default::default()
         },
     ] {
-        let mut e = Engine::new(TxFlow::new(opts));
+        let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(opts));
         e.start(1000.0);
         assert!(
             !e.drain_actions()
@@ -53,7 +53,7 @@ fn mainnet_and_invalid_agent_fail_before_io() {
 }
 #[test]
 fn public_requests_carry_version_and_public_route() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -90,7 +90,7 @@ fn explicit_metadata_ids_and_percent_funding() {
 }
 #[test]
 fn socket_roles_and_control_plane_are_distinct() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -404,7 +404,7 @@ fn public_payload_field_order_and_escaped_aliases_preserve_atomic_updates() {
 }
 #[test]
 fn failed_envelope_never_commits_markets() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -538,7 +538,7 @@ fn nullable_market_context_does_not_drop_valid_fields() {
 
 #[test]
 fn metadata_filters_other_settlement_and_delisting_without_reindexing() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -572,7 +572,7 @@ fn metadata_filters_other_settlement_and_delisting_without_reindexing() {
 }
 #[test]
 fn metadata_duplicate_identity_rejects_the_whole_snapshot() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -600,7 +600,7 @@ fn metadata_duplicate_identity_rejects_the_whole_snapshot() {
 
 #[test]
 fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -700,7 +700,7 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
 
 #[test]
 fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -1066,7 +1066,7 @@ fn absent_node_volume_preserves_rest_seed_and_stream_volume_until_explicit_zero(
 }
 #[test]
 fn historical_metadata_alias_conflicts_reject_before_active_markets_commit() {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -1104,7 +1104,7 @@ fn ambiguous_native_identity_preserves_store_and_retries_with_backoff() {
     let (previous, _, _) = ready();
     let prior_markets = previous.store().markets().to_vec();
     let prior_tickers = previous.store().tickers().to_vec();
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -1162,7 +1162,7 @@ fn ambiguous_native_identity_preserves_store_and_retries_with_backoff() {
 
 #[test]
 fn late_rest_seed_preserves_supplied_live_context_fields_and_seed_only_statistics() {
-    let mut engine = Engine::new(TxFlow::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()

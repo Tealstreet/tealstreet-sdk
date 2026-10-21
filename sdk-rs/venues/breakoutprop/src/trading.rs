@@ -475,7 +475,12 @@ impl BreakoutProp {
                     let steps = orders
                         .into_iter()
                         .map(|order| {
-                            let code = format!("tealstreet-{}", safe_cex_crypto::uuid::uuid()?);
+                            let code = format!(
+                                "tealstreet-{}",
+                                safe_cex_crypto::uuid::uuid_with_entropy(
+                                    |bytes| cx.fill_entropy(bytes)
+                                )?
+                            );
                             Ok(Step::Place { order, code })
                         })
                         .collect::<Result<VecDeque<_>, String>>()?;
@@ -517,7 +522,7 @@ impl BreakoutProp {
                 id,
                 price,
                 amount,
-            } => (command, self.plan_amend(cx.store, &id, price, amount)),
+            } => (command, self.plan_amend(cx, &id, price, amount)),
             Command::SetLeverage { command, .. }
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. }
@@ -568,11 +573,12 @@ impl BreakoutProp {
 
     fn plan_amend(
         &self,
-        store: &Store,
+        cx: &Cx<'_, Pending>,
         id: &str,
         price: Option<f64>,
         amount: Option<f64>,
     ) -> Result<Job, String> {
+        let store = &*cx.store;
         if self.public_only() {
             return Err("Breakout Prop trading requires a private account".into());
         }
@@ -627,7 +633,10 @@ impl BreakoutProp {
         if self.trading.acknowledged.len() + self.trading.reservations() >= MAX_ACKNOWLEDGED {
             return Err("Breakout Prop pending order capacity exceeded".into());
         }
-        let code = format!("tealstreet-{}", safe_cex_crypto::uuid::uuid()?);
+        let code = format!(
+            "tealstreet-{}",
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+        );
         Ok(Job {
             steps: VecDeque::from([
                 Step::Cancel {

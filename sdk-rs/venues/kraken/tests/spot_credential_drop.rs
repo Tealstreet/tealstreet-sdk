@@ -1,6 +1,6 @@
 //! Isolated allocator observer: inspect owned credential bytes while they are still
 //! allocated, immediately before System frees them. No production unsafe code.
-use safe_cex_engine::{Engine, ReadCredentials};
+use safe_cex_engine::ReadCredentials;
 use safe_cex_venue_kraken::{KrakenSpot, Options};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -101,7 +101,7 @@ fn original_spot_credentials_are_zeroed_before_engine_drop_frees_them() {
         }
         // Move the actual original String allocations through the public venue
         // constructor and engine owner. Do not call an erasure helper explicitly.
-        let engine = Engine::new(KrakenSpot::new(options));
+        let engine = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(options));
         for (index, watched) in WATCHED.iter().enumerate() {
             if index != 0 || key.is_some() {
                 assert_ne!(watched.pointer.load(Ordering::Acquire), 0, "{scenario}");

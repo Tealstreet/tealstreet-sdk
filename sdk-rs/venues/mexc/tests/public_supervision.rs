@@ -26,7 +26,7 @@ impl Harness {
         Self::with_policy(PublicFeedPolicy::Direct)
     }
     fn with_policy(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(MexcFutures::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
             public_data_only: true,
             ..Default::default()
         }));

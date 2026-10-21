@@ -66,7 +66,7 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
         application_id: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Default::default()
     };
-    let mut e = Engine::new(if spot {
+    let mut e = safe_cex_engine::test_support::seeded_engine(if spot {
         Hyperliquid::new_spot(options)
     } else {
         Hyperliquid::new(options)

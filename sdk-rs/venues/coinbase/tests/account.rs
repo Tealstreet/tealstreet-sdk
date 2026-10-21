@@ -38,7 +38,7 @@ struct Session {
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
-        let mut e = Engine::new(
+        let mut e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 key: "organizations/test/apiKeys/test".into(),
                 secret: STANDARD.encode([7; 32]),

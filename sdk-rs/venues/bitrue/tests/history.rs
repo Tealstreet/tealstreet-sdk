@@ -4,7 +4,7 @@ use safe_cex_venue_bitrue::{Bitrue, Options};
 const SYMBOL: &str = "E-BTC-USDT";
 const ROW: &str = r#"{"tradeId":1558124009467904992,"price":60000,"qty":3,"amount":180,"contractName":"E-BTC-USDT","side":"BUY","fee":"-0.1","bidId":1558124009467904993,"askId":1558124009467904994,"isBuyer":true,"isMaker":true,"ctime":1700000000123}"#;
 fn engine() -> Engine<Bitrue> {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -253,7 +253,7 @@ fn windows_require_known_symbols_and_unsupported_histories_do_not_fabricate_ledg
 }
 #[test]
 fn public_only_fills_fail_before_private_requests() {
-    let mut e = Engine::new(Bitrue::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -534,7 +534,7 @@ fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects
 }
 #[test]
 fn client_lookup_without_private_credentials_never_asserts_definitive_absence() {
-    let mut e = Engine::new(Bitrue::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options::default()));
     lookup(&mut e, SYMBOL, "caller-id");
     let missing = lookup_result(&mut e);
     assert!(!missing.found);

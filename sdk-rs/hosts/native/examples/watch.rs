@@ -10,10 +10,14 @@ use std::time::{Duration, Instant};
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let symbols: Vec<String> = std::env::args().skip(1).collect();
-    let engine = Engine::new(BinanceFutures::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
+    let engine = Engine::new(
+        BinanceFutures::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }),
+        Some(safe_cex_native::production_entropy()),
+    )
+    .expect("production entropy configured");
     let (commands, inbox) = tokio::sync::mpsc::unbounded_channel();
     for symbol in &symbols {
         let _ = commands.send(Command::SubscribeOrderBook {

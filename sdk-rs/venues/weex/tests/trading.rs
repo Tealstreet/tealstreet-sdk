@@ -11,7 +11,7 @@ fn engine() -> Engine<WeexFutures> {
     engine_with_private_ws(false)
 }
 fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
-    let mut e = Engine::new(WeexFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),

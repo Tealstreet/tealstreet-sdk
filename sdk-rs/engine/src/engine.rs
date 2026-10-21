@@ -809,8 +809,6 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
-const JITTER_GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
-
 struct PollTimer {
     logical: TimerId,
     default_interval_ms: f64,
@@ -1024,6 +1022,7 @@ impl Polls {
 }
 
 struct Io<P> {
+    entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
     #[cfg(feature = "order-locks")]
@@ -1049,8 +1048,6 @@ struct Io<P> {
     fills: Vec<(Fill, Option<FillFinancials>)>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
-    /// Retry-jitter state; advanced only by `Cx::jittered`, so replays repeat it.
-    jitter: u64,
     min_level: Level,
     health: Health,
     sockets: SocketRoles,
@@ -1063,6 +1060,7 @@ struct Io<P> {
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
+            entropy: None,
             #[cfg(feature = "order-locks")]
             order_locks: crate::order_locks::OrderLocks::default(),
             #[cfg(feature = "order-locks")]
@@ -1087,7 +1085,6 @@ impl<P> Default for Io<P> {
             fills: Vec::new(),
             frame: Vec::new(),
             snapshot: Vec::new(),
-            jitter: JITTER_GOLDEN_GAMMA,
             min_level: Level::Info,
             health: Health::default(),
             sockets: SocketRoles::default(),
@@ -1101,17 +1098,6 @@ impl<P> Io<P> {
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
-    }
-    /// splitmix64 step salted by the event clock, as `socket::Supervisor` mixes.
-    fn mix(&mut self, salt: u64) -> u64 {
-        self.jitter = self
-            .jitter
-            .wrapping_add(salt)
-            .wrapping_add(JITTER_GOLDEN_GAMMA);
-        let mut z = self.jitter;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
     }
     fn next(&mut self) -> u32 {
         next_engine_id(&mut self.next_id)
@@ -1363,6 +1349,21 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
+    }
+    pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .signing(bytes)
+    }
+
     /// Spreads a failed-request retry delay into `[0.75, 1.0] * delay_ms` so
     /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
     /// Non-finite and non-positive delays pass through unchanged.
@@ -1370,7 +1371,11 @@ impl<P> Cx<'_, P> {
         if !(delay_ms.is_finite() && delay_ms > 0.0) {
             return delay_ms;
         }
-        crate::backoff::jitter(delay_ms, self.io.mix(self.now.to_bits()))
+        let mut bytes = [0; 8];
+        if self.fill_entropy(&mut bytes).is_err() {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
@@ -1799,13 +1804,19 @@ struct BookBaseline {
 }
 
 impl<V: Venue> Engine<V> {
-    pub fn new(venue: V) -> Self {
+    pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
+        let entropy = entropy.ok_or_else(|| {
+            VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
+        })?;
         let mut store = Store::default();
         store.set_quantity_units(venue.capabilities().quantity_units);
-        Self {
+        Ok(Self {
             venue,
             store,
-            io: Io::default(),
+            io: Io {
+                entropy: Some(entropy),
+                ..Io::default()
+            },
             started: false,
             startup_watch_at: None,
             ack_timer: None,
@@ -1822,7 +1833,36 @@ impl<V: Venue> Engine<V> {
             book_baselines: HashMap::new(),
             #[cfg(feature = "book-deltas")]
             book_market_rows: Vec::new(),
+        })
+    }
+
+    /// Host configuration is immutable once startup begins.
+    pub fn set_entropy(&mut self, fill: crate::entropy::Fill) -> Result<(), VenueError> {
+        if self.started {
+            return Err(VenueError::new("Entropy must be configured before startup")
+                .kind(ErrorKind::InvalidInput));
         }
+        self.io
+            .entropy
+            .as_mut()
+            .expect("validated construction")
+            .set_identity(fill);
+        Ok(())
+    }
+    /// Independent explicit injection; identity seeds never affect signing.
+    pub fn set_signing_entropy(&mut self, fill: crate::entropy::Fill) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Signing entropy must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io
+            .entropy
+            .as_mut()
+            .expect("validated construction")
+            .set_signing(fill);
+        Ok(())
     }
 
     /// Feed ownership is fixed before startup; a disconnected provider never falls back.
@@ -3775,7 +3815,7 @@ mod streaming_tests {
     }
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
-        let mut engine = Engine::new(StreamVenue {
+        let mut engine = crate::test_support::seeded_engine(StreamVenue {
             at,
             rows: Vec::new(),
             body: None,
@@ -3811,7 +3851,7 @@ mod streaming_tests {
     }
 
     fn frame_engine() -> Engine<StreamVenue> {
-        Engine::new(StreamVenue {
+        crate::test_support::seeded_engine(StreamVenue {
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,
@@ -4726,7 +4766,10 @@ mod request_route_tests {
     #[test]
     fn route_hints_mark_only_the_requested_outbound_action() {
         let mut store = Store::default();
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut cx = Cx {
             now: 0.0,
             store: &mut store,
@@ -4897,7 +4940,7 @@ mod signing_tests {
     fn terminal_signer_failures_release_causal_tokens_without_unsigned_http_or_duplicate_completion()
      {
         for failure in ["invalid target", "invalid header", "expired", "failed"] {
-            let mut engine = Engine::new(SigningVenue::default());
+            let mut engine = crate::test_support::seeded_engine(SigningVenue::default());
             let target = SignatureTarget::Header(if failure == "invalid target" {
                 "MISSING"
             } else {
@@ -4961,7 +5004,7 @@ mod signing_tests {
     #[cfg(feature = "order-locks")]
     #[test]
     fn duplicate_unsupported_symbol_amend_cannot_complete_or_release_an_existing_mutation() {
-        let mut engine = Engine::new(SigningVenue::default());
+        let mut engine = crate::test_support::seeded_engine(SigningVenue::default());
         engine.handle(
             0.,
             Event::Command(Command::AmendOrder {
@@ -5039,7 +5082,7 @@ mod signing_tests {
     #[cfg(feature = "order-locks")]
     #[test]
     fn successful_signing_retains_causal_token_until_the_http_response_completes() {
-        let mut engine = Engine::new(SigningVenue::default());
+        let mut engine = crate::test_support::seeded_engine(SigningVenue::default());
         let request = staged_request(&mut engine, SignatureTarget::Header("SIGNATURE"));
         engine.handle(
             100.,
@@ -5163,7 +5206,10 @@ mod jitter_tests {
     use super::*;
 
     fn draws(clocks: &[f64], delay: f64) -> Vec<f64> {
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         clocks
             .iter()
@@ -5187,14 +5233,39 @@ mod jitter_tests {
         // Same clock, successive calls: the state advances, so draws differ.
         let same_clock = draws(&[0.0; 8], 4_000.0);
         assert!(same_clock.windows(2).all(|pair| pair[0] != pair[1]));
-        assert_ne!(first[..8], draws(&[1.0; 8], 4_000.0)[..]);
+        // Host entropy, rather than the clock, now controls reproducibility.
+        assert_eq!(first[..8], draws(&[1.0; 8], 4_000.0)[..]);
+    }
+
+    #[test]
+    fn failed_entropy_uses_the_nominal_delay() {
+        let mut io = Io::<()> {
+            entropy: Some(crate::entropy::Entropy::new(
+                Box::new(|bytes| {
+                    bytes.fill(99);
+                    Err("unavailable".into())
+                }),
+                Box::new(|_| panic!("jitter must not consume signing entropy")),
+            )),
+            ..Io::default()
+        };
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(cx.jittered(4_000.), 4_000.);
     }
 
     #[test]
     fn retry_jitter_passes_through_unschedulable_delays() {
         let draws = draws(&[0.0; 4], f64::INFINITY);
         assert!(draws.iter().all(|d| *d == f64::INFINITY));
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5204,10 +5275,13 @@ mod jitter_tests {
         assert_eq!(cx.jittered(0.0), 0.0);
         assert_eq!(cx.jittered(-5.0), -5.0);
         assert!(cx.jittered(f64::NAN).is_nan());
-        assert_eq!(
-            cx.io.jitter, JITTER_GOLDEN_GAMMA,
-            "pass-through draws nothing"
-        );
+        let mut actual = [0; 8];
+        cx.fill_entropy(&mut actual).unwrap();
+        let mut expected = [0; 8];
+        crate::test_support::seeded_entropy(17)
+            .identity(&mut expected)
+            .unwrap();
+        assert_eq!(actual, expected, "pass-through draws nothing");
     }
 }
 
@@ -5225,7 +5299,10 @@ mod startup_tests {
 
     #[test]
     fn discovery_retry_jitters_but_never_undercuts_a_rate_limit_minimum() {
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5259,7 +5336,10 @@ mod startup_tests {
     #[test]
     fn discovery_retry_waits_out_a_rate_limit_window() {
         use crate::startup::rate_limit_pause_ms;
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5329,7 +5409,10 @@ mod startup_tests {
 
     #[test]
     fn discovery_backoff_caps_deduplicates_and_resets_independent_reads() {
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5417,7 +5500,10 @@ mod public_retry_tests {
 
     #[test]
     fn public_retry_deduplicates_ban_extensions_recovers_and_keeps_repairs_running() {
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5481,7 +5567,10 @@ mod public_retry_tests {
 
     #[test]
     fn public_retry_counts_reads_independently_and_reports_only_one_outage() {
-        let mut io = Io::<()>::default();
+        let mut io = Io::<()> {
+            entropy: Some(crate::test_support::seeded_entropy(17)),
+            ..Io::default()
+        };
         let mut store = Store::default();
         let mut cx = Cx {
             now: 0.0,
@@ -5621,7 +5710,7 @@ mod startup_watch_tests {
     /// The effective poll deadline after a policy change on a fresh engine:
     /// the last one armed, counting the native arm at startup.
     fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
-        let mut engine = crate::Engine::new(PollVenue);
+        let mut engine = crate::test_support::seeded_engine(PollVenue);
         engine.start(0.0);
         change(&mut engine);
         let armed: Vec<_> = engine
@@ -5658,7 +5747,7 @@ mod startup_watch_tests {
                 assert_eq!(typed, commanded, "typed and host-command bounds agree");
             }
         }
-        let mut engine = Engine::new(PollVenue);
+        let mut engine = crate::test_support::seeded_engine(PollVenue);
         engine.start(0.0);
         engine.handle(
             0.0,
@@ -5684,7 +5773,7 @@ mod startup_watch_tests {
 
     #[test]
     fn an_empty_venue_catalogue_is_warned_about_and_never_applied() {
-        let mut engine = Engine::new(Idle);
+        let mut engine = crate::test_support::seeded_engine(Idle);
         engine.start(0.0);
         engine.store_mut().set_markets(vec![market("A")]);
         engine.store_mut().set_markets(Vec::new());
@@ -5710,7 +5799,7 @@ mod startup_watch_tests {
 
     #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
-        let mut engine = Engine::new(Idle);
+        let mut engine = crate::test_support::seeded_engine(Idle);
         engine.set_account_startup(true);
         engine.start(0.0);
         assert!(
@@ -5749,12 +5838,12 @@ mod startup_watch_tests {
 
     #[test]
     fn public_only_engine_is_not_told_its_account_never_loaded() {
-        let mut engine = Engine::new(Idle);
+        let mut engine = crate::test_support::seeded_engine(Idle);
         engine.start(0.0);
         engine.store_mut().set_markets(vec![market("A")]);
         engine.store_mut().set_tickers(vec![]);
         assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
-        let mut disabled = Engine::new(Idle);
+        let mut disabled = crate::test_support::seeded_engine(Idle);
         disabled
             .set_public_feed_policy(PublicFeedPolicy::Disabled)
             .unwrap();
@@ -5871,7 +5960,7 @@ mod placement_ack_tests {
     }
 
     fn engine(needs_stored: bool) -> Engine<StoredOnly> {
-        let mut engine = Engine::new(StoredOnly {
+        let mut engine = crate::test_support::seeded_engine(StoredOnly {
             needs_stored,
             sent: Vec::new(),
         });
@@ -6280,7 +6369,7 @@ mod fill_frame_tests {
     }
 
     fn started() -> Engine<Stream> {
-        let mut engine = Engine::new(Stream);
+        let mut engine = crate::test_support::seeded_engine(Stream);
         engine.start(0.);
         engine.store_mut().set_markets(vec![market("A")]);
         engine.take_frame(0.);

@@ -903,7 +903,7 @@ impl BitgetFutures {
         let reduce = o.reduce_only.unwrap_or(false);
         let hedge = cx.store.hedged();
         let mut p = Payload {
-            client_oid: Some(o.client_order_id.clone().map_or_else(mint, Ok)?),
+            client_oid: Some(o.client_order_id.clone().map_or_else(|| mint(cx), Ok)?),
             price: o
                 .price
                 .filter(|_| o.kind != OrderType::Market)
@@ -993,7 +993,7 @@ impl BitgetFutures {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
         let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
-        p.client_oid = Some(mint()?);
+        p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
         p.trigger_price = o.price.map(|v| number(v, m.precision.price));
         p.trigger_type = Some(trigger(if o.kind == OrderType::TakeProfit {
@@ -1155,7 +1155,7 @@ impl BitgetFutures {
             tpsl_mode: Some(if size > 0.0 { "partial" } else { "full" }),
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
-            client_oid: Some(mint()?),
+            client_oid: Some(mint(cx)?),
             ..Payload::default()
         };
         if o.kind == OrderType::TakeProfit {
@@ -1446,7 +1446,7 @@ impl BitgetFutures {
             if next_amount <= 0.0 {
                 return Err("Bitget amended size must be positive".into());
             }
-            let client = mint()?;
+            let client = mint(cx)?;
             let payload = Payload {
                 symbol: Some(order.symbol.clone()),
                 product_type: Some(self.product().into()),
@@ -2285,8 +2285,8 @@ fn needs_position_read(cx: &Cx<'_, Pending>, command: &Command, uta: bool) -> bo
         false
     }
 }
-fn mint() -> Result<String, String> {
-    safe_cex_crypto::uuid::uuid()
+fn mint(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
 }
 fn side_text(side: OrderSide) -> &'static str {
     if side == OrderSide::Buy {

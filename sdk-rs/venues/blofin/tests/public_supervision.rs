@@ -24,7 +24,7 @@ impl Harness {
     }
 
     fn with_policy(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(Blofin::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             public_data_only: true,
             ..Options::default()
         }));

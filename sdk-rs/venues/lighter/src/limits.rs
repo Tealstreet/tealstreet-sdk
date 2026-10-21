@@ -142,7 +142,7 @@ impl Lighter {
         let Some(account) = self.account.account_index else {
             return true;
         };
-        let Ok(auth) = self.account_auth(cx.now) else {
+        let Ok(auth) = self.account_auth(cx) else {
             self.limits.next_fetch_at = cx.now + RETRY_MS;
             return true;
         };
@@ -183,7 +183,7 @@ impl Lighter {
                         .account
                         .account_index
                         .ok_or("Lighter account is not loaded yet")?;
-                    let auth = self.account_auth(cx.now)?;
+                    let auth = self.account_auth(cx)?;
                     Ok::<_, String>((account, auth))
                 })();
                 match result {

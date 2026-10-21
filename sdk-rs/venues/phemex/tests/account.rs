@@ -70,7 +70,7 @@ fn envelope(currency: &str, total: f64, used: f64, rows: &str) -> String {
     )
 }
 fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1368,7 +1368,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
 }
 #[test]
 fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()

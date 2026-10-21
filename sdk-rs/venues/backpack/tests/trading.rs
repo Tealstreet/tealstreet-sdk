@@ -485,9 +485,9 @@ fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_befor
 #[test]
 fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use safe_cex_engine::Engine;
+
     use safe_cex_venue_backpack::{Backpack, Options};
-    let mut e = Engine::new(Backpack::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         read_credentials: None,
         public_data_only: false,
         key: Some("public-test-key".into()),

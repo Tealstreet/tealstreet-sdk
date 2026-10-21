@@ -10,7 +10,7 @@ struct Harness {
 }
 impl Harness {
     fn new(options: Options) -> Self {
-        let mut e = Engine::new(Grvt::new(options));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(options));
         e.store_mut().set_balance(safe_cex_engine::model::Balance {
             total: 123.,
             free: 100.,

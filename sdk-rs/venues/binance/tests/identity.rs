@@ -5,7 +5,7 @@ use safe_cex_venue_binance::{BinanceFutures, Options, Variant};
 const NOW: f64 = 1000.;
 type TestEngine = Engine<BinanceFutures>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = Engine::new(BinanceFutures::new(options));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(options));
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {

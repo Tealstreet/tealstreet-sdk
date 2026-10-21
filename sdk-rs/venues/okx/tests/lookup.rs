@@ -42,7 +42,7 @@ struct Info {
     pos_side: String,
 }
 fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: private.then(|| "lookup-key".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
             key: "secondary-key".into(),
@@ -337,7 +337,7 @@ fn cached_order_lookup_stays_read_only_without_private_credentials() {
     // This local-only shortcut is safe when no secondary account can have
     // populated the cache.
     let markets = ready(false, false, false).store().markets().to_vec();
-    let mut e = Engine::new(Okx::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
     e.store_mut().set_markets(markets);
     e.store_mut()
         .set_orders(vec![safe_cex_engine::model::Order {

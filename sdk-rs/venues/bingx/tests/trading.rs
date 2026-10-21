@@ -94,7 +94,7 @@ impl Harness {
         Self::with_status(initial, "NEW")
     }
     fn with_status(initial: Option<(Order, &str)>, status: &str) -> Self {
-        let mut engine = Engine::new(TestVenue {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
             trading: Trading::default(),
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
             acknowledgements: Vec::new(),

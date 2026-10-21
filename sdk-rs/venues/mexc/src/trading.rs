@@ -237,7 +237,10 @@ impl MexcFutures {
                 m.limits.leverage.min,
                 m.limits.leverage.max,
             )?,
-            external_oid: format!("ts_{}", safe_cex_crypto::uuid::uuid()?),
+            external_oid: format!(
+                "ts_{}",
+                safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+            ),
             reduce_only: opts.reduce_only.filter(|v| *v),
             stp_mode: batch.then_some(0),
             stop_loss_price: opts
