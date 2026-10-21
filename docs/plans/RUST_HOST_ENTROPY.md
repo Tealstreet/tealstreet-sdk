@@ -75,3 +75,8 @@ Local strict Clippy/fmt, wasm32 check, SDK typecheck, 142 host and 994 harness
 unit tests pass. 4831 unique Rust tests pass across all 32 touched crates (focused runs after
 fixture corrections). Landing integration, CI/size gates, a fresh separate revert
 guard and merge reporting remain pending.
+
+Integrated landing 4592d985e8a (including Bybit account row-isolation changes)
+cleanly in d8be4c45e11. The exact 315-path entropy delta and all own patch lines
+are unchanged relative to that landing. 314 integrated Bybit tests, strict
+Bybit Clippy and all 994 harness tests pass. Full CI and final guard remain.
