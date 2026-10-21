@@ -1,10 +1,12 @@
 use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor};
-use safe_cex_engine::{Cx, ErrorKind, Fill, LogLevel, Method, Response, TimerId, VenueError};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
 
@@ -236,7 +238,7 @@ impl BitgetFutures {
                     cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
                 }
             }
-            Err(error) => cx.log(LogLevel::Error, error),
+            Err(error) => cx.notice(Level::Error, code::REQUEST_FAILED, error),
         }
     }
 
@@ -544,8 +546,9 @@ impl BitgetFutures {
                     Ok(p) => rows.push(p),
                     Err(error) => {
                         let key = self.position_key(item);
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "skipped Bitget position record {}: {error}",
                                 key.as_ref().map_or("without symbol", |(s, _)| s.as_str())
@@ -615,8 +618,9 @@ impl BitgetFutures {
                     Ok(orders) => snapshot.rows.extend(orders),
                     Err(error) => {
                         let id = order_row_id(item);
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "skipped Bitget order record {}: {error}",
                                 id.as_deref().unwrap_or("without id")
@@ -737,7 +741,7 @@ impl BitgetFutures {
                             self.apply_balance(cx, amounts);
                         }
                     }
-                    Err(error) => cx.log(LogLevel::Error, error),
+                    Err(error) => cx.notice(Level::Error, code::REQUEST_FAILED, error),
                 }
             }
             Request::Orders(mut snapshot) => {
@@ -863,7 +867,7 @@ impl BitgetFutures {
         error: &str,
     ) {
         self.clear_in_flight(&request);
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::REQUEST_FAILED, error);
     }
 
     pub(crate) fn account_transport_failed(
@@ -960,7 +964,7 @@ impl BitgetFutures {
     /// Transient probe failures retry with backoff until detection succeeds,
     /// never inside the rate-limit window a 418/429 answer set.
     fn probe_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str, pause_ms: f64) {
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         if !self.account.startup_rejected {
             self.account.probe.failed_after(cx, (), pause_ms);
         }
@@ -1001,7 +1005,7 @@ impl BitgetFutures {
         if let Some(socket) = self.sockets[3].socket.take() {
             cx.close(socket);
         }
-        cx.log(LogLevel::Error, &error.message);
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, &error.message);
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
@@ -1336,8 +1340,7 @@ impl BitgetFutures {
         );
         if self.account.inverse_assets.iter().any(|a| !a.priced) {
             if !std::mem::replace(&mut self.account.inverse_unpriced_warned, true) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     "Bitget inverse collateral USD price unavailable; preserving previous USD balance",
                 );
             }
@@ -1409,8 +1412,9 @@ impl BitgetFutures {
                         rejection("API key login", code, &header.msg, ErrorKind::AuthInvalid);
                     return self.reject_startup(cx, error, true);
                 }
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::STREAM_UNAVAILABLE,
                     format!("Bitget private WS login failed: {}", header.msg),
                 );
                 if let Some(socket) = self.sockets[3].socket {
@@ -1450,8 +1454,9 @@ impl BitgetFutures {
                         Ok(position) => positions.push(position),
                         Err(error) => {
                             unmapped = true;
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("skipped Bitget position stream record: {error}"),
                             );
                         }
@@ -1511,7 +1516,11 @@ impl BitgetFutures {
                         continue;
                     }
                     let Ok(orders) = self.map_order(cx, &raw) else {
-                        cx.log(LogLevel::Warning, "invalid Bitget order stream record");
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            "invalid Bitget order stream record",
+                        );
                         continue;
                     };
                     let Some(order) = orders.first() else {
@@ -1815,7 +1824,7 @@ impl BitgetFutures {
                 if !self.account.uta {
                     self.account.needs_recovery = true;
                 }
-                cx.log(LogLevel::Warning, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
+                cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
                 self.refresh_positions(cx);
                 self.refresh_balance(cx);
                 self.refresh_orders(cx, false);

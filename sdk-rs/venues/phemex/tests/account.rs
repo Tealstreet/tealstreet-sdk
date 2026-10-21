@@ -1382,7 +1382,7 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
     );
     assert!(!e.store().loaded().positions);
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
 }
 
 #[test]
@@ -1397,7 +1397,7 @@ fn owned_position_outside_settled_catalogue_is_skipped_as_an_error() {
     );
     assert!(e.store().positions().is_empty());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
             if message == "Phemex skipped MISSINGUSDT position on an unavailable market")));
 }
 
@@ -1445,7 +1445,7 @@ fn unknown_working_live_order_cannot_clear_previous_snapshot_or_consume_sequence
     assert_eq!(e.store().orders(), before);
     assert!(!e.store().loaded().orders);
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
     ws(
         &mut e,
         socket,
@@ -1603,7 +1603,10 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
         let logs = actions
             .iter()
             .filter_map(|a| match a {
-                Action::Notice(Notice::Log { level, message }) => Some((*level, message.clone())),
+                Action::Notice(Notice::Log { level, message }) => {
+                    Some((safe_cex_engine::Level::from(*level), message.clone()))
+                }
+                Action::Notice(Notice::Event(event)) => Some((event.level, event.message.clone())),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1649,11 +1652,11 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
     assert_eq!(e.store().balance().total, 1000. + 200. - derived);
     for (level, message) in [
         (
-            LogLevel::Warning,
+            safe_cex_engine::Level::Warn,
             "Phemex skipped unmappable ETHUSDC position row",
         ),
         (
-            LogLevel::Error,
+            safe_cex_engine::Level::Error,
             "Phemex skipped MISSINGUSDC position on an unavailable market",
         ),
     ] {
@@ -1674,7 +1677,7 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
     assert_eq!(e.store().balance().total, 1000. + 200. - derived);
 
     // The same skips on the next poll are not reported again.
-    let skipped = |logs: &[(LogLevel, String)]| {
+    let skipped = |logs: &[(safe_cex_engine::Level, String)]| {
         logs.iter()
             .filter(|(_, m)| m.starts_with("Phemex skipped"))
             .count()

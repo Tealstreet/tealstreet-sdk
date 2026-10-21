@@ -838,7 +838,7 @@ fn repeated_product_cursor_cannot_commit_a_partial_market_list() {
     );
     assert!(e.store().markets().is_empty());
     assert!(e.drain_actions().any(
-        |a| matches!(a,Action::Notice(Notice::Log {message,..}) if message.contains("cursor"))
+        |a| matches!(a,Action::Notice(Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("cursor"))
     ));
 }
 #[test]
@@ -1072,7 +1072,7 @@ fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
     assert_eq!(e.store().markets()[0].symbol, "BTC-USD");
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -1095,7 +1095,7 @@ fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
     );
     assert!(!e.store().loaded().markets);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
     let timer = actions
         .into_iter()
         .find_map(|action| match action {

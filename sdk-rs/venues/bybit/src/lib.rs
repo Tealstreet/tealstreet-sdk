@@ -11,8 +11,10 @@ mod wire;
 
 use paths::Paths;
 pub use paths::{Category, Endpoints, Variant};
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
@@ -20,7 +22,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
@@ -622,8 +624,9 @@ impl BybitLinear {
         if let Some(server) = server_time {
             self.clock_offset_ms = server - cx.now;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             "Bybit rejected a signed request; resending it once",
         );
         taken.rest.resent = true;
@@ -690,8 +693,9 @@ impl BybitLinear {
             }
             self.select_category(category);
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::WS_DISCONNECTED,
             format!("Bybit socket closed ({code}); reconnecting"),
         );
     }
@@ -825,7 +829,7 @@ impl BybitLinear {
             "API key"
         };
         let text = format!("Bybit rejected the {which} ({code}): {message}");
-        cx.log(LogLevel::Error, &text);
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, &text);
         cx.startup_failed(
             VenueError::new(text)
                 .kind(kind)
@@ -839,8 +843,9 @@ impl BybitLinear {
 
     /// A required startup list failed: try the missing ones again, backing off.
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, what: &str, error: &str) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
         if self.category == Category::Option && !self.option_degraded {
@@ -929,8 +934,7 @@ impl BybitLinear {
             }
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::REQUEST_FAILED,
                 format!("Failed to fetch Bybit PreLaunch markets, continuing with Trading markets: {error}"),
             );
             self.startup.prelaunch = Some(Vec::new());
@@ -976,8 +980,9 @@ impl BybitLinear {
                 market.maker_fee = Some(maker);
             }
         }
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::STARTUP_PROGRESS,
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
@@ -1134,7 +1139,11 @@ impl BybitLinear {
         self.published_seeds = self.ticker_seeds.len();
         if self.option_degraded && self.ticker_seeds.contains_key(&Category::Option) {
             self.option_degraded = false;
-            cx.log(LogLevel::Info, "Bybit option markets recovered");
+            cx.notice(
+                Level::Info,
+                code::STARTUP_PROGRESS,
+                "Bybit option markets recovered",
+            );
         }
         // Published categories keep their live rows; a late option only appends.
         let mut tickers = if late_option {
@@ -1185,7 +1194,11 @@ impl BybitLinear {
             {
                 let op = frame.op.as_deref().unwrap_or_default();
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.log(LogLevel::Error, format!("[WS]{op}:{message}"));
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("[WS]{op}:{message}"),
+                );
             }
             return;
         };
@@ -1420,14 +1433,22 @@ impl BybitLinear {
         if self.category_for(&symbol) == Category::Option
             || !self.category_enabled(self.category_for(&symbol))
         {
-            cx.log(LogLevel::Warning, "Bybit has no candles for this product");
+            cx.notice(
+                Level::Warn,
+                code::COMMAND_UNSUPPORTED,
+                "Bybit has no candles for this product",
+            );
             return;
         }
         let trades = !self.variant.is_hyro();
         let kline = Self::kline_topic(&symbol, interval);
         // Hyro has no trade feed, so its seconds intervals stay unsupported.
         if kline.is_none() && !(trades && seconds_interval(interval).is_some()) {
-            cx.log(LogLevel::Error, interval.unsupported("Bybit"));
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                interval.unsupported("Bybit"),
+            );
             return;
         }
         let key = (symbol.clone(), interval);
@@ -1607,7 +1628,11 @@ impl BybitLinear {
                     return self.reject_credentials(cx, code, &message);
                 }
                 if let Some(error) = failure {
-                    cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        format!("Bybit fee rates: {error}"),
+                    );
                 }
                 self.startup.fees = Some(fees);
                 self.try_load_markets(cx);
@@ -1898,8 +1923,9 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
             self.startup.prelaunch = Some(Vec::new());
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Timed out waiting for Bybit PreLaunch markets, continuing with Trading markets",
             );
             self.try_load_markets(cx);
@@ -1933,11 +1959,11 @@ impl Venue for BybitLinear {
         if let Some(read) = &self.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         if let Some(error) = &self.config_error {
-            cx.log(LogLevel::Error, error.clone());
+            cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
             return;
         }
         if self.category_enabled(Category::Option) {
@@ -2174,7 +2200,11 @@ impl Venue for BybitLinear {
                     .outcome(safe_cex_engine::Outcome::NotSent);
                 cx.fail(id, error);
             } else {
-                cx.log(LogLevel::Warning, "Bybit product is not enabled");
+                cx.notice(
+                    Level::Warn,
+                    code::COMMAND_UNSUPPORTED,
+                    "Bybit product is not enabled",
+                );
             }
             return;
         }

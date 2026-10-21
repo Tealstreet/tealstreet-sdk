@@ -612,6 +612,9 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
             Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
                 logs.push(message.clone())
             }
+            Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                logs.push(event.message.clone())
+            }
             _ => {}
         }
     }
@@ -712,8 +715,8 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
     let out = actions(&mut e);
     assert!(out.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            if message.contains("ETH-USDT-SWAP has open exposure")
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("ETH-USDT-SWAP has open exposure")
     )));
     reply(
         &mut e,

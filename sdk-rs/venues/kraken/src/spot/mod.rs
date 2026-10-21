@@ -4,9 +4,11 @@ mod book;
 mod trading;
 mod wire;
 use crate::{Options, sign};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
     book::{Book, BookSide},
     model::*,
     socket::{Config, Supervisor, Tick},
@@ -131,7 +133,7 @@ impl KrakenSpot {
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Private(_) => unreachable!(),
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
     fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, params: &str, pending: Pending) {
         let id = cx.request(
@@ -481,8 +483,9 @@ impl Venue for KrakenSpot {
             return;
         };
         if msg.success == Some(false) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 format!("Kraken Spot subscription: {}", msg.error),
             );
             return;
@@ -803,7 +806,11 @@ impl Venue for KrakenSpot {
                 interval: tf,
             } => {
                 let Some(i) = interval(tf) else {
-                    cx.log(LogLevel::Error, tf.unsupported("Kraken Spot"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        tf.unsupported("Kraken Spot"),
+                    );
                     return;
                 };
                 let count = self.candles.entry((symbol.clone(), tf)).or_default();

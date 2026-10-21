@@ -1090,7 +1090,7 @@ fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
             format!("Skipping KuCoin position on uncatalogued market {symbol}")
         };
         assert!(h.actions.iter().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains(&needle))), "{symbol}");
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(&needle))), "{symbol}");
     }
 }
 
@@ -1126,7 +1126,7 @@ fn owned_position_and_order_on_filtered_market_are_skipped_and_the_account_loads
     assert_eq!(store.orders().len(), 1);
     assert_eq!(store.orders()[0].id, "5cdfc138b21023a909e5ad55");
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipping KuCoin order on uncatalogued market ETHUSDC"))));
 }
 
 #[test]
@@ -1204,7 +1204,7 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
     assert_eq!(h.engine.store().orders(), before);
     assert!(h.fill_rows().is_empty());
     assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("market unavailable"))));
 }
 
 #[test]

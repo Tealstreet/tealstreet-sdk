@@ -622,7 +622,7 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         );
         let out = actions(&mut e);
         assert!(out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
     }
 }
 
@@ -2348,6 +2348,7 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
             match out {
                 Action::Http(_) => pending.push(out),
                 Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => logs.push(event.message),
                 _ => {}
             }
         }

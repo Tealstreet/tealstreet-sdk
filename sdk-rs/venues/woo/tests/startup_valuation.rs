@@ -70,14 +70,20 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Warning,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Warn,
+            ..
+        }))
     )));
     assert!(!failed.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     let retry = failed
         .into_iter()
@@ -129,7 +135,7 @@ fn unpriced_native_holding_is_an_error_and_never_an_empty_success() {
     let (mut e, positions, _, _) = pending();
     reply(&mut e, &positions, 0.0, UNPRICED);
     assert!(!e.store().loaded().positions);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("position mark unavailable"))));
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("position mark unavailable"))));
 }
 #[test]
 fn an_unpriced_refresh_preserves_previous_positions_and_account_valuation() {
@@ -188,6 +194,6 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
         assert_eq!(*e.store().balance(), balance);
         assert_eq!(e.store().loaded().positions, previous);
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+            Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
     }
 }

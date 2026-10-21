@@ -1,9 +1,11 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::Level;
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::log::code;
 use safe_cex_engine::url;
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
+    Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -245,7 +247,7 @@ impl KrakenSpot {
         }
     }
     pub(super) fn reject_auth(&self, cx: &mut Cx<'_, Pending>, error: &str) {
-        cx.log(LogLevel::Error, error);
+        cx.notice(Level::Error, code::CONFIG_INVALID, error);
         cx.deactivate();
     }
     pub(super) fn request_private(
@@ -458,13 +460,13 @@ impl KrakenSpot {
         }
         if unsupported && self.account.wallet_valuation_warnings & 2 == 0 {
             self.account.wallet_valuation_warnings |= 2;
-            cx.log(LogLevel::Warning,
+            cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                 "Kraken Spot wallet retains unpriced native currency without a supported USD market");
         }
         if missing || !total.is_finite() {
             if self.account.wallet_valuation_warnings & 1 == 0 {
                 self.account.wallet_valuation_warnings |= 1;
-                cx.log(LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     "Kraken Spot USD wallet valuation awaits a valid quote; retaining native quantities and prior USD balance");
             }
             return;
@@ -474,7 +476,7 @@ impl KrakenSpot {
             self.account.wallet_valuation_warnings &= !4;
         } else if self.account.wallet_valuation_warnings & 4 == 0 {
             self.account.wallet_valuation_warnings |= 4;
-            cx.log(LogLevel::Warning,
+            cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                 "Kraken Spot USD wallet values a currency without a quote at zero until one arrives");
         }
         // An estimated route keeps revaluing on live quotes; a complete valuation
@@ -689,7 +691,7 @@ impl KrakenSpot {
             }
         };
         if let Err(e) = r {
-            cx.log(LogLevel::Warning, e);
+            cx.notice(Level::Warn, code::REQUEST_FAILED, e);
         }
     }
     pub(super) fn private_failed(
@@ -716,10 +718,10 @@ impl KrakenSpot {
                 }
                 Kind::Trade(_) => unreachable!("trade failures return below"),
             }
-            cx.log(LogLevel::Warning, error);
+            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
             return;
         };
-        cx.log(LogLevel::Warning, &error.message);
+        cx.notice(Level::Warn, code::ORDER_REJECTED, &error.message);
         self.trade_failed(cx, error);
     }
     pub(super) fn private_network_failed(
@@ -804,7 +806,11 @@ impl KrakenSpot {
             return true;
         };
         if msg.success == Some(false) {
-            cx.log(LogLevel::Warning, "Kraken Spot private subscription failed");
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                "Kraken Spot private subscription failed",
+            );
             cx.close(socket);
             self.private_close(cx, socket);
             return true;
@@ -972,7 +978,11 @@ impl KrakenSpot {
             }
         });
         if parsed.is_err() || invalid {
-            cx.log(LogLevel::Warning, "Kraken Spot invalid execution frame");
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Kraken Spot invalid execution frame",
+            );
             return true;
         }
         self.account.revision += 1;
