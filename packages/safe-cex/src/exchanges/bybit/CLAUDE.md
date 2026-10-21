@@ -2008,3 +2008,11 @@ fee discovery after restart; degraded optional products also require restart.
 Shared consumers must refresh their source then restart provider/accounts through
 the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
+
+
+Rust acknowledged leverage writes (including native leverage-not-modified replies)
+advance the existing positions revision before publishing the selected leverage.
+An older in-flight positions join cannot restore stale leverage/settings; it
+coalesces one fresh read after settling. A refused write leaves the authoritative
+read eligible. The fence adds no write retries and does not alter position-mode
+switch semantics.

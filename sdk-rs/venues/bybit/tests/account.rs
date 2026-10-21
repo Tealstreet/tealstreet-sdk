@@ -1980,3 +1980,103 @@ fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
     }
     assert_eq!(balance_info(&mut h, 93), expected);
 }
+
+#[test]
+fn leverage_ack_fences_older_position_reads_and_coalesces_fresh_metadata() {
+    for ack in [
+        OK_EMPTY,
+        r#"{"retCode":110043,"retMsg":"leverage not modified","result":{}}"#,
+    ] {
+        let mut h = ready();
+        h.advance(POLL_MS);
+        h.command(Command::SetLeverage {
+            command: 121,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        });
+        let write = h.take("/v5/position/set-leverage");
+        h.reply(write.id, 200, ack);
+        assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDT",
+            200,
+            POSITIONS,
+        );
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(
+            h.engine.store().setting("BTCUSDT").unwrap().leverage,
+            20.0,
+            "stale read overwrote acknowledged setting"
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.symbol == "BTCUSDT")
+                .unwrap()
+                .leverage,
+            20.0,
+            "stale read overwrote acknowledged position leverage"
+        );
+        assert_eq!(h.result(121), Some(&Ok("[]".to_owned())));
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|r| r.url.contains("/v5/position/list"))
+                .count(),
+            2,
+            "one fresh two-coin join after stale join settles"
+        );
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDT",
+            200,
+            &POSITIONS.replace("\"leverage\":\"10\"", "\"leverage\":\"20\""),
+        );
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+        assert!(
+            !h.has_request("/v5/position/set-leverage"),
+            "read fence must never resend write"
+        );
+    }
+}
+#[test]
+fn refused_leverage_does_not_invalidate_an_authoritative_position_read() {
+    let mut h = ready();
+    h.advance(POLL_MS);
+    h.command(Command::SetLeverage {
+        command: 122,
+        symbol: "BTCUSDT".into(),
+        leverage: 20.0,
+        side: None,
+    });
+    let write = h.take("/v5/position/set-leverage");
+    h.reply(
+        write.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"request parameter error","result":{}}"#,
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDT",
+        200,
+        &POSITIONS.replace("\"leverage\":\"10\"", "\"leverage\":\"15\""),
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 15.0);
+    assert!(h.result(122).unwrap().is_err());
+    assert!(!h.has_request("/v5/position/list"));
+}

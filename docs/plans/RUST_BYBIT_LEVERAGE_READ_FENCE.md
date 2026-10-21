@@ -12,3 +12,9 @@ not retry writes or invent a new settings publication channel.
 Run Bybit plus Binance native regressions, strict Bybit Clippy/fmt/bans, an
 independent review and full CI. Fresh actual landing integration, exact scope
 guard as a separate call, merge on green after #1620; report both merge pins.
+
+Verification: original regression reproduces acknowledged 20x overwritten by old
+10x. Accepted/native-not-modified, fresh metadata/no write resend and refused-write
+admission pass with 556 focused Bybit/Binance tests; strict Clippy/fmt/bans
+pass. Independent review clear after excluding Hyro from this ordinary-read hook;
+its existing atomic write/snapshot revision remains authoritative.
