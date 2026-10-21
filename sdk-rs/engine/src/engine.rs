@@ -1106,6 +1106,7 @@ pub trait Venue {
 /// Startup never hangs silently: sections still unloaded after this are named
 /// in a visible notice, repeated on a slow cadence until they load (non-terminal).
 const STARTUP_WATCH_MS: f64 = 60_000.0;
+const EMPTY_CATALOGUE_WARNING: &str = "Venue returned an empty market catalogue; it was not applied and the previous catalogue is kept";
 const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
 fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
@@ -1760,11 +1761,17 @@ impl<V: Venue> Engine<V> {
 
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        if self.store.take_rejected_empty_catalogue() {
+            self.io.actions.push(Action::Notice(Notice::Log {
+                level: LogLevel::Warning,
+                message: EMPTY_CATALOGUE_WARNING.to_owned(),
+            }));
+        }
         self.io.actions.drain(..)
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.io.actions.is_empty()
+        !self.io.actions.is_empty() || self.store.rejected_empty_catalogue()
     }
 
     /// The venue's synchronized book for `symbol`, if any.
@@ -3001,7 +3008,7 @@ mod streaming_tests {
         }
     }
 
-    fn market(symbol: &str) -> crate::model::Market {
+    pub(super) fn market(symbol: &str) -> crate::model::Market {
         use crate::model::{Limits, Market, MinMax, Precision};
         Market {
             id: symbol.into(),
@@ -3184,7 +3191,7 @@ mod streaming_tests {
             book_sections(engine.take_frame(2.).unwrap())[0].0,
             section::BOOK
         );
-        engine.store.set_markets(Vec::new());
+        engine.store.set_markets(vec![market("B")]);
         engine.take_frame(3.).unwrap();
         assert!(engine.book_baselines.is_empty());
         engine.store.set_markets(vec![market("A")]);
@@ -4066,6 +4073,7 @@ mod startup_tests {
 
 #[cfg(test)]
 mod startup_watch_tests {
+    use super::streaming_tests::market;
     use super::*;
 
     struct Idle;
@@ -4106,6 +4114,28 @@ mod startup_watch_tests {
     }
 
     #[test]
+    fn an_empty_venue_catalogue_is_warned_about_and_never_applied() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.store_mut().set_markets(Vec::new());
+        assert!(engine.has_actions());
+        let logs: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logs,
+            [(LogLevel::Warning, EMPTY_CATALOGUE_WARNING.to_owned())]
+        );
+        assert_eq!(engine.store().markets().len(), 1);
+        assert!(engine.drain_actions().next().is_none());
+    }
+
+    #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = Engine::new(Idle);
         engine.set_account_startup(true);
@@ -4116,7 +4146,7 @@ mod startup_watch_tests {
                 .all(|action| !matches!(action, Action::SetTimer { .. })),
             "the watch adds no timer of its own"
         );
-        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_markets(vec![market("A")]);
         assert!(notices(&mut engine, STARTUP_WATCH_MS - 1.0).is_empty());
         assert_eq!(
             notices(&mut engine, STARTUP_WATCH_MS),
@@ -4148,7 +4178,7 @@ mod startup_watch_tests {
     fn public_only_engine_is_not_told_its_account_never_loaded() {
         let mut engine = Engine::new(Idle);
         engine.start(0.0);
-        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_markets(vec![market("A")]);
         engine.store_mut().set_tickers(vec![]);
         assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
         let mut disabled = Engine::new(Idle);
@@ -4158,7 +4188,7 @@ mod startup_watch_tests {
         disabled.set_account_startup(true);
         disabled.start(0.0);
         let store = disabled.store_mut();
-        store.set_markets(vec![]);
+        store.set_markets(vec![market("A")]);
         store.set_balance(Default::default());
         store.set_orders(vec![]);
         store.set_positions(vec![]);
