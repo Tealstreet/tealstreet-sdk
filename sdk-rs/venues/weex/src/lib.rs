@@ -708,7 +708,7 @@ impl Venue for WeexFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
-            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
