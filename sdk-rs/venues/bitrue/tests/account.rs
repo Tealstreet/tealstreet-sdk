@@ -506,7 +506,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
         h.ws(&rejected);
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
         h.private_retry(1_000.0);
         let request = h.take("listenKey");
         h.respond(
@@ -526,7 +526,7 @@ fn private_subscription_rejection_and_followup_failures_never_log_echoed_credent
         );
         h.collect();
         assert_stream_notices_are_safe(&h);
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private stream") && message.contains("code 401"))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("private stream") && message.contains("code 401"))));
     }
 }
 #[test]
@@ -549,7 +549,7 @@ fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
     h.collect();
     h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
     assert_stream_notices_are_safe(&h);
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("account read failed") && message.contains("code 401"))));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("account read failed") && message.contains("code 401"))));
 }
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
@@ -751,7 +751,10 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
         Action::Notice(Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        })
+        }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        }))
     )));
     h.fire_retry(500.0);
     assert!(
@@ -785,7 +788,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
         h.actions
             .iter()
             .filter(|a| {
-                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) if message.contains("E-ETH-USDT"))
+                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("E-ETH-USDT"))
             })
             .count()
     };
@@ -800,7 +803,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) if message.contains("E-ETH-USDT recovered")
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Info, message, .. })) if message.contains("E-ETH-USDT recovered")
     )));
 
     // A fresh failure after recovery starts again from the initial delay.
@@ -1103,7 +1106,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert!(
             !h.actions
                 .iter()
-                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message==expected))
+                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message==expected))
         );
     }
 }
@@ -1129,7 +1132,7 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         } else {
             "Bitrue account read failed"
         };
-        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) if message==expected)).count(),1);
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message==expected)).count(),1);
     }
 }
 

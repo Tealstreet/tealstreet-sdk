@@ -150,8 +150,11 @@ Medium:
    venue for the wasm and native hosts and owns the credential rules (#1467,
    #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
    venue list is the `hostClock` capability (#1520); polling is the runtime
-   policy (#1392). Follow-ups: public-mode derivation with Paradex's rule,
-   AsterDEX API-version resolution, and the HyroTrader endpoint and
+   policy (#1392). AsterDEX version inference is shared by native construction
+   and registry metadata; the bridge forwards only explicit overrides and reads
+   the native version after WASM loads. Its synchronous pre-host fallback stays
+   under a compiled TS/Rust parity matrix. Follow-ups: public-mode derivation with
+   Paradex's rule, and the HyroTrader endpoint and
    payload-signer name branches in `createHost`.
 7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
    silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:

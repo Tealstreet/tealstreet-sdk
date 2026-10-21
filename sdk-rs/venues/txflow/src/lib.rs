@@ -5,13 +5,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -312,7 +314,11 @@ impl TxFlow {
         }
         if conn.subscriptions.len() >= 4096 {
             if let Some(socket) = conn.socket {
-                cx.log(LogLevel::Warning, "TxFlow subscription backlog exhausted");
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "TxFlow subscription backlog exhausted",
+                );
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);
             }
@@ -582,7 +588,11 @@ impl TxFlow {
     ) {
         if !supported(interval) {
             if add {
-                cx.log(LogLevel::Error, interval.unsupported("TxFlow"));
+                cx.notice(
+                    Level::Error,
+                    code::COMMAND_UNSUPPORTED,
+                    interval.unsupported("TxFlow"),
+                );
             }
             return;
         }
@@ -704,7 +714,7 @@ impl Venue for TxFlow {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.metadata(cx);
@@ -835,8 +845,9 @@ impl Venue for TxFlow {
             return;
         }
         if self.public_frame(cx, text) {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::WS_DISCONNECTED,
                 "TxFlow socket rate limited; reconnecting subscriptions",
             );
             cx.close(socket);
@@ -1091,11 +1102,11 @@ impl Venue for TxFlow {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Meta { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, None);
             }
             Pending::Ticker { asset } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, Some(asset));
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }

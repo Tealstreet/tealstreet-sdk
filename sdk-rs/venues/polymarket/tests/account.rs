@@ -120,6 +120,12 @@ impl H {
                     }
                     self.logs.push(message)
                 }
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    if event.level == safe_cex_engine::Level::Error {
+                        self.errors.push(event.message.clone());
+                    }
+                    self.logs.push(event.message)
+                }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 _ => {}

@@ -1,5 +1,7 @@
 //! Rare cursor-paged reads never mutate the account store.
 use crate::{Pending, account::Account};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
@@ -726,8 +728,9 @@ impl History {
             }
             // A bounded read keeps what its pages found, as before: a lookup
             // reports a non-definitive miss. An unbounded read is incomplete.
-            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.log(
-                safe_cex_engine::LogLevel::Warning,
+            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 "Paradex history reached page cap",
             ),
             CursorStep::Stalled(Stall::PageBudget) => {

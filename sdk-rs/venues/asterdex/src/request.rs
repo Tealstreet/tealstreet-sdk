@@ -2,8 +2,10 @@
 //! trading writes are never repeated after network or upstream failure.
 use std::collections::{HashMap, VecDeque};
 
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Cx, LogLevel, Method, RequestRoute, Response, TimerId, Venue};
+use safe_cex_engine::log::code;
+use safe_cex_engine::{Cx, Method, RequestRoute, Response, TimerId, Venue};
 use serde::Deserialize;
 
 use crate::sign::{Query, Version};
@@ -408,8 +410,9 @@ impl AsterDex {
             );
             return;
         } else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Aster time sync failed; retaining the last clock offset",
             );
         }

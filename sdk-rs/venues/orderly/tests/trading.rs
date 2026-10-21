@@ -1698,7 +1698,7 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
     assert!(body(&r).get("symbol").is_none());
     reply(&mut e, &r, 200, r#"{"success":true}"#);
     let out = actions(&mut e);
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
     assert!(done(out, 101).is_ok());
     for (symbol, expected) in [("BTCUSDC", 80.), ("ETHUSDC", 80.), ("SOLUSDC", 30.)] {
         assert_eq!(e.store().setting(symbol).unwrap().leverage, expected);

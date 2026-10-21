@@ -2,9 +2,11 @@
 use crate::sign::{self, Params};
 use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json};
 use std::collections::HashMap;
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
@@ -297,13 +299,18 @@ impl BitunixFutures {
             }
             Ok(_) => {
                 self.account.symbol_settings.remove(symbol);
-                cx.log(LogLevel::Warning, "Malformed Bitunix leverage/margin mode");
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "Malformed Bitunix leverage/margin mode",
+                );
                 return;
             }
             Err(e) => {
                 self.account.symbol_settings.remove(symbol);
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
                     format!("Bitunix leverage/margin mode read failed: {e}"),
                 );
                 return;
@@ -334,9 +341,9 @@ impl BitunixFutures {
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
                 }
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
             }
-            _ => cx.log(LogLevel::Error, error),
+            _ => cx.notice(Level::Error, code::REQUEST_FAILED, error),
         }
     }
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, socket: safe_cex_engine::SocketId) {
@@ -373,7 +380,7 @@ impl BitunixFutures {
                     ),
                 );
             }
-            Err(e) => cx.log(LogLevel::Error, e),
+            Err(e) => cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e),
         }
     }
     pub(crate) fn debounce(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
@@ -544,8 +551,9 @@ impl BitunixFutures {
         let body = match data(response.body) {
             Ok(b) if (200..300).contains(&response.status) && !read.invalid => b,
             _ => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SNAPSHOT_DISCARDED,
                     "Bitunix account read failed; keeping last snapshot",
                 );
                 self.debounce(cx, read.axis);
@@ -615,7 +623,7 @@ impl BitunixFutures {
                             self.debounce(cx, Axis::Orders);
                         }
                     }
-                    Err(e) => cx.log(LogLevel::Warning, e.to_string()),
+                    Err(e) => cx.notice(Level::Warn, code::STREAM_MALFORMED, e.to_string()),
                 }
             }
             Axis::Positions => {
@@ -859,8 +867,9 @@ impl BitunixFutures {
                     result: bool,
                 }
                 if !serde_json::from_str::<Login>(text).is_ok_and(|l| l.result) {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::AUTH_REJECTED,
                         "Bitunix private ws login failed, double check your key and secret",
                     );
                     if let Some(t) = self.account.login_retry.take() {
@@ -899,7 +908,11 @@ impl BitunixFutures {
                 if let Ok(o) = serde_json::from_str::<OrderRow<'_>>(text) {
                     let raw = o.order_id.as_ref();
                     if raw.is_empty() || o.symbol.is_empty() {
-                        cx.log(LogLevel::Warning, "Bitunix order event missing identity");
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            "Bitunix order event missing identity",
+                        );
                         return;
                     }
                     let emitted = self.account.filled.get(raw).map_or(0.0, |v| v.0);
@@ -1143,8 +1156,9 @@ impl BitunixFutures {
                                     .entry(raw.to_owned())
                                     .and_modify(|pending| *pending = pending.max(cumulative))
                                     .or_insert(cumulative);
-                                cx.log(
-                                    LogLevel::Warning,
+                                cx.notice(
+                                    Level::Warn,
+                                    code::HISTORY_INCOMPLETE,
                                     "Bitunix fill metadata is not reconciled",
                                 );
                             }

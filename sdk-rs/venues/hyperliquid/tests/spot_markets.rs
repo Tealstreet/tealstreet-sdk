@@ -79,6 +79,7 @@ fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
                 }
                 Action::WsSend { text, .. } => sends.push(text),
                 Action::Notice(Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(Notice::Event(event)) => logs.push(event.message),
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }

@@ -4,14 +4,16 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, PublicFeedPolicy, Response,
-    SocketId, TimerId, Venue, VenueError,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
+    TimerId, Venue, VenueError,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use wire::*;
@@ -209,8 +211,9 @@ impl MexcFutures {
             symbol: Str<'a>,
         }
         let Ok(identity) = serde_json::from_str::<Identity<'_>>(item) else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping malformed MEXC all-market ticker identity",
             );
             return;
@@ -221,8 +224,9 @@ impl MexcFutures {
         };
         let size = market.contract_size.unwrap_or(1.0);
         let Ok(raw) = serde_json::from_str::<MiniTick>(item) else {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping malformed MEXC all-market ticker row",
             );
             return;
@@ -236,8 +240,9 @@ impl MexcFutures {
                 .flatten()
                 .any(|n| n < 0.0)
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 "Skipping invalid MEXC all-market ticker row",
             );
             return;
@@ -548,7 +553,7 @@ impl MexcFutures {
             }
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
@@ -577,7 +582,7 @@ impl Venue for MexcFutures {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.discovery_read(cx, false);
@@ -628,7 +633,11 @@ impl Venue for MexcFutures {
             return;
         };
         if message.success == Some(false) {
-            cx.log(LogLevel::Warning, "MEXC websocket request failed");
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                "MEXC websocket request failed",
+            );
             return;
         }
         let symbol = compact(&message.symbol);
@@ -775,7 +784,11 @@ impl Venue for MexcFutures {
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets { rows, malformed } => {
                 if rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Malformed MEXC market list");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Malformed MEXC market list",
+                    );
                     self.discovery.failed(cx, false);
                     return;
                 }
@@ -812,7 +825,11 @@ impl Venue for MexcFutures {
             }
             Pending::Tickers { mut rows, failed } => {
                 if failed || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Malformed MEXC ticker list");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Malformed MEXC ticker list",
+                    );
                     self.discovery.failed(cx, true);
                     return;
                 }
@@ -999,7 +1016,11 @@ impl Venue for MexcFutures {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 let Some(i) = wire::interval(interval) else {
-                    cx.log(LogLevel::Error, interval.unsupported("MEXC"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("MEXC"),
+                    );
                     return;
                 };
                 let key = (symbol.clone(), interval);
@@ -1102,8 +1123,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("MEXC stops re-reading a catalogue with {after} malformed markets"),
         );
     }

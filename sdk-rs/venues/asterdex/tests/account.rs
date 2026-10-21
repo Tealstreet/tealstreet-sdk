@@ -87,6 +87,14 @@ impl H {
                     }
                     self.logs.push(message)
                 }
+                Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+                    level, message, ..
+                })) => {
+                    if level == safe_cex_engine::Level::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
+                }
                 _ => {}
             }
         }

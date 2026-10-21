@@ -366,7 +366,7 @@ fn failed_income_chunk_continues_next_hundred_day_chunk_with_incomplete_warning(
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) if message.contains("INCOMPLETE"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE"))));
     let actions = advance(&mut e, &mut now, actions);
     let actions = advance(&mut e, &mut now, actions);
     let req = request(&actions, "/account/income");
@@ -375,7 +375,7 @@ fn failed_income_chunk_continues_next_hundred_day_chunk_with_incomplete_warning(
     let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
     let actions = advance(&mut e, &mut now, actions);
     assert_eq!(result(&actions).unwrap(), "[]");
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) if message.contains("INCOMPLETE")&&message.contains("1 chunk"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE")&&message.contains("1 chunk"))));
 }
 #[test]
 fn malformed_streamed_fill_rows_fail_the_whole_query() {
@@ -421,7 +421,7 @@ fn income_page_budget_reports_incomplete_instead_of_silent_success() {
     }
     let rows: Vec<IncomeResult> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
     assert_eq!(rows.len(), 100);
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) if message.contains("INCOMPLETE"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:LogLevel::Warning,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE"))));
 }
 
 fn ban(e: &mut Engine<WeexFutures>) {
@@ -546,7 +546,7 @@ fn positive_income_cursor_never_reports_a_short_repeated_span_as_complete() {
     let mut warned = false;
     let mut completed = false;
     for _ in 0..10 {
-        warned|=actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) if message.contains("INCOMPLETE")));
+        warned|=actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("INCOMPLETE")));
         if actions
             .iter()
             .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
@@ -589,5 +589,5 @@ fn non_null_income_cursor_warns_even_when_has_next_page_is_false() {
         r#"{"hasNextPage":false,"nextKey":{"nextKeyId":42},"items":[]}"#,
     );
     assert_eq!(result(&actions).unwrap(), "[]");
-    assert!(actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) if message.contains("INCOMPLETE"))));
+    assert!(actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("INCOMPLETE"))));
 }

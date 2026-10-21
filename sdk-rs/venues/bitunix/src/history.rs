@@ -3,8 +3,10 @@ use crate::account::order_side;
 use crate::sign::Params;
 use crate::wire::{Num, Str, data, time_ms};
 use crate::{BitunixFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::{Cx, LogLevel, Method, Query, Response};
+use safe_cex_engine::{Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 const TRADES: &str = "/api/v1/futures/trade/get_history_trades";
@@ -544,8 +546,9 @@ impl BitunixFutures {
             return;
         }
         if read.page + 1 >= cap {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 "Bitunix history reached the page cap; older rows were not fetched",
             );
         }
@@ -555,7 +558,7 @@ impl BitunixFutures {
         read.fills.truncate(read.checkpoint[0]);
         read.income.truncate(read.checkpoint[2]);
         read.orders.clear();
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         self.history_done(cx, read);
     }
     fn history_done(&self, cx: &mut Cx<'_, Pending>, mut read: Request) {

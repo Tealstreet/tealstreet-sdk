@@ -74,7 +74,7 @@ fn malformed_fill_rows_are_skipped_and_logged_while_valid_fills_return() {
     assert!(json.contains("\"id\":\"999\""));
     assert!(!json.contains("998"));
     assert!(actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::Log { message, .. })
+        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }))
             if message == "Skipped 2 malformed Backpack fill rows: 998, 997")));
 }
 #[test]

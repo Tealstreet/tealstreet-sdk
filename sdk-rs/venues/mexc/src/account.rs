@@ -1,11 +1,13 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
@@ -344,8 +346,9 @@ impl MexcFutures {
                     self.refresh_account(cx, true);
                 }
             } else {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
                     "MEXC private ws login failed, double check your key and secret",
                 );
                 if let Some(socket) = self.account.private.socket {
@@ -396,8 +399,9 @@ impl MexcFutures {
                 let error = raw.error_code;
                 if let Some(order) = self.map_order(cx, &raw, scope) {
                     if order.status == OrderStatus::Canceled && error > 0.0 && order.filled == 0.0 {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::ORDER_REJECTED,
                             format!("MEXC canceled order {}: errorCode {error}", order.id),
                         );
                     }
@@ -871,10 +875,11 @@ impl MexcFutures {
                     if r.hold_vol != 0.0 && cx.store.market(&symbol).is_none() {
                         if self.malformed_markets.contains(&symbol) {
                             snapshot.bad = true;
-                            cx.log(LogLevel::Warning, "MEXC owned position market unavailable; preserving previous snapshot");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "MEXC owned position market unavailable; preserving previous snapshot");
                         } else {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Skipping MEXC position on uncatalogued market {symbol}"),
                             );
                         }
@@ -917,8 +922,9 @@ impl MexcFutures {
                             snapshot.bad = true;
                             return;
                         }
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("Skipping unmappable MEXC order {id} on {}", r.symbol),
                         );
                         // A typed but unmappable row is not proof that a known
@@ -953,7 +959,7 @@ impl MexcFutures {
             if let Some(timer) = self.account.poll.take() {
                 cx.clear_timer(timer);
             }
-            cx.log(LogLevel::Error, &error.message);
+            cx.notice(Level::Error, code::AUTH_REJECTED, &error.message);
             let refused = error.kind == Some(ErrorKind::AuthInvalid);
             cx.startup_failed(error);
             // As Bybit: a refused trading key also stops the private socket's login loop.
@@ -1330,7 +1336,7 @@ impl MexcFutures {
             cx.command_error(*command, error);
             cx.fail(*command, error);
         } else {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::REQUEST_FAILED, error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);

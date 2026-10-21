@@ -59,7 +59,11 @@ fn before_quotes(
                     channel: Some(SocketChannel::Public),
                     ..
                 } => public = Some(socket),
-                Action::Notice(Notice::Log { message, .. }) => logs.push(message),
+                Action::Notice(Notice::Log { message, .. })
+                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    message,
+                    ..
+                })) => logs.push(message),
                 _ => {}
             }
         }
@@ -76,7 +80,11 @@ fn refresh(engine: &mut Engine<Lighter>, socket: SocketId, body: &str) -> Vec<St
     engine
         .drain_actions()
         .filter_map(|action| match action {
-            Action::Notice(Notice::Log { message, .. }) => Some(message),
+            Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) => Some(message),
             _ => None,
         })
         .collect()

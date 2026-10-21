@@ -757,7 +757,7 @@ fn rejected_login_deactivates_clears_timers_and_fails_future_reads() {
         assert!(rig.requests.is_empty());
         assert!(rig.timers.is_empty());
         assert!(rig.notices.contains(&Notice::Deactivate));
-        assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message == &format!("DXtrade startup failed: DXtrade HTTP {status}"))));
+        assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } | safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }) if message == &format!("DXtrade startup failed: DXtrade HTTP {status}"))));
         assert!(rig.result(8).is_err());
         rig.command(Command::FetchCandles {
             command: 9,
@@ -784,7 +784,7 @@ fn ambiguous_account_startup_reports_error_without_auth_deactivation_or_retries(
     assert!(rig.requests.is_empty());
     assert!(rig.timers.is_empty());
     assert!(!rig.notices.contains(&Notice::Deactivate));
-    assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message.starts_with("DXtrade startup failed: Multiple accounts"))));
+    assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } | safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. }) if message.starts_with("DXtrade startup failed: Multiple accounts"))));
     assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::StartupFailed { error } if error.message.starts_with("DXtrade startup failed: Multiple accounts"))));
 }
 

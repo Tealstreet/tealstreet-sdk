@@ -3,10 +3,12 @@ use crate::account_wire::{OrderRow, id};
 use crate::sign::encode;
 use crate::wire::{Str, number, optional_number, timestamp};
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -655,7 +657,7 @@ impl WeexFutures {
         }
         let step = walk.step();
         if matches!(step, Step::Fetch { .. }) && walk.requests > INCOME_BUDGET {
-            cx.log(LogLevel::Warning,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound");
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound");
             let result = income_json(rows);
             self.history.reads.remove(&command);
             cx.done(command, result);
@@ -668,7 +670,7 @@ impl WeexFutures {
             Step::ChunkDone => *delay = Some(cx.set_timer(PAGE_DELAY)),
             Step::Finished => {
                 if walk.truncated {
-                    cx.log(LogLevel::Warning,format!("WEEX income history is INCOMPLETE: {} chunk(s) could not be walked to completion; totals are a lower bound",walk.exhausted_chunks));
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,format!("WEEX income history is INCOMPLETE: {} chunk(s) could not be walked to completion; totals are a lower bound",walk.exhausted_chunks));
                 }
                 let result = income_json(rows);
                 self.history.reads.remove(&command);
@@ -834,7 +836,7 @@ impl WeexFutures {
                 if has_more {
                     // Span continuation cannot prove it consumed an advertised
                     // opaque cursor, even when a repeated page is short.
-                    cx.log(LogLevel::Warning,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows");
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows");
                     if let Some(walk) = walk.as_mut() {
                         walk.failed();
                     }
@@ -878,15 +880,17 @@ impl WeexFutures {
         }) = self.history.reads.get_mut(&command)
         {
             walk.failed();
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::HISTORY_INCOMPLETE,
                 format!("WEEX income page failed: {error}; history is INCOMPLETE"),
             );
             *delay = Some(cx.set_timer(PAGE_DELAY));
         } else if self.history.reads.remove(&command).is_some() {
             if matches!(request.kind, Kind::Income) {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::HISTORY_INCOMPLETE,
                     "WEEX income history is INCOMPLETE: query failed",
                 );
             }
