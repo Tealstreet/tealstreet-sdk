@@ -157,15 +157,15 @@ impl MexcFutures {
     }
     pub fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: u32, symbol: String) {
         if cx.now < self.account.paused_until {
-            cx.done(command, Err("MEXC account reads are rate limited".into()));
+            cx.fail(command, "MEXC account reads are rate limited");
             return;
         }
         let Some(m) = cx.store.market(&symbol) else {
-            cx.done(command, Err("Market not found".into()));
+            cx.fail(command, "Market not found");
             return;
         };
         if self.credentials.is_none() {
-            cx.done(command, Err("MEXC leverage requires credentials".into()));
+            cx.fail(command, "MEXC leverage requires credentials");
             return;
         }
         let query = sign::query([("symbol", m.id.clone())]);
@@ -987,7 +987,7 @@ impl MexcFutures {
                 bad,
             } => {
                 if bad || rows.is_empty() {
-                    cx.done(command, Err("Invalid MEXC leverage response".into()));
+                    cx.fail(command, "Invalid MEXC leverage response");
                     return;
                 }
                 let mut rails = self
@@ -1059,7 +1059,7 @@ impl MexcFutures {
                 }
                 cx.done(
                     command,
-                    Ok(serde_json::to_string(&ResultRails {
+                    serde_json::to_string(&ResultRails {
                         buy_leverage: rails.long,
                         sell_leverage: rails.short,
                         margin_type: if rails.isolated {
@@ -1073,7 +1073,7 @@ impl MexcFutures {
                             PositionMode::Oneway
                         },
                     })
-                    .unwrap()),
+                    .unwrap(),
                 );
             }
             Request::Mode => {
@@ -1332,7 +1332,7 @@ impl MexcFutures {
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Request::Leverage { command, .. } = &request {
             cx.command_error(*command, error);
-            cx.done(*command, Err(error.into()));
+            cx.fail(*command, error);
         } else {
             cx.notice(Level::Error, code::REQUEST_FAILED, error);
         }

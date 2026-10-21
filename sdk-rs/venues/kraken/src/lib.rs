@@ -362,13 +362,13 @@ impl Kraken {
     ) {
         if cx.store.market(&symbol).is_none() {
             if let Some(c) = command {
-                cx.done(c, Err("Unknown Kraken market".into()));
+                cx.fail(c, "Unknown Kraken market");
             }
             return;
         }
         if resolution(interval).is_none() {
             if let Some(c) = command {
-                cx.done(c, Err(interval.unsupported("Kraken")));
+                cx.fail(c, interval.unsupported("Kraken"));
             }
             return;
         }
@@ -377,7 +377,7 @@ impl Kraken {
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
             if let Some(c) = command {
-                cx.done(c, Err("Invalid Kraken candle range".into()));
+                cx.fail(c, "Invalid Kraken candle range");
             }
             return;
         }
@@ -454,7 +454,7 @@ impl Kraken {
                 ..
             } => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()));
+                    cx.fail(c, error);
                 } else if let Some(s) = self
                     .candles
                     .get_mut(&(symbol, interval))
@@ -977,7 +977,14 @@ impl Venue for Kraken {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.in_flight = false;
                     s.next_poll = cx.now + 5_000.0;

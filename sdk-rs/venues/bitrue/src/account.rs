@@ -703,7 +703,7 @@ impl Bitrue {
             definitive,
         })
         .expect("client order lookup");
-        cx.done(command, Ok(result));
+        cx.done(command, result);
     }
     fn fast_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<String>) {
         self.account.settings_revision += 1;
@@ -1355,11 +1355,11 @@ impl Bitrue {
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         if let Command::FetchMaxLeverage { command, symbol } = command {
             let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-                cx.done(*command, Err("Unknown Bitrue market".into()));
+                cx.fail(*command, "Unknown Bitrue market");
                 return true;
             };
             if !self.authenticated() {
-                cx.done(*command, Err("Bitrue private credentials required".into()));
+                cx.fail(*command, "Bitrue private credentials required");
                 return true;
             }
             let contract = &cx.store.market(&symbol).expect("resolved market").id;
@@ -1383,11 +1383,11 @@ impl Bitrue {
             return false;
         };
         let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-            cx.done(*command, Err("Unknown Bitrue market".into()));
+            cx.fail(*command, "Unknown Bitrue market");
             return true;
         };
         if !self.authenticated() {
-            cx.done(*command, Err("Bitrue private credentials required".into()));
+            cx.fail(*command, "Bitrue private credentials required");
             return true;
         }
         self.account.leverage_queries.push((*command, symbol));
@@ -1436,12 +1436,13 @@ impl Bitrue {
                         position_mode: PositionMode::Oneway,
                     })
                 });
-            cx.done(
-                command,
-                result
-                    .map(|r| serde_json::to_string(&r).unwrap())
-                    .ok_or_else(|| error.to_owned()),
-            );
+            match result
+                .map(|r| serde_json::to_string(&r).unwrap())
+                .ok_or_else(|| error.to_owned())
+            {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            };
         }
     }
     pub(crate) fn account_item(
@@ -1570,11 +1571,11 @@ impl Bitrue {
                             market.limits.leverage.max = max;
                         }
                     });
-                    cx.done(command, Ok(safe_cex_engine::num::format(max)));
+                    cx.done(command, safe_cex_engine::num::format(max));
                 } else {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Malformed Bitrue leverage brackets; retaining known limit".into()),
+                        "Malformed Bitrue leverage brackets; retaining known limit",
                     );
                 }
             }
@@ -1849,12 +1850,9 @@ impl Bitrue {
         code: Option<i64>,
     ) {
         match request {
-            Request::Brackets { command, .. } => cx.done(
+            Request::Brackets { command, .. } => cx.fail(
                 command,
-                Err(private_diagnostic(
-                    "Bitrue leverage bracket read failed",
-                    code,
-                )),
+                private_diagnostic("Bitrue leverage bracket read failed", code),
             ),
             Request::Listen { generation } if generation == self.account.generation => {
                 self.listen_failed(cx, code, false)

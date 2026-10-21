@@ -864,19 +864,19 @@ impl ApexOmni {
                             user_id: String,
                             affiliate_id: Option<String>,
                         }
-                        cx.done(
-                            command,
-                            serde_json::to_string(&Identity {
+                        {
+                            let result: Result<String, String> = serde_json::to_string(&Identity {
                                 user_id: id,
                                 affiliate_id: None,
                             })
-                            .map_err(|e| e.to_string()),
-                        );
+                            .map_err(|e| e.to_string());
+                            match result {
+                                Ok(data) => cx.done(command, data),
+                                Err(error) => cx.fail(command, error),
+                            }
+                        };
                     }
-                    None => cx.done(
-                        command,
-                        Err("ApeX account identity payload missing or invalid".into()),
-                    ),
+                    None => cx.fail(command, "ApeX account identity payload missing or invalid"),
                 }
             }
             Request::Positions {
@@ -1030,7 +1030,7 @@ impl ApexOmni {
     ) {
         let generation = match request {
             Request::Identity { command } => {
-                cx.done(command, Err(error.to_owned()));
+                cx.fail(command, error.to_owned());
                 return;
             }
             Request::Positions { generation, .. } => {
@@ -1200,10 +1200,7 @@ impl ApexOmni {
             || self.options.key.as_ref().is_none_or(String::is_empty)
             || self.options.secret.as_ref().is_none_or(String::is_empty)
         {
-            cx.done(
-                command,
-                Err("ApeX account identity requires API credentials".into()),
-            );
+            cx.fail(command, "ApeX account identity requires API credentials");
             return Ok(());
         }
         if let Err(error) = self.signed(
@@ -1212,7 +1209,7 @@ impl ApexOmni {
             Pending::Account(Request::Identity { command }),
             None,
         ) {
-            cx.done(command, Err(error));
+            cx.fail(command, error);
         }
         Ok(())
     }

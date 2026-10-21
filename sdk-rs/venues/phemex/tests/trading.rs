@@ -51,7 +51,7 @@ fn done(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result.clone())),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
@@ -1472,7 +1472,7 @@ fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
             a,
             Action::Notice(Notice::CommandDone {
                 command: 42,
-                result: Ok(_)
+                result: _
             })
         )));
     }
@@ -1807,7 +1807,7 @@ fn queued_cancel_all_continues_after_proven_rejection() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 112,
-            result: Ok(_)
+            result: _
         })
     )));
 }
@@ -2563,7 +2563,7 @@ fn transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_
         a,
         Action::Notice(Notice::CommandDone {
             command: 172,
-            result: Ok(_)
+            result: _
         })
     )));
     let (timer, wake) = latest_timer(&a).expect("read still owed");

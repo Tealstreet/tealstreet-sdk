@@ -231,7 +231,7 @@ fn split_quantities(
 impl BitunixFutures {
     fn reject(&self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
         cx.notice(Level::Error, code::ORDER_REJECTED, &error);
-        cx.done(command, Err(error));
+        cx.fail(command, error);
     }
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut ids = HashSet::new();
@@ -1155,7 +1155,7 @@ impl BitunixFutures {
             let job = self.trading.jobs.remove(&command).unwrap();
             cx.store
                 .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
-            cx.done(command, Ok(text(&job.ids)));
+            cx.done(command, text(&job.ids));
             return;
         };
         if step.delay > 0.0 {

@@ -208,7 +208,7 @@ impl MexcFutures {
             return;
         }
         match snapshot(response.body, size, limit) {
-            Ok(json) => cx.done(command, Ok(json)),
+            Ok(json) => cx.done(command, json),
             Err(failure) => cx.fail(command, failure),
         }
     }

@@ -1120,10 +1120,10 @@ impl Coinbase {
                     }
                     cx.done(
                         id,
-                        Ok(encode(&Leverage {
+                        encode(&Leverage {
                             buy_leverage: setting.leverage,
                             sell_leverage: setting.leverage,
-                        })),
+                        }),
                     );
                 } else {
                     cx.fail(
@@ -1269,11 +1269,11 @@ impl Coinbase {
             let job = self.trading.active.take().unwrap();
             cx.done(
                 job.command,
-                Ok(if job.collect {
+                if job.collect {
                     encode(&job.ids)
                 } else {
                     "null".into()
-                }),
+                },
             );
             self.trading_next(cx);
             return;

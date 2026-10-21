@@ -390,8 +390,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     {
                         let text = encode_notice(ServerNotice::Done {
                             command: pending.original,
-                            result: result.as_deref().ok(),
-                            error: result.as_ref().err().map(|error| error.as_str().into()),
+                            result: Some(&result),
+                            error: None,
                             detail: None,
                         });
                         let text = self.bounded_done(pending.original, text);
@@ -1245,7 +1245,7 @@ mod tests {
         type Pending = ();
         fn start(&mut self, _: &mut Cx<'_, ()>) {}
         fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
-            cx.done(socket.0, Ok("[]".into()));
+            cx.done(socket.0, "[]".into());
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
             if let Some(command) = text.strip_prefix("error:") {

@@ -1107,16 +1107,19 @@ impl Venue for Kucoin {
                 rows,
                 invalid,
             } => {
-                cx.done(
-                    command,
-                    success(status, body).and_then(|_| {
+                {
+                    let result: Result<String, String> = success(status, body).and_then(|_| {
                         if invalid {
                             Err("invalid KuCoin candle row".into())
                         } else {
                             serde_json::to_string(&rows).map_err(|e| e.to_string())
                         }
-                    }),
-                );
+                    });
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
         }
     }
@@ -1142,7 +1145,7 @@ impl Venue for Kucoin {
                 cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error);
                 self.reconnect_later(cx, channel);
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Markets { .. } => {
                 let pause = self.discovery_paused_until - cx.now;
                 self.discovery.failed_after(cx, false, pause);
@@ -1206,7 +1209,7 @@ impl Venue for Kucoin {
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::FetchLeverage { command, .. } => {
-                cx.done(command, Err("KuCoin leverage query is unsupported".into()));
+                cx.fail(command, "KuCoin leverage query is unsupported");
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
@@ -1307,13 +1310,13 @@ impl Venue for Kucoin {
                             from_ms.unwrap_or(end - minutes as f64 * 60000.0 * 500.0)
                         };
                         if !start.is_finite() || !end.is_finite() || start < 0.0 || start > end {
-                            cx.done(command, Err("invalid KuCoin candle range".into()));
+                            cx.fail(command, "invalid KuCoin candle range");
                             return;
                         }
                         let api = api_symbol(cx.store, &symbol);
                         self.public(cx,&format!("/api/v1/kline/query?symbol={api}&granularity={minutes}&from={}&to={}",start as u64,end as u64),Some(ArrayAt::EnvelopeField("data")),Pending::Candles{command,rows:vec![],invalid:false});
                     }
-                    Err(e) => cx.done(command, Err(e)),
+                    Err(e) => cx.fail(command, e),
                 }
             }
             Command::Query { command, query } => self.history_command(cx, command, query),

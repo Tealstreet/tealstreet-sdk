@@ -1493,15 +1493,15 @@ impl BybitLinear {
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
         if self.category_for(symbol) == Category::Option {
-            cx.done(command, Err("Bybit has no candles for options".into()));
+            cx.fail(command, "Bybit has no candles for options");
             return;
         }
         if !self.category_enabled(self.category_for(symbol)) {
-            cx.done(command, Err("Bybit product is not enabled".into()));
+            cx.fail(command, "Bybit product is not enabled");
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(command, Err(interval.unsupported("Bybit")));
+            cx.fail(command, interval.unsupported("Bybit"));
             return;
         };
         let query = Query::new()
@@ -1694,14 +1694,11 @@ impl BybitLinear {
                 command,
                 mut candles,
             } => match failure {
-                Some(error) => cx.done(command, Err(format!("Bybit klines: {error}"))),
+                Some(error) => cx.fail(command, format!("Bybit klines: {error}")),
                 None => {
                     // Bybit lists newest first.
                     candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(
-                        command,
-                        Ok(serde_json::to_string(&candles).unwrap_or_default()),
-                    );
+                    cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
                 }
             },
             Then::Account(request) => self.on_account_response(cx, request, response),
@@ -2172,7 +2169,7 @@ impl Venue for BybitLinear {
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
             safe_cex_engine::VenueAction::FetchBalanceInfo => {
                 let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
-                cx.done(command, Ok(info));
+                cx.done(command, info);
             }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }

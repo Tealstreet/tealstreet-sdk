@@ -336,15 +336,14 @@ impl ApexOmni {
             return Err(command);
         };
         match query {
-            Query::OrderByClientId { .. } => cx.done(
+            Query::OrderByClientId { .. } => cx.fail(
                 command,
-                Err("ApeX Omni cannot provide definitive client order ID lookup".into()),
+                "ApeX Omni cannot provide definitive client order ID lookup",
             ),
-            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, Ok("[]".into())),
-            Query::PublicTrades { .. } => cx.done(
-                command,
-                Err("ApeX Omni does not support public trade history".into()),
-            ),
+            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, "[]".into()),
+            Query::PublicTrades { .. } => {
+                cx.fail(command, "ApeX Omni does not support public trade history")
+            }
             Query::Fills {
                 symbol,
                 order_id,
@@ -356,11 +355,11 @@ impl ApexOmni {
                     || self.options.key.as_deref().is_none_or(str::is_empty)
                     || self.options.secret.as_deref().is_none_or(str::is_empty)
                 {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return Ok(());
                 }
                 let Some(market) = symbol.as_deref().and_then(|s| cx.store.market(s)) else {
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(command, "[]".into());
                     return Ok(());
                 };
                 let mut candidates = vec![market.id.clone()];
@@ -415,7 +414,7 @@ impl ApexOmni {
             Pending::History(request),
             Some(ARRAYS),
         ) {
-            cx.done(command, Err(error));
+            cx.fail(command, error);
         }
     }
     pub(crate) fn history_item(
@@ -527,10 +526,14 @@ impl ApexOmni {
             .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         request.current.truncate(request.limit);
         let rows: Vec<_> = request.current.into_iter().map(|row| row.row).collect();
-        cx.done(
-            request.command,
-            serde_json::to_string(&rows).map_err(|e| e.to_string()),
-        );
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            }
+        };
     }
     pub(crate) fn history_timer(&mut self, _cx: &mut Cx<'_, Pending>, _timer: TimerId) -> bool {
         false

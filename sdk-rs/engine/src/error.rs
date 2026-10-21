@@ -62,8 +62,14 @@ pub struct VenueError {
 
 impl VenueError {
     pub fn new(message: impl Into<String>) -> Self {
+        Self::from_message(message.into())
+    }
+
+    // Out of line so call sites share one struct initialisation (wasm size budget).
+    #[inline(never)]
+    fn from_message(message: String) -> Self {
         Self {
-            message: message.into(),
+            message,
             ..Self::default()
         }
     }

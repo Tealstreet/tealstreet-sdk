@@ -89,7 +89,7 @@ fn completed(e: &mut TestEngine, command: u32) -> serde_json::Value {
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: id,
-                result: Ok(json),
+                result: json,
             }) if id == command => Some(serde_json::from_str(&json).unwrap()),
             _ => None,
         })

@@ -375,3 +375,47 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         message
     );
 }
+
+#[test]
+fn aster_api_resolution_preserves_override_and_trimmed_auth_precedence() {
+    let wallet = "0x1111111111111111111111111111111111111111";
+    let private = "12".repeat(32);
+    let flat = format!(r#""key":"{wallet}","secret":"{private}","applicationId":"{wallet}""#);
+    for (fields, version) in [
+        (String::new(), "v1"),
+        (flat.clone(), "v3"),
+        (format!(r#"{flat},"asterdex":{{"apiVersion":"v1"}}"#), "v1"),
+        (r#""asterdex":{"apiVersion":"v3"}"#.into(), "v3"),
+        (
+            format!(r#"{flat},"asterdex":{{"userAddress":" ","privateKey":" "}}"#),
+            "v3",
+        ),
+        (
+            format!(r#"{flat},"asterdex":{{"privateKey":"invalid"}}"#),
+            "v1",
+        ),
+        (
+            format!(
+                r#""asterdex":{{"userAddress":" {wallet} ","signerAddress":" {wallet} ","privateKey":" {private} "}}"#
+            ),
+            "v3",
+        ),
+        (
+            format!(r#"{flat},"asterdex":{{"signerAddress":"invalid"}}"#),
+            "v1",
+        ),
+    ] {
+        let options: EngineOptions = serde_json::from_str(&format!("{{{fields}}}")).unwrap();
+        assert_eq!(
+            options.construction("asterdex").asterdex_api_version,
+            Some(version),
+            "{fields}"
+        );
+        assert_eq!(
+            serde_json::to_string(&options.construction("binance")).unwrap(),
+            "{}"
+        );
+    }
+    // An inferred V3 reaches the same registry path as an explicit V3.
+    construct("asterdex", &format!("{{{flat}}}")).unwrap();
+}

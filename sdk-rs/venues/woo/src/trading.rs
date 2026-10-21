@@ -990,7 +990,7 @@ impl Woo {
             let Some(step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
                 if job.errors.is_empty() {
-                    cx.done(job.command, Ok(json(&job.ids).unwrap()));
+                    cx.done(job.command, json(&job.ids).unwrap());
                 } else {
                     // The cancel families are independent; only an unknown one is worth stating.
                     let error = VenueError::new(job.errors.join("; "));

@@ -326,9 +326,14 @@ impl Client {
         self.engine.drain_actions().collect()
     }
 }
-fn done(actions: &[Action], id: u32) -> Option<&Result<String, String>> {
+fn done(actions: &[Action], id: u32) -> Option<Result<String, String>> {
     actions.iter().find_map(|action| match action {
-        Action::Notice(Notice::CommandDone { command, result }) if *command == id => Some(result),
+        Action::Notice(Notice::CommandDone { command, result }) if *command == id => {
+            Some(Ok(result.clone()))
+        }
+        Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+            Some(Err(error.legacy_text()))
+        }
         _ => None,
     })
 }
@@ -349,7 +354,7 @@ fn account_tier_reads_the_cached_tier_and_a_change_posts_then_rereads_limits() {
         61,
         safe_cex_engine::VenueAction::FetchAccountTier,
     );
-    assert_eq!(done(&actions, 61), Some(&Ok("\"standard\"".into())));
+    assert_eq!(done(&actions, 61), Some(Ok("\"standard\"".into())));
     let actions = client.action(
         NOW + 2_003.0,
         62,
@@ -384,7 +389,7 @@ fn account_tier_reads_the_cached_tier_and_a_change_posts_then_rereads_limits() {
         r#"{"code":200}"#,
     );
     let actions = client.engine.drain_actions().collect::<Vec<_>>();
-    assert_eq!(done(&actions, 62), Some(&Ok("null".into())));
+    assert_eq!(done(&actions, 62), Some(Ok("null".into())));
     assert!(actions.iter().any(
         |action| matches!(action, Action::Http(request) if request.url.contains("accountLimits"))
     ));
@@ -430,7 +435,7 @@ fn rejected_or_invalid_tier_changes_report_the_reason() {
     let actions = client.engine.drain_actions().collect::<Vec<_>>();
     assert_eq!(
         done(&actions, 64),
-        Some(&Err(
+        Some(Err(
             "Lighter account tier change failed: tier change cooldown".into()
         ))
     );
@@ -439,7 +444,7 @@ fn rejected_or_invalid_tier_changes_report_the_reason() {
 fn reading_the_cached_tier_never_starts_a_limits_read() {
     let mut client = Client::new(options());
     let actions = client.action(NOW, 65, safe_cex_engine::VenueAction::FetchAccountTier);
-    assert_eq!(done(&actions, 65), Some(&Ok("null".into())));
+    assert_eq!(done(&actions, 65), Some(Ok("null".into())));
     assert!(
         !actions
             .iter()
