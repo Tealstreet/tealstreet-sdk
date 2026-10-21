@@ -19,3 +19,19 @@ silently does nothing although explicit fetchLeverage already works.
    fix, push/PR and integrate current landing under lane rules. Do not merge
    shared source until Kraken #1663's priority hold is lifted. Fresh separate
    guard, exact-head green merge and actual-pin reports to ddi2il/cxxyqr.
+
+## Before-fix evidence
+
+The actual native/host regression ran against green #1666 CI run39669643997's
+`ci-wasm-weex` artifact (WASM SHA256
+`7992f411c20a00395dca82dc1f25fecb03ba3fe75a1bea57e4099b59f4bc4add`).
+Both refresh/failure tests fail because no scoped request is dispatched; the
+public-only control passes. The initial local package contained only Binance
+and failed constructor setup; that attempt is not regression evidence.
+No local release build was run. Kraken #1663 landed at `e033ec44f2e`; the
+priority hold is released and that landing is integrated before implementation.
+
+Independent review caught a stale all-venue native host capability expectation.
+Its focused parity test failed after the capability change (WEEX still expected
+onRead); update that mirrored expectation as well as the JS fixture. The
+existing generic onRead test now uses GRVT with every assertion retained.

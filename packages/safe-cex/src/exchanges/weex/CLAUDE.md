@@ -136,6 +136,13 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
 
 ## Primary Endpoints
 
+Rust WEEX reports `leverageQuery: onReadAndMetadata`. The shared SDK selected-
+symbol metadata hook issues the existing signed `symbolConfig` read even when
+a flat symbol already has cached rails. Explicit leverage reads stay fresh,
+public-only accounts issue no private metadata request, and malformed responses
+reject without replacing the last good rails. Native settings-revision fences
+continue to protect newer writes; no new polling loop is added.
+
 Rust income queries emit `history.incomplete` with the actual native command
 ID before partial completion or failure. This includes range chunk failures,
 opaque cursors and chunk/lifetime budgets. The host routes coverage to the

@@ -1017,7 +1017,7 @@ mod tests {
                 } else {
                     CancelAll::EachOpenSymbol
                 },
-                leverage_query: if venue == "bingx" {
+                leverage_query: if any(&["bingx", "weex"], venue) {
                     LeverageQuery::OnReadAndMetadata
                 } else if any(
                     &[
@@ -1030,7 +1030,6 @@ mod tests {
                         "coinbase",
                         "coinbasespot",
                         "polymarket",
-                        "weex",
                     ],
                     venue,
                 ) || any(&OKX, venue)
