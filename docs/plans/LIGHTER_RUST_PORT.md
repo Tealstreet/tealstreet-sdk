@@ -240,3 +240,29 @@ native/Wasm, JS and Lighter/Binance gates; final CI must cover the merged head.
 4. Reproduce failures, add race/error regressions, run focused Lighter/Binance
    tests and fmt/Clippy/bans with CARGO_BUILD_JOBS=4, independently review and
    push for CI. Merge remains subject to overseer hold.
+
+- Reproduced all three findings before fixes: the fixed2s recheck, missing account
+  refresh on explicit21613 placement rejection, and HTTP405 rate mapping/guidance.
+  Position confirmation now uses a separate10s wait token containing command and
+  account-read serial, clears it before any continuation, and rejects empty,
+  malformed, foreign-account, transport-failed, unconfirmed or timed-out reads.
+  Retired in-flight read serials cannot release a later queued job. Settings-only
+  rows may still reconcile account settings but cannot authorize from retained
+  exposure. Snapshot coverage protects against malformed target/unknown rows.
+- HTTP405/429 use neutral wait guidance, preserving native code/message and
+  rejection versus unknown outcome (including malformed replies and ambiguous
+  batches). Failed nonce/approval prerequisites are NotSent; rate limits cannot
+  enter the existing explicit-invalid-nonce retry. Code21613 refreshes account
+  and orders only; native cache is not inverted and writes are not replayed.
+- Primary references checked:
+  https://apidocs.lighter.xyz/docs/rate-limits (HTTP405 and429)
+  https://apidocs.lighter.xyz/docs/data-structures-constants-and-errors (21613).
+- Design/adversarial review identified late-read serial reuse and settings-only
+  position retention as traps. Serial retirement and target confirmation markers
+  address both; aggregate command outcome still accounts for prior accepted legs.
+- Focused Lighter171 + Binance246 native tests, fmt, strict all-target Lighter
+  Clippy and banned-pattern guard pass. Full WASM/replay validation runs in CI.
+- Final review found bare native codes without messages needed Unknown before
+  cleanup, not merely on the returned error. Corrected that path and regressed
+  dependent queued settings. Final independent rereview is clean. Integrating
+  landing's new success-only Cx.done API next, then repeating focused checks.

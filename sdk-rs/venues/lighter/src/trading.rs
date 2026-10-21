@@ -10,6 +10,8 @@ use std::collections::{HashMap, VecDeque};
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
+const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
+const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
 
 #[derive(Default)]
@@ -21,7 +23,14 @@ pub struct Trading {
     next_nonce: Option<u64>,
     next_id: u64,
     timer: Option<TimerId>,
+    position_wait: Option<PositionWait>,
+    retired_snapshot: Option<u64>,
     uncertain_settings: HashMap<String, u64>,
+}
+struct PositionWait {
+    command: CommandId,
+    serial: u64,
+    timer: TimerId,
 }
 struct Job {
     command: CommandId,
@@ -352,7 +361,10 @@ impl Lighter {
     }
 
     pub(crate) fn trade_kick(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.inflight || self.trading.timer.is_some() {
+        if self.trading.inflight
+            || self.trading.timer.is_some()
+            || self.trading.position_wait.is_some()
+        {
             return;
         }
         if self.trading.active.is_none() {
@@ -395,8 +407,26 @@ impl Lighter {
                 {
                     *requested = true;
                 }
-                self.trading.timer = Some(cx.set_timer(2_000.0));
+                let command = self.trading.active.as_ref().unwrap().command;
                 self.refresh_account(cx);
+                let Some(serial) = self.account_snapshot_serial() else {
+                    self.trade_finish(
+                        cx,
+                        not_sent(
+                            "Lighter account read unavailable; reduce-only order was not sent",
+                        ),
+                    );
+                    return;
+                };
+                if self.trading.retired_snapshot == Some(serial) {
+                    self.trade_finish(cx, not_sent("Previous Lighter account read timed out; wait for a fresh snapshot before placing this reduce-only order"));
+                    return;
+                }
+                self.trading.position_wait = Some(PositionWait {
+                    command,
+                    serial,
+                    timer: cx.set_timer(POSITION_READ_TIMEOUT_MS),
+                });
             }
             return;
         }
@@ -633,6 +663,21 @@ impl Lighter {
         response: Response<'_>,
     ) {
         self.trading.inflight = false;
+        if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
+            let parsed = serde_json::from_str::<Reply>(response.body).ok();
+            let mut error = not_sent(RATE_MESSAGE).kind(ErrorKind::RateLimited);
+            if let Some(reply) = parsed {
+                if let Some(code) = reply.code.as_ref().and_then(Number::integer) {
+                    error = error.venue_code(code.to_string());
+                }
+                if !reply.message.is_empty() {
+                    error.message = format!("{}; {RATE_MESSAGE}", reply.message);
+                    error = error.venue_message(reply.message);
+                }
+            }
+            self.trade_finish(cx, error);
+            return;
+        }
         match request {
             Request::Approval => {
                 if response.status < 300
@@ -700,13 +745,20 @@ impl Lighter {
                     Ok(reply) => reply,
                     Err(_) => {
                         self.submission_uncertain(cx, &submission.effect);
-                        self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
+                        let error = if matches!(response.status, 405 | 429) {
+                            uncertain(format!("{UNCERTAIN_RESULT}; {RATE_MESSAGE}"))
+                                .kind(ErrorKind::RateLimited)
+                        } else {
+                            uncertain(UNCERTAIN_RESULT)
+                        };
+                        self.trade_finish(cx, error);
                         return;
                     }
                 };
                 let code = reply.code.as_ref().and_then(Number::integer);
                 if code == Some(21104)
                     && response.status < 500
+                    && !matches!(response.status, 405 | 429)
                     && !self.trading.active.as_ref().unwrap().retried_nonce
                 {
                     self.trading.active.as_mut().unwrap().retried_nonce = true;
@@ -726,36 +778,60 @@ impl Lighter {
                     let unknown = response.status >= 500
                         || code.is_none()
                         || code == Some(200)
-                        || submission.count > 1;
+                        || submission.count > 1
+                        || (reply.message.is_empty()
+                            && !matches!(code, Some(21520 | 21149 | 21132 | 21613)));
                     if unknown {
                         self.submission_uncertain(cx, &submission.effect);
-                    } else if matches!(submission.effect, Effect::Setting { .. }) {
+                    } else if matches!(submission.effect, Effect::Setting { .. })
+                        || (code == Some(21613) && matches!(submission.effect, Effect::Place))
+                    {
                         self.refresh_account(cx);
                     }
-                    let message = match code {
+                    let native_message = reply.message.clone();
+                    let mut message = match code {
                         Some(21520) => TIER_MESSAGE.into(),
                         Some(21149) => APPROVAL_MESSAGE.into(),
+                        Some(21613) => format!("Lighter rejected invalid margin mode; refreshing account state: {}", reply.message),
                         Some(21132) => "Lighter rejected margin mode switch: close open positions and orders on this market first".into(),
                         _ if !reply.message.is_empty() => reply.message,
                         _ => UNCERTAIN_RESULT.into(),
                     };
                     self.refresh_orders(cx);
                     let explained = message != UNCERTAIN_RESULT;
-                    let error = VenueError::new(message);
+                    let rate_limited = matches!(response.status, 405 | 429);
+                    if rate_limited {
+                        message.push_str("; ");
+                        message.push_str(RATE_MESSAGE);
+                    }
+                    let mut error = VenueError::new(message);
+                    if let Some(code) = code {
+                        error = error.venue_code(code.to_string());
+                    }
+                    if !native_message.is_empty() {
+                        error = error.venue_message(native_message);
+                    }
                     let error = match code {
                         _ if unknown => error.outcome(Outcome::Unknown),
                         // A bare code with no reason keeps the uncertain text; claim nothing.
-                        Some(code) if !explained => error.venue_code(code.to_string()),
+                        Some(code) if !explained => {
+                            error.venue_code(code.to_string()).outcome(Outcome::Unknown)
+                        }
                         // Lighter's numeric codes on a sub-500 answer are explicit refusals.
                         Some(code) => error
                             .venue_code(code.to_string())
-                            .kind(if response.status == 429 {
+                            .kind(if rate_limited {
                                 ErrorKind::RateLimited
                             } else {
                                 ErrorKind::Rejected
                             })
                             .outcome(Outcome::Rejected),
                         None => error,
+                    };
+                    let error = if rate_limited {
+                        error.kind(ErrorKind::RateLimited)
+                    } else {
+                        error
                     };
                     self.trade_finish(cx, error);
                     return;
@@ -892,7 +968,60 @@ impl Lighter {
         self.trade_kick(cx);
     }
 
+    pub(crate) fn trade_position_symbol(&self, serial: u64) -> Option<&String> {
+        let wait = self
+            .trading
+            .position_wait
+            .as_ref()
+            .filter(|w| w.serial == serial)?;
+        let job = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|j| j.command == wait.command)?;
+        match job.steps.front()? {
+            Step::Position { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+    pub(crate) fn trade_account_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        serial: u64,
+        confirmed: bool,
+    ) {
+        if self.trading.position_wait.is_none() {
+            self.trade_kick(cx);
+            return;
+        }
+        if self.trade_position_symbol(serial).is_none() {
+            return;
+        }
+        let wait = self.trading.position_wait.take().unwrap();
+        cx.clear_timer(wait.timer);
+        if !confirmed {
+            self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            return;
+        }
+        let job = self.trading.active.as_ref().unwrap();
+        let Some(Step::Position { symbol, side, .. }) = job.steps.front() else {
+            unreachable!()
+        };
+        if !has_position(cx, symbol, *side) {
+            self.trade_finish(
+                cx,
+                not_sent("No open position available for this Lighter reduce-only limit order"),
+            );
+            return;
+        }
+        self.trading.active.as_mut().unwrap().steps.pop_front();
+        self.trade_kick(cx);
+    }
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
+        if let Some(wait) = self.trading.position_wait.take() {
+            cx.clear_timer(wait.timer);
+            self.trading.retired_snapshot = Some(wait.serial);
+        }
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
             let mut error = error.into();
@@ -914,6 +1043,20 @@ impl Lighter {
     }
 
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self
+            .trading
+            .position_wait
+            .as_ref()
+            .is_some_and(|w| w.timer == timer)
+        {
+            let wait = self.trading.position_wait.take().unwrap();
+            self.trading.retired_snapshot = Some(wait.serial);
+            self.trade_finish(
+                cx,
+                not_sent("Timed out confirming Lighter reduce-only exposure; order was not sent"),
+            );
+            return true;
+        }
         if self.trading.timer != Some(timer) {
             return false;
         }

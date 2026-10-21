@@ -1343,3 +1343,14 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Lighter port-review confirmation and failures
+
+A Rust Lighter reduce-only limit order without matching known exposure now waits
+for account-read completion, up to10 seconds, before any nonce/signing request.
+Unconfirmed, failed or timed-out reads refuse the unsent leg; a prior accepted
+leg remains reflected in the aggregate outcome. Late reads cannot release later
+queued orders. Both Lighter deployments keep their existing placement units and
+result shapes. HTTP405/429 include neutral guidance with native diagnostics;
+explicit invalid-margin21613 rejection refreshes state without changing cached
+mode by guess or automatically replaying a placement.

@@ -32,6 +32,7 @@ pub enum Request {
         index: Option<u64>,
     },
     Snapshot {
+        serial: u64,
         revision: u64,
         account: Option<Snapshot>,
         valid: bool,
@@ -114,6 +115,7 @@ pub struct Account {
     settings_revision: HashMap<String, u64>,
     suppressed: HashSet<String>,
     pub snapshot_inflight: bool,
+    snapshot_serial: u64,
     orders_inflight: bool,
     batch: Option<OrderBatch>,
     sync: Option<TimerId>,
@@ -134,6 +136,7 @@ pub struct Snapshot {
     positions: Vec<Position>,
     settings: Vec<(String, f64, MarginType)>,
     known_settings: HashSet<String>,
+    unconfirmed_positions: HashSet<String>,
     equity: f64,
     free: f64,
     coverage: SnapshotCoverage<String>,
@@ -713,6 +716,11 @@ impl Lighter {
             .ok_or("Lighter signer unavailable")?
             .auth_token((now / 1000.0).floor() as u64 + 60)
     }
+    pub(crate) fn account_snapshot_serial(&self) -> Option<u64> {
+        self.account
+            .snapshot_inflight
+            .then_some(self.account.snapshot_serial)
+    }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.snapshot_inflight {
             return;
@@ -721,12 +729,14 @@ impl Lighter {
             return;
         };
         self.account.snapshot_inflight = true;
+        self.account.snapshot_serial = self.account.snapshot_serial.wrapping_add(1);
         cx.request_streamed(
             Method::Get,
             format!("{}/api/v1/account?by=index&value={account}", self.host()),
             vec![],
             json::ArrayAt::Field("accounts"),
             Pending::Account(Request::Snapshot {
+                serial: self.account.snapshot_serial,
                 revision: self.account.revision,
                 account: None,
                 valid: true,
@@ -1272,10 +1282,14 @@ impl Lighter {
                             .initial_margin_fraction
                             .as_ref()
                             .is_some_and(|n| n.ratio().is_some()));
+                let explicit_size = row.size.is_some();
                 if let Some((position, symbol, leverage, margin)) = self.position_row(cx, row, hint)
                 {
                     if known {
                         snapshot.known_settings.insert(symbol.clone());
+                    }
+                    if !explicit_size {
+                        snapshot.unconfirmed_positions.insert(symbol.clone());
                     }
                     snapshot.settings.push((symbol, leverage, margin));
                     if let Some(position) = position {
@@ -1906,6 +1920,7 @@ impl Lighter {
                 }
             }
             Request::Snapshot {
+                serial,
                 revision,
                 account,
                 valid,
@@ -1926,12 +1941,17 @@ impl Lighter {
                     && valid
                     && let Some(account) = account
                 {
+                    let confirmed = self.trade_position_symbol(serial).is_none_or(|symbol| {
+                        account.coverage.allows_absence(symbol)
+                            && !account.unconfirmed_positions.contains(symbol)
+                    });
                     self.commit_snapshot(cx, revision, account);
                     if self.account.signer.is_none() && !cx.store.loaded().orders {
                         cx.store.set_orders(vec![]);
                     }
-                    self.trade_kick(cx);
+                    self.trade_account_ready(cx, serial, confirmed);
                 } else {
+                    self.trade_account_ready(cx, serial, false);
                     cx.notice(
                         Level::Warn,
                         code::SNAPSHOT_DISCARDED,
@@ -2049,8 +2069,9 @@ impl Lighter {
                 )),
             ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
-            Request::Snapshot { .. } => {
+            Request::Snapshot { serial, .. } => {
                 self.account.snapshot_inflight = false;
+                self.trade_account_ready(cx, serial, false);
                 cx.notice(
                     Level::Warn,
                     code::REQUEST_FAILED,
