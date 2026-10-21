@@ -35,3 +35,12 @@ Independent review caught a stale all-venue native host capability expectation.
 Its focused parity test failed after the capability change (WEEX still expected
 onRead); update that mirrored expectation as well as the JS fixture. The
 existing generic onRead test now uses GRVT with every assertion retained.
+
+## Integration and focused checks
+
+The committed implementation integrates #1670 WEEX empty-fill history and
+#1671 audit docs at `fb96c9d5d4b` conflict-free, preserving incoming tests and
+B11 text. Local checks: 20 shared SDK policy tests, 39 native WEEX account
+tests, native all-venue capability parity, SDK typecheck, scoped Clippy and
+format checks pass. Final after-fix WASM proof is required from fresh CI; the
+local artifact remains the known pre-fix baseline, not rebuilt silently.

@@ -56,10 +56,13 @@ first, then GRVT typed builder errors, then public/manual book and dead-man
 parity; browser measurement remains open. Each source batch needs its own
 fresh landing branch, before/after regression, focused checks, CI and review.
 
-1. **WEEX selected-symbol metadata:** TS `updateSymbolMetadata` forces a symbol
-   configuration refresh. Native WEEX has real explicit leverage reads but
-   `leverageQuery: onRead` leaves the SDK metadata hook inert. Its existing
-   no-dispatch assertion proves that limitation, not equivalent refresh.
+1. **WEEX selected-symbol metadata: repaired in the follow-up.** Native WEEX
+   now reports `onReadAndMetadata`; the shared SDK path reads signed symbol
+   configuration for cached/flat symbols while explicit reads stay fresh. The
+   [before-fix native regression and validation](RUST_WEEX_METADATA_REFRESH.md)
+   distinguish malformed failure/retention and public-only isolation. No new
+   polling loop or venue-name fallback. The original table above records the
+   audit baseline before this repair.
 2. **GRVT builder-specific rejection:** native checks/retries already block
    unauthorized orders, but generic `invalidInput`/`notSent` cannot identify
    the authorization UI contract. Preserve a stable typed builder code,
