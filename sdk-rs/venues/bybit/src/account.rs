@@ -81,23 +81,6 @@ struct RejectedIdentity {
 fn rejected_identity(item: &str) -> Option<RejectedIdentity> {
     serde_json::from_str(item).ok()
 }
-// Keep the concrete Serde entry points shared by REST and WebSocket rows.
-// Out-of-line calls limit expanded-parser duplication under fat LTO.
-#[inline(never)]
-fn parse_order_row(text: &str) -> serde_json::Result<OrderRow<'_>> {
-    serde_json::from_str(text)
-}
-
-#[inline(never)]
-fn parse_position_row(text: &str) -> serde_json::Result<PositionRow<'_>> {
-    serde_json::from_str(text)
-}
-
-#[inline(never)]
-fn parse_private_frame(text: &str) -> serde_json::Result<TopicFrame<&serde_json::value::RawValue>> {
-    serde_json::from_str(text)
-}
-
 fn parent_order_id(id: &str) -> &str {
     id.strip_suffix("__stop_loss")
         .or_else(|| id.strip_suffix("__take_profit"))
@@ -1790,7 +1773,9 @@ impl BybitLinear {
         }
         match wire_topic.map(|topic| topic.split('.').next().unwrap_or(topic)) {
             Some("order") if !self.variant.is_hyro() => {
-                let Ok(frame) = parse_private_frame(text) else {
+                let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                else {
                     self.account.orders_stale = true;
                     if let Some(join) = &mut self.account.orders {
                         join.rejected.reject(None);
@@ -1806,7 +1791,7 @@ impl BybitLinear {
                 let mut rejected = RejectedRows::default();
                 let mut admitted = Vec::new();
                 for raw in &frame.data {
-                    let Ok(row) = parse_order_row(raw.get()) else {
+                    let Ok(row) = serde_json::from_str::<OrderRow>(raw.get()) else {
                         self.reject_order_item(cx, &mut rejected, raw.get());
                         continue;
                     };
@@ -1889,7 +1874,9 @@ impl BybitLinear {
                 }
             }
             Some("position") if !self.variant.is_hyro() => {
-                let Ok(frame) = parse_private_frame(text) else {
+                let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                else {
                     if let Some(join) = &mut self.account.positions {
                         join.rejected.reject(None);
                     }
@@ -1903,7 +1890,7 @@ impl BybitLinear {
                 let mut rejected = RejectedRows::default();
                 let mut admitted = Vec::new();
                 for raw in &frame.data {
-                    let Ok(row) = parse_position_row(raw.get()) else {
+                    let Ok(row) = serde_json::from_str::<PositionRow>(raw.get()) else {
                         self.reject_position_item(cx, &mut rejected, raw.get());
                         continue;
                     };
@@ -2281,7 +2268,7 @@ impl BybitLinear {
                 rejected,
                 ..
             } => {
-                let Ok(row) = parse_order_row(item) else {
+                let Ok(row) = serde_json::from_str::<OrderRow>(item) else {
                     if self.variant.is_hyro() {
                         *invalid = true;
                     } else {
@@ -2328,7 +2315,7 @@ impl BybitLinear {
                 rejected,
                 ..
             } => {
-                let Ok(row) = parse_position_row(item) else {
+                let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
                     if self.variant.is_hyro() {
                         *invalid = true;
                     } else {
@@ -2361,7 +2348,6 @@ impl BybitLinear {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn on_account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

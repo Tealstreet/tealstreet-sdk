@@ -160,101 +160,6 @@ pub enum Then {
     Closed(closed::Request),
 }
 
-type PrivateResponseHandler =
-    fn(&mut BybitLinear, &mut Cx<'_, Pending>, Then, Result<Response<'_>, &str>);
-
-fn private_response_handler(then: &Then) -> Option<PrivateResponseHandler> {
-    const HANDLERS: [PrivateResponseHandler; 5] = [
-        dispatch_account_response,
-        dispatch_trade_response,
-        dispatch_history_response,
-        dispatch_closed_response,
-        dispatch_options_response,
-    ];
-    let slot = match then {
-        Then::Account(_) => 0,
-        Then::Trade(_) => 1,
-        Then::History(_) => 2,
-        Then::Closed(_) => 3,
-        Then::Options(_) => 4,
-        _ => return None,
-    };
-    Some(HANDLERS[slot])
-}
-
-// Keep the common call opaque to LTO so private handlers do not expand into
-// the response entry point. The concrete handlers retain their existing bodies.
-#[inline(never)]
-fn dispatch_private_response(
-    handler: PrivateResponseHandler,
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    handler(venue, cx, then, response);
-}
-
-fn dispatch_account_response(
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    let Then::Account(request) = then else {
-        unreachable!()
-    };
-    venue.on_account_response(cx, request, response);
-}
-
-fn dispatch_trade_response(
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    let Then::Trade(request) = then else {
-        unreachable!()
-    };
-    venue.on_trade_response(cx, request, response);
-}
-
-fn dispatch_history_response(
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    let Then::History(request) = then else {
-        unreachable!()
-    };
-    venue.on_history_response(cx, request, response);
-}
-
-fn dispatch_closed_response(
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    let Then::Closed(request) = then else {
-        unreachable!()
-    };
-    venue.on_closed_response(cx, request, response);
-}
-
-fn dispatch_options_response(
-    venue: &mut BybitLinear,
-    cx: &mut Cx<'_, Pending>,
-    then: Then,
-    response: Result<Response<'_>, &str>,
-) {
-    let Then::Options(request) = then else {
-        unreachable!()
-    };
-    venue.on_options_response(cx, request, response);
-}
-
 pub struct Pending {
     category: Category,
     rest: Rest,
@@ -1855,10 +1760,6 @@ impl BybitLinear {
                 }
             }
         }
-        if let Some(handler) = private_response_handler(&then) {
-            dispatch_private_response(handler, self, cx, then, response);
-            return;
-        }
         match then {
             Then::RefreshMarkets(page) => match response {
                 Ok(response) => self.refresh_response(cx, page, response),
@@ -1936,6 +1837,7 @@ impl BybitLinear {
                     }
                 }
             }
+            Then::Options(request) => self.on_options_response(cx, request, response),
             Then::Klines {
                 command,
                 mut candles,
@@ -1947,11 +1849,10 @@ impl BybitLinear {
                     cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
                 }
             },
-            Then::Account(_)
-            | Then::Trade(_)
-            | Then::History(_)
-            | Then::Closed(_)
-            | Then::Options(_) => unreachable!("private response was dispatched above"),
+            Then::Account(request) => self.on_account_response(cx, request, response),
+            Then::Trade(request) => self.on_trade_response(cx, request, response),
+            Then::History(request) => self.on_history_response(cx, request, response),
+            Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
     }
 }
@@ -2439,7 +2340,6 @@ impl Venue for BybitLinear {
         );
     }
 
-    #[inline(never)]
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
         if self.market_refresh.retired_startup && matches!(&pending.then, Then::Markets { .. }) {

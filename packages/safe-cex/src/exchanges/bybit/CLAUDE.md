@@ -2041,15 +2041,7 @@ native query command in `history.incomplete` before partial completion/window
 continuation. Existing rows, caps and error policies are preserved; the host can
 flag the owning partial array and route its warning without crossing callers.
 
-Rust private order and position rows share concrete, out-of-line Serde parser
-entry points across REST and WebSocket handlers. Ordinary raw topic envelopes
-share the same parser boundary too. This limits duplicated WASM parser code;
-accepted JSON forms, borrowed strings, row isolation and Hyro whole-frame
-validation retain their existing semantics.
-Private response handlers and streamed row dispatch also retain explicit
-out-of-line boundaries so the optimizer does not fold all their code into the
-shared response and streaming entry points. Their bodies and dispatch order
-remain unchanged.
-Private response kinds select a concrete function-table entry after the existing
-response preamble; one shared call boundary forwards the unchanged owned payload
-to its original handler. Public response cases retain their existing path.
+Rust release code generation for the Bybit crate is selected for family WASM
+size. CI still requires the public CPU/memory gates and complete raw replay
+outputs, including caller identities; the source parsers, handlers and financial
+calculations retain their existing behavior. Other venue profiles are unchanged.

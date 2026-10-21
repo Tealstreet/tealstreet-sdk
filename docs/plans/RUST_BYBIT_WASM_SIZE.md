@@ -91,3 +91,25 @@ response payloads through a concrete function table and one shared out-of-line
 call boundary, retaining the original response preamble and handler bodies.
 The final raw-output proof must contain all 55 baseline outputs; fewer available
 adaptive performance samples do not satisfy the overseer's proof requirement.
+
+The third candidate measured 1,340,058 bytes (596 bytes above baseline),
+SHA-256 `6eef9f5bd0c4580b499783e7bd69b2977650836aa33c965262ab68b1b15f4eb7`,
+run 39646578013 / Bybit job 119384236814. The response table did not help.
+All three source experiments are removed from the final change.
+
+## Release profile experiments
+
+The existing configuration already has fat LTO, one codegen unit and the WASM
+target's abort panic behavior. Rust release and the Bybit package both use level
+3; only the final Binaryen optimizer uses `-Oz`. Twiggy monos finds no Bybit
+`SnapshotBuilder` instantiation: its rejected-row tracking is venue-local.
+
+The overseer approved testing Rust `s` and `z` for the Bybit package and choosing
+the smallest setting that passes strict public timing/memory gates and the full
+55/55 raw replay comparison. Other packages retain their current profiles.
+The source-level parser/handler experiments are removed; all six Rust source
+files return byte-for-byte to the landed baseline. Normal CI artifact sizes
+remain the measurement. Other level-3 families may offer similar code-size
+headroom, but their savings and throughput effects are unmeasured and are not
+changed here; families already using size profiles should not be assumed to
+have the same opportunity.

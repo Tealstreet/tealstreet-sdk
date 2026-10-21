@@ -106,7 +106,6 @@ impl BybitLinear {
         );
     }
 
-    #[inline(never)]
     pub(crate) fn on_closed_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
