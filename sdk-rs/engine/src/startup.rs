@@ -97,8 +97,12 @@ impl<K: Clone> Backoff<K> {
     }
 }
 
+/// Longest honoured `Retry-After`: real IP bans can exceed minutes, but an
+/// absurd or overflowing value must not stall an account indefinitely.
+pub const MAX_RATE_LIMIT_PAUSE_MS: f64 = 3_600_000.0;
+
 /// The pause a rate-limited response asks for: `Retry-After` seconds on a 418
-/// or 429, else `default_ms` for those statuses, else none.
+/// or 429 (capped at an hour), else `default_ms` for those statuses, else none.
 pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f64 {
     if !matches!(response.status, 418 | 429) {
         return 0.0;
@@ -106,8 +110,10 @@ pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f
     response
         .header("retry-after")
         .and_then(|seconds| seconds.trim().parse::<f64>().ok())
-        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
-        .map_or(default_ms, |seconds| seconds * 1_000.0)
+        .filter(|seconds| !seconds.is_nan() && *seconds > 0.0)
+        .map_or(default_ms, |seconds| {
+            (seconds * 1_000.0).min(MAX_RATE_LIMIT_PAUSE_MS)
+        })
 }
 
 /// Do not expose raw catalogue rows, which can arrive through authenticated APIs.
@@ -390,5 +396,38 @@ mod rows_tests {
             .collect();
         assert_eq!(partial, [Some(1), None, Some(3)]);
         assert!(rows::<u32>("[1,").is_err());
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
+    use crate::Response;
+
+    fn pause(status: u16, headers: &str) -> f64 {
+        rate_limit_pause_ms(
+            &Response {
+                status,
+                headers,
+                body: "",
+            },
+            30_000.0,
+        )
+    }
+
+    #[test]
+    fn retry_after_is_honoured_up_to_an_hour_and_never_unbounded() {
+        assert_eq!(pause(429, "Retry-After: 120"), 120_000.0);
+        assert_eq!(pause(418, ""), 30_000.0);
+        assert_eq!(pause(500, "Retry-After: 120"), 0.0);
+        assert_eq!(pause(429, "Retry-After: 86400"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: 1e308"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: inf"), MAX_RATE_LIMIT_PAUSE_MS);
+        assert_eq!(pause(429, "Retry-After: NaN"), 30_000.0);
+        assert_eq!(pause(429, "Retry-After: -5"), 30_000.0);
+        assert_eq!(
+            pause(429, "Retry-After: Wed, 21 Oct 2026 07:28:00 GMT"),
+            30_000.0
+        );
     }
 }
