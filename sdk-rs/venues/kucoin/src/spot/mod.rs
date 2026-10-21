@@ -971,14 +971,13 @@ impl Venue for KucoinSpot {
                             cx.now as u64,
                             channel,
                         );
-                        c.socket = Some(cx.connect_channel(
-                            url,
+                        c.socket = Some(cx.connect(safe_cex_engine::SocketSpec::new(url).channel(
                             if channel == 1 {
                                 SocketChannel::Private
                             } else {
                                 SocketChannel::Public
                             },
-                        ));
+                        )));
                     }
                     _ => {
                         cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");

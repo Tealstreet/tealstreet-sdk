@@ -304,7 +304,9 @@ impl AsterDex {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
 

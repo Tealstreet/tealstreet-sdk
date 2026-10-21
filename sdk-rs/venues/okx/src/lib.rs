@@ -415,13 +415,12 @@ impl Okx {
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
         }
-        let socket = cx.connect_channel(
-            self.socket_url(channel),
-            match channel {
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new(self.socket_url(channel)).channel(match channel {
                 PUBLIC => safe_cex_engine::SocketChannel::Public,
                 BUSINESS => safe_cex_engine::SocketChannel::Business,
                 _ => safe_cex_engine::SocketChannel::Private,
-            },
+            }),
         );
         let c = &mut self.connections[channel];
         c.socket = Some(socket);

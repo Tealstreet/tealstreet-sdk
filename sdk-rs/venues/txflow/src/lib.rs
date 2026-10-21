@@ -272,14 +272,16 @@ impl TxFlow {
         if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             conn.supervisor.connecting(cx);
         }
-        conn.socket = Some(cx.connect_channel(
-            format!(
-                "{}/{}",
-                REST_URL.replacen("https:", "wss:", 1),
-                if api { "api-ws" } else { "ws" }
+        conn.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "{}/{}",
+                    REST_URL.replacen("https:", "wss:", 1),
+                    if api { "api-ws" } else { "ws" }
+                ))
+                .channel(channel),
             ),
-            channel,
-        ));
+        );
     }
     fn subscribe(
         &mut self,

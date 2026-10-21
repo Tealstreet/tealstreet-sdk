@@ -619,13 +619,15 @@ impl ApexOmni {
         self.account.generation += 1;
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            format!(
-                "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                cx.now as u64, self.account.generation
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(format!(
+                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
+                    cx.now as u64, self.account.generation
+                ))
+                .channel(SocketChannel::Private),
             ),
-            SocketChannel::Private,
-        ));
+        );
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {

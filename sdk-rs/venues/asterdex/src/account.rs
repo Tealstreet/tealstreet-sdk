@@ -665,10 +665,15 @@ impl AsterDex {
                     if let Some(old) = self.account.socket.take() {
                         cx.close(old);
                     }
-                    self.account.socket = Some(cx.connect_channel(
-                        format!("{base}/ws/{}", key.listen_key),
-                        SocketChannel::Private,
-                    ));
+                    self.account.socket = Some(
+                        cx.connect(
+                            safe_cex_engine::SocketSpec::new(format!(
+                                "{base}/ws/{}",
+                                key.listen_key
+                            ))
+                            .channel(SocketChannel::Private),
+                        ),
+                    );
                     if let Some(t) = self.account.keepalive.take() {
                         cx.clear_timer(t);
                     }

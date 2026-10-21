@@ -345,16 +345,17 @@ impl Polymarket {
         if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
-        c.socket = Some(cx.connect_feed(
-            SOCKETS[index],
-            if index == 0 {
-                SocketChannel::Public
-            } else {
-                SocketChannel::Private
-            },
-            if index == 0 { "market" } else { "user" },
-            true,
-        ));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(SOCKETS[index])
+                    .channel(if index == 0 {
+                        SocketChannel::Public
+                    } else {
+                        SocketChannel::Private
+                    })
+                    .feed(if index == 0 { "market" } else { "user" }, true),
+            ),
+        );
     }
     fn subscription(&self, cx: &mut Cx<'_, Pending>, ids: Vec<String>, operation: Option<&str>) {
         if ids.is_empty() {

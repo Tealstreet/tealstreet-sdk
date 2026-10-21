@@ -197,6 +197,7 @@ fn encode(actions: &[Action]) -> String {
                 binary,
                 socket,
                 url,
+                headers,
                 channel,
                 context,
             } => ActionOut::WsConnect {
@@ -205,21 +206,9 @@ fn encode(actions: &[Action]) -> String {
                 url,
                 channel: channel.as_ref().map(socket_channel),
                 context: context.as_ref(),
-                headers: None,
-            },
-            Action::WsConnectWithHeaders {
-                socket,
-                url,
-                headers,
-                channel,
-                context,
-            } => ActionOut::WsConnect {
-                binary: false,
-                socket: socket.0,
-                url,
-                channel: channel.as_ref().map(socket_channel),
-                context: context.as_ref(),
-                headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
+                // Header-less sockets keep the field absent so browser hosts can open them.
+                headers: (!headers.is_empty())
+                    .then(|| headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
                 socket: socket.0,

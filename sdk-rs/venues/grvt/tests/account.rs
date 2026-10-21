@@ -101,11 +101,6 @@ impl Harness {
                 socket,
                 channel: Some(SocketChannel::Private),
                 ..
-            }
-            | Action::WsConnectWithHeaders {
-                socket,
-                channel: Some(SocketChannel::Private),
-                ..
             } => Some(*socket),
             _ => None,
         });
@@ -406,7 +401,7 @@ fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut native = Harness::with_options(Options::default());
     native.authenticate();
     let socket = native.socket.unwrap();
-    assert!(native.actions.iter().any(|a|matches!(a,Action::WsConnectWithHeaders {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.iter().any(|(k,v)|*k=="Cookie" && v=="rm=true; gravity=fixture-session"))));
+    assert!(native.actions.iter().any(|a|matches!(a,Action::WsConnect {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.iter().any(|(k,v)|*k=="Cookie" && v=="rm=true; gravity=fixture-session"))));
     native.open();
     let messages: Vec<_> = native
         .actions
@@ -942,11 +937,6 @@ fn private_pings(h: &Harness) -> Vec<SocketId> {
 fn use_latest_private_socket(h: &mut Harness) {
     h.socket = h.actions.iter().rev().find_map(|action| match action {
         Action::WsConnect {
-            socket,
-            channel: Some(SocketChannel::Private),
-            ..
-        }
-        | Action::WsConnectWithHeaders {
             socket,
             channel: Some(SocketChannel::Private),
             ..

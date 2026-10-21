@@ -1019,18 +1019,19 @@ impl Venue for Kucoin {
                             }
                             Role::Private => (SocketChannel::Private, "private".into()),
                         };
-                        c.socket = Some(cx.connect_feed(
-                            format!(
-                                "{}{separator}token={}&connectId={}-{}",
-                                server.endpoint,
-                                encode(bullet.token),
-                                cx.now as u64,
-                                self.message_id
+                        c.socket = Some(
+                            cx.connect(
+                                safe_cex_engine::SocketSpec::new(format!(
+                                    "{}{separator}token={}&connectId={}-{}",
+                                    server.endpoint,
+                                    encode(bullet.token),
+                                    cx.now as u64,
+                                    self.message_id
+                                ))
+                                .channel(role)
+                                .feed(feed, false),
                             ),
-                            role,
-                            feed,
-                            false,
-                        ));
+                        );
                         c.pong = Some(cx.set_timer(c.ping_timeout));
                     }
                     Err(error) => {
