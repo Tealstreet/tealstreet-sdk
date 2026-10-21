@@ -1222,6 +1222,12 @@ Signing and payloads match; no confirmed highs.
   next balance fetch; Rust uses reported PnL until a real price arrives.
 
 ### Paradex
+
+- ~~Paradex's bounded history-cap ownership omission~~ now carries the actual
+  request command before retained rows complete. Its native regression covers
+  exact Warn ownership/order at Error-only logging; unbounded caps and other
+  stalls still fail.
+
 StarkNet typed data, JWT, payloads and SBE decoding match.
 - High: ~~one blank ticker field halts the venue including its private side~~
   (#1356, `d65119bea35`: nullable summary/default regressions and independent
