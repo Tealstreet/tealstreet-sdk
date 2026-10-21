@@ -78,13 +78,13 @@ cutover, so each item below must be handled in the same change set (or before).
 
 **Inputs.** tealstreet-next `origin/master` `41e538d78d` (2026-10-20), read with
 `git grep`/`git show` only; Tealstreet/tealstreet-mobile `master` through the
-GitHub API. SDK `origin/feat/rust-rewrite` `5ff7ebde6c` (2026-10-21), which has
+GitHub API. SDK `origin/feat/rust-rewrite` `5cd8cf2f9d` (2026-10-21), which has
 the merged contract PRs #1375, #1377, #1383, #1386, #1394, #1400, #1411, #1424,
 #1401, #1439, #1441, #1443, #1445, #1447, #1451, #1453, #1462, #1467 and #1469 (venue construction and the Polymarket, Orderly, BreakoutProp and AsterDEX construction rules moved into the shared `safe-cex-venues` crate; messages and the `start()` rejection point unchanged) and the per-venue classified-error PRs (#1403, #1404,
 #1417, #1425, #1429, #1432, #1434, #1436, #1437, #1438, #1442, #1444, #1446,
 #1452, #1455, #1457, #1458, #1460, #1463, #1468, #1470, #1471, #1473, #1478,
 #1479, #1475, and the B9 SDK PRs #1482, #1483, #1484), plus #1388 (engine log
-events, `getHealth`) and #1450 (B5). No contract PR is open. Line numbers are tealstreet-next
+events, `getHealth`), #1450 (B5) and #1510 (payload-signer routing). No contract PR is open. Line numbers are tealstreet-next
 `origin/master` unless an SDK path is named.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
@@ -159,7 +159,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `validateAccount()` starts the engine; error text from engine startup | web `components/newApiFlow/useAccountForm.ts:210-275` (matches `'passphrase'`, `'api key'`, `'secret'`, `'whitelist'`, `'permission'`, `'secondary'`) | TS venue messages | engine messages (e.g. `<name> credentials were rejected`, `Orderly requires base58-encoded 32-byte key and secret`) | RT |
 | `externalPublicData` websocket gateway rejected; in-process source accepted (B6); `privateOnly`+`publicFeed: direct` rejected | exchange-server `server.ts:1015-1034` | none for in-process | `publicFeed: { mode: 'shared', port }` + `RustPublicFeedProvider` for gateways | RT, B6 |
 | `remoteSigner` refused (most venues) | exchange-server `server.ts:1015`; web hosted signing | browser-signed | none | RT, B2 |
-| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | ignored on Rust → private reads unsigned | RT |
+| `payloadSigner` used only by Paradex | MCP `packages/exchange-mcp/src/config.ts:15-22,59-72` (hmac proxy signer) | Bybit/Binance REST | #1510: `runsOnRustEngine` keeps a non-Paradex, non-Lighter `payloadSigner` account (not `publicDataOnly`) on the TS venue, and a directly built `RustEngineExchange` refuses it with `ExchangeError` `kind: 'unsupported'`, `outcome: 'notSent'` | none (MCP `EXCHANGE_ENGINE=rust` signer mode runs TS) |
 | `extra.tickInterval` honored only by Orderly/BreakoutProp | MCP `config.ts:59-72` (`Infinity` disables polling); web `createExchangeFromAccount.ts:91-92` (`secondaryApiKeyTickInterval`) | all TS polling venues | other Rust venues poll a fixed engine interval | RT |
 | `instanceof BlofinExchange` | web `components/reactiveStateHelper/exchangeReactiveStateHelper/BlofinExchangeReactiveStateHelper.tsx:6,20` | true for blofin | false when blofin runs Rust | RT (on blofin switch) |
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
