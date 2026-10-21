@@ -181,9 +181,13 @@ fn support_fill_count(frame: &[u8]) -> u32 {
     0
 }
 #[test]
-fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() {
-    let (mut e, _, _) = ready(false);
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 10 }));
+fn balance_read_signature_rejection_resigns_once() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
     let first = requests(&mut e).pop().unwrap();
     reply(
         &mut e,
@@ -199,10 +203,19 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
         r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
     );
     assert!(
-        e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 10, .. })))
+        requests(&mut e).is_empty(),
+        "a signature rejection resigns once"
     );
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 11 }));
+}
+
+#[test]
+fn balance_read_network_retry_is_bounded() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
     let request = requests(&mut e).pop().unwrap();
     e.handle(
         NOW,
@@ -223,21 +236,13 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
 }
 
 #[test]
-fn parallel_balance_reads_cannot_rollback_newer_response() {
-    let (mut e, _, _) = ready(false);
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 20 }));
-    let old = requests(&mut e).pop().unwrap();
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 21 }));
-    let new = requests(&mut e).pop().unwrap();
-    reply(&mut e, &new, r#"{"error":[],"result":{"ZUSD":"2222"}}"#);
-    e.drain_plain().for_each(drop);
-    reply(&mut e, &old, r#"{"error":[],"result":{"ZUSD":"1111"}}"#);
-    assert_eq!(e.store().balance().total, 2222.);
-}
-#[test]
 fn posted_read_network_retry_stops_after_three_resends() {
-    let (mut e, _, _) = ready(false);
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 22 }));
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
     let mut request = requests(&mut e).pop().unwrap();
     let mut lastnonce = 0u64;
     for attempt in 0..4 {
@@ -275,12 +280,6 @@ fn posted_read_network_retry_stops_after_three_resends() {
                 !actions
                     .iter()
                     .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
-            );
-            assert!(
-                actions.iter().any(|a| matches!(
-                    a,
-                    Action::Notice(Notice::CommandFailed { command: 22, .. })
-                ))
             );
         }
     }
@@ -414,8 +413,12 @@ fn cumulative_fallback_progress_uses_the_previous_row_in_the_same_batch() {
 }
 #[test]
 fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
-    let (mut e, _, _) = ready(false);
-    e.handle(NOW, Event::Command(Command::FetchAccount { command: 901 }));
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
     let first = requests(&mut e).pop().unwrap();
     reply(
         &mut e,
@@ -448,10 +451,6 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))if message.contains("Invalid signature"))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 901, .. })
-    )));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]

@@ -24,6 +24,7 @@ export const SECTION = {
   POSITION_GREEKS: 18,
   CAPABILITIES: 19,
   UNDERLYING_TOKENS: 20,
+  ACCOUNT_READ: 21,
 };
 
 export const NONE = 0xffffffff;
@@ -225,6 +226,13 @@ export class Frame {
     if (index === NONE) return undefined;
     if (!this.strings) throw new Error('missing STRINGS section for string reference');
     return this.strings.get(index);
+  }
+
+  /** A synchronous read does not represent a fresh streaming observation. */
+  accountRead() {
+    const section = this.first(SECTION.ACCOUNT_READ);
+    if (section && section.length !== 0) throw new Error('Invalid account read marker');
+    return section !== undefined;
   }
 
   /** Markets, replacing any earlier table: row i is market index i. */
@@ -576,15 +584,27 @@ export class Frame {
     const { buffer } = this;
     const count = rowCount(this, section);
     const data = align8(section.offset + 4 + count * 12);
-    requireEnd(section, data + count * (section.revision === 1 ? 20 : 16));
+    const numericEnd = data + count * 16;
+    // Revision 1 appends native symbol refs before the optional aligned tails.
+    const baselineEnd = numericEnd + (section.revision === 1 ? count * 4 : 0);
+    requireEnd(section, baselineEnd);
+    const end = section.offset + section.length;
+    const financialAt = align8(baselineEnd);
+    const financials = end !== baselineEnd && end !== financialAt;
+    if (financials && end !== financialAt + count * 16) throw new Error('invalid fill section length');
     const orderId = new Uint32Array(buffer, section.offset + 4, count);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const side = new Uint32Array(buffer, section.offset + 4 + count * 8, count);
-    const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 12), count * 2);
-    const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 16, count) : undefined;
+    const rows = new Float64Array(buffer, data, count * 2);
+    const symbols = section.revision === 1 ? new Uint32Array(buffer, numericEnd, count) : undefined;
     return { count, market, side, rows,
       ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
-      orderId: (i) => requiredString(this, orderId[i]) };
+      orderId: (i) => requiredString(this, orderId[i]),
+      ...(financials ? {
+        realizedPnl: new Float64Array(buffer, financialAt, count),
+        fee: new Float64Array(buffer, financialAt + count * 8, count),
+      } : {}),
+    };
   }
 }
 
