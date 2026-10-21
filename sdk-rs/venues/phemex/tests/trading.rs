@@ -491,6 +491,60 @@ fn stop_brackets_and_hedged_reduce_side() {
 }
 
 #[test]
+fn index_price_is_encoded_for_standalone_and_attached_protection() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut e = engine();
+        let mut o = opts("");
+        o.kind = kind;
+        o.side = OrderSide::Sell;
+        o.price = Some(if kind == OrderType::StopLoss {
+            68000.
+        } else {
+            70000.
+        });
+        o.trigger_type = Some(StopTriggerType::IndexPrice);
+        o.sl_trigger_type = Some(StopTriggerType::IndexPrice);
+        o.tp_trigger_type = Some(StopTriggerType::IndexPrice);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 95,
+                orders: vec![o],
+            },
+        );
+        let sent = writes(&a);
+        assert_eq!(sent.len(), 1, "{a:?}");
+        assert_eq!(p(&sent[0], "triggerType").as_deref(), Some("ByIndexPrice"));
+        let mut reply = ack(&sent[0], "indexed-stop");
+        reply["data"]["triggerType"] = json!("ByIndexPrice");
+        reply["data"]["stopPxRp"] = json!(p(&sent[0], "stopPxRp").unwrap());
+        let complete = respond(&mut e, &sent[0], reply);
+        assert!(done(&complete).is_ok());
+        assert_eq!(
+            e.store().order("indexed-stop").unwrap().trigger_type,
+            Some(StopTriggerType::IndexPrice)
+        );
+    }
+    let mut e = engine();
+    let mut o = opts("");
+    o.stop_loss = Some(68000.);
+    o.take_profit = Some(70000.);
+    o.sl_trigger_type = Some(StopTriggerType::IndexPrice);
+    o.tp_trigger_type = Some(StopTriggerType::IndexPrice);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 96,
+            orders: vec![o],
+        },
+    );
+    let sent = writes(&a);
+    assert_eq!(sent.len(), 1, "{a:?}");
+    assert_eq!(p(&sent[0], "slTrigger").as_deref(), Some("ByIndexPrice"));
+    assert_eq!(p(&sent[0], "tpTrigger").as_deref(), Some("ByIndexPrice"));
+}
+
+#[test]
 fn trailing_has_full_position_quantity_and_signed_distance() {
     let mut e = engine();
     e.store_mut().set_positions(vec![Position {

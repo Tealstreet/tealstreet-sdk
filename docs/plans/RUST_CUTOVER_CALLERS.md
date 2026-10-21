@@ -1257,3 +1257,11 @@ within those bounds rather than a locally filtered latest-only window. Consumers
 keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
+
+### Phemex explicit index triggers and daily cutoff
+
+Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
+wire value instead of native refusal or TS's mark/last fallback. Default sources
+are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
+keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
+caller signatures are unchanged.
