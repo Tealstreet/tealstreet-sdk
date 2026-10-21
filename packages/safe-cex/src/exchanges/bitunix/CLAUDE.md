@@ -836,3 +836,10 @@ publish; malformed or overflowed coverage cannot establish readiness. Write
 planning/dispatch, responses (including partial cancel ACKs) and cleanup invalidate
 older ordinary reads. Command-owned prerequisites retain global generation fences;
 no write is retried by reconciliation.
+
+Rust per-symbol settings reads retain their attempt serial and accepted settings-
+write revision across position notifications, including activity on other symbols.
+Publication, scoped auth and retry/reset share this fence. Accepted leverage,
+margin and position-mode writes supersede older metadata; refused or unproved
+writes do not. This preserves canonical-market admission, grouped refusals,
+bounded private-read recovery and existing margin-mode fallback.

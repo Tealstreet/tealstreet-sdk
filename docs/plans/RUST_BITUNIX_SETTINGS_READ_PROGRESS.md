@@ -28,3 +28,15 @@ The current balance PR and this branch share a venue crate but have no unlanded
 source dependency. Any eventual merge must integrate actual current landing,
 including #1665 if it lands first, rerun focused/full CI and the separate exact
 scope guard, and report the actual merge pin under the lane rules.
+
+Verification: three original-source regressions fail for defaults remaining10x,
+missing scoped rejection, and hidden real retry failures. The repaired four
+regression groups pass, including primary/secondary credentials, same/other-symbol
+WS overlap, malformed/transport retry progression and accepted/refused/malformed/
+transport-lost leverage/margin/mode ACK controls. Publication-only and auth-only
+write-fence-disabled controls each fail; restored461 Bitunix/Binance native tests
+and strict Clippy/format/bans pass. Two independent correctness/adversarial
+reviews are clear. No private-read/preflight generations or financial mappings
+changed; metadata response/failure/auth consistently use accepted-write revision
+plus symbol attempt serial. Fresh full CI and actual same-crate integration if
+#1665 lands first remain mandatory before any guarded merge.

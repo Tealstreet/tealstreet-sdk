@@ -530,7 +530,7 @@ impl BitunixFutures {
             .str("symbol", symbol);
         let pending = Pending::SymbolSettings {
             symbol: symbol.into(),
-            generation: self.account.generations[Axis::Positions.index()],
+            write_revision: self.account.position_write_revision,
             serial,
         };
         self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
@@ -539,7 +539,7 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        generation: u64,
+        write_revision: u64,
         serial: u64,
         response: Response<'_>,
     ) {
@@ -547,7 +547,7 @@ impl BitunixFutures {
         if !self.account.recovery.settings_current(symbol, serial) {
             return;
         }
-        if generation != self.account.generations[Axis::Positions.index()] {
+        if write_revision != self.account.position_write_revision {
             self.account.symbol_settings.remove(symbol);
             self.account.recovery.defer(
                 cx,
@@ -557,7 +557,7 @@ impl BitunixFutures {
             return;
         }
         let Some(settings) = decode_symbol_settings(&response) else {
-            self.settings_failed(cx, symbol, generation, serial, Some(&response));
+            self.settings_failed(cx, symbol, write_revision, serial, Some(&response));
             return;
         };
         let margin = if settings.margin_mode.eq_ignore_ascii_case("ISOLATION") {
@@ -594,9 +594,9 @@ impl BitunixFutures {
             Pending::Private(read) => self.account_failed(cx, read, None),
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
-            } => self.settings_failed(cx, &symbol, generation, serial, None),
+            } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             _ => cx.retried_failure("bitunix.account:2", error),
         }
     }
@@ -964,7 +964,7 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        generation: u64,
+        write_revision: u64,
         serial: u64,
         response: Option<&Response<'_>>,
     ) {
@@ -973,7 +973,7 @@ impl BitunixFutures {
         }
         self.account.symbol_settings.remove(symbol);
         let key = crate::recovery::Key::Settings(symbol.into());
-        if generation != self.account.generations[Axis::Positions.index()] {
+        if write_revision != self.account.position_write_revision {
             self.account.recovery.defer(cx, key, cx.now + 1000.0);
             return;
         }
@@ -1014,9 +1014,9 @@ impl BitunixFutures {
             }
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
-            } if *generation == self.account.generations[1]
+            } if *write_revision == self.account.position_write_revision
                 && self.account.recovery.settings_current(symbol, *serial) =>
             {
                 let outcome = if rejected {
