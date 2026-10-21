@@ -102,9 +102,9 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-bybit]
 opt-level = "z"
 
-# Its steady public decoder also needs throughput optimization to beat the TS oracle.
+# CI gates the steady public decoder throughput for this size profile.
 [profile.release.package.safe-cex-venue-bingx]
-opt-level = 3
+opt-level = "z"
 
 [profile.release.package.safe-cex-venue-weex]
 opt-level = "z"
@@ -129,9 +129,52 @@ opt-level = 3
 [profile.release.package.safe-cex-engine]
 opt-level = 3
 
-# Keep GRVT ticker decoding optimized for throughput within its solo-WASM budget.
+# CI gates GRVT ticker throughput within the unchanged standalone budget.
 [profile.release.package.safe-cex-venue-grvt]
-opt-level = 3
+opt-level = "z"
 
 [profile.release.package.safe-cex-venue-coinbase]
+opt-level = "z"
+
+# Per-family size profiles; retain only after public timing and complete raw proof.
+[profile.release.package.safe-cex-venue-apexomni]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-asterdex]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-backpack]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-blofin]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-breakoutprop]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-cryptocom]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-hyperliquid]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-kraken]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-lighter]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-mexc]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-okx]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-polymarket]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-txflow]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-woo]
 opt-level = "z"
