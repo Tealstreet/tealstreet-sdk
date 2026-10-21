@@ -687,9 +687,12 @@ separate buy/sell leverage. A rejected write changes neither leg.
 
 Rust `updateSymbolMetadata` performs signed per-symbol leverage then margin-mode
 reads even for flat symbols. Both native rails and an exact CROSSED/ISOLATED
-margin mode commit together. A pending settings write, newer settings/config,
-authoritative nonempty position snapshot or newer query for the same symbol
-invalidates the result; callers can refresh again. Failed reads retain settings.
+margin mode commit together for a current read. A pending settings write, newer
+settings/config, authoritative nonempty position snapshot or newer query for the
+same symbol prevents stale metadata publication. The read still returns current
+cached buy/sell rails, falling back independently to validated read values for
+missing rails. This overlap produces no command failure or null leverage result.
+Failed native reads retain settings.
 ACCOUNT_UPDATE position rows decode independently: valid peers apply, malformed
 rows retain prior state and produce a coded warning plus bounded REST repair.
 Balance-only records remain balance records; source precedence stays P, B, p.
@@ -697,5 +700,7 @@ Balance-only records remain balance records; source precedence stays P, B, p.
 BingX reports `leverageQuery: onReadAndMetadata`: explicit
 `fetchLeverageForSymbol` calls always read fresh data even when rails are cached,
 and `updateSymbolMetadata` refreshes the selected symbol. Both use the same signed
-leverage-then-margin pair and its revision/query-generation fences. A failed margin
-read leaves the prior complete settings intact; no partial rails are published.
+leverage-then-margin pair when current. Superseded reads finish without another
+metadata request; a write pending at issue keeps that read ineligible to publish
+even after the write settles. A failed current margin read leaves the prior
+complete settings intact; no partial rails are published.

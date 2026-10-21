@@ -1588,8 +1588,8 @@ fn a_config_update_during_the_read_wins_over_its_snapshot() {
     let r = h.take(LEVERAGE);
     h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":30,"S":25}}"#);
     h.reply(r.id, 200, FRESH_RAILS);
-    // The atomic pair rejects the stale generation; no stale rails reach the caller.
-    failed_metadata(&h, 12);
+    // The read answers newer cached rails without publishing its stale snapshot.
+    assert_eq!(metadata_rails(&h, 12), (30.0, 25.0));
     assert!(
         !h.requests
             .iter()
@@ -1746,6 +1746,122 @@ fn failed_metadata(h: &Harness, command: u32) {
             .any(|(id, result)| *id == command && result.is_err())
     );
 }
+
+fn metadata_rails(h: &Harness, command: u32) -> (f64, f64) {
+    let results = h
+        .done
+        .iter()
+        .filter(|(id, _)| *id == command)
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 1, "read settles once");
+    let value: serde_json::Value = serde_json::from_str(
+        results[0]
+            .1
+            .as_ref()
+            .expect("settings overlap still returns leverage"),
+    )
+    .unwrap();
+    assert!(!h.command_errors.iter().any(|(id, _)| *id == command));
+    (
+        value["buyLeverage"].as_f64().unwrap(),
+        value["sellLeverage"].as_f64().unwrap(),
+    )
+}
+
+#[test]
+fn metadata_race_with_newer_settings_returns_current_rails_without_publication() {
+    for margin in [false, true] {
+        let mut h = Harness::ready();
+        let read = if margin {
+            margin_stage(&mut h, 920)
+        } else {
+            metadata(&mut h, 920)
+        };
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#);
+        let newer = h.engine.store().setting("BTCUSDT").unwrap();
+        h.reply(
+            read.id,
+            200,
+            if margin {
+                r#"{"code":0,"data":{"marginType":"UNKNOWN"}}"#
+            } else {
+                RAILS
+            },
+        );
+        assert_eq!(metadata_rails(&h, 920), (25.0, 25.0));
+        assert_eq!(h.engine.store().setting("BTCUSDT"), Some(newer));
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("/trade/marginType"))
+        );
+    }
+}
+
+#[test]
+fn metadata_race_with_pending_write_returns_cached_rails_or_read_fallback() {
+    for (buy, sell, expected) in [
+        (Some(20.0), Some(20.0), (20.0, 20.0)),
+        (None, None, (12.0, 34.0)),
+        (Some(47.0), None, (47.0, 34.0)),
+        (None, Some(53.0), (12.0, 53.0)),
+    ] {
+        for failed_write in [false, true] {
+            let mut h = Harness::ready();
+            h.engine.store_mut().update_setting("BTCUSDT", |setting| {
+                setting.buy_leverage = buy;
+                setting.sell_leverage = sell;
+            });
+            h.event(Event::Command(Command::SetLeverage {
+                command: 921,
+                symbol: "BTCUSDT".into(),
+                leverage: 25.0,
+                side: None,
+            }));
+            let write = h.take("/trade/leverage");
+            assert_eq!(write.method, Method::Post);
+            let before = h.engine.store().setting("BTCUSDT").unwrap();
+            let read = metadata(&mut h, 922);
+            assert_eq!(read.method, Method::Get);
+            if failed_write {
+                h.event(Event::HttpFailed {
+                    request: write.id,
+                    error: "scripted write failure",
+                });
+            }
+            h.reply(read.id, 200, RAILS);
+            assert_eq!(metadata_rails(&h, 922), expected);
+            assert_eq!(h.engine.store().setting("BTCUSDT"), Some(before));
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|r| r.url.contains("/trade/marginType"))
+            );
+            assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+        }
+    }
+}
+
+#[test]
+fn superseded_metadata_still_rejects_invalid_native_leverage_responses() {
+    for (status, body) in [
+        (503, "{}"),
+        (200, r#"{"code":109400,"msg":"invalid symbol"}"#),
+        (200, r#"{"code":0,"data":{}}"#),
+        (
+            200,
+            r#"{"code":0,"data":{"longLeverage":0,"shortLeverage":34}}"#,
+        ),
+    ] {
+        let mut h = Harness::ready();
+        let read = metadata(&mut h, 923);
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#);
+        let newer = h.engine.store().setting("BTCUSDT");
+        h.reply(read.id, status, body);
+        failed_metadata(&h, 923);
+        assert_eq!(h.engine.store().setting("BTCUSDT"), newer);
+    }
+}
 #[test]
 fn metadata_failures_never_publish_partial_or_guessed_settings() {
     for (status, body) in [
@@ -1816,8 +1932,13 @@ fn newer_settings_writes_and_snapshots_fence_metadata() {
                 h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#);
             }
         }
+        let newer = h.engine.store().setting("BTCUSDT").unwrap();
         h.reply(read.id, 200, ISOLATED);
-        failed_metadata(&h, 905);
+        assert_eq!(
+            metadata_rails(&h, 905),
+            (newer.buy_leverage.unwrap(), newer.sell_leverage.unwrap())
+        );
+        assert_eq!(h.engine.store().setting("BTCUSDT"), Some(newer));
         assert_ne!(
             h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
             Some(12.0)
@@ -1831,7 +1952,7 @@ fn newer_settings_writes_and_snapshots_fence_metadata() {
     let read = margin_stage(&mut h, 907);
     h.reply(snapshot.id, 200, POSITION);
     h.reply(read.id, 200, ISOLATED);
-    failed_metadata(&h, 907);
+    assert_eq!(metadata_rails(&h, 907), (20.0, 20.0));
 }
 #[test]
 fn metadata_cannot_race_pending_writes_or_a_newer_query() {
@@ -1847,14 +1968,16 @@ fn metadata_cannot_race_pending_writes_or_a_newer_query() {
         command: 909,
         symbol: "BTCUSDT".into(),
     }));
-    failed_metadata(&h, 909);
+    let read = h.take("/trade/leverage");
+    h.reply(read.id, 200, RAILS);
+    assert_eq!(metadata_rails(&h, 909), (20.0, 20.0));
     assert!(!h.requests.iter().any(|r| r.url.contains("/trade/leverage")));
     h.reply(write.id, 200, r#"{"code":0,"data":{}}"#);
     let first = margin_stage(&mut h, 910);
     let second = margin_stage(&mut h, 911);
     h.reply(second.id, 200, ISOLATED);
     h.reply(first.id, 200, ISOLATED);
-    failed_metadata(&h, 910);
+    assert_eq!(metadata_rails(&h, 910), (12.0, 34.0));
     assert!(h.done.iter().any(|(id, r)| *id == 911 && r.is_ok()));
 }
 #[test]
@@ -1922,7 +2045,7 @@ fn metadata_commit_fences_older_positions_and_signature_retries_keep_the_fence()
         let retry = h.take(path);
         h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":50}}"#);
         h.reply(retry.id, 200, if stage == 0 { RAILS } else { ISOLATED });
-        failed_metadata(&h, 913);
+        assert_eq!(metadata_rails(&h, 913), (50.0, 50.0));
         assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
         assert!(!h.requests.iter().any(|r| r.url.contains(path)));
     }
