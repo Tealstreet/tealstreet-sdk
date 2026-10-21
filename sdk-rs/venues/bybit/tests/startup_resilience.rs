@@ -135,3 +135,37 @@ fn ticker_ip_ban_retry_waits_ten_minutes() {
     reply_with_headers(&mut h, "/v5/market/tickers", 403, "");
     assert_retry_waits(&mut h, "/v5/market/tickers", 600_000.0);
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for (filter, field, bad) in [
+        ("priceFilter", "tickSize", "0"),
+        ("lotSizeFilter", "qtyStep", "-0.01"),
+        ("priceFilter", "tickSize", ""),
+    ] {
+        let mut h = Harness::started(Options {
+            public_data_only: true,
+            ..Default::default()
+        });
+        h.respond("status=PreLaunch", 200, PRELAUNCH);
+        let mut body: serde_json::Value = serde_json::from_str(INSTRUMENTS).unwrap();
+        let eth = body["result"]["list"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["symbol"] == "ETHUSDT")
+            .unwrap();
+        eth[filter][field] = bad.into();
+        h.respond("/v5/market/instruments-info", 200, &body.to_string());
+        assert!(h.engine.store().market("BTCUSDT").is_some());
+        assert!(
+            h.engine.store().market("ETHUSDT").is_none(),
+            "{field}={bad:?}"
+        );
+        assert!(
+            h.logs
+                .iter()
+                .any(|line| line.contains("Skipped malformed public discovery row"))
+        );
+    }
+}

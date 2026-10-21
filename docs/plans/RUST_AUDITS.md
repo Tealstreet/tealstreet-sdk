@@ -644,9 +644,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   (`trading.rs:671`)~~ (explicit error).
 - Low: ~~strict leverage fetch~~ (no user impact: the bridge turns a refused
   read into `null` plus a warning, as TS returns `null`); ~~trigger TP/SL not
-  tick-rounded; missing iso/cross warnings; 102143 not translated~~; history
-  shape (order history reports contracts while open orders and fills report
-  base units; Rust preserves TS here by design, `BLOFIN_RUST_PORT.md`).
+  tick-rounded; missing iso/cross warnings; 102143 not translated; history
+  shape~~ (order history now reports base units like open orders and fills, a
+  deliberate divergence from TS; `BLOFIN_RUST_PORT.md`).
 - Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
   zero-size partial TP/SL rejected; amend checks order-detail (endpoint
   unexercised live); per-row cancel errors; empty snapshot commits; income
@@ -713,8 +713,11 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
   engine (needs a resync command); `validateAccount` leaves a started engine.
-- Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
-  `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
+- Low: ~~Asterdex unsupported interval mapped to 1h breaks candle matching~~
+  (typed `Interval` refuses it);
+  ~~`num::adjust` with step ≤ 0~~ (a market without two positive finite steps is
+  a malformed catalogue row on every venue; the guard stays as defence in depth);
+  no command deadline, `execute` drops the batch tail
   on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
 
 ### Kraken
