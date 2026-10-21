@@ -88,3 +88,13 @@ protocol improvement: Rust requires `execution` and `wallet` on every connection
 TS infers fills from cumulative order updates and waits for REST wallet reads.
 The declared exception adds those two required topics to the TS oracle; it does
 not copy Rust subscriptions or hide missing native topics.
+
+## Explicit market refresh and Hyro supervision (2026-10-21)
+
+Plan: add a capability-gated native public catalogue refresh that stages all
+enabled categories atomically, coalesces callers, bounds paging/timeouts and
+preserves account/trading/settings/fee state. Publish through the SDK after a
+host flush and forward read-only worker requests. Confirm the stale Hyro early
+ping finding with a deadline/retired-timer regression. Keep demo-key diagnostics
+in separate #1590. Run Bybit/Binance and touched engine/host/TS gates plus
+independent adversarial review before CI and merge.
