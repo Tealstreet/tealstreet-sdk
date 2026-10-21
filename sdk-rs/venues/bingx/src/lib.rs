@@ -2,6 +2,7 @@
 pub mod account;
 pub mod account_wire;
 mod history;
+mod identity;
 pub mod paths;
 pub mod sign;
 mod trading;
@@ -40,6 +41,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -657,6 +659,12 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -734,6 +742,7 @@ impl Venue for Bingx {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Identity(_) => {}
             Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
@@ -851,6 +860,10 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let pending = match pending {
             Pending::Signed(signed) => {
                 if !signed.resent && signature_rejected(response.body) {
@@ -1045,6 +1058,10 @@ impl Venue for Bingx {
                 self.on_request_failed(cx, signed.inner, error);
                 return;
             }
+            Pending::Identity(command) => {
+                self.identity_failed(cx, command, error);
+                return;
+            }
             Pending::History(request) => {
                 self.history.on_failed(cx, request, error);
                 return;
@@ -1133,6 +1150,10 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::Query { command, query } => {
                 self.history

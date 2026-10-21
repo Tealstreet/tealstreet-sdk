@@ -414,7 +414,8 @@ impl KrakenSpot {
                     .collect();
                 self.enqueue(cx, *command, steps, true)
             }
-            Command::FetchAccount { command } => self.balance_read(cx, Some(*command)),
+            // FetchAccount is refused by the engine (AccountLookup::Unsupported).
+            Command::FetchAccount { .. } => {}
             Command::FetchOrderBook { command, .. } => cx.fail(
                 *command,
                 "Kraken Spot order book snapshots use subscriptions",
