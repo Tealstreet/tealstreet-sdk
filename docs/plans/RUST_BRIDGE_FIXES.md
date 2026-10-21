@@ -523,3 +523,164 @@ Hyperliquid/GRVT/OKX's full account, so resync remains a separate completion-awa
 venue operation. Phase 6b must add classified native credential evidence;
 reflecting manual Base auth-streak mutations alone would not establish actual
 credential backoff. No body/log regex or signed-header inference is planned.
+
+## Phase 6a scheduling foundation plan and audit
+
+- Engine owns an explicit periodic-poll timer registry. `Cx::set_poll_timer`
+  keeps the logical TimerId expected by venue handlers; a bounded variant keeps
+  explicit retry/rate floors. Physical host IDs change on policy replacement so
+  queued stale callbacks cannot execute the newly scheduled logical timer.
+- Apply valid TickIntervalChanged policy centrally before the legacy venue
+  hook. Finite positive values replace fallback cadence; Infinity retains
+  logical registrations while removing physical timers. Invalid updates leave
+  policy unchanged. `clear_timer` removes paused and active registrations.
+  Consume a registration before dispatching its logical callback; asynchronous
+  completion rearms against current policy. Ordinary timers remain unchanged.
+- Enable the existing polling-control decoder for every WASM venue selection.
+  Preserve distinct fallback cadence, absolute cooldown and minimum-backoff
+  floors. Do not treat every native default as a minimum (which would ignore a
+  faster policy), or overwrite backoff with a faster configured cadence.
+- This first slice touches core/host feature plumbing and deterministic core
+  regressions. Venue registration and SDK initialization/update propagation
+  follow after independent review; it does not yet claim all venue polling is
+  fixed. Retain heartbeats, socket recovery, metadata periods, post-write repair,
+  valuation and in-flight deadlines. OKX's valuation/GC timer is not REST
+  polling. Breakout's public-only poll must register even when initially paused.
+- Verify pause at registration, update/resume with fresh physical ID, queued old
+  callbacks, clear while paused, multiple polls, floor preservation, in-flight
+  completion after policy change and unaffected ordinary timers. Run core/native
+  and wasm32 strict checks, parser feature tests and independent review before
+  the foundation commit. No resync/network-completion claim in this slice.
+
+Foundation implemented and independently reviewed PASS. Core all-feature run
+passes 106 cases (91 unit, eight new scheduler, seven shared-feed); default
+feature run passes 100, overlapping those cases rather than adding 100 distinct
+cases. Coinbase-only WASM parser case passes, proving polling-control is no
+longer dependent on enabling Breakout. Strict core all-target/all-feature and
+selected Coinbase/Breakout wasm32 Clippy, bans and scoped fmt pass. Logical
+registrations survive pause, obsolete physical callbacks are fenced, floors
+remain distinct from fallback cadence, and consumed registrations are removed
+before callbacks. Venue timers, SDK policy propagation, classified auth feedback
+and actual account resync are still separate implementation work.
+
+## Phase 6a venue and SDK activation plan
+
+- SDK applies resolved `getTickInterval()` after host construction and before
+  native start. Send Infinity explicitly as null; do not serialize raw options
+  into Orderly's numeric constructor field. Subscribe every Rust venue to server
+  multiplier changes, forward Base auth-streak changes, and observe effective
+  option changes through the existing flush cadence. Send only changed policy,
+  clean listeners on disposal, and preserve errors/startup failure semantics.
+  This proves propagation; native classified credential evidence remains 6b.
+- Native slice A: Binance/Aster, Bybit, Bitget, BloFin, BingX, Backpack, Bitrue,
+  Orderly, Kucoin futures/spot, MEXC, Phemex and WEEX. Replace only recurring
+  account timer registration/rearm with the poll API. Preserve actual native
+  rate/backoff floors, degraded and multi-tick subcadences, listen-key renewal,
+  healing, socket supervision and read deadlines.
+- Native slice B: ApeX, Breakout, Coinbase, Crypto.com, GRVT, Hyperliquid,
+  Kraken futures/spot, Lighter, OKX, Paradex, Polymarket, Txflow and WOO. Preserve
+  urgent post-write repair separately (including Polymarket dirty refresh).
+  Hyperliquid's TS HIP-3 position-refresh interval is a real separate safety-net
+  floor, not permission to poll every dex at the short Base interval. Inspect TS
+  evidence before treating other old native defaults as minimums. OKX valuation
+  and GC keep running while periodic network polling is paused. Breakout retains
+  a logical registration when initially paused, including public-only accounts.
+- Each owner audits exact timer paths/floors before editing and tests actual
+  venue request timing with pause/resume, slower/faster policy and completion
+  after policy changes. Test high-risk rate/backoff/repair controls explicitly;
+  no blind replacement of all `set_timer` calls. Independent source/test review,
+  scoped tests/strict Clippy/fmt, then a combined rebuild and actual SDK controls
+  precede acceptance. No network-resync completion claim from these timers.
+
+## Phase 4a native account-frame API plan and audit
+
+Root owns this independent core/host slice while venue poll activation proceeds.
+`Store::account_snapshot()` selects full private ORDERS/POSITIONS/BALANCE/
+SETTINGS/STATUS with the existing position Greeks/prediction extensions. Carry
+an unflushed market catalog and its existing extensions before private indexes;
+otherwise omit public tables, books, candles and fills. `Engine::account_snapshot_frame`
+uses the existing encoder and reusable snapshot buffer without draining dirty
+tracking, queued events or ticker/book baselines. Expose it as WASM
+`accountSnapshotFrame` and guarded `EngineHost.accountSnapshot()` returning a
+frame for the caller to apply/forward explicitly. It does not emit callbacks or
+claim network refresh; unsupported older engines fail visibly.
+
+Frame headers contain no blanket snapshot-reset bit; only present sections are
+replaced by FrameApplier. Public state therefore survives account-only frames.
+Consumers must first accept native catalog readiness; subsequent catalog
+updates travel with private reads so changed indexes cannot misattribute rows.
+The subsequent SDK slice must synchronize
+before private reads and bulk/direct CLI/chaser decisions, retain native close
+quantities and never treat this snapshot as successful REST resync.
+
+Verify complete zero-row private sections, retained pending private/public
+deltas and queued events, unchanged book baselines, repeatable current balance/
+settings, and host trap/dead/dispose boundaries. No raw native JSON readback or
+changes to existing position/order unit conversions. Core/host checks and an
+independent review precede this API checkpoint; actual SDK consumer proof follows
+after policy propagation releases the wrapper file.
+
+### Poll deadline review correction
+
+The unchanged Breakout control caught first-policy delivery postponing an
+existing poll when its resolved interval matched the startup fallback. New
+mixed-fallback regression proved RED (two replacements instead of one). Keep
+the existing physical deadline when the effective cadence, including a real
+minimum floor, is unchanged; still record policy for later completion/rearm.
+Two new controls cover first delivery and floor-equivalent updates. The
+cooldown control also verifies a genuinely different cadence still rearms.
+All ten scheduler controls now pass; strict all-feature core Clippy passes.
+Independent source review PASS. No ordinary timer behavior changed.
+
+### Account-frame API checkpoint
+
+Implemented the typed native account frame and guarded host API. Independent
+review caught the unflushed catalog race; conditional catalog inclusion and a
+reordering regression close it without flushing public events. Final core
+all-feature checks pass 112 cases (95 unit, ten scheduler, seven shared-feed),
+including four new account-read controls. Host package passes 145 cases; selected
+Binance WASM host passes 13. Core and selected wasm32 strict Clippy pass; API
+source independently reviewed PASS twice. These are core/host evidence, not a
+rebuilt combined artifact or actual SDK consumer acceptance yet.
+
+## Phase 4a SDK current-state plan and audit
+
+Use `host.accountSnapshot()` through one synchronous public
+`syncAccountState()` seam, applying/forwarding with the existing receiveFrame
+path. Before initial native readiness, private async reads await loaded native
+data; fail visibly on unsupported/dead/disposed engines rather than answering
+with a stale JS mirror. Each orders/positions/balance/position-mode read syncs
+the engine state; filtered reads keep their existing shapes. This is an engine
+read, not a network resync. Expose the harmless no-op Base seam so direct
+CLI/chaser store decisions can synchronize without importing the Rust class.
+
+Default cancel-all must derive its symbols from that native state. Retain
+existing venue-global empty-symbol cancellation for WOO, GRVT, KuCoin,
+Polymarket and Breakout. Bulk closes will use the same state seam and the
+established native-size rules (exact contractsNative, inverse notional divided
+by contract size, linear base quantity divided by contract size), not the
+published position quantity. Interrupted/unknown writes must not be retried.
+Verify before-flush changes, native empties clearing stale mirrors, filters,
+frame forwarding without fills/books replay, and wrong-size close regressions.
+Network completion/resync and getAccount identity queries remain separate.
+
+### Poll activation checkpoint
+
+All recurring native account loops now use logical configurable polls: 14 paths
+in slice A and 13 in slice B, with OKX's non-network valuation/GC left ordinary.
+34 new controls cover actual requests, obsolete callbacks, pause/resume,
+completion under a changed policy, urgent repair and absolute failure floors.
+Final native runs pass 2,688 tests (1,326 A plus 1,362 B); the final A rerun also
+passes against the equivalent-deadline core correction. Strict all-target/
+all-feature Clippy, bans and scoped fmt pass for all 26 venue crates. Both
+native slices received independent cross-reviews PASS.
+
+The SDK sends the resolved interval to every registered Rust name before start,
+awaiting a newer policy if it changes during initial delivery. Infinity is
+explicit null, duplicate policies are suppressed, failed delivery is retryable,
+and disposal removes listeners. SDK checks: 354 wrapper cases, final 56 polling
+cases (overlapping the wrapper run except its final added reentry case), 44
+additional consumer cases, types and strict scoped lint pass. Independent
+source and fixture-preservation review PASS. Actual native credential outcome
+feedback remains phase 6b; manually invoking Base auth methods proves only
+resolved-policy propagation. No combined-WASM acceptance claimed yet.

@@ -89,12 +89,6 @@ impl Harness {
                     url,
                     context,
                     ..
-                }
-                | Action::WsConnectWithHeaders {
-                    socket,
-                    url,
-                    context,
-                    ..
                 } => {
                     self.socket_contexts.push((socket, url.clone(), context));
                     self.sockets.push((socket, url))
@@ -127,6 +121,7 @@ impl Harness {
                     self.startup_failures.push(error);
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::Deactivate) => {
                     assert!(
                         self.expect_startup_failure,

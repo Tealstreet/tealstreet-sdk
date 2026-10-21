@@ -5,6 +5,9 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response, Sock
 use safe_cex_venue_asterdex::{AsterDex, Options};
 use serde_json::{Value, json};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 3_000.0;
+
 const MARKETS: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"LOT_SIZE","minQty":"0.001","maxQty":"1000"}]}]}"#;
 const BALANCE: &str = r#"{"totalWalletBalance":"1000","availableBalance":"800","totalInitialMargin":"100","totalOpenOrderInitialMargin":"20","totalUnrealizedProfit":"5"}"#;
 const POSITION: &str = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","entryPrice":"100","unRealizedProfit":"5","liquidationPrice":"20","notional":"100","leverage":"10","marginType":"cross"}]"#;
@@ -16,6 +19,7 @@ struct H {
     timers: Vec<(TimerId, f64)>,
     done: Vec<(u32, Result<String, String>)>,
     logs: Vec<String>,
+    errors: Vec<String>,
     closed: Vec<SocketId>,
 }
 impl H {
@@ -37,6 +41,7 @@ impl H {
             timers: vec![],
             done: vec![],
             logs: vec![],
+            errors: vec![],
             closed: vec![],
         };
         h.engine.start(h.now);
@@ -76,7 +81,12 @@ impl H {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Log { level, message }) => {
+                    if level == safe_cex_engine::LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
+                }
                 _ => {}
             }
         }
@@ -241,12 +251,12 @@ fn order_terminal_and_cumulative_guards_survive_stale_ws_and_rest() {
     );
 }
 #[test]
-fn unidentifiable_position_row_preserves_last_good_state() {
+fn unidentifiable_position_row_keeps_stored_positions_while_valid_rows_commit() {
     let mut h = H::new();
     h.fire_after(27000.0);
     h.reply("/positionRisk",r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","entryPrice":"0","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"25"}, {"positionAmt":"1"}]"#);
     assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
-    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 25.0);
 }
 #[test]
 fn legacy_execution_and_balance_remain_supported() {
@@ -552,6 +562,173 @@ fn leverage_metadata_command_completes_from_native_settings() {
     assert_eq!(output, json!({"buyLeverage":10,"sellLeverage":10}));
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = H::new();
+    let now = h.now;
+    let engine = &mut h.engine;
+    let (now, mut reads) = policy_poll_read(engine, now, "/account");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("/account") {
+                BALANCE
+            } else if r.url.contains("positionRisk") {
+                POSITION
+            } else {
+                "[]"
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
 fn place(h: &mut H, command: u32, order: Value) {
     h.event(Event::Command(safe_cex_engine::Command::PlaceOrders {
         command,
@@ -617,7 +794,7 @@ fn malformed_open_order_row_is_skipped_and_keeps_known_copy() {
     assert!(
         h.logs
             .iter()
-            .any(|l| l.contains("skipped 1 malformed open order row(s): 123"))
+            .any(|l| l == "Aster skipped malformed open order row 123")
     );
 }
 #[test]
@@ -845,4 +1022,127 @@ fn late_listen_key_response_after_connect_deadline_does_not_replace_the_new_sess
     h.now = at;
     h.event(Event::TimerFired { timer });
     assert_eq!(h.take("/listenKey").method, safe_cex_engine::Method::Post);
+}
+#[test]
+fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let leg = |side: &str, amount: &str, entry: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"{entry}","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"5"}}"#
+        )
+    };
+    let order = |id: u64, price: &str, qty: &str| {
+        format!(
+            r#"{{"orderId":{id},"symbol":"BTCUSDT","type":"LIMIT","side":"SELL","price":"{price}","origQty":"{qty}","executedQty":"0","status":"NEW","timeInForce":"GTC","reduceOnly":false,"closePosition":false}}"#
+        )
+    };
+    let read = |h: &mut H, positions: &[String], orders: &[String]| {
+        h.fire_after(75_000.0);
+        h.reply("/positionRisk", &format!("[{}]", positions.join(",")));
+        h.reply("/openOrders", &format!("[{}]", orders.join(",")));
+    };
+    let mut h = H::pending_mode();
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
+    read(
+        &mut h,
+        &[leg("LONG", "1", "100"), leg("SHORT", "-2", "100")],
+        &[order(123, "100", "1"), order(200, "110", "1")],
+    );
+    assert_eq!(h.engine.store().positions().len(), 2);
+    assert_eq!(h.engine.store().orders().len(), 2);
+    h.logs.clear();
+
+    // The identity-less row protects every stored row but no longer withholds valid peers.
+    read(
+        &mut h,
+        &[
+            leg("LONG", "3", "100"),
+            leg("SHORT", "-5", "bad"),
+            r#"{"positionAmt":"1"}"#.into(),
+        ],
+        &[order(123, "100", "bad"), order(200, "111", "1")],
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 3.0);
+    assert_eq!(store.position("BTCUSDT:short").unwrap().contracts, 2.0);
+    assert_eq!(store.order("200").unwrap().price, 111.0);
+    assert_eq!(store.order("123").unwrap().amount, 1.0);
+    for message in [
+        "Aster skipped malformed position row BTCUSDT:short",
+        "Aster skipped malformed position row without a symbol",
+        "Aster skipped malformed open order row 123",
+    ] {
+        assert!(h.logs.iter().any(|l| l == message), "{message}");
+    }
+    assert!(!h.logs.iter().any(|l| l.contains("bad")));
+
+    read(
+        &mut h,
+        &[leg("LONG", "3", "100")],
+        &[order(200, "111", "1")],
+    );
+    let store = h.engine.store();
+    assert!(store.position("BTCUSDT:short").is_none());
+    assert_eq!(store.positions().len(), 1);
+    assert!(store.order("123").is_none());
+    assert_eq!(store.orders().len(), 1);
+}
+#[test]
+fn rejected_position_row_with_no_stored_copy_is_reported_as_an_error() {
+    let read = |h: &mut H, positions: &str| {
+        h.fire_after(75_000.0);
+        h.reply("/positionRisk", positions);
+        h.reply("/openOrders", "[]");
+    };
+    let mut h = H::new();
+    // With a stored copy to keep, a skipped row is only a warning.
+    read(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#,
+    );
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert!(h.errors.is_empty());
+    read(&mut h, "[]");
+    assert!(h.engine.store().positions().is_empty());
+
+    // With nothing stored, the snapshot commits as flat, so each skip is an error.
+    read(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"},{"positionAmt":"1"}]"#,
+    );
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.errors,
+        [
+            "Aster skipped malformed position row BTCUSDT",
+            "Aster skipped malformed position row without a symbol",
+        ]
+    );
+}
+#[test]
+fn a_repeated_position_skip_logs_once_until_the_row_maps_again() {
+    let read = |h: &mut H, positions: &str| {
+        h.fire_after(75_000.0);
+        // The periodic clock re-sync gates signed reads.
+        if h.requests.iter().any(|r| r.url.contains("/time")) {
+            let time = format!(r#"{{"serverTime":{}}}"#, h.now);
+            h.reply("/time", &time);
+        }
+        h.reply("/positionRisk", positions);
+        h.reply("/openOrders", "[]");
+    };
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#;
+    let mut h = H::new();
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors, ["Aster skipped malformed position row BTCUSDT"]);
+    // The same skip on the next poll is not reported again.
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 1);
+
+    // Once the row maps, a recurrence is reported again.
+    read(&mut h, POSITION);
+    assert_eq!(h.engine.store().positions().len(), 1);
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 2);
 }

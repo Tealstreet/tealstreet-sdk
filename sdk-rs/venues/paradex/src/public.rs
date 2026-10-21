@@ -146,7 +146,13 @@ impl Paradex {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws())
+                    .channel(SocketChannel::Public)
+                    .binary(),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -635,6 +641,14 @@ impl Paradex {
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
+                let precision = Precision {
+                    amount: m.step_size.0,
+                    price: m.tick_size.0,
+                };
+                if !precision.is_tradable() {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                }
                 let imf = if m.delta1_cross_margin_params.imf_base.0 > 0. {
                     m.delta1_cross_margin_params.imf_base.0
                 } else {
@@ -656,10 +670,7 @@ impl Paradex {
                     base: m.base_currency.into_owned(),
                     quote: m.quote_currency.into_owned(),
                     active: true,
-                    precision: Precision {
-                        amount: m.step_size.0,
-                        price: m.tick_size.0,
-                    },
+                    precision,
                     limits: Limits {
                         amount: MinMax {
                             min: m.min_order_size.0,
@@ -1245,7 +1256,7 @@ mod tests {
                 }
             })
             .unwrap();
-        e.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","price_bands_width":"5","max_slippage":"0.01"},{"symbol":"ETH-USD-PERP","asset_kind":"PERP","max_slippage":"0.03"},{"symbol":"SOL-USD-PERP","asset_kind":"PERP","price_bands_width":"0.07"}]}"#}});
+        e.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"5","max_slippage":"0.01"},{"symbol":"ETH-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","max_slippage":"0.03"},{"symbol":"SOL-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"0.07"}]}"#}});
         assert_eq!(
             e.venue().public.price_bands.get("BTC-USD-PERP"),
             Some(&0.05)
@@ -1273,7 +1284,7 @@ mod tests {
                 }
             })
             .unwrap();
-        failed.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","price_bands_width":"5"},{"symbol":"ETH-USD-PERP","step_size":"invalid"}]}"#}});
+        failed.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","price_bands_width":"5"},{"symbol":"ETH-USD-PERP","step_size":"invalid"}]}"#}});
         assert!(failed.store().loaded().markets);
         assert_eq!(failed.store().markets().len(), 1);
         assert_eq!(

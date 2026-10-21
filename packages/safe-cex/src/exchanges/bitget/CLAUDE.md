@@ -916,5 +916,5 @@ read-only credentials as `InvalidInput`. Before the account loads, a socket logi
 refused with 30011/30012 (`event: "error"` or `login`) fails startup; other login
 errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
 account timers and retires the private socket; a refused trading key also emits
-`Deactivate`. The probe backoff does not yet honour the 30 s `rest_paused_until`
-window after a 429/418.
+`Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
+and the probe retry waits out that window; transport failures keep plain backoff.
