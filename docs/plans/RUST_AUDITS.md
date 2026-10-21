@@ -952,13 +952,19 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - ~~MEXC ignores `SetTickerSymbols`~~ (repaired; dynamic public-demand tests).
   Other no-op arms are not proof of missing data: aggregate/all-market feeds
   already satisfy subsets. Require a demonstrated missing requested feed.
-- History completeness: fourteen query-associated markers in Bitunix, BloFin,
-  Bybit, Hyperliquid, OKX, Paradex and WEEX omit `fields.command`, leaving their
+- History completeness: the sweep found fourteen query-associated markers in
+  Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX omitting `fields.command`, leaving their
   returned partial history unflagged and worker owners unwarned. Attribute to
   the actual request before completion; preserve Warn semantics, result/error
   policy and #1593's client isolation. Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
   attach a fabricated request ID or broadcast unowned semantic markers.
+  ~~WEEX's five query-associated omissions~~ now carry the actual income query
+  command before retained-row completion or failure, including lifetime/chunk
+  budgets, opaque cursors and read errors. Native ownership/order regressions
+  and a native-verified fixture through host/worker overlapping-client isolation
+  cover the fix; range continuation and failure policy remain intact. Nine
+  query-associated omissions remain in the other six venues.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
