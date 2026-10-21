@@ -323,7 +323,7 @@ impl Blofin {
         }
         self.account.session_started = cx.now;
         self.private_connect(cx);
-        self.account.tick = Some(cx.set_timer(10_000.0));
+        self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
     }
@@ -1866,9 +1866,18 @@ impl Blofin {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
             }
-            self.account.tick = Some(
-                cx.set_timer(Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)),
-            );
+            let not_before_ms = if self.account.auth_failures > 0 {
+                cx.now + Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)
+            } else {
+                f64::NEG_INFINITY
+            };
+            self.account.tick = Some(cx.set_poll_timer_with_bounds(
+                10_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms,
+                    ..Default::default()
+                },
+            ));
             return true;
         }
         if self.account.debounce == Some(timer) {

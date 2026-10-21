@@ -963,7 +963,7 @@ impl Coinbase {
         }
         self.private_connect(cx);
         self.account_poll(cx, true);
-        self.account.tick = Some(cx.set_timer(5000.0));
+        self.account.tick = Some(cx.set_poll_timer(5000.0));
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.opened = false;
@@ -1230,7 +1230,7 @@ impl Coinbase {
                     !cx.store.loaded().orders || cx.now - self.account.last_orders >= gap,
                 );
             }
-            self.account.tick = Some(cx.set_timer(5000.0));
+            self.account.tick = Some(cx.set_poll_timer(5000.0));
             return true;
         }
         false

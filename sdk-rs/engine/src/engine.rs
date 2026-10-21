@@ -13,12 +13,42 @@ use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
 
+/// Bounds on a host-scaled poll cadence, beyond a venue's own native cadence.
+pub const POLL_POLICY_FLOOR_MS: f64 = 1_000.0;
+pub const POLL_POLICY_CAP_MS: f64 = 120_000.0;
+
+/// Bound a configured absolute cadence; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(POLL_POLICY_FLOOR_MS, POLL_POLICY_CAP_MS)
+    } else {
+        f64::INFINITY
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SocketId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RequestId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TimerId(pub u32);
+/// Explicit limits on a periodic poll, separate from its fallback cadence.
+#[derive(Clone, Copy, Debug)]
+pub struct PollTimerBounds {
+    /// Recurring rate floor, including after configuration changes.
+    pub minimum_interval_ms: f64,
+    /// Absolute cooldown/backoff deadline; configuration changes never move it.
+    pub not_before_ms: f64,
+}
+
+impl Default for PollTimerBounds {
+    fn default() -> Self {
+        Self {
+            minimum_interval_ms: 0.,
+            not_before_ms: f64::NEG_INFINITY,
+        }
+    }
+}
 /// Correlates a [`Command`] with its [`Notice::CommandDone`].
 pub type CommandId = u32;
 
@@ -524,9 +554,14 @@ impl<'a> Response<'a> {
 }
 
 pub enum Event<'a> {
-    /// Host configuration update; infinity pauses optional venue polling.
-    TickIntervalChanged {
-        interval_ms: f64,
+    /// Host polling policy: a factor on each poll's own cadence (resolved SDK
+    /// tick over its metadata tick); infinity pauses optional venue polling.
+    PollScaleChanged {
+        scale: f64,
+    },
+    /// Host's absolute bound on slowed polls (its resolved tick); `None` lifts it.
+    PollCeilingChanged {
+        ceiling_ms: Option<f64>,
     },
     WsOpened {
         socket: SocketId,
@@ -610,6 +645,185 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
+struct PollTimer {
+    logical: TimerId,
+    default_interval_ms: f64,
+    bounds: PollTimerBounds,
+    physical: Option<TimerId>,
+}
+
+/// Host poll policy and the registered polls. Deliberately not generic over a
+/// venue's pending type: every venue in a bundle shares this one copy.
+#[derive(Default)]
+struct Polls {
+    scale: Option<f64>,
+    ceiling_ms: Option<f64>,
+    /// A venue registers only a few polls, kept in registration order.
+    entries: Vec<PollTimer>,
+}
+
+/// The engine timer state a poll change writes to.
+struct TimerSink<'a> {
+    next_id: &'a mut u32,
+    timers: &'a mut HashMap<TimerId, ()>,
+    actions: &'a mut Vec<Action>,
+}
+
+fn next_engine_id(next_id: &mut u32) -> u32 {
+    let id = *next_id;
+    *next_id = next_id.wrapping_add(1).max(1);
+    id
+}
+
+impl TimerSink<'_> {
+    fn clear(&mut self, timer: TimerId) {
+        if self.timers.remove(&timer).is_some() {
+            self.actions.push(Action::ClearTimer { timer });
+        }
+    }
+}
+
+/// A poll's own cadence times the host scale. A slowdown never exceeds the
+/// host's absolute ceiling unless the native cadence is already slower.
+fn poll_interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
+    let scale = scale.unwrap_or(1.);
+    // Only an explicit infinite scale or native cadence pauses; a huge finite
+    // scale overflowing the product is still finite and takes the cap below.
+    if scale == f64::INFINITY || default_ms == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    let interval = (default_ms * scale).min(f64::MAX);
+    let interval = match ceiling_ms {
+        Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
+            interval.min(default_ms.max(ceiling))
+        }
+        _ => interval,
+    };
+    // Host policy cannot flood a venue or overflow a timer; infinity pauses.
+    if interval.is_finite() {
+        interval.clamp(
+            default_ms.min(POLL_POLICY_FLOOR_MS),
+            default_ms.max(POLL_POLICY_CAP_MS),
+        )
+    } else {
+        interval
+    }
+}
+
+impl Polls {
+    fn interval(&self, default_ms: f64) -> f64 {
+        poll_interval_for(default_ms, self.scale, self.ceiling_ms)
+    }
+
+    fn current_interval(&self, logical: TimerId) -> Option<f64> {
+        let poll = self.entries.iter().find(|poll| poll.logical == logical)?;
+        Some(
+            self.interval(poll.default_interval_ms)
+                .max(poll.bounds.minimum_interval_ms),
+        )
+    }
+
+    fn arm(&mut self, now: f64, index: usize, sink: &mut TimerSink<'_>) {
+        let interval = self.interval(self.entries[index].default_interval_ms);
+        let poll = &mut self.entries[index];
+        // Never hand an infinite/invalid deadline to a host. Infinity policy
+        // retains the registration so a finite update can resume it.
+        if !interval.is_finite()
+            || interval <= 0.
+            || !poll.bounds.minimum_interval_ms.is_finite()
+            || poll.bounds.minimum_interval_ms < 0.
+            || poll.bounds.not_before_ms.is_nan()
+        {
+            return;
+        }
+        let at_ms =
+            (now + interval.max(poll.bounds.minimum_interval_ms)).max(poll.bounds.not_before_ms);
+        if !at_ms.is_finite() {
+            return;
+        }
+        let physical = TimerId(next_engine_id(sink.next_id));
+        poll.physical = Some(physical);
+        sink.timers.insert(physical, ());
+        sink.actions.push(Action::SetTimer {
+            timer: physical,
+            at_ms,
+        });
+    }
+
+    fn register(
+        &mut self,
+        now: f64,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+        sink: &mut TimerSink<'_>,
+    ) -> TimerId {
+        let logical = TimerId(next_engine_id(sink.next_id));
+        self.entries.push(PollTimer {
+            logical,
+            default_interval_ms,
+            bounds,
+            physical: None,
+        });
+        self.arm(now, self.entries.len() - 1, sink);
+        logical
+    }
+
+    /// Removes a registration; false when `logical` is not a poll.
+    fn clear(&mut self, logical: TimerId, sink: &mut TimerSink<'_>) -> bool {
+        let Some(index) = self.entries.iter().position(|poll| poll.logical == logical) else {
+            return false;
+        };
+        if let Some(physical) = self.entries.remove(index).physical {
+            sink.clear(physical);
+        }
+        true
+    }
+
+    /// A fired physical timer ends its one-shot registration; returns the
+    /// logical ID the venue knows.
+    fn fired(&mut self, physical: TimerId) -> Option<TimerId> {
+        let index = self
+            .entries
+            .iter()
+            .position(|poll| poll.physical == Some(physical))?;
+        Some(self.entries.remove(index).logical)
+    }
+
+    fn set_policy(
+        &mut self,
+        now: f64,
+        scale: Option<f64>,
+        ceiling_ms: Option<f64>,
+        sink: &mut TimerSink<'_>,
+    ) {
+        let (old_scale, old_ceiling) = (self.scale, self.ceiling_ms);
+        if (old_scale, old_ceiling) == (scale, ceiling_ms) {
+            return;
+        }
+        self.scale = scale;
+        self.ceiling_ms = ceiling_ms;
+        // Registration order keeps action ordering deterministic.
+        for index in 0..self.entries.len() {
+            let poll = &self.entries[index];
+            let old_interval = poll_interval_for(poll.default_interval_ms, old_scale, old_ceiling);
+            let new_interval = poll_interval_for(poll.default_interval_ms, scale, ceiling_ms);
+            if old_interval.is_finite()
+                && old_interval > 0.
+                && new_interval.is_finite()
+                && old_interval.max(poll.bounds.minimum_interval_ms)
+                    == new_interval.max(poll.bounds.minimum_interval_ms)
+            {
+                // An equivalent cadence must not postpone an already due poll.
+                continue;
+            }
+            if let Some(physical) = self.entries[index].physical.take() {
+                sink.clear(physical);
+            }
+            self.arm(now, index, sink);
+        }
+    }
+}
+
 struct Io<P> {
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
@@ -626,6 +840,7 @@ struct Io<P> {
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
+    polls: Polls,
     next_id: u32,
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
@@ -656,6 +871,7 @@ impl<P> Default for Io<P> {
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
+            polls: Polls::default(),
             next_id: 1,
             changed_books: Vec::new(),
             changed_books_active: 0,
@@ -675,9 +891,19 @@ impl<P> Io<P> {
         Some(self.signatures.swap_remove(index).1)
     }
     fn next(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
-        id
+        next_engine_id(&mut self.next_id)
+    }
+
+    /// Splits the poll registry from the timer state it writes to.
+    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
+        (
+            &mut self.polls,
+            TimerSink {
+                next_id: &mut self.next_id,
+                timers: &mut self.timers,
+                actions: &mut self.actions,
+            },
+        )
     }
 }
 
@@ -895,9 +1121,36 @@ impl<P> Cx<'_, P> {
         timer
     }
 
+    /// Register one periodic-poll wakeup. The configured positive interval
+    /// replaces this fallback cadence; Infinity pauses without losing it.
+    /// Rearm from the venue callback or read completion for the next cycle.
+    pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
+        self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
+    }
+    /// The interval a registered poll is armed with under the current host
+    /// policy (bounded, and infinite while paused).
+    pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
+        self.io.polls.current_interval(timer)
+    }
+
+    /// Configuration changes rearm from change-time, honoring both the recurring
+    /// minimum and the unchanged absolute deadline. Backoff should therefore be
+    /// an absolute `not_before_ms`, not the fallback cadence. Invalid bounds or
+    /// nonfinite due times stay parked rather than reaching a host timer.
+    pub fn set_poll_timer_with_bounds(
+        &mut self,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+    ) -> TimerId {
+        let now = self.now;
+        let (polls, mut sink) = self.io.polls();
+        polls.register(now, default_interval_ms, bounds, &mut sink)
+    }
+
     pub fn clear_timer(&mut self, timer: TimerId) {
-        if self.io.timers.remove(&timer).is_some() {
-            self.io.actions.push(Action::ClearTimer { timer });
+        let (polls, mut sink) = self.io.polls();
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
         }
     }
 
@@ -1121,7 +1374,7 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
-    fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
+    fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
@@ -1510,12 +1763,20 @@ impl<V: Venue> Engine<V> {
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
         match event {
-            Event::TickIntervalChanged { interval_ms } => {
-                // Invalid typed inputs retain the last policy, just as rejected JSON does.
-                if interval_ms > 0.0 {
-                    self.venue
-                        .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
+            Event::PollScaleChanged { scale } => {
+                if scale.is_nan() || scale <= 0. {
+                    return;
                 }
+                let (polls, mut sink) = cx.io.polls();
+                let ceiling = polls.ceiling_ms;
+                polls.set_policy(now, Some(scale), ceiling, &mut sink);
+                self.venue.on_poll_scale(&mut cx, scale)
+            }
+            Event::PollCeilingChanged { ceiling_ms } => {
+                let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
+                let (polls, mut sink) = cx.io.polls();
+                let scale = polls.scale;
+                polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => {
                 cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
@@ -1591,7 +1852,8 @@ impl<V: Venue> Engine<V> {
             }
             Event::TimerFired { timer } => {
                 if cx.io.timers.remove(&timer).is_some() {
-                    self.venue.on_timer(&mut cx, timer);
+                    let logical = cx.io.polls.fired(timer).unwrap_or(timer);
+                    self.venue.on_timer(&mut cx, logical);
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
@@ -1868,6 +2130,17 @@ impl<V: Venue> Engine<V> {
         &self.io.snapshot
     }
 
+    /// Full private sections and any unflushed market catalog, without consuming
+    /// changes, queued events or public stream baselines.
+    pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
+        let buffer = std::mem::take(&mut self.io.snapshot);
+        let mut writer = FrameWriter::new(buffer, now);
+        self.store
+            .write(&self.store.account_snapshot(), &mut writer);
+        self.io.snapshot = writer.finish();
+        &self.io.snapshot
+    }
+
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
@@ -2039,15 +2312,6 @@ impl<V: Venue> Engine<V> {
     }
 }
 
-/// Bound account polling pressure; positive infinity explicitly pauses polling.
-pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
-    if interval_ms.is_finite() {
-        interval_ms.clamp(1_000.0, 120_000.0)
-    } else {
-        f64::INFINITY
-    }
-}
-
 fn apply_signature(
     http: &mut HttpRequest,
     target: &SignatureTarget,
@@ -2203,7 +2467,6 @@ mod streaming_tests {
     }
 
     struct StreamVenue {
-        interval: f64,
         at: ArrayAt,
         rows: Vec<String>,
         body: Option<String>,
@@ -2308,9 +2571,6 @@ mod streaming_tests {
         ) {
             self.failure = Some(error.to_owned());
         }
-        fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, interval_ms: f64) {
-            self.interval = interval_ms;
-        }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn capabilities(&self) -> Capabilities {
             Capabilities {
@@ -2339,28 +2599,6 @@ mod streaming_tests {
                     .into_iter()
                     .map(|book| ("A", book)),
             )
-        }
-    }
-
-    #[test]
-    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
-        let mut engine = frame_engine();
-        for (input, expected) in [
-            (0.00001, 1_000.0),
-            (1e300, 120_000.0),
-            (f64::INFINITY, f64::INFINITY),
-        ] {
-            engine.handle(0.0, Event::TickIntervalChanged { interval_ms: input });
-            assert_eq!(engine.venue.interval, expected);
-        }
-        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
-            engine.handle(
-                0.0,
-                Event::TickIntervalChanged {
-                    interval_ms: invalid,
-                },
-            );
-            assert_eq!(engine.venue.interval, f64::INFINITY);
         }
     }
 
@@ -2856,8 +3094,8 @@ mod streaming_tests {
         assert!(!engine.has_received_commands());
         engine.handle(
             1.,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         assert!(
@@ -2881,7 +3119,6 @@ mod streaming_tests {
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
         let mut engine = Engine::new(StreamVenue {
-            interval: 0.0,
             at,
             rows: Vec::new(),
             body: None,
@@ -2918,7 +3155,6 @@ mod streaming_tests {
 
     fn frame_engine() -> Engine<StreamVenue> {
         Engine::new(StreamVenue {
-            interval: 0.0,
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,
@@ -2930,6 +3166,213 @@ mod streaming_tests {
             fence_uncertain: true,
             commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn account_snapshot_has_complete_empty_private_sections_without_public_tables() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        engine.store.set_balance(crate::model::Balance {
+            used: 1.,
+            free: 2.,
+            total: 3.,
+            upnl: 4.,
+        });
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        assert_eq!(
+            sections.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            [
+                section::ORDERS,
+                section::POSITIONS,
+                section::BALANCE,
+                section::SETTINGS,
+                section::STATUS
+            ]
+        );
+        for kind in [section::ORDERS, section::POSITIONS, section::SETTINGS] {
+            let payload = sections.iter().find(|(id, _)| *id == kind).unwrap().1;
+            assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 0);
+        }
+        let balance = sections
+            .iter()
+            .find(|(id, _)| *id == section::BALANCE)
+            .unwrap()
+            .1;
+        assert_eq!(
+            balance[..32]
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|row| f64::from_le_bytes(*row))
+                .collect::<Vec<_>>(),
+            [1., 2., 3., 4.]
+        );
+        assert_eq!(engine.account_snapshot_frame(1.), snapshot);
+        assert!(
+            engine.take_frame(1.).is_some(),
+            "snapshot must leave dirty private state for the stream"
+        );
+        assert!(engine.take_frame(1.).is_none());
+        assert_eq!(
+            engine.account_snapshot_frame(1.),
+            snapshot,
+            "clean state remains readable"
+        );
+    }
+
+    #[test]
+    fn account_snapshot_carries_unflushed_catalog_reordering_before_private_indexes() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A"), market("B")]);
+        engine.take_frame(0.);
+        engine.store.set_positions(vec![crate::model::Position {
+            id: "A:long".into(),
+            symbol: "A".into(),
+            side: crate::model::PositionSide::Long,
+            entry_price: 10.,
+            notional: 20.,
+            leverage: 2.,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: 0.,
+            realized_pnl: None,
+            contracts: 2.,
+            liquidation_price: 0.,
+            margin_size: None,
+            last_update: None,
+        }]);
+        engine.store.set_markets(vec![market("B"), market("A")]);
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        assert_eq!(sections[0].0, section::MARKETS);
+        let positions = sections
+            .iter()
+            .find(|(kind, _)| *kind == section::POSITIONS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(positions[4..8].try_into().unwrap()), 1);
+        assert!(sections.iter().all(|(kind, _)| !matches!(
+            *kind,
+            section::TICKERS
+                | section::TICKER_DELTAS
+                | section::BOOK
+                | section::CANDLES
+                | section::FILLS
+        )));
+        assert_eq!(engine.account_snapshot_frame(1.), snapshot);
+        let normal = engine.take_frame(1.).unwrap().to_vec();
+        for kind in [section::MARKETS, section::POSITIONS] {
+            assert_eq!(
+                crate::wire::sections(&normal)
+                    .find(|(id, _)| *id == kind)
+                    .unwrap()
+                    .1,
+                sections.iter().find(|(id, _)| *id == kind).unwrap().1,
+                "account read must leave the catalog and private changes pending"
+            );
+        }
+        assert!(engine.take_frame(1.).is_none());
+        assert!(
+            crate::wire::sections(engine.account_snapshot_frame(1.))
+                .all(|(kind, _)| kind != section::MARKETS)
+        );
+    }
+
+    #[test]
+    fn account_snapshot_leaves_public_events_and_ticker_deltas_for_their_normal_flushes() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.store.set_tickers(vec![crate::model::Ticker {
+            symbol: "A".into(),
+            ..Default::default()
+        }]);
+        engine.take_frame(0.);
+        engine.store.update_ticker("A", |ticker| ticker.last = 99.);
+        engine.store.set_balance(crate::model::Balance {
+            free: 10.,
+            ..Default::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.book_changed("A");
+            cx.candle(
+                "A",
+                Interval::M1,
+                crate::model::Candle {
+                    timestamp: 1.,
+                    open: 98.,
+                    high: 100.,
+                    low: 97.,
+                    close: 99.,
+                    volume: 2.,
+                },
+            );
+            cx.fill(Fill {
+                order_id: "9007199254740995".into(),
+                symbol: "A".into(),
+                side: OrderSide::Buy,
+                price: 99.,
+                amount: 1.,
+            });
+        }
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        assert!(crate::wire::sections(&snapshot).all(|(kind, _)| !matches!(
+            kind,
+            section::MARKETS
+                | section::TICKERS
+                | section::TICKER_DELTAS
+                | section::BOOK
+                | section::BOOK_DELTA
+                | section::CANDLES
+                | section::FILLS
+        )));
+        let market = engine.take_market_frame(1.).unwrap().to_vec();
+        let kinds = crate::wire::sections(&market)
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        for kind in [section::BOOK, section::CANDLES, section::FILLS] {
+            assert!(kinds.contains(&kind));
+        }
+        assert!(
+            engine.take_market_frame(1.).is_none(),
+            "events must flush exactly once"
+        );
+        let normal = engine.take_frame(1.).unwrap().to_vec();
+        let kinds = crate::wire::sections(&normal)
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&section::TICKER_DELTAS));
+        assert!(kinds.contains(&section::BALANCE));
+        assert!(engine.take_frame(1.).is_none());
+    }
+
+    #[cfg(feature = "book-deltas")]
+    #[test]
+    fn account_snapshots_do_not_advance_or_reset_the_book_delta_baseline() {
+        use crate::book::BookSide::Bids;
+        let mut engine = frame_engine();
+        engine.set_book_deltas(true);
+        engine.store.set_markets(vec![market("A")]);
+        change_book(&mut engine, Bids, 100., 1.);
+        engine.take_frame(0.);
+        change_book(&mut engine, Bids, 100., 2.);
+        engine.account_snapshot_frame(1.);
+        let rows = book_sections(engine.take_market_frame(1.).unwrap());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, section::BOOK_DELTA);
+        change_book(&mut engine, Bids, 100., 3.);
+        engine.account_snapshot_frame(2.);
+        change_book(&mut engine, Bids, 100., 2.);
+        assert!(
+            engine.take_market_frame(2.).is_none(),
+            "baseline must remain the last flushed size"
+        );
     }
 
     #[test]
@@ -4195,12 +4638,7 @@ mod startup_watch_tests {
     }
 
     fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
-        engine.handle(
-            now,
-            Event::TickIntervalChanged {
-                interval_ms: 1000.0,
-            },
-        );
+        engine.handle(now, Event::PollScaleChanged { scale: 1.0 });
         engine
             .drain_actions()
             .filter_map(|action| match action {
@@ -4208,6 +4646,91 @@ mod startup_watch_tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    struct PollVenue;
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351: typed native policy events obey the same bounds as host
+    // commands, and invalid typed inputs retain the last policy.
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        for (input, expected) in [(0.00001, 1_000.0), (1e300, 120_000.0)] {
+            let scale = input / 2_000.0;
+            let typed = armed_after(|engine| {
+                engine.handle(0.0, Event::PollScaleChanged { scale });
+            });
+            assert_eq!(typed, [expected]);
+            #[cfg(feature = "polling-control")]
+            {
+                let json = format!(r#"{{"op":"setPollScale","scale":{scale}}}"#);
+                let crate::command::HostInput::PollScaleChanged { scale: decoded, .. } =
+                    crate::command::decode_host_input(&json).unwrap()
+                else {
+                    panic!("{json} must decode as a polling control")
+                };
+                let commanded = armed_after(|engine| {
+                    engine.handle(0.0, Event::PollScaleChanged { scale: decoded });
+                });
+                assert_eq!(typed, commanded, "typed and host-command bounds agree");
+            }
+        }
+        let mut engine = Engine::new(PollVenue);
+        engine.start(0.0);
+        engine.handle(
+            0.0,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
+            },
+        );
+        assert!(
+            engine
+                .drain_actions()
+                .any(|action| matches!(action, Action::ClearTimer { .. }))
+        );
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(0.0, Event::PollScaleChanged { scale: invalid });
+            assert!(
+                !engine
+                    .drain_actions()
+                    .any(|action| matches!(action, Action::SetTimer { .. })),
+                "{invalid} must retain the pause"
+            );
+        }
     }
 
     #[test]

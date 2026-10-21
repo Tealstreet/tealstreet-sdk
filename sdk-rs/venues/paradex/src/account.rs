@@ -993,7 +993,7 @@ impl Account {
     fn positions(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
         if self.positions_busy {
             if cycle && self.poll.is_none() {
-                self.poll = Some(cx.set_timer(POLL_MS));
+                self.poll = Some(cx.set_poll_timer(POLL_MS));
             }
             return;
         }
@@ -1255,7 +1255,7 @@ impl Account {
                 if boot {
                     self.positions(cx, true);
                 } else if self.poll.is_none() {
-                    self.poll = Some(cx.set_timer(POLL_MS));
+                    self.poll = Some(cx.set_poll_timer(POLL_MS));
                 }
             }
             Request::Positions {
@@ -1404,7 +1404,7 @@ impl Account {
                 if boot {
                     self.positions(cx, true);
                 } else if self.poll.is_none() {
-                    self.poll = Some(cx.set_timer(POLL_MS));
+                    self.poll = Some(cx.set_poll_timer(POLL_MS));
                 }
             }
             Request::Positions { cycle, .. } => {

@@ -389,7 +389,7 @@ impl AsterDex {
         self.account.mode = ModeLoad::Loading;
         self.request_mode(cx);
         self.request_listen_key(cx);
-        self.account.tick = Some(cx.set_timer(3_000.0));
+        self.account.tick = Some(cx.set_poll_timer(3_000.0));
     }
     fn request_mode(&mut self, cx: &mut Cx<'_, Pending>) {
         let path = self.path("positionSide/dual");
@@ -985,7 +985,7 @@ impl AsterDex {
             if cx.now - self.account.last_orders >= 75_000.0 {
                 self.request_refresh_orders(cx);
             }
-            self.account.tick = Some(cx.set_timer(3_000.0));
+            self.account.tick = Some(cx.set_poll_timer(3_000.0));
         } else if self.account.positions_timer == Some(timer) {
             self.account.positions_timer = None;
             self.refresh_positions(cx);

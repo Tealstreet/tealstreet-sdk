@@ -268,6 +268,8 @@ export interface WasmEngineLike {
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
+  /** Full private sections and unflushed catalog; absence is unsupported. */
+  accountSnapshotFrame?(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string | undefined;
   /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
@@ -298,6 +300,7 @@ export class EngineHost {
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
   /** Abnormally close the open sockets of `channel` (all when omitted) so the
    * venue reconnects; returns how many were closed. */

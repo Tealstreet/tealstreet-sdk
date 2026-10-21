@@ -302,6 +302,7 @@ drift measurement.
 
 `tickIntervalOverride.ts` publishes multiplier changes through
 `subscribeTickIntervalMultipliers`. Engine pollers subscribe once and remove the
-listener on disposal; they send resolved intervals rather than reconstructing
-wildcard/exact precedence. A paused interval stays paused across configuration
+listener on disposal; Rust accounts send the resolved interval as a scale on
+each venue's own cadence (plus that interval as a ceiling) rather than
+reconstructing wildcard/exact precedence. A paused interval stays paused across configuration
 updates. Other TS pollers continue reading the multiplier at their next tick.

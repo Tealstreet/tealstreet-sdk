@@ -84,8 +84,8 @@ calls. For example, `{"op":"subscribeOrderBook","symbol":"BTCUSDT"}` has no
 result, while `{"op":"fetchLeverage","command":7,"symbol":"BTCUSDT"}` produces
 `{"type":"done","command":7,"result":"...JSON..."}` (or `error`). IDs are u32,
 unique among pending commands for this connection; the native server isolates
-them across clients. `setTickerSymbols`, `setTickInterval` and book/candle
-subscribe/unsubscribe have no completion. `setTickInterval` affects the whole
+them across clients. `setTickerSymbols`, `setPollScale` and book/candle
+subscribe/unsubscribe have no completion. `setPollScale` affects the whole
 account. Native writes can first emit
 `{"type":"commandProgress","command":7,"receipts":[{"symbol":"BTCUSDT","kind":"clientOrderId","identity":"native-id"}]}`.
 These are selected native identities, not placement acknowledgements. Kinds
