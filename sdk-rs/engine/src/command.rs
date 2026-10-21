@@ -107,7 +107,7 @@ enum CommandIn {
     FetchAccount {
         command: u32,
     },
-    #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
+    #[cfg(feature = "command-order-book")]
     FetchOrderBook {
         command: u32,
         symbol: String,
@@ -301,7 +301,7 @@ impl From<CommandIn> for Command {
             #[cfg(feature = "command-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
+            #[cfg(feature = "command-order-book")]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,

@@ -23,7 +23,9 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
     fetchAccount: { userId: 'account-1' },
     fetchLeverage: { buyLeverage: 20, sellLeverage: 50 },
     findOrderByClientOrderId: { found: false, definitive: true },
-    fetchOrderBook: { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
+    fetchOrderBook: name === 'backpack'
+      ? { bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [] }
+      : { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
   };
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name, capabilities),
@@ -140,6 +142,19 @@ describe('Rust bridge routes from the engine capability record', () => {
     await startupFailure;
     expect(commands.some((command) => command.op === 'placeOrders')).toBe(false);
     expect(errors).toHaveBeenCalledOnce();
+  });
+
+  it('routes Backpack REST books from the native capability without subscribing', async () => {
+    const { exchange, commands } = fixture({}, 'backpack');
+    await exchange.start();
+    const result = await exchange.fetchOrderBook('SOL_USDC_PERP', 1);
+    expect(result).toEqual({
+      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [],
+    });
+    expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
+      expect.objectContaining({ symbol: 'SOL_USDC_PERP', limit: 1 }),
+    ]);
+    expect(commands.some((c) => c.op === 'subscribeOrderBook')).toBe(false);
   });
 
   it('routes MEXC snapshot queries without a book subscription', async () => {
