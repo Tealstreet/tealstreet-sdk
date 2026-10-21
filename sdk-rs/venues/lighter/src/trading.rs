@@ -326,7 +326,7 @@ impl Lighter {
                     );
                 } else {
                     cx.store.set_hedged(false);
-                    cx.done(command, Ok("null".into()));
+                    cx.done(command, "null".into());
                 }
                 return;
             }
@@ -375,7 +375,7 @@ impl Lighter {
         };
         if job.steps.is_empty() {
             let job = self.trading.active.take().unwrap();
-            cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap()));
+            cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
             self.trade_kick(cx);
             return;
         }

@@ -480,7 +480,7 @@ impl BybitLinear {
         }
         if let Some((id, result)) = self.variant_control(&command) {
             match result {
-                Ok(()) => cx.done(id, Ok("[]".to_owned())),
+                Ok(()) => cx.done(id, "[]".to_owned()),
                 Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::Unsupported)),
             }
             return;
@@ -819,10 +819,7 @@ impl BybitLinear {
                         };
                         cx.fail(command, error)
                     }
-                    _ => cx.done(
-                        command,
-                        Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                    ),
+                    _ => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
                 }
             }
         }

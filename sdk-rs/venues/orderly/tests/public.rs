@@ -487,7 +487,7 @@ fn bounded_candle_reads_use_history_seconds_and_sort_and_filter_results() {
             .find_map(|a| match a {
                 Action::Notice(safe_cex_engine::Notice::CommandDone {
                     command: 91,
-                    result: Ok(json),
+                    result: json,
                 }) => Some(serde_json::from_str::<Vec<CandleTime>>(&json).unwrap()),
                 _ => None,
             })
@@ -530,7 +530,7 @@ fn candle_history_no_data_and_future_lower_bound_return_empty() {
             out = actions(&mut e);
         }
         assert!(out.iter().any(|a| matches!(a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone { command: 93, result: Ok(json) }) if json == "[]"
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command: 93, result: json }) if json == "[]"
         )));
     }
 }
@@ -562,10 +562,7 @@ fn malformed_history_candles_fail_instead_of_publishing_partial_rows() {
         assert!(
             actions(&mut e).iter().any(|a| matches!(
                 a,
-                Action::Notice(safe_cex_engine::Notice::CommandDone {
-                    command: 92,
-                    result: Err(_)
-                }) | Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 92, .. })
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 92, .. })
             )),
             "{body}"
         );
@@ -597,10 +594,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
         reply(&mut e, &r, body);
         assert!(actions(&mut e).iter().any(|a| matches!(
             a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone {
-                command: 42,
-                result: Err(_)
-            })
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, .. })
         )));
     }
 }

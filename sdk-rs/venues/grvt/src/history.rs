@@ -365,7 +365,7 @@ impl Grvt {
                     None | Some("FUNDING_FEE") => Kind::Funding,
                     Some("COMMISSION" | "REALIZED_PNL") => Kind::IncomeFills,
                     _ => {
-                        cx.done(command, Err("Unsupported GRVT income category".into()));
+                        cx.fail(command, "Unsupported GRVT income category");
                         return;
                     }
                 };
@@ -398,15 +398,12 @@ impl Grvt {
         };
         if kind != Kind::Trades && (self.options.public_data_only || self.account.session.is_none())
         {
-            cx.done(
-                command,
-                Err("GRVT query requires an authenticated session".into()),
-            );
+            cx.fail(command, "GRVT query requires an authenticated session");
             return;
         }
         let selected = symbol.as_ref().and_then(|s| cx.store.market(s));
         if symbol.is_some() && selected.is_none() {
-            cx.done(command, Err("Unknown GRVT query market".into()));
+            cx.fail(command, "Unknown GRVT query market");
             return;
         }
         let result =
@@ -414,12 +411,12 @@ impl Grvt {
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {
-                cx.done(command, Err(e));
+                cx.fail(command, e);
                 return;
             }
         };
         if from.is_some_and(|f| f > to) || order_id.as_ref().is_some_and(String::is_empty) {
-            cx.done(command, Err("Invalid GRVT query range or order ID".into()));
+            cx.fail(command, "Invalid GRVT query range or order ID");
             return;
         }
         if kind == Kind::Lookup
@@ -427,12 +424,12 @@ impl Grvt {
                 id.parse::<u64>().ok().is_none_or(|n| n == 0) || id.starts_with('0')
             })
         {
-            cx.done(command, Err("Invalid GRVT client order ID".into()));
+            cx.fail(command, "Invalid GRVT client order ID");
             return;
         }
         let account = self.account.trading_account_id.clone();
         if kind != Kind::Trades && account.is_none() {
-            cx.done(command, Err("GRVT query requires a subaccount".into()));
+            cx.fail(command, "GRVT query requires a subaccount");
             return;
         }
         let target_created = order_id
@@ -821,7 +818,10 @@ impl Grvt {
                 })
                 .map_err(|e| e.to_string())
             })();
-            cx.done(r.command, result);
+            match result {
+                Ok(data) => cx.done(r.command, data),
+                Err(error) => cx.fail(r.command, error),
+            };
             return;
         }
         if let Some(error) = r.failed.take() {
@@ -891,10 +891,10 @@ impl Grvt {
         }
         r.rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
         r.rows.truncate(r.limit);
-        cx.done(
-            r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(r.command, data),
+            Err(error) => cx.fail(r.command, error),
+        };
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -902,6 +902,6 @@ impl Grvt {
         request: Request,
         error: &str,
     ) {
-        cx.done(request.command, Err(error.to_owned()));
+        cx.fail(request.command, error.to_owned());
     }
 }

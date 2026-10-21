@@ -81,9 +81,6 @@ fn timer(e: &mut Engine<Lighter>) -> TimerId {
 fn failure(e: &mut Engine<Lighter>) -> String {
     e.drain_actions()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone {
-                result: Err(error), ..
-            }) => Some(error),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
             _ => None,
         })
@@ -159,7 +156,7 @@ fn placement_scales_market_metadata_and_returns_native_index() {
     let id = tx["ClientOrderIndex"].as_u64().unwrap().to_string();
     assert!(e.store().order(&id).is_some());
     assert!(e.store().order(&id).unwrap().client_order_id.is_none());
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:Ok(ref ids),.. }) if ids==&format!("[\"{id}\"]"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if ids==&format!("[\"{id}\"]"))));
 }
 
 #[test]
@@ -278,7 +275,7 @@ fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
     assert_eq!(tp["Type"], 4);
     assert_ne!(sl["ClientOrderIndex"], tp["ClientOrderIndex"]);
     ack(&mut e, &take);
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:Ok(ref ids),.. }) if serde_json::from_str::<Vec<String>>(ids).unwrap().len()==3)));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if serde_json::from_str::<Vec<String>>(ids).unwrap().len()==3)));
 }
 
 #[test]
@@ -746,9 +743,6 @@ fn amend_infers_protection_from_requested_price() {
 fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
     e.drain_actions()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone {
-                result: Err(error), ..
-            }) => Some((error, None)),
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 Some((error.message, error.outcome))
             }

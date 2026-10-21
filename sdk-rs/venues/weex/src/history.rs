@@ -368,15 +368,15 @@ impl WeexFutures {
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
             )
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let mut requests = VecDeque::new();
         let (kind, order_id, symbol) = match read {
             Query::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("WEEX client order lookup is not supported by the Rust engine".into()),
+                    "WEEX client order lookup is not supported by the Rust engine",
                 );
                 return;
             }
@@ -388,7 +388,7 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    cx.done(command, Err("invalid WEEX fill range".into()));
+                    cx.fail(command, "invalid WEEX fill range");
                     return;
                 }
                 for window in windows(from_ms, to_ms, 7.0 * DAY) {
@@ -417,7 +417,7 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    cx.done(command, Err("invalid WEEX order range".into()));
+                    cx.fail(command, "invalid WEEX order range");
                     return;
                 }
                 for window in windows(from_ms, to_ms, 90.0 * DAY) {
@@ -469,15 +469,12 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    cx.done(command, Err("invalid WEEX income range".into()));
+                    cx.fail(command, "invalid WEEX income range");
                     return;
                 }
                 if matches!((from_ms,to_ms),(Some(from),Some(to)) if (to-from)/INCOME_WINDOW>f64::from(INCOME_BUDGET))
                 {
-                    cx.done(
-                        command,
-                        Err("WEEX income range exceeds chunk budget".into()),
-                    );
+                    cx.fail(command, "WEEX income range exceeds chunk budget");
                     return;
                 }
                 let walk = match (from_ms, to_ms) {
@@ -510,10 +507,7 @@ impl WeexFutures {
             }
         };
         if requests.is_empty() {
-            cx.done(
-                command,
-                Err("WEEX history range exceeds request budget".into()),
-            );
+            cx.fail(command, "WEEX history range exceeds request budget");
             return;
         }
         self.history.reads.insert(
@@ -548,7 +542,7 @@ impl WeexFutures {
         let Some(fetch) = pending.pop_front() else {
             let result = rows.json();
             self.history.reads.remove(&command);
-            cx.done(command, Ok(result));
+            cx.done(command, result);
             return;
         };
         let stream = Some(if matches!(fetch.kind, Kind::Algo) {
@@ -577,7 +571,7 @@ impl WeexFutures {
             stream,
         ) {
             self.history.reads.remove(&command);
-            cx.done(command, Err("WEEX history signing unavailable".into()));
+            cx.fail(command, "WEEX history signing unavailable");
         }
     }
     fn history_income_request(
@@ -644,7 +638,7 @@ impl WeexFutures {
             Some(ArrayAt::Field("items")),
         ) {
             self.history.reads.remove(&command);
-            cx.done(command, Err("WEEX history signing unavailable".into()));
+            cx.fail(command, "WEEX history signing unavailable");
         }
     }
     fn history_next_income(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -666,7 +660,7 @@ impl WeexFutures {
             cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound");
             let result = income_json(rows);
             self.history.reads.remove(&command);
-            cx.done(command, Ok(result));
+            cx.done(command, result);
             return;
         }
         match step {
@@ -680,7 +674,7 @@ impl WeexFutures {
                 }
                 let result = income_json(rows);
                 self.history.reads.remove(&command);
-                cx.done(command, Ok(result));
+                cx.done(command, result);
             }
         }
     }
@@ -867,7 +861,7 @@ impl WeexFutures {
                     *rows = page;
                     let result = income_json(rows);
                     self.history.reads.remove(&command);
-                    cx.done(command, Ok(result));
+                    cx.done(command, result);
                 }
             }
         }
@@ -900,7 +894,7 @@ impl WeexFutures {
                     "WEEX income history is INCOMPLETE: query failed",
                 );
             }
-            cx.done(command, Err(error.into()));
+            cx.fail(command, error);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

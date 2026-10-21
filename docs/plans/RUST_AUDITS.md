@@ -902,8 +902,18 @@ Normal inputs send the same requests as TS; the risk is resilience.
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
   accepted, imported TP/SL amend keeps row working types, partial credentials
   deactivate visibly.
-- Low: isolated leverage sets both sides; index triggers rejected; fill without
-  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+- Low: ~~isolated leverage sets both sides~~ (selected isolated rail changes;
+  required opposite payload rail is preserved, including flat symbols; cross
+  leverage is coupled); ~~fetchLeverage returns max~~ (bridge returns cached
+  native buy/sell rails, not market limits).
+  **RISKY — retained:** index-source placement needs a verified native wire
+  contract (TS substitutes mark price for IndexPrice, which changes semantics).
+  Fills accept `id`/`tradeId`/`fillId`; an absent identity field rejects the query,
+  while an empty identity string is still skipped. Inventing a fill identity is
+  unsafe; the empty-string handling remains a limitation. Income with neither
+  `asset` nor its `coin` alias rejects the affected page (range walks continue
+  with an explicit incomplete marker); assuming USDT without accounting evidence
+  can mislabel value.
 
 ### Coinbase (already defaults to Rust)
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
