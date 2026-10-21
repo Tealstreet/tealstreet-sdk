@@ -688,6 +688,7 @@ impl Venue for Grvt {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             client_order_lookup: true,
             fills_by_order_id: true,
             cancel_all: safe_cex_engine::CancelAll::Native,

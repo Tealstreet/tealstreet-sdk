@@ -708,6 +708,7 @@ impl Venue for TxFlow {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            reject_order_history_filters: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             ..safe_cex_engine::Capabilities::BASE
         }

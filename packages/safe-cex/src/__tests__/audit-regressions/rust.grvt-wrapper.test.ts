@@ -68,6 +68,7 @@ it.each(['grvt', 'woo'] as const)('%s cancel-all reaches the engine even with an
 
 it('GRVT global cancellation does not inherit WOO journal position folding', async () => {
   const exchange = new RustEngineExchange('grvt', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  adoptEngineCapabilities(exchange);
   const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([]);
   try {
     await expect(exchange.fetchHistoricalPositions({ account: 'fixture' })).rejects.toThrow('no journal records path declared');

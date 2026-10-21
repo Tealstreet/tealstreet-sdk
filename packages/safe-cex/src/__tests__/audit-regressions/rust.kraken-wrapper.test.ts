@@ -1,3 +1,4 @@
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -7,6 +8,7 @@ import { OrderSide } from '../../types';
 describe('Rust Kraken journal boundary', () => {
   it('keeps the futures account-wide fills journal path when selecting Rust', async () => {
     const exchange = new RustEngineExchange('kraken', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    adoptEngineCapabilities(exchange);
     const from = 1_700_000_000_000;
     const to = from + 1_000_000;
     const fills = vi.spyOn(exchange, 'fetchHistoricalFills').mockResolvedValue([

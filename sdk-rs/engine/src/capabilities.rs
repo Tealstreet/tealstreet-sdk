@@ -44,6 +44,49 @@ pub struct Capabilities {
     pub host_clock: bool,
     /// Explicit public catalogue refresh through VenueAction::RefreshMarkets.
     pub market_refresh: bool,
+    /// Host journal adapter and whether fill folding is account- or symbol-scoped.
+    pub position_history: PositionHistory,
+    pub closed_position_format: ClosedPositionFormat,
+    /// Legacy SDK time-bound normalization expected by FetchFills.
+    pub fill_history_time: FillHistoryTime,
+    pub stp_controls: bool,
+    pub bybit_execution_controls: bool,
+    pub reject_client_slippage: bool,
+    pub finite_command_numbers: bool,
+    pub finite_history_bounds: bool,
+    pub reject_order_history_filters: bool,
+    pub public_catalogue_validation: bool,
+    pub isolated_book_subscriptions: bool,
+    pub inverse_closed_positions: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PositionHistory {
+    Unsupported,
+    FillsAccount,
+    FillsSymbol,
+    Bybit,
+    Okx,
+    Blofin,
+    WooOrders,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClosedPositionFormat {
+    Unsupported,
+    Bybit,
+    Okx,
+    Blofin,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FillHistoryTime {
+    AsProvided,
+    SecondsOrMilliseconds,
+    NonnegativeSecondsOrMilliseconds,
 }
 
 /// How a market's order and position quantities relate to its placement units.
@@ -130,6 +173,18 @@ impl Capabilities {
         balance_info: false,
         host_clock: false,
         market_refresh: false,
+        position_history: PositionHistory::Unsupported,
+        closed_position_format: ClosedPositionFormat::Unsupported,
+        fill_history_time: FillHistoryTime::AsProvided,
+        stp_controls: false,
+        bybit_execution_controls: false,
+        reject_client_slippage: false,
+        finite_command_numbers: false,
+        finite_history_bounds: false,
+        reject_order_history_filters: false,
+        public_catalogue_validation: false,
+        isolated_book_subscriptions: false,
+        inverse_closed_positions: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -167,6 +222,15 @@ impl Capabilities {
             self.balance_info,
             self.host_clock,
             self.market_refresh,
+            self.stp_controls,
+            self.bybit_execution_controls,
+            self.reject_client_slippage,
+            self.finite_command_numbers,
+            self.finite_history_bounds,
+            self.reject_order_history_filters,
+            self.public_catalogue_validation,
+            self.isolated_book_subscriptions,
+            self.inverse_closed_positions,
         ]
         .iter()
         .enumerate()
@@ -175,7 +239,10 @@ impl Capabilities {
             | (self.cancel_all as u32) << 4
             | (self.leverage_query as u32) << 8
             | (self.max_leverage as u32) << 12
-            | (self.quantity_units as u32) << 16;
+            | (self.quantity_units as u32) << 16
+            | (self.position_history as u32) << 20
+            | (self.closed_position_format as u32) << 24
+            | (self.fill_history_time as u32) << 28;
         w.begin(section::CAPABILITIES);
         w.u32s([flags, enums]);
         w.end();
@@ -215,5 +282,38 @@ mod tests {
         assert_eq!(LeverageQuery::OnRead as u32, 1);
         assert_eq!(LeverageQuery::OnMetadata as u32, 2);
         assert_eq!(LeverageQuery::OnReadAndMetadata as u32, 3);
+    }
+
+    #[test]
+    fn bridge_policies_append_to_the_existing_two_words() {
+        let record = Capabilities {
+            position_history: PositionHistory::WooOrders,
+            closed_position_format: ClosedPositionFormat::Blofin,
+            fill_history_time: FillHistoryTime::NonnegativeSecondsOrMilliseconds,
+            stp_controls: true,
+            bybit_execution_controls: true,
+            reject_client_slippage: true,
+            finite_command_numbers: true,
+            finite_history_bounds: true,
+            reject_order_history_filters: true,
+            public_catalogue_validation: true,
+            isolated_book_subscriptions: true,
+            inverse_closed_positions: true,
+            ..Capabilities::NO_HISTORY
+        };
+        let mut w = FrameWriter::new(vec![], 0.0);
+        record.write(&mut w);
+        let frame = w.finish();
+        let (kind, payload) = sections(&frame).next().unwrap();
+        assert_eq!(kind, section::CAPABILITIES);
+        assert_eq!(payload.len(), 8);
+        assert_eq!(
+            u32::from_le_bytes(payload[..4].try_into().unwrap()),
+            0x1ff << 16
+        );
+        assert_eq!(
+            u32::from_le_bytes(payload[4..].try_into().unwrap()),
+            6 << 20 | 3 << 24 | 2 << 28
+        );
     }
 }
