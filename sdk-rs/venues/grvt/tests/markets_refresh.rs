@@ -25,6 +25,11 @@ fn respond(e: &mut Engine<Grvt>, request: &HttpRequest, body: &str, headers: &st
     e.drain_actions().collect()
 }
 fn boot() -> (Engine<Grvt>, TimerId) {
+    let (e, refresh, _) = boot_with(r#"{"r":[]}"#);
+    (e, refresh)
+}
+/// Boots with a positions snapshot; also returns the private socket.
+fn boot_with(positions: &str) -> (Engine<Grvt>, TimerId, Option<safe_cex_engine::SocketId>) {
     let mut e = Engine::new(Grvt::new(Options {
         key: Some("fixture-key".into()),
         secret: Some(KEY.into()),
@@ -34,7 +39,16 @@ fn boot() -> (Engine<Grvt>, TimerId) {
     e.start(NOW);
     let mut pending: VecDeque<_> = e.drain_actions().collect();
     let mut refresh = None;
+    let mut private = None;
     while let Some(action) = pending.pop_front() {
+        if let Action::WsConnect {
+            socket, headers, ..
+        } = &action
+            && !headers.is_empty()
+        {
+            private = Some(*socket);
+            continue;
+        }
         if let Action::SetTimer { timer, at_ms } = action {
             if at_ms == NOW + 300_002. {
                 refresh = Some(timer);
@@ -61,6 +75,8 @@ fn boot() -> (Engine<Grvt>, TimerId) {
                 r#"{"r":[{"i":"BTC_USDT_Perp","l":"10","ml":"2","ml1":"50"}]}"#,
                 "",
             )
+        } else if request.url.ends_with("/positions") {
+            (positions, "")
         } else if request.url.ends_with("get_authorized_builders") {
             (
                 r#"{"results":[{"builder_account_id":"0xee8f3559f298fffa79b8253437969d15b5dccff3","max_futures_fee_rate":"0.03"}]}"#,
@@ -71,7 +87,7 @@ fn boot() -> (Engine<Grvt>, TimerId) {
         };
         pending.extend(respond(&mut e, &request, body, headers));
     }
-    (e, refresh.expect("catalog refresh timer"))
+    (e, refresh.expect("catalog refresh timer"), private)
 }
 fn refresh(e: &mut Engine<Grvt>, timer: TimerId, body: &str) -> Vec<Action> {
     e.handle(NOW + 300_002., Event::TimerFired { timer });
@@ -320,4 +336,41 @@ fn newly_listed_market_limits_wait_for_an_inflight_session_refresh() {
             .max,
         25.
     );
+}
+#[test]
+fn refresh_with_a_malformed_row_for_a_held_market_keeps_the_market_and_position() {
+    let position = r#"{"r":[{"i":"BTC_USDT_Perp","s":"1","ep":"100","n":"100","l":"20","el":"50","up":"0","mt":"CROSS","et":"1700000000000000000"}]}"#;
+    // A zero tick fails validation; an object tick fails decoding with the id intact.
+    for bad_tick in [r#""ts":"0""#, r#""ts":{}"#] {
+        let (mut e, timer, private) = boot_with(position);
+        assert_eq!(e.store().positions().len(), 1);
+        let before = e.store().market("BTC_USDT_PERP").unwrap().clone();
+        let catalog = REFRESH.replace(r#""ts":"0.2""#, bad_tick);
+        assert_ne!(catalog, REFRESH);
+        refresh(&mut e, timer, &catalog);
+        assert_eq!(
+            e.store().market("BTC_USDT_PERP"),
+            Some(&before),
+            "{bad_tick}"
+        );
+        assert!(e.store().market("ETH_USDT_PERP").is_some());
+        assert_eq!(e.store().positions().len(), 1);
+        assert_eq!(e.store().positions()[0].symbol, "BTC_USDT_PERP");
+        // The next positions snapshot still maps the held market.
+        e.handle(
+            NOW + 300_010.,
+            Event::WsOpened {
+                socket: private.expect("private socket"),
+            },
+        );
+        let read = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("/positions") => Some(r),
+                _ => None,
+            })
+            .expect("private open reconciles positions");
+        respond(&mut e, &read, position, "");
+        assert_eq!(e.store().positions().len(), 1, "{bad_tick}");
+    }
 }

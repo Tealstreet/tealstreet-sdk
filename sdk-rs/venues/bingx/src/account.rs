@@ -255,8 +255,21 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
-    pub fn set_skipped_markets(&mut self, symbols: impl Iterator<Item = String>) {
-        self.skipped_markets = symbols.filter(|s| !s.is_empty()).collect();
+    /// Keeps earlier malformed markets the new catalogue still lacks; returns the
+    /// malformed count before and after.
+    pub fn set_skipped_markets(
+        &mut self,
+        store: &safe_cex_engine::store::Store,
+        symbols: impl Iterator<Item = String>,
+    ) -> (usize, usize) {
+        let before = self.skipped_markets.len();
+        self.skipped_markets
+            .extend(symbols.filter(|s| !s.is_empty()));
+        self.skipped_markets
+            .retain(|symbol| store.market(symbol).is_none());
+        self.reported_markets
+            .retain(|symbol| store.market(symbol).is_none());
+        (before, self.skipped_markets.len())
     }
     /// Whether a row's market is unknown; a market dropped at startup is an error once.
     fn untracked_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
@@ -575,11 +588,18 @@ impl Account {
                 let symbol = row.symbol.replace('-', "");
                 if self.untracked_market(cx, &symbol) {
                     if row.position_amt != 0.0 {
-                        *unavailable = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            "BingX owned position market unavailable; preserving previous snapshot",
-                        );
+                        if self.skipped_markets.contains(&symbol) {
+                            *unavailable = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "BingX owned position market unavailable; preserving previous snapshot",
+                            );
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Skipping BingX position on uncatalogued market {symbol}"),
+                            );
+                        }
                     }
                     return;
                 }
@@ -671,11 +691,21 @@ impl Account {
                 }
                 if self.untracked_market(cx, &order.symbol) {
                     if order.status == OrderStatus::Open {
-                        *unavailable = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            "BingX working order market unavailable; preserving previous orders",
-                        );
+                        if self.skipped_markets.contains(&order.symbol) {
+                            *unavailable = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "BingX working order market unavailable; preserving previous orders",
+                            );
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!(
+                                    "Skipping BingX order on uncatalogued market {}",
+                                    order.symbol
+                                ),
+                            );
+                        }
                     }
                     return;
                 }
@@ -742,10 +772,15 @@ impl Account {
                     return;
                 };
                 self.key = Some(key.into());
-                self.socket = Some(cx.connect_channel(
-                    format!("{}?listenKey={key}", crate::paths::PRIVATE_WS),
-                    safe_cex_engine::SocketChannel::Private,
-                ));
+                self.socket = Some(
+                    cx.connect(
+                        safe_cex_engine::SocketSpec::new(format!(
+                            "{}?listenKey={key}",
+                            crate::paths::PRIVATE_WS
+                        ))
+                        .channel(safe_cex_engine::SocketChannel::Private),
+                    ),
+                );
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {

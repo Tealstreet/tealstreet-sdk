@@ -120,6 +120,10 @@ pub struct Kraken {
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
     markets_in_flight: bool,
+    /// PF_ symbols the last catalogue read skipped as malformed; their rows hold snapshots.
+    skipped_markets: HashSet<String>,
+    skipping_markets: HashSet<String>,
+    reread_stalls: u8,
     poll: Option<TimerId>,
 }
 impl Kraken {
@@ -155,6 +159,9 @@ impl Kraken {
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
             markets_in_flight: false,
+            skipped_markets: HashSet::new(),
+            skipping_markets: HashSet::new(),
+            reread_stalls: 0,
             poll: None,
         }
     }
@@ -177,6 +184,7 @@ impl Kraken {
             return;
         }
         self.markets_in_flight = true;
+        self.skipping_markets.clear();
         cx.request_streamed(
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
@@ -211,7 +219,9 @@ impl Kraken {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.ws_url()).channel(SocketChannel::Public),
+        ));
         self.public.open = false;
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, event: &str, feed: &str, products: &[&str]) {
@@ -457,6 +467,25 @@ impl Kraken {
         cx.log(LogLevel::Warning, error);
     }
 }
+/// The PF_ symbol of an undecodable instrument row that was not marked untradeable.
+fn malformed_perpetual(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Other(serde::de::IgnoredAny),
+    }
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: std::borrow::Cow<'a, str>,
+        #[serde(default)]
+        tradeable: Option<Flag>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (row.symbol.starts_with("PF_") && !matches!(row.tradeable, Some(Flag::Bool(false))))
+        .then(|| row.symbol.into_owned())
+}
 // Kraken Futures chart resolutions are the TS spellings.
 fn resolution(interval: Interval) -> Option<&'static str> {
     use Interval::*;
@@ -630,6 +659,7 @@ impl Venue for Kraken {
                         let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
                         if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
                             safe_cex_engine::startup::skipped_row(cx);
+                            self.skipping_markets.insert(m.symbol.into_owned());
                             return;
                         }
                         rows.push(Market {
@@ -684,6 +714,9 @@ impl Venue for Kraken {
                             LogLevel::Warning,
                             format!("Kraken invalid public row: {error}"),
                         );
+                        if let Some(symbol) = malformed_perpetual(item) {
+                            self.skipping_markets.insert(symbol);
+                        }
                     }
                 }
             }
@@ -774,7 +807,7 @@ impl Venue for Kraken {
                     return;
                 }
                 let mut seen = HashSet::new();
-                let rows = rows
+                let rows: Vec<_> = rows
                     .into_iter()
                     .filter(|m| {
                         if seen.insert(m.symbol.clone()) {
@@ -785,8 +818,26 @@ impl Venue for Kraken {
                         }
                     })
                     .collect();
-                self.discovery.succeeded(cx, &false);
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 cx.store.set_markets(rows);
+                let mut skipped = std::mem::take(&mut self.skipping_markets);
+                skipped.retain(|symbol| cx.store.market(symbol).is_none());
+                let before = self.skipped_markets.len();
+                // A partial catalogue commits so private reads start, and is re-read.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, skipped.len()) {
+                    self.discovery.failed(cx, false);
+                } else {
+                    self.discovery.succeeded(cx, &false);
+                }
+                self.skipped_markets = skipped;
+                if refresh {
+                    return;
+                }
                 self.connect(cx);
                 self.account_start(cx);
                 self.tickers_request(cx);
@@ -1076,6 +1127,58 @@ impl Venue for Kraken {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("Kraken stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

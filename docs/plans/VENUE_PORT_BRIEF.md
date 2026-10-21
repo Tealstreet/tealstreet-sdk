@@ -34,20 +34,21 @@ A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `
   cancel-all, leverage, margin type, position mode; queries (fills, order
   history, income, public trades) in Binance `history.rs`'s JSON shapes.
 - A liveness watchdog on every socket with the venue's ping protocol.
-- Tag every socket with `Cx::connect_channel` (or
-  `connect_with_headers_channel`) and `SocketChannel::{Public, Private, Business}`.
-  Binary protocols use `Cx::connect_binary_channel`; decode borrowed
+- Open every socket with `Cx::connect(SocketSpec::new(url).channel(..))`, tagged
+  `SocketChannel::{Public, Private, Business}`; upgrade headers go in `.headers(..)`.
+  Binary protocols add `.binary()`; decode borrowed
   `Event::WsBinary` payloads in the venue. Hosts preserve bytes on this explicit
   path and keep the existing text/decompression path for other sockets.
   Keep the venue's real URL; hosts apply the TS account routing policy. Roles
   are required even when public and private feeds share a URL.
-  Independent feeds sharing a role and URL use `Cx::connect_feed` with a stable
+  Independent feeds sharing a role and URL add `.feed(..)` with a stable
   feed identity. Its recovery hint reports missing protocol payloads; hosts
   select a declared fallback. Never embed Tealstreet URLs inside venue code.
 - Tests from the venue's documented payload examples.
 
 Register it (the workspace picks up `venues/*` itself): `hosts/wasm`
-(`Cargo.toml` and the `WasmEngine::new` match), `RUST_VENUES` in
+(a feature), `sdk-rs/registry` (`safe-cex-venues`: a feature, the `build` match
+and the venue's construction rules, with tests in `registry/tests`), `RUST_VENUES` in
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
 and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
 script beside `rust:private-tape`. Extend `replay.mjs` generically; never

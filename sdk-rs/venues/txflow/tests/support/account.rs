@@ -49,6 +49,12 @@ pub fn bootstrap() -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
 pub fn bootstrap_with_wallet(
     wallet: &str,
 ) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
+    bootstrap_with_meta(wallet, META)
+}
+pub fn bootstrap_with_meta(
+    wallet: &str,
+    meta: &str,
+) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
     let mut e = Engine::new(TxFlow::new(Options {
         testnet: true,
         application_id: Some(wallet.into()),
@@ -57,7 +63,7 @@ pub fn bootstrap_with_wallet(
     }));
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, META);
+    reply(&mut e, &r, meta);
     let mut actions = e.drain_actions().collect::<Vec<_>>();
     let index = actions
         .iter()
@@ -142,4 +148,37 @@ pub fn fill(tid: u64, price: f64, time: f64) -> String {
     format!(
         r#"{{"tid":{tid},"oid":42,"instrumentId":1,"px":"{price}","sz":"0.5","side":"B","time":{time}}}"#
     )
+}
+/// Drains actions with failures as the plain text the host renders.
+pub trait Plain {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action>;
+}
+impl<V: safe_cex_engine::Venue> Plain for safe_cex_engine::Engine<V> {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action> {
+        use safe_cex_engine::{Action, Notice};
+        self.drain_actions()
+            .map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    })
+                }
+                a => a,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+}
+/// Drains the classified failures, dropping every other action.
+pub fn failures<V: safe_cex_engine::Venue>(
+    e: &mut safe_cex_engine::Engine<V>,
+) -> Vec<safe_cex_engine::VenueError> {
+    use safe_cex_engine::{Action, Notice};
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect()
 }
