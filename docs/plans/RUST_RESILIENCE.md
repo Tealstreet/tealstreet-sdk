@@ -81,3 +81,11 @@ and check identified/unidentified rejection, replacements, empty/duplicate
 rows, failed envelopes and a newer settings revision. Verify Orderly plus
 Binance, strict Clippy/fmt, independent review and full CI. Merge remains held
 behind the overseer's #1602/#1487 queue until it is lifted.
+
+Implemented with `SnapshotBuilder` and fixed Warn-level `row.skipped` notices.
+Six full-engine regressions cover retained identities, unidentified scope,
+valid peers, broker suffixes, empty/duplicate rows, malformed envelopes and
+settings-revision fencing. Four fail on the old implementation; all pass with
+the fix. Orderly plus Binance crate tests and scoped strict Clippy/fmt verify
+the change; independent review requested the additional malformed-envelope
+cases and found no production blockers. No downstream callers change.
