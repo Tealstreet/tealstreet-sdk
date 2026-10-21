@@ -281,7 +281,7 @@ impl KrakenSpot {
         self.private_connect(cx);
         self.balance_read(cx, None);
         self.orders_read(cx);
-        self.account.poll = Some(cx.set_timer(10_000.));
+        self.account.poll = Some(cx.set_poll_timer(10_000.));
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.supervisor.connecting(cx);
@@ -753,7 +753,7 @@ impl KrakenSpot {
             return true;
         }
         if self.account.poll == Some(timer) {
-            self.account.poll = Some(cx.set_timer(10_000.));
+            self.account.poll = Some(cx.set_poll_timer(10_000.));
             self.balance_read(cx, None);
             self.orders_read(cx);
             return true;

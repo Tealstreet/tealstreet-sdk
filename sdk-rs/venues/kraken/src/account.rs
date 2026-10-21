@@ -568,7 +568,7 @@ impl Kraken {
         }
         self.account_connect(cx);
         self.account_refresh(cx);
-        self.account.poll = Some(cx.set_timer(5000.0));
+        self.account.poll = Some(cx.set_poll_timer(5000.0));
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.supervisor.connecting(cx);
@@ -689,7 +689,7 @@ impl Kraken {
         if self.account.poll == Some(timer) {
             self.account.poll = None;
             self.account_refresh(cx);
-            self.account.poll = Some(cx.set_timer(5000.0));
+            self.account.poll = Some(cx.set_poll_timer(5000.0));
             return true;
         }
         if self.account.heal == Some(timer) {

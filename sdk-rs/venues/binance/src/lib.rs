@@ -244,6 +244,11 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
+    /// The catalogue is complete and no discovery read awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && self.discovery.idle()
+    }
+
     pub fn new(options: Options) -> Self {
         let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         if options.variant == Variant::UsdM && options.portfolio_margin {

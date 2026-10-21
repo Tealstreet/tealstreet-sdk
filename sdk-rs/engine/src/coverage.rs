@@ -11,6 +11,7 @@ use std::hash::Hash;
 /// Bound on remembered identities; past it the snapshot counts as unidentified.
 const MAX_PROTECTED: usize = 4096;
 
+#[derive(Clone)]
 pub struct SnapshotCoverage<K> {
     protected: HashSet<K>,
     unidentified: bool,
@@ -54,6 +55,7 @@ impl<K: Eq + Hash> SnapshotCoverage<K> {
 /// plus the store's current copies that a rejection protects. Venues call it in
 /// place of an all-or-nothing `invalid` flag; structural failures (envelope,
 /// paging, duplicate identities) still discard the whole snapshot.
+#[derive(Clone)]
 pub struct SnapshotBuilder<K, T> {
     rows: Vec<T>,
     coverage: SnapshotCoverage<K>,

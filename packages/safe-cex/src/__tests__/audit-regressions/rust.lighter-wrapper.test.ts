@@ -20,7 +20,7 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
     start: noop,
     command: (json) => {
       const command = JSON.parse(json);
-      if (command.op === 'setTickerSymbols') return '[]';
+      if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
