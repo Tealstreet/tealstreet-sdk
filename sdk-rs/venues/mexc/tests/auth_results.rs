@@ -181,3 +181,76 @@ fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_reads() {
     // Plan orders still refuse the key, so stop orders' success is no evidence.
     assert!(orders(&reply(&mut e, &stop, 200, ok)).is_empty());
 }
+
+#[test]
+fn independent_depth_queries_never_emit_auth_evidence_with_private_read_credentials() {
+    use safe_cex_engine::{Command, ErrorKind};
+    for read in [false, true] {
+        for (status, body) in [
+            (
+                200,
+                r#"{"success":true,"code":0,"data":{"version":1,"bids":[],"asks":[]}}"#,
+            ),
+            (
+                401,
+                r#"{"success":false,"code":602,"message":"invalid api key"}"#,
+            ),
+            (
+                403,
+                r#"{"success":false,"code":701,"message":"permission denied"}"#,
+            ),
+            (
+                200,
+                r#"{"success":false,"code":602,"message":"invalid api key"}"#,
+            ),
+        ] {
+            let (mut e, _) = started(read);
+            let failures = e.health().auth_failures;
+            e.handle(
+                1000.,
+                Event::Command(Command::FetchOrderBook {
+                    command: 91,
+                    symbol: "BTCUSDT".into(),
+                    limit: Some(1),
+                }),
+            );
+            let actions = drain(&mut e);
+            let query = http(&actions, "contract/depth");
+            assert!(auth(&actions).is_empty());
+            assert!(query.headers.iter().all(|(name, _)| !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "apikey" | "signature" | "request-time"
+            )));
+            let actions = reply(&mut e, &query, status, body);
+            assert!(
+                auth(&actions).is_empty(),
+                "read={read} status={status} body={body}"
+            );
+            assert_eq!(e.health().auth_failures, failures);
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(
+                        a,
+                        Action::Notice(
+                            Notice::CommandDone { command: 91, .. }
+                                | Notice::CommandFailed { command: 91, .. }
+                        )
+                    ))
+                    .count(),
+                1
+            );
+            if status == 200 && body.contains("\"success\":true") {
+                assert!(
+                    actions.iter().any(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandDone { command: 91, .. })
+                    ))
+                );
+            }
+            if body.contains("invalid api key") || status == 403 {
+                assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 91, error }) if error.kind == Some(ErrorKind::VenueUnavailable))));
+            }
+        }
+    }
+}
