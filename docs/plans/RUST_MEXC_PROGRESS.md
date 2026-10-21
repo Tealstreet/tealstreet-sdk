@@ -273,3 +273,39 @@ and cut a follow-up branch. Never touch master or force-push.
   for optional leverage rails. Run mandatory local MEXC/Binance acceptance and
   fresh CI's entire integrated suite before merging; previous six-venue15 gate
   results remain committed above.
+
+### Port-review lows plan (2026-10-21)
+
+1. Derive plan reduce-only from explicit raw flag/closing side, keeping dedicated
+   position stops reduce-only. Cover REST and WS opening/closing plan rows.
+2. Add independent `FetchOrderBook`: public native depth, default 100 levels,
+   SDK bound 1000, captured contract-size scaling, sorted vectors with cumulative
+   base totals and exact version string. Validate all rows/arithmetic before
+   limiting; keep subscription books untouched and classify failures/cooldown.
+3. Expose the native capability and update host/SDK expectations. Regression
+   test no-subscription and active-subscription reads, malformed data, numeric
+   bounds, errors, request correlation and bridge routing.
+4. Keep fee sign unchanged: absolute-value normalization is RISKY without
+   independent debit/rebate evidence. Update audit/caller notes. Run focused
+   MEXC/Binance and host-capability checks, touched TS tests/typecheck/lint,
+   fmt/Clippy/bans with CARGO_BUILD_JOBS=4; independently review and push for CI.
+   MERGE HOLD applies until lifted by the overseer.
+
+- Implemented independent public depth queries and plan reduce-only correction.
+  The query captures each request's contract scale/limit, validates the complete
+  snapshot before truncating, retains zero levels/empty sides and exact u64
+  versions, sorts levels and accumulates base quantity. It never changes live
+  subscription/recovery state. Rate limits share cooldown without automatic
+  retries; malformed data and transport/HTTP/native failures settle once.
+- Independent adversarial review found public HTTP401/403 incorrectly classified
+  as account auth failures. Corrected to VenueUnavailable so native auth counters
+  and bridge text matching cannot invalidate a healthy private account. Added
+  auth-looking refusal, private-state, cooldown expiry and invalid-version tests.
+- Added native capability and bridge/host expectation coverage. Signed fee is
+  explicitly retained as RISKY; no independently verified rebate-sign contract.
+- Focused validation passes: MEXC119 + Binance246 native tests, MEXC-enabled
+  WASM host14 tests, TS bridge/socket-health21 tests, safe-cex typecheck,
+  touched-file ESLint (including normally ignored tests), fmt, strict MEXC
+  all-target Clippy and banned-pattern guard. Public HTTP200/native refusals also
+  use a non-auth-specific classification; auth-looking venue details remain intact.
+  Full workspace/WASM/replay validation runs in CI; merge remains held.
