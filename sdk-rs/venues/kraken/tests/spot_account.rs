@@ -195,10 +195,10 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
         &second,
         r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
     );
-    assert!(e.drain_plain().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 10, .. })
-    )));
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 10, .. })))
+    );
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 11 }));
     let request = requests(&mut e).pop().unwrap();
     e.handle(
@@ -273,10 +273,12 @@ fn posted_read_network_retry_stops_after_three_resends() {
                     .iter()
                     .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
             );
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { command: 22, .. })
-            )));
+            assert!(
+                actions.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 22, .. })
+                ))
+            );
         }
     }
 }
@@ -324,10 +326,11 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 50, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 50, .. })))
+    );
 }
 
 #[test]

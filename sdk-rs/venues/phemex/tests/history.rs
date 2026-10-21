@@ -324,10 +324,11 @@ fn unsupported_or_invalid_queries_never_issue_io() {
         e.handle(1.0, Event::Command(Command::Query { command: 10, query }));
         let output = actions(&mut e);
         assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
-        assert!(output.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 
@@ -400,10 +401,11 @@ fn public_only_mode_refuses_private_history_even_with_credentials() {
     );
     let output = actions(&mut e);
     assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
-    assert!(output.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        output
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -696,11 +698,12 @@ fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success()
     // incomplete and probes the remaining span, then completion must fail.
     for _ in 0..60 {
         let output = actions(&mut e);
-        if let Some(result) = output.iter().find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+        if let Some(failed) = output.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { .. }) => Some(false),
+            Action::Notice(Notice::CommandFailed { .. }) => Some(true),
             _ => None,
         }) {
-            assert!(result.is_err());
+            assert!(failed);
             return;
         }
         let a = output
@@ -736,10 +739,11 @@ fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
         );
         let output = actions(&mut e);
         assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
-        assert!(output.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 

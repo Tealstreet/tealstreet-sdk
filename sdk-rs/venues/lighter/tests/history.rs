@@ -27,7 +27,10 @@ fn result(e: &mut Engine<Lighter>) -> Result<Value, String> {
             Action::Notice(Notice::CommandDone {
                 command: 91,
                 result,
-            }) => Some(result.map(|s| serde_json::from_str(&s).unwrap())),
+            }) => Some(Ok(serde_json::from_str(&result).unwrap())),
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("history completion")
@@ -339,10 +342,11 @@ fn caller_id_lookup_and_invalid_ranges_fail_before_http() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 

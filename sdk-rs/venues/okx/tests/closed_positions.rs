@@ -41,7 +41,10 @@ fn done(actions: &[Action]) -> Option<Result<String, String>> {
         Action::Notice(Notice::CommandDone {
             command: 77,
             result,
-        }) => Some(result.clone()),
+        }) => Some(Ok(result.clone())),
+        Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+            Some(Err(error.legacy_text()))
+        }
         _ => None,
     })
 }

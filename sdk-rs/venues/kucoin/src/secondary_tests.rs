@@ -193,7 +193,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
             },
         },
     );
-    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result: result }) if result == "[]")));
+    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result }) if result == "[]")));
     let queries = [
         Query::Fills {
             symbol: Some(symbol.clone()),

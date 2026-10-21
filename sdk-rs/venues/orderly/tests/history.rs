@@ -478,10 +478,10 @@ fn query_preflight_rejects_unsupported_ledgers_ranges_and_noncanonical_ids() {
         ask(&mut e, query);
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 

@@ -79,7 +79,10 @@ impl Harness {
                 Action::Http(r) => self.pending.push(r),
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.actions.push(Action::Notice(Notice::CommandFailed { command, error: error.clone() }));
+                    self.actions.push(Action::Notice(Notice::CommandFailed {
+                        command,
+                        error: error.clone(),
+                    }));
                     self.failures.push(error);
                 }
                 a => self.actions.push(a),
@@ -175,7 +178,10 @@ impl Harness {
             .rev()
             .find_map(|a| match a {
                 Action::Notice(Notice::CommandDone { command, result }) if *command == id => {
-                    Some(result.as_ref().map(String::as_str).map_err(String::as_str))
+                    Some(Ok(result.as_str()))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+                    Some(Err(error.message.as_str()))
                 }
                 _ => None,
             })

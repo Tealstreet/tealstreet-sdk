@@ -34,7 +34,10 @@ fn drained(e: &mut TestEngine) -> Vec<Action> {
     e.drain_actions()
         .map(|a| match a {
             Action::Notice(Notice::CommandFailed { command, error }) => {
-                Action::Notice(Notice::CommandFailed { command, error: error.clone() })
+                Action::Notice(Notice::CommandFailed {
+                    command,
+                    error: error.clone(),
+                })
             }
             a => a,
         })
@@ -51,11 +54,11 @@ fn failures(e: &mut TestEngine) -> Vec<safe_cex_engine::VenueError> {
 fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .Ok(collect)()
+        .collect()
 }
 #[test]
 fn only_final_refreshed_batch_and_fallback_external_ids_are_receipted() {
@@ -321,10 +324,11 @@ fn lost_write_response_never_retries_and_finishes_the_command() {
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 1, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
 }
 
 #[test]
@@ -705,10 +709,11 @@ fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
     let actions = drained(&mut e);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]

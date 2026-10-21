@@ -1704,7 +1704,7 @@ async fn routed_signed_network_notices(
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
             startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Public discovery read failed; retry scheduled");
-            command_failed |= matches!(&notice, Notice::CommandFailed { command: 411, .. } | Notice::CommandFailed { command: 411, .. });
+            command_failed |= matches!(&notice, Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }
     }).await.expect("real network failures reached startup log and command completion");
@@ -1718,9 +1718,7 @@ async fn routed_signed_network_notices(
         let rendered = format!("{notice:?}");
         let payload = match notice {
             Notice::Log { message, .. } => message.clone(),
-            Notice::CommandDone { result, .. } => match result {
-                Ok(value) | Err(value) => value.clone(),
-            },
+            Notice::CommandDone { result, .. } => result.clone(),
             Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {
                 error.legacy_text()
             }
@@ -1784,8 +1782,8 @@ fn rejected_proxy_token(calls: Arc<AtomicUsize>) -> ProxyTokenProvider {
 fn assert_proxy_authorization_notices(notices: &[Notice]) {
     // Startup discovery logs a fixed retry warning; the command carries the cause.
     assert!(notices.iter().any(|notice| matches!(notice,
-        Notice::CommandDone { command: 411, result: Err(message) }
-            if message.contains("Proxy authorization failed")
+        Notice::CommandFailed { command: 411, error }
+            if error.message.contains("Proxy authorization failed")
     )));
 }
 

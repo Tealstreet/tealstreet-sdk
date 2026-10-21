@@ -119,7 +119,10 @@ impl Harness {
                 let a = match a {
                     Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
                         self.failures.push(error.clone());
-                        Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error: error.clone() })
+                        Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                            command,
+                            error: error.clone(),
+                        })
                     }
                     a => a,
                 };

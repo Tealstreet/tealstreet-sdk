@@ -21,7 +21,10 @@ fn fetch(h: &mut Harness, symbol: Option<&str>, from: Option<f64>, to: Option<f6
 
 fn result(h: &Harness) -> Option<Result<String, String>> {
     h.actions.iter().rev().find_map(|a| match a {
-        Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result.clone()),
+        Action::Notice(Notice::CommandDone { command: 9, result }) => Some(Ok(result.clone())),
+        Action::Notice(Notice::CommandFailed { command: 9, error }) => {
+            Some(Err(error.legacy_text()))
+        }
         _ => None,
     })
 }

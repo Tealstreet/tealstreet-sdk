@@ -68,7 +68,6 @@ fn malformed_fill_rows_are_skipped_and_logged_while_valid_fills_return() {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     assert!(json.contains("\"id\":\"999\""));
     assert!(!json.contains("998"));

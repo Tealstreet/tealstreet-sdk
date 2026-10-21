@@ -12,7 +12,10 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
         .drain_actions()
         .map(|action| match action {
             Action::Notice(Notice::CommandFailed { command, error }) => {
-                Action::Notice(Notice::CommandFailed { command, error: error.clone() })
+                Action::Notice(Notice::CommandFailed {
+                    command,
+                    error: error.clone(),
+                })
             }
             action => action,
         })

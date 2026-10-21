@@ -81,7 +81,6 @@ fn timer(e: &mut Engine<Lighter>) -> TimerId {
 fn failure(e: &mut Engine<Lighter>) -> String {
     e.drain_actions()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
             _ => None,
         })
@@ -744,7 +743,6 @@ fn amend_infers_protection_from_requested_price() {
 fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
     e.drain_actions()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { error, .. }) => Some((error, None)),
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 Some((error.message, error.outcome))
             }

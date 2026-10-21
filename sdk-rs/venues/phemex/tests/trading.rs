@@ -48,14 +48,14 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: Value) -> Ve
 }
 
 fn done(actions: &[Action]) -> Result<String, String> {
-    Ok(actions
+    actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result.clone())),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .expect("command completed"))
+        .expect("command completed")
 }
 
 fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {

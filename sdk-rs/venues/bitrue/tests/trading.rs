@@ -68,7 +68,10 @@ impl Harness {
                 Action::Http(r) => self.requests.push(r),
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.notices.push(Notice::CommandFailed { command, error: error.clone() });
+                    self.notices.push(Notice::CommandFailed {
+                        command,
+                        error: error.clone(),
+                    });
                     self.failures.push(error);
                 }
                 Action::Notice(n) => self.notices.push(n),
@@ -109,12 +112,9 @@ impl Harness {
         self.command(Command::PlaceOrders { command: 7, orders });
     }
     fn failed(&self) -> bool {
-        self.notices.iter().any(|n| {
-            matches!(
-                n,
-                Notice::CommandFailed { command: 7, .. }
-            )
-        })
+        self.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandFailed { command: 7, .. }))
     }
     fn result(&self) -> Option<&str> {
         self.notices.iter().find_map(|n| match n {
@@ -597,13 +597,13 @@ fn conditional_census_requires_complete_success() {
             0,
             "{scenario} cannot authorize a guessed cancellation"
         );
-        assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+        assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
         for command in [9, 10] {
             h.command(Command::CancelSymbolOrders {
                 command,
                 symbol: "E-BTC-USDT".into(),
             });
-            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:id,result:Err(error) } if *id == command && error.contains("uncertain"))));
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("uncertain"))));
         }
         assert_eq!(h.writes(), 0);
     }
@@ -630,7 +630,7 @@ fn conditional_census_superseded_by_stream_cannot_authorize_cancel_all() {
     h.reply(census, &protective_census(&client));
     assert!(h.failed());
     assert_eq!(h.writes(), 0);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
 }
 #[test]
 fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel() {
@@ -657,7 +657,7 @@ fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel()
         }
     }
     assert!(h.failed());
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
 }
 #[test]
 fn attached_protection_census_owns_the_native_open_set_even_when_one_leg_is_gone() {
@@ -752,13 +752,13 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
     );
     let census = h.take(Method::Get, "/fapi/v2/openOrders");
     h.reply(census, r#"{"code":"-1","msg":"denied"}"#);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:11,result:Err(error) } if error.contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 11, error } if error.legacy_text().contains("uncertain"))));
     h.command(Command::CancelSymbolOrders {
         command: 12,
         symbol: "E-BTC-USDT".into(),
     });
     assert_eq!(h.writes(), 0);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:12,result:Err(error) } if error.contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("uncertain"))));
     let timer = h
         .timers
         .iter()
@@ -851,17 +851,18 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
                 },
             );
         }
-        assert!(h.notices.iter().any(|n| matches!(
-            n,
-            Notice::CommandFailed { command: 11, .. }
-        )));
+        assert!(
+            h.notices
+                .iter()
+                .any(|n| matches!(n, Notice::CommandFailed { command: 11, .. }))
+        );
         let census = h.take(Method::Get, "/fapi/v2/openOrders");
         for command in [12, 13] {
             h.command(Command::CancelSymbolOrders {
                 command,
                 symbol: "E-BTC-USDT".into(),
             });
-            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:id,result:Err(error) } if *id == command && error.contains("uncertain"))), "{outcome}: held census must prevent empty cancel success");
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("uncertain"))), "{outcome}: held census must prevent empty cancel success");
             assert_eq!(
                 h.writes(),
                 0,
@@ -894,10 +895,11 @@ fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
         create,
         r#"{"code":"-1102","msg":"Required parameter missing"}"#,
     );
-    assert!(h.notices.iter().any(|n| matches!(
-        n,
-        Notice::CommandFailed { command: 11, .. }
-    )));
+    assert!(
+        h.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandFailed { command: 11, .. }))
+    );
     let _held = h.take(Method::Get, "/fapi/v2/openOrders");
     h.command(Command::CancelSymbolOrders {
         command: 12,
@@ -924,10 +926,11 @@ fn protective_amend_preflight_failure_keeps_existing_protection_cancelable() {
         price: Some(0.0),
         amount: None,
     });
-    assert!(h.notices.iter().any(|n| matches!(
-        n,
-        Notice::CommandFailed { command: 11, .. }
-    )));
+    assert!(
+        h.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandFailed { command: 11, .. }))
+    );
     assert_eq!(h.writes(), 0);
     h.command(Command::CancelSymbolOrders {
         command: 12,
@@ -975,17 +978,18 @@ fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
         create,
         r#"{"code":"-1102","msg":"Required parameter missing"}"#,
     );
-    assert!(h.notices.iter().any(|n| matches!(
-        n,
-        Notice::CommandFailed { command: 15, .. }
-    )));
+    assert!(
+        h.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandFailed { command: 15, .. }))
+    );
     // This read predates the second write and cannot resolve the older unknown order.
     h.reply(held, r#"{"code":"0","data":[]}"#);
     h.command(Command::CancelSymbolOrders {
         command: 16,
         symbol: "E-BTC-USDT".into(),
     });
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:16,result:Err(error) } if error.contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 16, error } if error.legacy_text().contains("uncertain"))));
     assert_eq!(h.writes(), 0);
 }
 
@@ -1079,14 +1083,11 @@ fn missing_cancel_identity_is_reported_without_blocking_known_ids() {
         .notices
         .iter()
         .find_map(|n| match n {
-            Notice::CommandDone {
-                command: 7,
-                result: Err(error),
-            } => Some(error),
+            Notice::CommandFailed { command: 7, error } => Some(error),
             _ => None,
         })
         .expect("partial cancellation error");
-    let error: serde_json::Value = serde_json::from_str(error).unwrap();
+    let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
     assert_eq!(error["failedOrders"][0]["id"], "missing");
     assert_eq!(error["canceledOrderIds"][0], "2334151155877155281");
     assert_eq!(
@@ -1149,14 +1150,11 @@ fn cancel_batch_continues_after_native_and_transport_and_identity_failures() {
             .notices
             .iter()
             .find_map(|n| match n {
-                Notice::CommandDone {
-                    command: 7,
-                    result: Err(error),
-                } => Some(error),
+                Notice::CommandFailed { command: 7, error } => Some(error),
                 _ => None,
             })
             .unwrap();
-        let error: serde_json::Value = serde_json::from_str(error).unwrap();
+        let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
         assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
         assert_eq!(error["canceledOrderIds"][0], "2334151155877155282");
         assert_eq!(
@@ -1313,14 +1311,11 @@ fn child_cancel_remains_a_fallback_when_parent_is_missing_or_its_cancel_fails() 
             .notices
             .iter()
             .find_map(|n| match n {
-                Notice::CommandDone {
-                    command: 7,
-                    result: Err(error),
-                } => Some(error),
+                Notice::CommandFailed { command: 7, error } => Some(error),
                 _ => None,
             })
             .unwrap();
-        let error: serde_json::Value = serde_json::from_str(error).unwrap();
+        let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
         assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
         assert_eq!(error["canceledOrderIds"][0], "child");
     }
@@ -1375,8 +1370,8 @@ fn cancellation_missing_from_store_reports_error_and_attempts_known_mixed_target
         }
         assert_eq!(h.writes(), 0);
         assert!(h.notices.iter().any(|notice| matches!(notice,
-            Notice::CommandDone { command: 991, result: Err(error) }
-                if error.contains("missing") && error.contains("not found")
+            Notice::CommandFailed { command: 991, error }
+                if error.legacy_text().contains("missing") && error.legacy_text().contains("not found")
         )));
     }
 }
@@ -1419,14 +1414,14 @@ fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_r
                 .notices
                 .iter()
                 .find_map(|notice| match notice {
-                    Notice::CommandDone {
+                    Notice::CommandFailed {
                         command: 991,
-                        result: Err(error),
+                        error,
                     } => Some(error),
                     _ => None,
                 })
                 .expect("mixed cancellation remains visibly partial");
-            let error: serde_json::Value = serde_json::from_str(error).unwrap();
+            let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
             assert!(
                 error["failedOrders"]
                     .as_array()
@@ -1539,12 +1534,10 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
         "{:?}",
         h.notices
     );
-    let done = h.notices.iter().position(|n| {
-        matches!(
-            n,
-            Notice::CommandFailed { command: 7, .. }
-        )
-    });
+    let done = h
+        .notices
+        .iter()
+        .position(|n| matches!(n, Notice::CommandFailed { command: 7, .. }));
     assert!(error.is_some() && error < done, "{:?}", h.notices);
     // An uncorrelated Error log would surface as a second toast beside Done Err.
     assert!(!h.notices.iter().any(|n| matches!(
@@ -1602,7 +1595,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         assert!(h.notices.iter().any(|n| matches!(
             n,
-            Notice::CommandDone { result: Err(text), .. } if *text == error.legacy_text()
+            Notice::CommandFailed { error: text, .. } if text.legacy_text() == error.legacy_text()
         )));
     }
     // Transport loss on a write is Unknown.

@@ -1193,7 +1193,10 @@ fn plain(actions: impl Iterator<Item = safe_cex_engine::Action>) -> Vec<safe_cex
             safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
                 command,
                 error,
-            }) => safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error: error.clone() }),
+            }) => safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command,
+                error: error.clone(),
+            }),
             a => a,
         })
         .collect()

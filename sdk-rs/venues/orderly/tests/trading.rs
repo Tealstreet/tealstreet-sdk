@@ -11,17 +11,17 @@ fn place(e: &mut Driver, command: u32, json: &str) {
 }
 
 fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
-    Ok(out.into_iter()
+    out.into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
-                (command == id).then_some(result)
+                (command == id).then_some(Ok(result))
             }
             Action::Notice(Notice::CommandFailed { command, error }) => {
                 (command == id).then(|| Err(error.legacy_text()))
             }
             _ => None,
         })
-        .expect("command completion"))
+        .expect("command completion")
 }
 
 fn body(r: &safe_cex_engine::HttpRequest) -> serde_json::Value {
@@ -1725,10 +1725,6 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
 
 fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>> {
     out.into_iter().find_map(|a| match a {
-        Action::Notice(Notice::CommandDone {
-            command,
-            result: Err(_),
-        }) if command == id => Some(None),
         Action::Notice(Notice::CommandFailed { command, error }) if command == id => {
             Some(error.outcome)
         }

@@ -28,7 +28,7 @@ fn result(e: &mut Engine<Okx>) -> String {
             Action::Notice(Notice::CommandDone {
                 command: 991,
                 result,
-            }) => Some(result.unwrap()),
+            }) => Some(result),
             _ => None,
         })
         .expect("completed query")
@@ -368,9 +368,11 @@ fn unknown_market_does_not_issue_a_history_request() {
     );
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(
-        |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[]")
-    ));
+    assert!(
+        out.iter().any(
+            |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[]")
+        )
+    );
 }
 
 #[test]

@@ -17,7 +17,10 @@ fn result(e: &mut Engine<Kraken>) -> Result<Value, String> {
             Action::Notice(Notice::CommandDone {
                 command: 91,
                 result,
-            }) => Some(result.map(|s| serde_json::from_str(&s).unwrap())),
+            }) => Some(Ok(serde_json::from_str(&result).unwrap())),
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("query completion")

@@ -11,12 +11,9 @@ fn place(h: &mut Harness, raw: &str) {
     h.collect();
 }
 fn done(h: &Harness) -> bool {
-    h.actions.iter().any(|a| {
-        matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 7, .. })
-        )
-    })
+    h.actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
 }
 fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
@@ -905,8 +902,8 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
         );
     }
     assert!(h.actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::CommandDone { command:7, result:result })
-            if result == r#"["1","2","3","4"]"#)));
+        Action::Notice(Notice::CommandDone { command:7, result })
+            if result.as_str() == r#"["1","2","3","4"]"#)));
 }
 
 #[test]
@@ -1071,10 +1068,11 @@ fn retained_protective_and_trigger_orders_keep_their_cancel_family() {
             assert_eq!(row[id_field], "retained");
             assert_eq!(row["instId"], "BTC-USDT");
             h.respond(cancel, bad_ack);
-            assert!(h.actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { command: 8, .. })
-            )));
+            assert!(
+                h.actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+            );
             h.e.handle(
                 3.,
                 Event::Command(Command::CancelSymbolOrders {
@@ -1118,10 +1116,9 @@ fn ambiguous_placement_ack_cannot_authorize_empty_cancel_all_success() {
     );
     h.collect();
     assert!(
-        h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 8, .. })
-        )),
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. }))),
         "successful empty ACK does not prove placement absence"
     );
 }

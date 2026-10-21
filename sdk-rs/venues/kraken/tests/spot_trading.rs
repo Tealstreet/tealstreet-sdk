@@ -136,10 +136,11 @@ fn caller_ids_bad_brackets_and_zero_trailing_fail_before_any_write() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 2, .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
     }
     let mut bad = opts("limit", 99.);
     bad.stop_loss = Some(-1.);
@@ -223,10 +224,11 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
             assert!(r.body.unwrap().contains("trigger_price=97"));
         } else {
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { .. })
-            )));
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+            );
         }
     }
 }
@@ -312,10 +314,11 @@ fn uncertain_write_is_never_replayed_but_signature_rejection_resigns_once() {
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 8, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+    );
 }
 #[test]
 fn failed_cancel_stops_batch_and_does_not_remove_store_orders() {
@@ -425,10 +428,11 @@ fn queued_amend_rechecks_reconciled_native_kind_before_write() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 41, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, .. })))
+    );
 }
 
 #[test]
@@ -514,7 +518,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 44, error: m }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 44, error: m }) if m.legacy_text().contains("take-profit/stop-loss legs on a market entry"))));
 }
 #[test]
 fn market_entry_with_zero_brackets_places_only_the_entry() {

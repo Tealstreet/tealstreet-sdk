@@ -118,17 +118,17 @@ fn tick(e: &mut TestEngine, actions: &[Action]) -> Vec<Action> {
     e.drain_actions().collect()
 }
 fn result(actions: &[Action]) -> Result<String, String> {
-    Ok(actions
+    actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(Ok(result.clone())),
             // Failures as the plain text the host renders.
             Action::Notice(Notice::CommandFailed { command: 1, error }) => {
                 Some(Err(error.legacy_text()))
             }
             _ => None,
         })
-        .unwrap())
+        .unwrap()
 }
 fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
     actions

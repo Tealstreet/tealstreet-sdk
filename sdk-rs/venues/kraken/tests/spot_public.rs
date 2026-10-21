@@ -198,10 +198,12 @@ fn public_candle_network_read_retries_three_times_and_settles() {
             assert_eq!(request.url, next.url);
             request = next;
         } else {
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { command: 30, .. })
-            )));
+            assert!(
+                actions.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 30, .. })
+                ))
+            );
             assert!(
                 !actions
                     .iter()

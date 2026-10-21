@@ -582,7 +582,9 @@ mod tests {
                     Action::SetTimer { timer, at_ms } => {
                         self.timers.push((timer, at_ms - self.now))
                     }
-                    Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
+                    Action::Notice(Notice::CommandDone { result, .. }) => {
+                        self.done.push(Ok(result))
+                    }
                     _ => {}
                 }
             }

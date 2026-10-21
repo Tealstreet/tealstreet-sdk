@@ -156,10 +156,10 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
             },
         },
     );
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 7, .. })
-    )));
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
     e.handle(now + 59_999., candles(8));
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));

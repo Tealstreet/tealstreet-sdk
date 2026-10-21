@@ -24,9 +24,8 @@ struct Harness {
 fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Action {
     match action {
         Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
-            let result = Err(error.legacy_text());
-            failures.push(error);
-            Action::Notice(safe_cex_engine::Notice::CommandDone { command, result })
+            failures.push(error.clone());
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
         }
         action => action,
     }

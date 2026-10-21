@@ -115,10 +115,11 @@ fn invalid_or_duplicate_caller_ids_reject_entire_batch_before_writes() {
             },
         );
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 1, .. })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
     }
 }
 
@@ -333,10 +334,11 @@ fn unsuccessful_http_or_missing_success_code_never_reports_write_success() {
             },
         });
         pace(&mut h);
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 1, .. })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
     }
 }
 

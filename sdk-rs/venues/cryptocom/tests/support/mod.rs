@@ -48,9 +48,8 @@ impl Harness {
             // Failures as the plain text the host renders.
             let action = match action {
                 Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
-                    let result = Err(error.legacy_text());
-                    self.failures.push(error);
-                    Action::Notice(safe_cex_engine::Notice::CommandDone { command, result })
+                    self.failures.push(error.clone());
+                    Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
                 }
                 action => action,
             };

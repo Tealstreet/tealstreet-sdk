@@ -141,9 +141,7 @@ fn candle_rows_sort_by_time_and_use_seconds() {
     let out = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::Notice(safe_cex_engine::Notice::CommandDone { result, .. }) => {
-                Some(result.unwrap())
-            }
+            Action::Notice(safe_cex_engine::Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
         })
         .unwrap();

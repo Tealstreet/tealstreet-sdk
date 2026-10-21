@@ -844,7 +844,6 @@ fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
             }) => Some(result),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     assert_eq!(
         result,

@@ -40,7 +40,9 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
         &envelope(r#"{"ordId":"1234","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1234\"]")));
+    assert!(actions(&mut e).iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1234\"]")
+    ));
 }
 
 #[test]
@@ -59,10 +61,10 @@ fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
             ],
         );
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 
@@ -145,10 +147,10 @@ fn lost_write_response_never_retries() {
         !out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 fn stored(id: &str, kind: safe_cex_engine::model::OrderType) -> safe_cex_engine::model::Order {
@@ -217,10 +219,10 @@ fn negative_protective_amount_never_turns_into_close_all() {
         )],
     );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -302,10 +304,10 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
     );
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -344,10 +346,10 @@ fn market_and_terminal_amends_are_rejected_before_writes() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 
@@ -454,10 +456,10 @@ fn replacement_never_runs_after_cancellation_rejection() {
     );
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
@@ -576,10 +578,10 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
         "write must not be retried"
     );
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert!(
         !e.store()
             .setting("BTCUSDT")
@@ -779,10 +781,10 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
         );
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 11, .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 11, .. })))
+        );
     }
 }
 
@@ -864,10 +866,11 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
         r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 1, .. })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
     e.handle(
         7.0,
         Event::Command(Command::CancelSymbolOrders {
@@ -1022,10 +1025,12 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                 expected,
                 "{status}: {body}"
             );
-            assert!(out.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { command: 81, .. })
-            )));
+            assert!(
+                out.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 81, .. })
+                ))
+            );
             assert!(
                 !out.iter()
                     .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
@@ -1109,10 +1114,10 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
             e.store().order("rejected").unwrap().status,
             OrderStatus::Open
         );
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 82, .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 82, .. })))
+        );
     }
 }
 
@@ -1250,10 +1255,11 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
         r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 8, .. })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+    );
     e.handle(
         7.0,
         Event::Command(Command::FetchLeverage {
@@ -1261,10 +1267,11 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
             symbol: "NOPE".into(),
         }),
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 9, .. })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. })))
+    );
 }
 
 /// A ready account plus every action emitted after its config reply.

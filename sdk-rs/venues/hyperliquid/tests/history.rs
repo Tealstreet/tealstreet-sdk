@@ -34,7 +34,6 @@ fn result(e: &mut Engine<Hyperliquid>) -> Value {
                 None
             }
         })
-        .unwrap()
         .unwrap();
     serde_json::from_str(&result).unwrap()
 }
@@ -179,10 +178,10 @@ fn failed_or_malformed_history_never_resolves_as_empty_success() {
         );
         let r = read(&mut e);
         reply(&mut e, &r, status, body);
-        assert!(e.drain_actions().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -290,10 +289,10 @@ fn full_overlap_page_is_incomplete_instead_of_an_empty_success() {
     let r = read(&mut e);
     let repeated = format!("[{}]", vec![fill(1); 2000].join(","));
     reply(&mut e, &r, 200, &repeated);
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 #[test]
 fn concurrent_heavy_reads_reserve_response_weight_before_dispatch() {

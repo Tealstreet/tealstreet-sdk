@@ -277,7 +277,7 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
                 result,
             }) = a
             {
-                Some(result.unwrap())
+                Some(result)
             } else {
                 None
             }

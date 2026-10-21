@@ -149,7 +149,7 @@ fn native_limit_payload_rounds_steps_generates_attributed_code_and_uses_close() 
         200,
         r#"{"orderId":46073148,"updateOrderId":46073148}"#,
     );
-    assert_eq!(rig.result(10), &Ok("[\"46073148\"]".into()));
+    assert_eq!(rig.result(10), Ok("[\"46073148\"]".into()));
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn amendment_cancels_before_replacement_and_rejects_concurrent_same_order_mutati
     assert_order_code_receipt(&rig, &replacement, 10);
     assert_eq!(body(&replacement)["limitPrice"], 3660.0);
     rig.reply(&replacement, 200, r#"{"orderId":46073150}"#);
-    assert_eq!(rig.result(10), &Ok("[\"46073150\"]".into()));
+    assert_eq!(rig.result(10), Ok("[\"46073150\"]".into()));
     amend(&mut rig, 12);
     assert!(rig.result(12).is_err());
     assert!(rig.requests.is_empty());
@@ -773,7 +773,7 @@ fn zero_close_limit_and_stop_price_amendments_require_native_cancellation_proof(
         assert!(payload.get(absent_price_field).is_none());
         assert!(payload.get("positionCode").is_none());
         rig.reply(&replacement, 200, r#"{"orderId":42}"#);
-        assert_eq!(rig.result(10), &Ok("[\"42\"]".into()));
+        assert_eq!(rig.result(10), Ok("[\"42\"]".into()));
     }
 }
 
@@ -1008,7 +1008,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         place(&mut rig, 10, vec![limit()]);
         let request = rig.next_request();
         rig.reply(&request, status, r#"{"errorCode":33}"#);
-        assert_eq!(rig.result(10), &Err(format!("DXtrade HTTP {status}")));
+        assert_eq!(rig.result(10), Err(format!("DXtrade HTTP {status}")));
         let error = &rig.failures[0];
         assert_eq!((error.kind, error.outcome), classified, "{status}");
     }
@@ -1052,7 +1052,7 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     );
     let second = rig.next_request();
     rig.reply(&second, 409, r#"{"errorCode":33}"#);
-    assert_eq!(rig.result(10), &Err("DXtrade HTTP 409".to_owned()));
+    assert_eq!(rig.result(10), Err("DXtrade HTTP 409".to_owned()));
     assert_eq!(rig.failures[0].outcome, None);
 }
 
@@ -1068,7 +1068,7 @@ fn an_unknown_cancel_leg_makes_the_batch_unknown_with_its_kind() {
     let second = rig.next_request();
     rig.reply(&first, 429, "{}");
     rig.failure(&second);
-    assert_eq!(rig.result(10), &Err("DXtrade HTTP 429".to_owned()));
+    assert_eq!(rig.result(10), Err("DXtrade HTTP 429".to_owned()));
     assert_eq!(
         (rig.failures[0].kind, rig.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))

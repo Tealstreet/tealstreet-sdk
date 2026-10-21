@@ -36,11 +36,14 @@ fn completions(actions: &[Action]) -> Vec<(u32, Result<String, String>)> {
         .iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
-                Some((*command, result.clone()))
+                Some((*command, Ok(result.clone())))
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                Some((*command, Err(error.legacy_text())))
             }
             _ => None,
         })
-        .Ok(collect)()
+        .collect()
 }
 fn boot() -> (Engine<Bitrue>, SocketId) {
     let mut e = Engine::new(Bitrue::new(Options {

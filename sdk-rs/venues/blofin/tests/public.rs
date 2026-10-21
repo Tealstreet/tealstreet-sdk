@@ -223,7 +223,7 @@ fn candles_use_documented_volume_and_request_window() {
         .drain_actions()
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone { command: 7, result }) => {
-                Some(result.unwrap())
+                Some(result)
             }
             _ => None,
         })

@@ -271,7 +271,7 @@ fn first_401_refreshes_and_resends_once_while_second_fails() {
             .contains(&("Authorization", "DXAPI new-session".into()))
     );
     rig.reply(&retry, 401, "{}");
-    assert!(rig.result(9).as_ref().unwrap_err().contains("401"));
+    assert!(rig.result(9).unwrap_err().contains("401"));
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn login_401_does_not_loop_and_does_not_leak_password_or_response_body() {
         r#"{"message":"example-password secret-token"}"#,
     );
     assert!(rig.requests.is_empty());
-    let error = rig.result(9).as_ref().unwrap_err();
+    let error = rig.result(9).unwrap_err();
     assert_eq!(error, "DXtrade HTTP 401");
     assert!(!format!("{:?}", rig.notices).contains("example-password"));
 }
@@ -409,10 +409,7 @@ fn network_retries_have_three_attempt_limit() {
             rig.reply(&request, 200, QUOTES);
         }
     }
-    assert_eq!(
-        rig.result(9).as_ref().unwrap_err(),
-        "DXtrade transport failed"
-    );
+    assert_eq!(rig.result(9).unwrap_err(), "DXtrade transport failed");
 }
 
 #[test]

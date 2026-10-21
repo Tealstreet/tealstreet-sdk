@@ -2300,10 +2300,11 @@ mod streaming_tests {
             2,
             "overlapping native mutation must not dispatch"
         );
-        assert!(engine.drain_actions().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 2, .. })
-        )));
+        assert!(
+            engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
         // Duplicate IDs cannot release the first operation's lock.
         engine.handle(
             0.,
@@ -3807,10 +3808,11 @@ mod signing_tests {
                 ids: vec!["native".into()],
             }),
         );
-        assert!(engine.drain_actions().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { command: 2, .. })
-        )));
+        assert!(
+            engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+        );
         assert!(engine.io.order_locks.contains(1));
         engine.handle(
             3.,

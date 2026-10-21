@@ -140,14 +140,14 @@ fn raw_response(e: &mut Engine<WeexFutures>, r: &HttpRequest, text: &str) -> Vec
     e.drain_actions().collect()
 }
 fn done(actions: &[Action]) -> Result<String, String> {
-    Ok(actions
+    actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result.clone())),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
-        .expect("completed command"))
+        .expect("completed command")
 }
 fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
     actions

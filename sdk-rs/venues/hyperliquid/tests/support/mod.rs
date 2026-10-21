@@ -133,7 +133,10 @@ impl<V: safe_cex_engine::Venue> Plain for safe_cex_engine::Engine<V> {
         self.drain_actions()
             .map(|a| match a {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    Action::Notice(Notice::CommandFailed { command, error: error.clone() })
+                    Action::Notice(Notice::CommandFailed {
+                        command,
+                        error: error.clone(),
+                    })
                 }
                 a => a,
             })

@@ -101,10 +101,11 @@ fn invalid_or_duplicate_caller_id_rejects_entire_batch_before_a_write() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -156,9 +157,11 @@ fn full_position_stop_accepts_waiting_without_oid() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
-    assert!(e.drain_plain().any(
-        |a| matches!(a,Action::Notice(Notice::CommandDone{result:ref ids,..})if ids=="[]")
-    ));
+    assert!(
+        e.drain_plain().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{result:ref ids,..})if ids=="[]")
+        )
+    );
 }
 #[test]
 fn own_bracket_leg_is_inferred_from_cloid_before_rest_returns() {
@@ -305,10 +308,11 @@ fn malformed_cancel_ack_stops_replacement_and_keeps_original() {
             .iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -462,9 +466,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         );
         assert!(
             e.drain_plain()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-            command: 3, result: Err(ref error),
-        }) if error.contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -603,10 +605,11 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 1, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -896,9 +899,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
     );
     assert!(
         e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 2, result: Err(ref error),
-    }) if error.contains("settings are uncertain")))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
     );
     reply_at(
         &mut e,
@@ -993,7 +994,8 @@ fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 1, result }) if result.is_err() == amend)));
+                Action::Notice(Notice::CommandFailed { command: 1, .. }) if amend)
+                || !amend && matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))));
         }
     }
 }
@@ -1085,7 +1087,7 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
     let result = e
         .drain_plain()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.unwrap()),
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result),
             _ => None,
         })
         .unwrap();

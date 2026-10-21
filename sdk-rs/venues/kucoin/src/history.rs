@@ -1130,10 +1130,11 @@ mod tests {
             );
             let actions = e.drain_actions().collect::<Vec<_>>();
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { .. })
-            )));
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+            );
         }
     }
     #[test]
@@ -1202,10 +1203,11 @@ mod tests {
             r,
             r#"{"code":"200000","data":{"currentPage":2,"totalPage":2,"totalNum":10,"items":[]}}"#,
         );
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
     #[test]
     fn public_trades_need_no_credentials() {
@@ -1259,10 +1261,11 @@ mod tests {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
     #[test]
     fn pending_settlement_sentinel_does_not_corrupt_completed_ledger_cursor() {

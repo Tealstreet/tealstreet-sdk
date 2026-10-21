@@ -69,7 +69,10 @@ impl Rig {
                 }
                 // Failures as the plain text the host renders.
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.notices.push(Notice::CommandFailed { command, error: error.clone() });
+                    self.notices.push(Notice::CommandFailed {
+                        command,
+                        error: error.clone(),
+                    });
                     self.failures.push(error);
                 }
                 Action::Notice(notice) => self.notices.push(notice),
@@ -144,12 +147,17 @@ impl Rig {
             self.reply(&request, 200, body);
         }
     }
-    pub fn result(&self, id: u32) -> &Result<String, String> {
+    pub fn result(&self, id: u32) -> Result<String, String> {
         self.notices
             .iter()
             .rev()
             .find_map(|notice| match notice {
-                Notice::CommandDone { command, result } if *command == id => Some(result),
+                Notice::CommandDone { command, result } if *command == id => {
+                    Some(Ok(result.clone()))
+                }
+                Notice::CommandFailed { command, error } if *command == id => {
+                    Some(Err(error.legacy_text()))
+                }
                 _ => None,
             })
             .expect("command result")

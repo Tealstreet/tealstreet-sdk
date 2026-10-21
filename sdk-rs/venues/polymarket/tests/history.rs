@@ -63,7 +63,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         e.handle(0.0, Event::Command(command));
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(
-            matches!(&actions[..],[Action::Notice(Notice::CommandDone{result:result,..})] if result=="[]")
+            matches!(&actions[..],[Action::Notice(Notice::CommandDone{result,..})] if result=="[]")
         );
         assert!(!e.store().hedged());
     }
@@ -75,7 +75,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         }),
     );
     assert!(
-        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result:result,..})) if result==r#"{"buyLeverage":1,"sellLeverage":1}"#)
+        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result,..})) if result==r#"{"buyLeverage":1,"sellLeverage":1}"#)
     );
     e.handle(
         0.0,
@@ -88,7 +88,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         }),
     );
     assert!(
-        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result:result,..})) if result==r#"{"found":false,"definitive":false}"#)
+        matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result,..})) if result==r#"{"found":false,"definitive":false}"#)
     );
 }
 
@@ -113,13 +113,7 @@ fn account_uses_signer_identity_and_never_funder_or_private_io() {
         }));
         e.handle(0.0, Event::Command(Command::FetchAccount { command: 7 }));
         let actions: Vec<_> = e.drain_actions().collect();
-        let [
-            Action::Notice(Notice::CommandDone {
-                command: 7,
-                result: result,
-            }),
-        ] = &actions[..]
-        else {
+        let [Action::Notice(Notice::CommandDone { command: 7, result })] = &actions[..] else {
             panic!("unexpected account actions: {actions:?}");
         };
         assert_eq!(

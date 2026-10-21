@@ -848,7 +848,7 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
     let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed leverage transport")).unwrap();
     assert!(error < done);
-    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.legacy_text()=="failed leverage transport")));
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed leverage transport")));
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }

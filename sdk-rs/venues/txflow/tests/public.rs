@@ -487,7 +487,7 @@ fn candle_query_validates_and_streams_documented_envelope() {
         .drain_actions()
         .find_map(|a| {
             if let Action::Notice(safe_cex_engine::Notice::CommandDone { command: 9, result }) = a {
-                Some(result.unwrap())
+                Some(result)
             } else {
                 None
             }

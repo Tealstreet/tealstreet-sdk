@@ -235,10 +235,11 @@ fn complete_batch_preflight_rejects_invalid_last_shape_without_writes() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: 7, .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
 }
 #[test]
 fn request_preserves_caller_id_and_confirm_executed_but_ack_never_fabricates_oid() {
@@ -530,7 +531,6 @@ fn fetch_leverage_returns_confirmed_account_rails_in_wrapper_json_shape() {
             }) => Some(result),
             _ => None,
         })
-        .unwrap()
         .unwrap();
     let rails: Value = serde_json::from_str(&result).unwrap();
     assert_eq!(
