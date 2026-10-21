@@ -583,11 +583,12 @@ impl BinanceFutures {
             Step::ChunkDone => *delay = Some(cx.set_timer(INCOME_CHUNK_DELAY_MS)),
             Step::Finished => {
                 if walk.truncated {
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
                         format!(
                             "Income history is INCOMPLETE: {} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.",
                             walk.exhausted_chunks
                         ),
+                        vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
                     );
                 }
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
