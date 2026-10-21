@@ -16,8 +16,11 @@ FAIL results for documented TS/Rust differences.
 For each PR: review the plan and diff, run focused harness checks, require at
 least five identical strict runs using Node 22 and fresh record/verify outputs,
 review independently, and merge only after green CI. Use CI-built artifacts
-or repeated CI jobs; do not build local release wasm or run public timing
-sweeps. Merge pinned landing SHAs with porcelain Git and inspect the complete
+or CI's five-pair mode on `wip/harness-tape-time-<suite>` branches. That
+branch flag applies only to the matching replay matrix job; ordinary branches
+keep one private pair. Compare all five raw outputs per implementation after
+excluding measured metrics and record run ID and output hashes in the PR.
+Do not build local release wasm or run public timing sweeps. Merge pinned landing SHAs with porcelain Git and inspect the complete
 landing-to-head diff before merging. Report every merge to the overseer.
 
 ## OKX verification
