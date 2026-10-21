@@ -1059,6 +1059,7 @@ mod tests {
                         "backpack",
                         "cryptocom",
                         "grvt",
+                        "paradex",
                     ],
                     venue,
                 ),

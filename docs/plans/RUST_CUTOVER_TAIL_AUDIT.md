@@ -81,8 +81,10 @@ fresh landing branch, before/after regression, focused checks, CI and review.
    native price IDs/order/zero totals survive without stream mutation. GRVT now
    issues independent unsigned MDG lite queries using the documented i/d fields
    and full/lite response aliases; native side order, zero rows and cumulative
-   base totals are preserved without stream/session mutation. Paradex and WEEX
-   remain parity gaps; streaming subscriptions are separate. MEXC's existing
+   base totals are preserved without stream/session mutation. Paradex now uses
+   unsigned request-owned depth queries (default20/explicit depth), native row
+   order and per-level quote totals, independently of live SBE sequence state
+   and private JWT. WEEX remains a parity gap; streaming subscriptions are separate. MEXC's existing
    standalone JSON decoder omission is repaired by opting into the precise book
    feature, with a JSON-to-native-HTTP/result regression; native book semantics
    stay unchanged. Add each remaining native query/capability without synthesizing
