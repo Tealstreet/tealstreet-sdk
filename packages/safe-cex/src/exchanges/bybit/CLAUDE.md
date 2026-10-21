@@ -2040,3 +2040,9 @@ Rust closed-PnL and unbounded order-history page-cap warnings carry their actual
 native query command in `history.incomplete` before partial completion/window
 continuation. Existing rows, caps and error policies are preserved; the host can
 flag the owning partial array and route its warning without crossing callers.
+
+Rust private order and position rows share concrete, out-of-line Serde parser
+entry points across REST and WebSocket handlers. Ordinary raw topic envelopes
+share the same parser boundary too. This limits duplicated WASM parser code;
+accepted JSON forms, borrowed strings, row isolation and Hyro whole-frame
+validation retain their existing semantics.
