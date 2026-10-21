@@ -288,8 +288,9 @@ impl MexcFutures {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
-        self.account.private.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.account.private.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
+        ));
     }
     pub fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let c = self.credentials.as_ref().unwrap();

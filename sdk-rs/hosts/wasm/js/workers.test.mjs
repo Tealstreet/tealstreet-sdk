@@ -341,6 +341,20 @@ test('standalone Workers reject unconfigured CORS before fetching or allocating 
   assert.equal(timeout.mock.callCount(), 0);
 });
 
+test('Durable Object notices reach clients, and Warn+ reaches the console with none attached', (t) => {
+  const EngineObject = createEngineObject({ loadEngine });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const warned = t.mock.method(console, 'warn', () => {});
+  object.notify(false, { op: 'log', level: 'info', message: 'quiet' });
+  object.notify(true, { op: 'log', level: 'warning', code: 'ws.reconnect', message: 'reconnecting' });
+  assert.deepEqual(warned.mock.calls.map((call) => call.arguments), [['safe-cex warning ws.reconnect: reconnecting']]);
+  const sent = [];
+  object.clients.add({ send: (text) => sent.push(JSON.parse(text)) });
+  object.notify(true, { op: 'log', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} });
+  assert.deepEqual(sent, [{ op: 'log', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} }]);
+  assert.equal(warned.mock.callCount(), 1);
+});
+
 test('Workers upgrades fail closed without deployment auth and cannot select another account token', async () => {
   const request = (token) => ({ headers: new Map([['Upgrade', 'websocket'], ['Authorization', `Bearer ${token}`]]) });
   for (const accountToken of [undefined, () => '', () => { throw Error('secret'); }, () => 'account-b-token']) {

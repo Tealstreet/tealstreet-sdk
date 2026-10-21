@@ -38,7 +38,7 @@ compile_error!(
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
+    Action, Engine, Event, Health, LogLevel, Notice, RequestId, SocketId, TimerId, Value, Venue,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -56,6 +56,9 @@ trait AnyEngine {
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
     fn account_snapshot(&mut self, now: f64) -> &[u8];
+    fn health(&self) -> Health {
+        Health::default()
+    }
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -94,6 +97,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
     fn account_snapshot(&mut self, now: f64) -> &[u8] {
         self.account_snapshot_frame(now)
+    }
+
+    fn health(&self) -> Health {
+        Engine::health(self).clone()
     }
 }
 
@@ -162,6 +169,13 @@ enum ActionOut<'a> {
         level: &'static str,
         message: &'a str,
     },
+    Event {
+        level: &'static str,
+        code: &'static str,
+        message: &'a str,
+        #[serde(skip_serializing_if = "Fields::is_empty")]
+        fields: Fields<'a>,
+    },
     CommandError {
         command: u32,
         message: &'a str,
@@ -180,6 +194,32 @@ enum ActionOut<'a> {
         command: u32,
         receipts: &'a [safe_cex_engine::OrderIdentityReceipt],
     },
+}
+
+struct Fields<'a>(&'a [(&'static str, Value)]);
+
+impl Fields<'_> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl serde::Serialize for Fields<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in self.0 {
+            match value {
+                Value::Str(text) => map.serialize_entry(key, text)?,
+                // JSON has no non-finite numbers.
+                Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
+                Value::Num(_) => map.serialize_entry(key, &())?,
+                Value::Bool(flag) => map.serialize_entry(key, flag)?,
+                Value::Redacted => map.serialize_entry(key, safe_cex_engine::log::REDACTED)?,
+            }
+        }
+        map.end()
+    }
 }
 
 fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
@@ -201,6 +241,7 @@ fn encode(actions: &[Action]) -> String {
                 binary,
                 socket,
                 url,
+                headers,
                 channel,
                 context,
             } => ActionOut::WsConnect {
@@ -209,21 +250,9 @@ fn encode(actions: &[Action]) -> String {
                 url,
                 channel: channel.as_ref().map(socket_channel),
                 context: context.as_ref(),
-                headers: None,
-            },
-            Action::WsConnectWithHeaders {
-                socket,
-                url,
-                headers,
-                channel,
-                context,
-            } => ActionOut::WsConnect {
-                binary: false,
-                socket: socket.0,
-                url,
-                channel: channel.as_ref().map(socket_channel),
-                context: context.as_ref(),
-                headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
+                // Header-less sockets keep the field absent so browser hosts can open them.
+                headers: (!headers.is_empty())
+                    .then(|| headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
                 socket: socket.0,
@@ -278,6 +307,12 @@ fn encode(actions: &[Action]) -> String {
                     LogLevel::Error => "error",
                 },
                 message,
+            },
+            Action::Notice(Notice::Event(event)) => ActionOut::Event {
+                level: event.level.as_str(),
+                code: event.code,
+                message: &event.message,
+                fields: Fields(&event.fields),
             },
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
@@ -362,6 +397,22 @@ impl WasmEngine {
 
     fn flush(&mut self) -> String {
         encode(&self.inner.drain())
+    }
+
+    /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).
+    pub fn health(&self) -> String {
+        let h = self.inner.health();
+        format!(
+            r#"{{"wsOpened":{},"wsClosed":{},"reconnects":{},"authFailures":{},"httpFailures":{},"rateLimited":{},"snapshotsDiscarded":{},"rowsSkipped":{}}}"#,
+            h.ws_opened,
+            h.ws_closed,
+            h.reconnects,
+            h.auth_failures,
+            h.http_failures,
+            h.rate_limited,
+            h.snapshots_discarded,
+            h.rows_skipped
+        )
     }
 
     pub fn start(&mut self, now: f64) -> String {
@@ -1196,6 +1247,78 @@ mod tests {
         fn account_snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
+    }
+
+    #[test]
+    fn events_and_health_encode_as_the_documented_json() {
+        let event = Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Warn,
+            code: "auth.rejected",
+            message: "rejected \"key\"".into(),
+            fields: vec![
+                ("key", Value::Redacted),
+                ("status", Value::Num(401.)),
+                ("ratio", Value::Num(f64::NAN)),
+                ("retry", Value::Bool(false)),
+                ("venue", Value::Str("bybit".into())),
+            ],
+        }));
+        assert_eq!(
+            encode(&[event]),
+            r#"[{"op":"event","level":"warn","code":"auth.rejected","message":"rejected \"key\"","fields":{"key":"[redacted]","status":401.0,"ratio":null,"retry":false,"venue":"bybit"}}]"#
+        );
+
+        struct Counted;
+        impl AnyEngine for Counted {
+            fn capabilities(&self) -> safe_cex_engine::Capabilities {
+                safe_cex_engine::Capabilities::BASE
+            }
+            fn apply_public_feed(
+                &mut self,
+                _: f64,
+                _: safe_cex_engine::PublicFeedUpdate,
+            ) -> Result<(), &'static str> {
+                Ok(())
+            }
+            fn start(&mut self, _: f64) {}
+            fn handle(&mut self, _: f64, _: Event<'_>) {}
+            fn drain(&mut self) -> Vec<Action> {
+                Vec::new()
+            }
+            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+                None
+            }
+            fn snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
+            fn account_snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
+            fn health(&self) -> Health {
+                Health {
+                    ws_opened: 1,
+                    ws_closed: 2,
+                    reconnects: 3,
+                    auth_failures: 4,
+                    http_failures: 5,
+                    rate_limited: 6,
+                    snapshots_discarded: 7,
+                    rows_skipped: 8,
+                }
+            }
+        }
+        let health: serde_json::Value = serde_json::from_str(
+            &WasmEngine {
+                inner: Box::new(Counted),
+            }
+            .health(),
+        )
+        .unwrap();
+        assert_eq!(
+            health,
+            serde_json::json!({"wsOpened":1,"wsClosed":2,"reconnects":3,"authFailures":4,
+                "httpFailures":5,"rateLimited":6,"snapshotsDiscarded":7,"rowsSkipped":8})
+        );
     }
 
     #[cfg(feature = "text-ingress")]

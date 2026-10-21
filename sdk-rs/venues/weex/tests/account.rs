@@ -111,7 +111,9 @@ fn private_socket(actions: &[Action]) -> SocketId {
     actions
         .iter()
         .find_map(|action| match action {
-            Action::WsConnectWithHeaders { socket, .. } => Some(*socket),
+            Action::WsConnect {
+                socket, headers, ..
+            } if !headers.is_empty() => Some(*socket),
             _ => None,
         })
         .unwrap()
@@ -123,7 +125,7 @@ fn documented_private_snapshots_and_browser_rest_fallback() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnectWithHeaders { .. }))
+            .any(|a| matches!(a, Action::WsConnect { headers, .. } if !headers.is_empty()))
     );
     for request in requests(&actions) {
         assert!(
@@ -289,11 +291,15 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         .windows(2)
         .find_map(|pair| match (&pair[0], &pair[1]) {
             (
-                Action::WsConnectWithHeaders {
-                    socket: private, ..
+                Action::WsConnect {
+                    socket: private,
+                    headers,
+                    ..
                 },
                 Action::SetTimer { timer, at_ms },
-            ) if *private == socket && *at_ms == NOW + 5000.0 => Some(*timer),
+            ) if !headers.is_empty() && *private == socket && *at_ms == NOW + 5000.0 => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("private socket watchdog");
@@ -312,7 +318,7 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         })
         .unwrap();
     e.handle(NOW + 32_000.0, Event::TimerFired { timer });
-    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnectWithHeaders {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
+    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnect {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
 }
 
 #[test]

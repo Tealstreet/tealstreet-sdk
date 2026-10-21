@@ -1364,10 +1364,11 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Secondary read credentials"))));
-        assert!(!actions.iter().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+        );
     }
 }
 #[test]

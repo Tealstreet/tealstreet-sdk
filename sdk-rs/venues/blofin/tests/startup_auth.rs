@@ -74,6 +74,17 @@ impl Rig {
 }
 
 fn respond(engine: &mut Engine<Blofin>, action: &Action, status: u16, body: &str, now: f64) {
+    respond_with(engine, action, status, "", body, now);
+}
+
+fn respond_with(
+    engine: &mut Engine<Blofin>,
+    action: &Action,
+    status: u16,
+    headers: &str,
+    body: &str,
+    now: f64,
+) {
     let Action::Http(r) = action else {
         panic!("expected request")
     };
@@ -83,7 +94,7 @@ fn respond(engine: &mut Engine<Blofin>, action: &Action, status: u16, body: &str
             request: r.id,
             response: Response {
                 status,
-                headers: "",
+                headers,
                 body,
             },
         },
@@ -123,7 +134,7 @@ fn transient_settings_failures_back_off_and_the_account_still_loads() {
     let (mut margin, mode, _) = to_settings(&mut engine, &mut rig);
     respond(&mut engine, &mode, 200, MODE, 2.);
     let failures: [(u16, &str); 6] = [
-        (429, "Too Many Requests"),
+        (500, "Internal Server Error"),
         (503, r#"{"code":"503","msg":"Service unavailable"}"#),
         (200, "{"),
         (200, r#"{"code":"0","data":{}}"#),
@@ -404,4 +415,36 @@ fn bad_signature_on_socket_login_reconnects() {
         "closed on the rejection, not the auth deadline"
     );
     assert!(rig.failures.is_empty() && rig.deactivated == 0);
+}
+
+#[test]
+fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
+    // BloFin limits count per minute; Retry-After overrides the default window.
+    for (status, headers, wait) in [
+        (429, "Retry-After: 120", 120_000.),
+        (418, "", 60_000.),
+        (429, "", 60_000.),
+    ] {
+        let mut engine = Engine::new(Blofin::new(keyed()));
+        let mut rig = Rig::default();
+        let (margin, mode, _) = to_settings(&mut engine, &mut rig);
+        respond(&mut engine, &mode, 200, MODE, 2.);
+        respond_with(
+            &mut engine,
+            &margin,
+            status,
+            headers,
+            "Too Many Requests",
+            2.,
+        );
+        let mut early = rig.take(&mut engine);
+        early.extend(rig.run(&mut engine, 1. + wait));
+        assert!(
+            !early.iter().any(get("margin-mode")),
+            "{status} {headers:?}: retried early"
+        );
+        let (at, _) = rig.until(&mut engine, get("margin-mode")).expect("retried");
+        assert_eq!(at, 2. + wait, "{status} {headers:?}");
+        assert!(rig.failures.is_empty());
+    }
 }

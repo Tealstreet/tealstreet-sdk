@@ -10,6 +10,7 @@ pub mod engine;
 pub mod error;
 pub mod fence;
 pub mod json;
+pub mod log;
 pub mod model;
 pub mod num;
 #[cfg(feature = "order-locks")]
@@ -32,9 +33,11 @@ pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
     PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget,
-    SocketChannel, SocketContext, SocketId, TimerId, Venue, VenueAction, unsupported_venue_action,
+    SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
+    unsupported_venue_action,
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
+pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;
 

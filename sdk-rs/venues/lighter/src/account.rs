@@ -819,8 +819,12 @@ impl Lighter {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.open = false;
         self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket =
-            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Private));
+        self.account.connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws_url())
+                    .channel(safe_cex_engine::SocketChannel::Private),
+            ),
+        );
     }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();

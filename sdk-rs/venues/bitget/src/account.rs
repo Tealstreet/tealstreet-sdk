@@ -8,6 +8,9 @@ use safe_cex_engine::{Cx, ErrorKind, Fill, LogLevel, Method, Response, TimerId, 
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
 
+/// Private REST pause after a 418/429 that carries no usable `Retry-After`.
+const REST_PAUSE_MS: f64 = 30_000.0;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OrderSource {
     Normal,
@@ -634,11 +637,12 @@ impl BitgetFutures {
         response: Response<'_>,
     ) {
         let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body);
-        if matches!(response.status, 429 | 418) {
-            self.account.rest_paused_until = cx.now + 30_000.0;
+        let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, REST_PAUSE_MS);
+        if pause > 0.0 {
+            self.account.rest_paused_until = self.account.rest_paused_until.max(cx.now + pause);
         }
         if let Request::Probe = request {
-            self.probe_response(cx, response, envelope.ok());
+            self.probe_response(cx, response, envelope.ok(), pause);
             return;
         }
         if envelope
@@ -880,12 +884,14 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         response: Response<'_>,
         envelope: Option<Envelope<IgnoredAny>>,
+        pause_ms: f64,
     ) {
         let Some(header) = envelope else {
             if response.status >= 500 {
                 return self.probe_transport_failed(cx, "Bitget settings transport failure");
             }
-            return self.probe_failed(cx, &format!("Bitget settings HTTP {}", response.status));
+            let error = format!("Bitget settings HTTP {}", response.status);
+            return self.probe_failed(cx, &error, pause_ms);
         };
         match header.code.0 {
             Some(40084.0) => {
@@ -907,7 +913,7 @@ impl BitgetFutures {
                         self.apply_settings(cx, &settings);
                         self.private_detected(cx);
                     }
-                    Err(error) => self.probe_failed(cx, &error),
+                    Err(error) => self.probe_failed(cx, &error, 0.0),
                 }
             }
             code => {
@@ -936,7 +942,7 @@ impl BitgetFutures {
                 } else {
                     self.account.signature_rejections = 0;
                 }
-                self.probe_failed(cx, &format!("Bitget {code}: {}", header.msg));
+                self.probe_failed(cx, &format!("Bitget {code}: {}", header.msg), pause_ms);
             }
         }
     }
@@ -945,17 +951,18 @@ impl BitgetFutures {
     /// confirmed UTA account keeps probing instead of downgrading.
     fn probe_transport_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         if self.account.uta {
-            self.probe_failed(cx, error);
+            self.probe_failed(cx, error, 0.0);
         } else {
             self.private_detected(cx);
         }
     }
 
-    /// Transient probe failures retry with backoff until detection succeeds.
-    fn probe_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    /// Transient probe failures retry with backoff until detection succeeds,
+    /// never inside the rate-limit window a 418/429 answer set.
+    fn probe_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str, pause_ms: f64) {
         cx.log(LogLevel::Warning, error);
         if !self.account.startup_rejected {
-            self.account.probe.failed(cx, ());
+            self.account.probe.failed_after(cx, (), pause_ms);
         }
     }
 

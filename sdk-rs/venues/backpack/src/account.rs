@@ -844,8 +844,9 @@ impl Backpack {
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.socket.supervisor.connecting(cx);
-        self.account.socket.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.account.socket.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
+        ));
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {

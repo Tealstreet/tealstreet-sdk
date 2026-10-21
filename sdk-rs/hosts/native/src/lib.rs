@@ -220,28 +220,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     binary,
                     socket,
                     url,
+                    headers,
                     channel,
                     context,
                 } => {
                     let outgoing = self.transport.connect_encoding(
                         binary,
-                        socket,
-                        url,
-                        vec![],
-                        channel,
-                        context,
-                        self.events.clone(),
-                    );
-                    self.sockets.insert(socket, outgoing);
-                }
-                Action::WsConnectWithHeaders {
-                    socket,
-                    url,
-                    headers,
-                    channel,
-                    context,
-                } => {
-                    let outgoing = self.transport.connect_context(
                         socket,
                         url,
                         headers,

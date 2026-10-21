@@ -64,10 +64,15 @@ impl Harness {
                     binary,
                     socket,
                     url,
+                    headers,
                     channel,
                     context,
                 } if url.contains("/private?") => {
                     assert!(!binary, "KuCoin sockets use the text protocol");
+                    assert!(
+                        headers.is_empty(),
+                        "KuCoin authenticates with a bullet token"
+                    );
                     assert_eq!(*channel, Some(SocketChannel::Private));
                     assert_eq!(
                         context.as_ref().expect("routing feed context").feed,
