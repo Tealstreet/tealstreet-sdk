@@ -1394,6 +1394,14 @@ opening plans no longer appear reduce-only. Position stops stay reduce-only.
 Order overlays and reduce-only sizing consumers receive corrected flags; no
 placement units or signatures change. Native fill-fee sign remains unchanged
 pending independent debit/rebate evidence.
+### Phemex explicit index triggers and daily cutoff
+
+Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
+wire value instead of native refusal or TS's mark/last fallback. Default sources
+are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
+keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
+caller signatures are unchanged.
+
 ### Coinbase port-review retained read semantics
 
 Coinbase Rust spot currency balances continue using native total/free and their

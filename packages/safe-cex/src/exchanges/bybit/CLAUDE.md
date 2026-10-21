@@ -1923,8 +1923,11 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 With `engine: 'rust'`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo` and
 `hyrotrader` use one `sdk-rs/venues/bybit` state machine with a variant/paths
 option. Demo/testnet routing and the Hyro configured-origin selection remain
-as described above. Hyro native callers must supply all three endpoints; an
-absent configuration fails before I/O.
+as described above. The registry resolves raw `hyrotrader` mode and URL maps,
+using the simulator for demo mode or an empty production REST livenet URL,
+then selecting testnet/livenet. All three selected URLs must be configured.
+Native callers may instead supply explicit `endpoints` when `hyrotrader` is
+absent; missing endpoints fail before I/O.
 
 Inverse keeps native USD order amounts and coin position PnL. The frame bridge
 preserves native order remainder and reconstructs native position size for
