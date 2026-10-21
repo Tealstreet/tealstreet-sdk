@@ -273,3 +273,67 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         }
     }
 }
+
+#[test]
+fn ticker_rate_limit_retry_waits_for_retry_after() {
+    let mut engine = public_engine();
+    engine.start(0.0);
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let respond = |engine: &mut Engine<Kucoin>, request, status, headers, body| {
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status,
+                    headers,
+                    body,
+                },
+            },
+        )
+    };
+    respond(&mut engine, catalogue.id, 200, "", CATALOGUE);
+    let mut timers = Vec::new();
+    let mut ticker = None;
+    for action in engine.drain_actions() {
+        match action {
+            Action::Http(r) => ticker = Some(r),
+            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+            _ => {}
+        }
+    }
+    let ticker = ticker.expect("ticker request");
+    respond(&mut engine, ticker.id, 429, "Retry-After: 120", "");
+    let mut retried_at = None;
+    let mut now = 0.0;
+    loop {
+        for action in engine.drain_actions() {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::Http(r) if r.url == ticker.url => {
+                    retried_at.get_or_insert(now);
+                }
+                _ => {}
+            }
+        }
+        if retried_at.is_some() || timers.is_empty() {
+            break;
+        }
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (timer, at) = timers.remove(0);
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    assert_eq!(
+        retried_at,
+        Some(120_000.0),
+        "tickers retried only after Retry-After"
+    );
+}
