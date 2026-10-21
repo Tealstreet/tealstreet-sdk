@@ -10,11 +10,11 @@ safe-cex-crypto.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 base64.workspace = true
-getrandom.workspace = true
 miniz_oxide = "0.8"
 rmp-serde = "1.3"
 
 [dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
 alloy-dyn-abi.workspace = true
 
 [lints]

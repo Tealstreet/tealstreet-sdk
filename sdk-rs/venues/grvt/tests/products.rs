@@ -49,7 +49,7 @@ struct Harness {
 impl Harness {
     fn new(private: bool) -> Self {
         let mut h = Self {
-            e: Engine::new(Grvt::new(Options {
+            e: safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
                 public_data_only: !private,
                 key: Some("fixture-key".into()),
                 secret: Some(format!("0x{}", "01".repeat(32))),
@@ -1127,7 +1127,7 @@ fn a_mismatched_configured_signer_warns_without_blocking_startup() {
         ("0x0000000000000000000000000000000000000001", true),
         (signer.as_str(), false),
     ] {
-        let mut e = safe_cex_engine::Engine::new(safe_cex_venue_grvt::Grvt::new(
+        let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_grvt::Grvt::new(
             safe_cex_venue_grvt::Options {
                 key: Some("fixture-key".into()),
                 secret: Some(secret.clone()),

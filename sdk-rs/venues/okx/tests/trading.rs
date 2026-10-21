@@ -885,9 +885,8 @@ fn ready_with_held_reconciliation() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    use safe_cex_engine::Engine;
     use safe_cex_venue_okx::{Okx, Options};
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
@@ -1279,13 +1278,14 @@ fn ready_engine() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    let mut e =
-        safe_cex_engine::Engine::new(safe_cex_venue_okx::Okx::new(safe_cex_venue_okx::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_okx::Okx::new(
+        safe_cex_venue_okx::Options {
             key: Some("test-key".into()),
             secret: Some("test-secret".into()),
             passphrase: Some("test-passphrase".into()),
             ..Default::default()
-        }));
+        },
+    ));
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);

@@ -36,7 +36,7 @@ impl Harness {
     }
     pub fn started_expecting(options: Options, expect_startup_failure: bool) -> Self {
         let mut h = Self {
-            engine: Engine::new(BitgetFutures::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(options)),
             now: 1_000_000.0,
             requests: vec![],
             sockets: vec![],

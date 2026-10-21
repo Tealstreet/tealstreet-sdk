@@ -387,7 +387,10 @@ impl PhemexPerpetuals {
                 }
                 let id = match &o.client_order_id {
                     Some(id) => id.clone(),
-                    None => format!("Tealstreet_{}", safe_cex_crypto::uuid::uuid()?),
+                    None => format!(
+                        "Tealstreet_{}",
+                        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+                    ),
                 };
                 if o.client_order_id.is_none() && !seen.insert(id.clone()) {
                     return Err("Phemex duplicate generated clientOrderId".into());

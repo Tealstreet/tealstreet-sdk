@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, SocketChannel, Venue};
+use safe_cex_engine::{Action, Command, Event, Notice, SocketChannel, Venue};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
 fn subscribe(e: &mut TestEngine) {
@@ -29,7 +29,7 @@ const UPDATE: &str = r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":102,"data"
 #[test]
 fn initial_sockets_have_explicit_roles_and_unmodified_venue_urls_on_both_environments() {
     for (testnet, host) in [(false, "wss.woox.io"), (true, "wss.staging.woox.io")] {
-        let mut e = Engine::new(Woo::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
             testnet,
             key: Some("fixture-key".into()),
             secret: Some("fixture-secret".into()),
@@ -151,7 +151,7 @@ fn ticker_signed_zero_changes_emit_frames_and_repeated_bits_do_not() {
 
 #[test]
 fn nullable_index_keeps_missing_value_without_rejecting_the_seed() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -324,7 +324,7 @@ fn malformed_or_duplicate_ticker_envelope_fields_cannot_commit_rows() {
 }
 #[test]
 fn pre_seed_book_subscription_survives_until_socket_open() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -511,7 +511,7 @@ fn reference_counts_and_generations_reject_unsubscribed_snapshot() {
 }
 #[test]
 fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -544,7 +544,7 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
 }
 #[test]
 fn failed_market_page_cannot_poison_price_caps_after_retry() {
-    let mut e = Engine::new(Woo::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options::default()));
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(
@@ -681,7 +681,7 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
 }
 #[test]
 fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -731,7 +731,7 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
 }
 #[test]
 fn ticker_without_open_keeps_last_price_with_zero_percentage() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

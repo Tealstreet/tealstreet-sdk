@@ -1,6 +1,6 @@
 use super::*;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, Engine, ReadCredentials};
+use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -59,7 +59,7 @@ fn secondary_get_keeps_primary_mutations() {
         .parse()
         .unwrap();
     let read_bound: u64 = read_signer.nonce(1700000000000.0).unwrap().parse().unwrap();
-    let mut engine = Engine::new(probe(Kraken::new(options)));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Kraken::new(options)));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()
@@ -119,7 +119,7 @@ fn secondary_get_keeps_primary_mutations() {
 fn invalid_secondary_identity_stops_startup_before_io() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = Engine::new(Kraken::new(opts));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kraken::new(opts));
     engine.start(1700000000000.0);
     assert!(
         !engine
@@ -132,7 +132,7 @@ fn invalid_secondary_identity_stops_startup_before_io() {
 fn equal_api_keys_share_nonce_clock_but_keep_selected_signing_secrets() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().key = "primary-key".into();
-    let mut engine = Engine::new(probe(Kraken::new(opts)));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Kraken::new(opts)));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
@@ -181,7 +181,7 @@ fn equal_api_keys_share_nonce_clock_but_keep_selected_signing_secrets() {
 
 #[test]
 fn history_client_keeps_primary_credentials_and_explicit_primary_route() {
-    let mut engine = Engine::new(probe(Kraken::new(options())));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Kraken::new(options())));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()

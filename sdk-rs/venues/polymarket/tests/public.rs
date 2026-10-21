@@ -1,6 +1,7 @@
+use safe_cex_engine::Engine;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketId,
-    TimerId, Venue,
+    Action, Command, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue,
 };
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
@@ -31,7 +32,7 @@ impl H {
     }
     fn with_policy(policy: PublicFeedPolicy) -> Self {
         let mut h = Self {
-            e: Engine::new(Polymarket::new(Options {
+            e: safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
                 public_data_only: true,
                 ..Default::default()
             })),
@@ -582,7 +583,7 @@ fn price_history_duplicate_timestamp_retains_last_sample() {
 #[test]
 fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_intent() {
     let mut h = H::new();
-    h.e = Engine::new(Polymarket::new(Options {
+    h.e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
         polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
             market_slugs: Some(vec!["one/a".into(), "two b".into()]),
             ..Default::default()
@@ -601,7 +602,7 @@ fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_in
     assert!(h.http.is_empty());
     assert!(h.socket.is_none());
     for slugs in [vec![], vec!["".into()], vec!["one".into(), "one".into()]] {
-        let mut e = Engine::new(Polymarket::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
             polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
                 market_slugs: Some(slugs),
                 ..Default::default()

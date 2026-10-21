@@ -56,7 +56,7 @@ impl Driver {
         } else {
             Options::default()
         };
-        let mut e = Engine::new(Coinbase::new(options).unwrap());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Coinbase::new(options).unwrap());
         e.store_mut().set_markets(vec![market(symbol, cfm)]);
         Self {
             e,

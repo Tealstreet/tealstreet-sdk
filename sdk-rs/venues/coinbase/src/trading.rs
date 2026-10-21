@@ -345,7 +345,10 @@ impl Coinbase {
             }
             id.clone()
         } else {
-            format!("tealstreet-{}", safe_cex_crypto::uuid::uuid()?)
+            format!(
+                "tealstreet-{}",
+                safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+            )
         };
         let config = match opts.kind {
             OrderType::Market => Configuration::Market(Size { base_size: size }),

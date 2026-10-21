@@ -42,7 +42,7 @@ fn answer(e: &mut Engine<Kucoin>, request: &HttpRequest, body: &str) {
     );
 }
 fn seeded(count: usize) -> (Engine<Kucoin>, Vec<HttpRequest>) {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -374,7 +374,7 @@ fn fetched_candles_use_minutes_and_milliseconds_on_wire() {
 }
 #[test]
 fn rejects_sandbox_before_any_request() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
@@ -384,7 +384,7 @@ fn rejects_sandbox_before_any_request() {
 }
 #[test]
 fn api_rejection_never_commits_a_seed() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -438,7 +438,7 @@ fn disconnected_generation_cannot_collide_with_recreated_book() {
 
 #[test]
 fn missing_private_passphrase_rejects_before_public_or_private_reads() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Default::default()
@@ -451,7 +451,7 @@ fn missing_private_passphrase_rejects_before_public_or_private_reads() {
 
 #[test]
 fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_count() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -540,7 +540,7 @@ fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_c
 
 #[test]
 fn ticker_interest_hints_are_safe_before_and_after_startup() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -804,7 +804,7 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 
 #[test]
 fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome() {
-    let mut e = Engine::new(Kucoin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
@@ -881,7 +881,7 @@ fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome(
 
 #[test]
 fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
-    let unstarted = Engine::new(Kucoin::new(Options {
+    let unstarted = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -962,7 +962,7 @@ fn bullet_failures_back_off_and_timed_out_token_responses_cannot_connect() {
 
 #[test]
 fn spot_symbol_amend_rejects_once_without_io_or_state_changes_on_futures() {
-    let unstarted = Engine::new(Kucoin::new(Options {
+    let unstarted = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

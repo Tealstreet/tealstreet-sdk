@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, SocketChannel, SocketId, TimerId,
+    Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId, TimerId,
 };
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
@@ -39,7 +39,7 @@ fn start_with_retry(
     TimerId,
     Option<TimerId>,
 ) {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         application_id: Some("app".into()),
@@ -1355,7 +1355,7 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
 // instead of staying invisible until the next poll.
 #[test]
 fn stop_read_before_the_ticker_seed_is_reread_as_soon_as_prices_exist() {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         application_id: Some("app".into()),

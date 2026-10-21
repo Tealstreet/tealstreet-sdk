@@ -18,7 +18,7 @@ struct Harness {
 
 impl Harness {
     fn public(policy: PublicFeedPolicy) -> Self {
-        let mut e = Engine::new(Hyperliquid::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
             public_data_only: true,
             ..Options::default()
         }));

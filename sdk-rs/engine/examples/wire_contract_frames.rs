@@ -1,5 +1,7 @@
 //! Actual writer frames for the JS/TypeScript wire contract regressions.
 //! Run with `cargo run -q -p safe-cex-engine --example wire_contract_frames`.
+#[path = "../tests/support/mod.rs"]
+mod support;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{
     Candle, Limits, MarginType, Market, MinMax, Order, OrderExtra, OrderSide, OrderStatus,
@@ -7,7 +9,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, Cx, Engine, Event, Fill, FillFinancials, Response, SocketId, TimerId, Venue,
+    Command, Cx, Event, Fill, FillFinancials, Response, SocketId, TimerId, Venue,
 };
 
 fn market(symbol: &str, pretty: Option<&str>) -> Market {
@@ -234,7 +236,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
-    let mut engine = Engine::new(FixtureVenue {
+    let mut engine = support::seeded_engine(FixtureVenue {
         book: Book::default(),
     });
     engine.start(1000.);

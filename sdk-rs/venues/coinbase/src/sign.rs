@@ -155,8 +155,13 @@ impl Credentials {
         &self.key
     }
 
-    pub fn jwt(&self, now: f64, uri: Option<&str>) -> Result<String, String> {
-        self.jwt_with_nonce(now, uri, &safe_cex_crypto::uuid::uuid()?)
+    pub fn jwt(
+        &self,
+        now: f64,
+        uri: Option<&str>,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
+    ) -> Result<String, String> {
+        self.jwt_with_nonce(now, uri, &safe_cex_crypto::uuid::uuid_with_entropy(fill)?)
     }
 
     fn jwt_with_nonce(&self, now: f64, uri: Option<&str>, nonce: &str) -> Result<String, String> {
@@ -213,6 +218,7 @@ impl Credentials {
         method: Method,
         path: &str,
         now: f64,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
     ) -> Result<Vec<(&'static str, String)>, String> {
         if !path.starts_with('/')
             || path.starts_with("//")
@@ -226,7 +232,7 @@ impl Credentials {
         Ok(vec![
             (
                 "Authorization",
-                format!("Bearer {}", self.jwt(now, Some(&uri))?),
+                format!("Bearer {}", self.jwt(now, Some(&uri), fill)?),
             ),
             ("Content-Type", "application/json".into()),
         ])
@@ -520,11 +526,18 @@ mod tests {
     #[test]
     fn rest_uri_uses_real_host_and_path_only_and_tokens_are_fresh() {
         let credentials = Credentials::new(KEY, &URL_SAFE_NO_PAD.encode([7; 32])).unwrap();
+        let mut counter = 0u8;
+        let mut fill = |bytes: &mut [u8]| {
+            counter += 1;
+            bytes.fill(counter);
+            Ok(())
+        };
         let headers = credentials
             .headers(
                 Method::Get,
                 "/api/v3/brokerage/orders/historical/batch?cursor=abc#ignored",
                 1_000.0,
+                &mut fill,
             )
             .unwrap();
         let token = headers
@@ -539,7 +552,7 @@ mod tests {
             claims.uri.as_deref(),
             Some("GET api.coinbase.com/api/v3/brokerage/orders/historical/batch")
         );
-        let (second, ws_claims, _, _) = decode(&credentials.jwt(1_000.0, None).unwrap());
+        let (second, ws_claims, _, _) = decode(&credentials.jwt(1_000.0, None, &mut fill).unwrap());
         assert_ne!(header.nonce, second.nonce);
         assert!(ws_claims.uri.is_none());
         assert_eq!(
@@ -575,7 +588,14 @@ mod tests {
         }
         let credentials = Credentials::new(KEY, &secret).unwrap();
         for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, f64::MAX] {
-            assert!(credentials.jwt(now, None).is_err());
+            assert!(
+                credentials
+                    .jwt(now, None, |bytes| {
+                        bytes.fill(1);
+                        Ok(())
+                    })
+                    .is_err()
+            );
         }
         for path in [
             "",
@@ -583,12 +603,33 @@ mod tests {
             "//other-host/path",
             "/path\nheader",
         ] {
-            assert!(credentials.headers(Method::Get, path, 0.0).is_err());
+            assert!(
+                credentials
+                    .headers(Method::Get, path, 0.0, |bytes| {
+                        bytes.fill(1);
+                        Ok(())
+                    })
+                    .is_err()
+            );
         }
         for nonce in ["", "bad\nnonce"] {
             assert!(credentials.jwt_with_nonce(0.0, None, nonce).is_err());
         }
-        assert!(credentials.jwt(0.0, Some("")).is_err());
-        assert!(credentials.jwt(0.0, Some("GET api\nheader")).is_err());
+        assert!(
+            credentials
+                .jwt(0.0, Some(""), |bytes| {
+                    bytes.fill(1);
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(
+            credentials
+                .jwt(0.0, Some("GET api\nheader"), |bytes| {
+                    bytes.fill(1);
+                    Ok(())
+                })
+                .is_err()
+        );
     }
 }

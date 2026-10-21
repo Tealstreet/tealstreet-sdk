@@ -5,7 +5,7 @@ use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::jittered;
 const CATALOGUE: &str = r###"{"success":true,"code":0,"data":[{"broken":true},{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true,"contractSize":0.0001,"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500,"makerFeeRate":0,"takerFeeRate":0.0002}]}"###;
 fn public_engine() -> Engine<MexcFutures> {
-    Engine::new(MexcFutures::new(Options {
+    safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(MexcFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

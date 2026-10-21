@@ -103,7 +103,7 @@ impl<V: Venue> H<V> {
         respond: fn(&str) -> Option<&'static str>,
         ping: &'static str,
     ) -> Self {
-        let mut engine = Engine::new(venue);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(support::NOW);
         let mut h = Self {

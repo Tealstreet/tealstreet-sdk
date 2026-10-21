@@ -459,7 +459,7 @@ impl Okx {
             ..empty_payload()
         };
         let generated = || {
-            safe_cex_crypto::uuid::uuid()
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
                 .map(|id| format!("{BROKER}{id}").chars().take(32).collect::<String>())
         };
         if algo {

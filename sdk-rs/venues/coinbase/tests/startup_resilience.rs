@@ -1,4 +1,4 @@
-use safe_cex_engine::{Action, Engine, Event, Notice, Response};
+use safe_cex_engine::{Action, Event, Notice, Response};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
 /// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
@@ -10,7 +10,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
-    let mut engine = Engine::new(
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()

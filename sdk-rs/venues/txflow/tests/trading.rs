@@ -8,7 +8,7 @@ mod account_support;
 use account_support::{Plain, failures};
 const NOW: f64 = 1_800_000_000_000.0;
 fn engine() -> Engine<TxFlow> {
-    let mut e = Engine::new(TxFlow::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
         secret: Some(format!("0x{}", "ab".repeat(32))),

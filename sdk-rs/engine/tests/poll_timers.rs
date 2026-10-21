@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, Method, PollTimerBounds, Response, SocketId, TimerId, Venue,
@@ -113,7 +114,7 @@ fn clear(engine: &mut Engine<Polls>, now: f64, index: &str) -> Vec<Action> {
 fn first_matching_policy_keeps_existing_deadline_and_rearms_only_different_fallbacks() {
     let mut venue = Polls::new(&[2_000., 5_000.]);
     venue.specs[0].1.minimum_interval_ms = 2_000.;
-    let mut engine = Engine::new(venue);
+    let mut engine = support::seeded_engine(venue);
     engine.start(5.);
     let original = timers(&take(&mut engine));
     assert!(policy(&mut engine, 50., 1.).is_empty());
@@ -142,7 +143,7 @@ fn first_matching_policy_keeps_existing_deadline_and_rearms_only_different_fallb
 fn an_unchanged_effective_minimum_never_postpones_a_poll() {
     let mut venue = Polls::new(&[100.]);
     venue.specs[0].1.minimum_interval_ms = 250.;
-    let mut engine = Engine::new(venue);
+    let mut engine = support::seeded_engine(venue);
     engine.start(10.);
     let original = timers(&take(&mut engine));
     assert_eq!(original[0].1, 260.);
@@ -158,7 +159,7 @@ fn an_unchanged_effective_minimum_never_postpones_a_poll() {
 
 #[test]
 fn fallback_cadences_are_independent_and_callbacks_use_logical_ids_once() {
-    let mut engine = Engine::new(Polls::new(&[100., 250.]));
+    let mut engine = support::seeded_engine(Polls::new(&[100., 250.]));
     engine.start(10.);
     let physical = timers(&take(&mut engine));
     assert_eq!(
@@ -176,7 +177,7 @@ fn fallback_cadences_are_independent_and_callbacks_use_logical_ids_once() {
 
 #[test]
 fn change_uses_fresh_physical_ids_and_fences_queued_callbacks_without_changing_ordinary_timers() {
-    let mut engine = Engine::new(Polls::new(&[4_000., 10_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[4_000., 10_000.]));
     engine.start(0.);
     let old = timers(&take(&mut engine));
     let changes = policy(&mut engine, 20., 0.5);
@@ -207,7 +208,7 @@ fn change_uses_fresh_physical_ids_and_fences_queued_callbacks_without_changing_o
 
 #[test]
 fn pause_retains_registrations_clear_removes_paused_demand_and_resume_is_fresh() {
-    let mut engine = Engine::new(Polls::new(&[4_000., 8_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[4_000., 8_000.]));
     engine.start(0.);
     let old = timers(&take(&mut engine));
     let paused = policy(&mut engine, 10., f64::INFINITY);
@@ -231,7 +232,7 @@ fn pause_retains_registrations_clear_removes_paused_demand_and_resume_is_fresh()
 
 #[test]
 fn initially_paused_polls_register_without_host_timers_and_clear_while_active_is_final() {
-    let mut engine = Engine::new(Polls::new(&[4_000., 8_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[4_000., 8_000.]));
     assert!(policy(&mut engine, 0., f64::INFINITY).is_empty());
     engine.start(1.);
     assert_eq!(
@@ -262,7 +263,7 @@ fn recurring_minimum_and_absolute_cooldown_survive_policy_changes() {
         minimum_interval_ms: 5_000.,
         not_before_ms: 37_500.,
     };
-    let mut engine = Engine::new(venue);
+    let mut engine = support::seeded_engine(venue);
     engine.start(0.);
     let first = timers(&take(&mut engine))[0];
     assert_eq!(first.1, 64_000.);
@@ -280,7 +281,7 @@ fn recurring_minimum_and_absolute_cooldown_survive_policy_changes() {
 fn read_completion_rearms_against_latest_policy_even_when_paused_during_io() {
     let mut venue = Polls::new(&[4_000.]);
     venue.rearm_on_response = true;
-    let mut engine = Engine::new(venue);
+    let mut engine = support::seeded_engine(venue);
     engine.start(0.);
     let timer = timers(&take(&mut engine))[0].0;
     engine.handle(4_000., Event::TimerFired { timer });
@@ -316,7 +317,7 @@ fn read_completion_rearms_against_latest_policy_even_when_paused_during_io() {
 fn latest_policy_is_applied_before_legacy_hook_and_invalid_updates_do_nothing() {
     let mut venue = Polls::new(&[4_000.]);
     venue.register_in_hook = true;
-    let mut engine = Engine::new(venue);
+    let mut engine = support::seeded_engine(venue);
     engine.start(0.);
     take(&mut engine);
     let changed = policy(&mut engine, 10., 0.25);
@@ -340,7 +341,7 @@ fn latest_policy_is_applied_before_legacy_hook_and_invalid_updates_do_nothing() 
 
 #[test]
 fn repeated_policy_leaves_existing_due_time_and_physical_id_unchanged() {
-    let mut engine = Engine::new(Polls::new(&[4_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[4_000.]));
     engine.start(0.);
     take(&mut engine);
     let fresh = timers(&policy(&mut engine, 10., 0.5))[0];
@@ -352,7 +353,7 @@ fn repeated_policy_leaves_existing_due_time_and_physical_id_unchanged() {
 
 #[test]
 fn scale_multiplies_each_native_cadence_instead_of_replacing_it() {
-    let mut engine = Engine::new(Polls::new(&[500., 5_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[500., 5_000.]));
     engine.start(0.);
     let native = timers(&take(&mut engine));
     assert_eq!(
@@ -374,7 +375,7 @@ fn scale_multiplies_each_native_cadence_instead_of_replacing_it() {
 
 #[test]
 fn host_ceiling_bounds_slowed_polls_without_slowing_native_cadences() {
-    let mut engine = Engine::new(Polls::new(&[2_000., 5_000., 30_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[2_000., 5_000., 30_000.]));
     engine.start(0.);
     take(&mut engine);
     engine.handle(
@@ -405,7 +406,7 @@ fn host_ceiling_bounds_slowed_polls_without_slowing_native_cadences() {
 
 #[test]
 fn host_policy_is_bounded_without_moving_native_cadences_past_the_bounds() {
-    let mut engine = Engine::new(Polls::new(&[10_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[10_000.]));
     engine.start(0.);
     take(&mut engine);
     assert_eq!(timers(&policy(&mut engine, 10., 0.01))[0].1, 1_010.);
@@ -414,7 +415,7 @@ fn host_policy_is_bounded_without_moving_native_cadences_past_the_bounds() {
     assert!(!paused.is_empty());
     assert!(timers(&paused).is_empty());
 
-    let mut engine = Engine::new(Polls::new(&[500., 200_000.]));
+    let mut engine = support::seeded_engine(Polls::new(&[500., 200_000.]));
     engine.start(0.);
     let native = timers(&take(&mut engine));
     assert_eq!(

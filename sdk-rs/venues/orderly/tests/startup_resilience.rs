@@ -8,7 +8,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"success":true,"data":{"rows":[{"broken":true},{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01},{"symbol":"PERP_ETH_USDC","base_tick":0.001,"quote_tick":0.01,"base_min":0.001,"base_max":100,"base_imr":0.02}]}}"###;
 fn public_engine() -> Engine<Orderly> {
-    Engine::new(Orderly::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -76,7 +76,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn authenticated_discovery_starts_private_reads_before_tickers() {
-    let mut engine = Engine::new(Orderly::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         key: Some("ed25519:11111111111111111111111111111111".into()),
         secret: Some(bs58::encode([7; 32]).into_string()),
         application_id: Some("scripted-account".into()),

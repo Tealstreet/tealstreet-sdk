@@ -291,7 +291,7 @@ impl Hyperliquid {
                         }
                     }
                 }
-                let cloid = match mint_cloid() {
+                let cloid = match mint_cloid(cx) {
                     Ok(c) => c,
                     Err(e) => {
                         cx.fail(command, not_sent(e));
@@ -491,7 +491,7 @@ impl Hyperliquid {
         let price = price_wire(p, m.precision.amount, spot)?;
         let cloid = match &opts.client_order_id {
             Some(c) => c.clone(),
-            None => mint_cloid()?,
+            None => mint_cloid(cx)?,
         };
         let t = if trigger {
             WireType::Trigger {
@@ -545,7 +545,7 @@ impl Hyperliquid {
                                 tpsl: kind,
                             },
                         },
-                        c: mint_cloid()?,
+                        c: mint_cloid(cx)?,
                     });
                 }
             }
@@ -1222,9 +1222,9 @@ fn only_terminal_cancel(error: &str) -> bool {
                 .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
     })
 }
-fn mint_cloid() -> Result<String, String> {
+fn mint_cloid(cx: &Cx<'_, Pending>) -> Result<String, String> {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).map_err(|e| e.to_string())?;
+    cx.fill_entropy(&mut bytes)?;
     Ok(format!("0x{}", safe_cex_crypto::hex(&bytes)))
 }
 fn float_wire(value: f64) -> Result<String, String> {

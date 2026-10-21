@@ -370,13 +370,13 @@ fn spot_refresh_has_no_pagination_parameters_and_hyro_keeps_filtering_and_dedupl
 
 #[test]
 fn a_shared_consumer_refuses_independent_discovery_before_any_refresh_io() {
-    use safe_cex_engine::{Action, Engine, ErrorKind, Notice, PublicFeedPolicy};
-    let mut engine = Engine::new(safe_cex_venue_bybit::BybitLinear::new(
-        safe_cex_venue_bybit::Options {
+    use safe_cex_engine::{Action, ErrorKind, Notice, PublicFeedPolicy};
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bybit::BybitLinear::new(safe_cex_venue_bybit::Options {
             public_data_only: true,
             ..Default::default()
-        },
-    ));
+        }),
+    );
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();

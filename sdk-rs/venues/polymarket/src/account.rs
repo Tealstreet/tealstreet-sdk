@@ -1339,7 +1339,7 @@ mod execution_bounds {
         });
         venue.connections[1].socket = Some(SocketId(77));
         venue.connections[1].open = true;
-        let mut engine = Engine::new(venue);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.store_mut().set_markets(vec![Market {
             id: "1".into(),
             symbol: "event-Yes".into(),

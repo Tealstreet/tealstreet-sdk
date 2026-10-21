@@ -45,3 +45,27 @@ pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
         })
         .collect()
 }
+
+/// Explicit fixture injection for BOTH identity and signing. Never a production default.
+pub fn seeded_entropy(seed: u64) -> crate::entropy::Entropy {
+    fn source(mut state: u64) -> crate::entropy::Fill {
+        Box::new(move |bytes| {
+            for byte in bytes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *byte = state as u8;
+            }
+            Ok(())
+        })
+    }
+    crate::entropy::Entropy::new(
+        source(seed.max(1)),
+        source((seed ^ 0xa076_1d64_78bd_642f).max(1)),
+    )
+}
+
+/// Tests explicitly choose reproducible signing entropy as well as identities.
+pub fn seeded_engine<V: Venue>(venue: V) -> Engine<V> {
+    Engine::new(venue, Some(seeded_entropy(0x7365_6564_6564_4944))).unwrap()
+}

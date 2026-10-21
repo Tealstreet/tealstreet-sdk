@@ -8,7 +8,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":"00000","data":[{"broken":true},{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"###;
 fn public_engine() -> Engine<BitgetFutures> {
-    Engine::new(BitgetFutures::new(Options {
+    safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -76,7 +76,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(BitgetFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         passphrase: Some("scripted-passphrase".into()),
