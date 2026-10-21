@@ -1367,3 +1367,12 @@ wire value instead of native refusal or TS's mark/last fallback. Default sources
 are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
 keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
 caller signatures are unchanged.
+
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.

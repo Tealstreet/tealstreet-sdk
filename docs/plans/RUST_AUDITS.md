@@ -940,8 +940,15 @@ Normal inputs send the same requests as TS; the risk is resilience.
   the snapshot (`account.rs:1246`)~~ (stops and other closes reserve separately;
   spot reduce-only is plain; probe advances unless 408/429/5xx; bad position
   rows skip keeping the store copy, flat side-less rows clear).
-- Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
-  OHLCV honours `from`; ~~placement errors lose Coinbase's message~~.
+- Low: ~~spot `total` source differs~~ (native `total_balance_crypto` includes
+  held funds; TS incorrectly used available-to-trade as total); ~~OHLCV honours
+  `from`~~ (correct: explicit caller lower bounds reach the native start field;
+  TS's defaulted limit made its `from` branch unreachable); ~~placement errors
+  lose Coinbase's message~~.
+  **RISKY — retained:** CFM summary `upnl`/equity aggregation. Native uses the
+  summary unrealized-PnL field while TS returns zero. Changing that value needs
+  verified CFM/spot portfolio accounting and downstream equity-consumer evidence;
+  neither suppressing real PnL nor silently double-counting it is acceptable.
 
 ### Lighter
 

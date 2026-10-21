@@ -35,3 +35,6 @@ export function wasmMemoryBytes(): number;
 
 /** Web build only: fetch and instantiate the module. */
 export default function init(module?: unknown): Promise<unknown>;
+
+/** Resolved account choices without construction or I/O. */
+export function resolveConstruction(venue: string, optionsJson: string): string;
