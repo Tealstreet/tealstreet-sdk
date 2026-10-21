@@ -2050,3 +2050,6 @@ Private response handlers and streamed row dispatch also retain explicit
 out-of-line boundaries so the optimizer does not fold all their code into the
 shared response and streaming entry points. Their bodies and dispatch order
 remain unchanged.
+Private response kinds select a concrete function-table entry after the existing
+response preamble; one shared call boundary forwards the unchanged owned payload
+to its original handler. Public response cases retain their existing path.

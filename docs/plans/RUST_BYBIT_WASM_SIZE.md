@@ -82,3 +82,12 @@ concrete response handlers and `Venue::on_item`. Their bodies, argument types,
 parser grammar and error handling remain unchanged. Independent profile review
 identified these boundaries; CI must establish the actual saving and public
 performance before any final claim.
+
+The second candidate measured 1,339,336 bytes (126 bytes below baseline),
+SHA-256 `b9e848f6f7f5699df80808b0f611eaf0a72d8b1b5f6edd6dafa48cc80c507d20`,
+run 39644779366 / Bybit job 119377661176. Handler inlining boundaries alone did
+not recover enough space. The next candidate routes the five existing private
+response payloads through a concrete function table and one shared out-of-line
+call boundary, retaining the original response preamble and handler bodies.
+The final raw-output proof must contain all 55 baseline outputs; fewer available
+adaptive performance samples do not satisfy the overseer's proof requirement.
