@@ -336,12 +336,25 @@ impl WeexFutures {
                 return;
             }
         };
-        // A write or a newer settings read since issue supersedes this snapshot.
-        if revision == self.account.settings_revision() {
+        // A settings write since issue supersedes this snapshot: answer the
+        // current settings instead, so the caller's store cannot regress either.
+        let fetched = if revision == self.account.settings_revision() {
             cx.store
                 .update_setting(symbol, |setting| *setting = config.setting);
             self.account.configs.insert(symbol.to_owned(), config);
-        }
+            fetched
+        } else {
+            cx.store
+                .setting(symbol)
+                .and_then(|s| {
+                    Some(Fetched {
+                        buy_leverage: s.buy_leverage?,
+                        sell_leverage: s.sell_leverage?,
+                        margin_type: s.margin_type?,
+                    })
+                })
+                .unwrap_or(fetched)
+        };
         cx.done(
             command,
             serde_json::to_string(&fetched).map_err(|e| e.to_string()),

@@ -1296,9 +1296,10 @@ fn a_config_update_during_the_read_wins_over_its_snapshot() {
     let r = h.take(LEVERAGE);
     h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":30,"S":25}}"#);
     h.reply(r.id, 200, RAILS);
+    // The answer carries the newer rails, so no caller store regresses either.
     assert_eq!(
         h.done,
-        [(12, Ok(r#"{"buyLeverage":8.0,"sellLeverage":12.0}"#.into()))]
+        [(12, Ok(r#"{"buyLeverage":30.0,"sellLeverage":25.0}"#.into()))]
     );
     let setting = h.engine.store().setting("BTCUSDT").unwrap();
     assert_eq!(setting.buy_leverage, Some(30.0));
@@ -1311,4 +1312,20 @@ fn leverage_read_needs_a_known_market() {
     fetch_leverage(&mut h, 13, "ETHUSDT");
     assert_eq!(h.done, [(13, Err("unknown market ETHUSDT".into()))]);
     assert!(!h.requests.iter().any(|r| r.url.contains(LEVERAGE)));
+}
+
+#[test]
+fn unrelated_position_activity_during_the_read_does_not_drop_it() {
+    let mut h = Harness::ready();
+    fetch_leverage(&mut h, 14, "BTCUSDT");
+    let r = h.take(LEVERAGE);
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","pa":"0.2","ep":"60000","up":"1","ps":"BOTH","mt":"cross"}]}}"#);
+    h.reply(r.id, 200, RAILS);
+    assert_eq!(
+        h.done,
+        [(14, Ok(r#"{"buyLeverage":8.0,"sellLeverage":12.0}"#.into()))]
+    );
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(8.0));
+    assert_eq!(setting.sell_leverage, Some(12.0));
 }

@@ -675,7 +675,7 @@ impl Bingx {
             Pending::Leverage {
                 command,
                 symbol,
-                revision: self.account.positions_revision(),
+                revision: self.account.settings_revision(),
             },
         );
     }
@@ -726,14 +726,21 @@ impl Bingx {
                 return;
             }
         };
-        // A stream event or acknowledgement during the read is newer than this snapshot.
-        if self.account.positions_revision() == revision {
+        // Settings changed during the read are newer than this snapshot: answer
+        // them instead, so the caller's store cannot regress either.
+        let (long, short) = if self.account.settings_revision() == revision {
             cx.store.update_setting(symbol, |s| {
                 s.leverage = long;
                 s.buy_leverage = Some(long);
                 s.sell_leverage = Some(short);
             });
-        }
+            (long, short)
+        } else {
+            cx.store
+                .setting(symbol)
+                .and_then(|s| Some((s.buy_leverage?, s.sell_leverage?)))
+                .unwrap_or((long, short))
+        };
         cx.done(
             command,
             serde_json::to_string(&Fetched {
@@ -958,6 +965,9 @@ impl Venue for Bingx {
             Pending::Trade(request) => {
                 self.account.bump_orders();
                 self.account.bump_positions();
+                if request.changes_settings() {
+                    self.account.bump_settings();
+                }
                 let reconcile = (request.changes_settings() || request.reconciles_orders())
                     && success(response).is_ok();
                 let accepted = request.accepts_placement(response);
@@ -1332,6 +1342,14 @@ impl Venue for Bingx {
             other => {
                 self.account.bump_orders();
                 self.account.bump_positions();
+                if matches!(
+                    other,
+                    Command::SetLeverage { .. }
+                        | Command::SetMarginType { .. }
+                        | Command::SetPositionMode { .. }
+                ) {
+                    self.account.bump_settings();
+                }
                 if !self.trading.command(cx, self.credentials.as_ref(), other) {
                     cx.log(LogLevel::Warning, "unsupported BingX command");
                 }

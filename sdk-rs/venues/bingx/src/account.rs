@@ -80,6 +80,8 @@ pub struct Account {
     repair: Option<TimerId>,
     orders_revision: u64,
     positions_revision: u64,
+    /// Leverage/margin settings changes, which fence a leverage read.
+    settings_revision: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -252,9 +254,13 @@ impl Account {
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
     }
-    /// Fences a settings read against stream and acknowledgement updates.
-    pub fn positions_revision(&self) -> u64 {
-        self.positions_revision
+    /// Fences a leverage read against newer settings from a config event,
+    /// a position snapshot or a settings write.
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision
+    }
+    pub fn bump_settings(&mut self) {
+        self.settings_revision = self.settings_revision.wrapping_add(1);
     }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
@@ -876,6 +882,9 @@ impl Account {
                         .collect();
                     rows.extend(kept);
                     cx.store.set_positions(rows);
+                    if !settings.is_empty() {
+                        self.bump_settings();
+                    }
                     for (symbol, value) in settings {
                         cx.store.update_setting(&symbol, |s| *s = value);
                     }
@@ -1016,6 +1025,7 @@ impl Account {
             "ACCOUNT_CONFIG_UPDATE" => {
                 if let Some(config) = event.ac {
                     self.bump_positions();
+                    self.bump_settings();
                     let symbol = config.s.replace('-', "");
                     let hedged = cx.store.hedged();
                     if config.l > 0.0 {

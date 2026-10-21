@@ -1923,9 +1923,10 @@ fn a_leverage_write_during_the_read_wins_over_its_snapshot() {
     );
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 50.0);
     let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
+    // The answer carries the confirmed write, not the stale snapshot.
     assert_eq!(
         done(&actions),
-        Ok(r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#.into())
+        Ok(r#"{"buyLeverage":50.0,"sellLeverage":50.0,"marginType":"cross"}"#.into())
     );
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 50.0);
 }
