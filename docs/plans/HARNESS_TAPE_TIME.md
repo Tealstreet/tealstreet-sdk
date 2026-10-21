@@ -75,3 +75,18 @@ CI suite with five pairs for all five private identities (50 raw outputs).
 Record run ID, tape identities and every raw hash, verify fresh CI reports,
 require full green head CI and the normal Binance dependency guard, merge
 with a separate call and report the receipt before the next family.
+
+## Bitget family phase
+
+Enable the virtual private clock for Bitget USDT-M, inverse and USDC-M.
+All three aliases share the Bitget engine. Generate the unchanged CI tapes
+and use a fingerprint-matching CI engine for focused private iteration.
+Remove only exact unobserved declarations bound to those tapes; inspect any
+new diagnostics before adding exact keys, tape SHA and a specific rationale.
+
+The Bitget sweep branch must collect five private pairs in both the `bitget`
+and `bitgetusdc` matrix suites, including inverse in the former. Other
+branches and suites retain one pair. Require identical complete nonmetric
+outputs within each implementation for all three tapes, fresh mandatory
+suite verification, independent review, full green head CI and a separate
+landing guard before merging and reporting the receipt.
