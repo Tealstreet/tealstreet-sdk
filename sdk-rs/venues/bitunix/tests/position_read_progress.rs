@@ -186,8 +186,16 @@ fn failed_position_reads_release_the_matching_token_keep_state_and_retry() {
         }
         assert_eq!(e.store().positions()[0].contracts, 0.01, "{failure}");
         let actions: Vec<_> = e.drain_actions().collect();
-        let (timer, at) = timer(&actions);
-        assert_eq!(at, 3000.0, "{failure}");
+        let (timer, at) = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms >= 2750.0 && *at_ms <= 3000.0 => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("actual jittered failed-position retry");
         e.handle(at, Event::TimerFired { timer });
         assert!(
             e.drain_actions()
