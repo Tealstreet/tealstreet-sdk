@@ -238,13 +238,6 @@ enum Outgoing {
     Text(Arc<str>),
 }
 impl Outgoing {
-    fn len(&self) -> usize {
-        match self {
-            Self::Frame(bytes) => bytes.len(),
-            Self::Text(text) => text.len(),
-        }
-    }
-
     fn message(self) -> Message {
         match self {
             Self::Frame(bytes) => Message::binary(bytes.to_vec()),
@@ -398,6 +391,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             error: result.as_ref().err().map(|error| error.as_str().into()),
                             detail: None,
                         });
+                        let text = self.bounded_done(pending.original, text);
                         self.send(client, Outgoing::Text(text));
                     }
                 }
@@ -411,6 +405,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             error: Some(error.legacy_text().into()),
                             detail: Some(&error),
                         });
+                        let text = self.bounded_done(pending.original, text);
                         self.send(client, Outgoing::Text(text));
                     }
                 }
@@ -426,7 +421,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::StartupFailed { error } => {
-                    let text = encode_notice(ServerNotice::StartupFailed { detail: &error });
+                    let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
+                    if text.len() > self.config.max_frame_bytes {
+                        // Late peers replay this notice, so keep a deliverable failure.
+                        // Classification survives so clients can still branch on it.
+                        let mut bounded = VenueError::new(
+                            "Startup failed; its diagnostic exceeded the native message limit",
+                        );
+                        bounded.kind = error.kind;
+                        bounded.outcome = error.outcome;
+                        text = encode_notice(ServerNotice::StartupFailed { detail: &bounded });
+                    }
                     self.startup_failure = Some(text.clone());
                     self.broadcast(Outgoing::Text(text))
                 }
@@ -463,22 +468,58 @@ impl<V: Venue, T: Transport> Account<V, T> {
     fn flush(&mut self) {
         if let Some(frame) = self.host.engine.take_frame((self.host.clock)()) {
             let frame: Arc<[u8]> = frame.into();
-            if frame.len() > self.config.max_frame_bytes {
-                let clients: Vec<_> = self.peers.keys().copied().collect();
-                for client in clients {
-                    self.leave(client);
-                }
-            } else {
-                self.broadcast(Outgoing::Frame(frame));
-            }
+            self.broadcast(Outgoing::Frame(frame));
         }
     }
 
-    fn send(&mut self, client: u64, message: Outgoing) {
-        if message.len() > self.config.max_frame_bytes {
-            self.leave(client);
-            return;
+    /// A completion too large to deliver still settles its command, as an error
+    /// whose outcome is unknown: the engine may have succeeded.
+    fn bounded_done(&self, command: u32, text: Arc<str>) -> Arc<str> {
+        if text.len() <= self.config.max_frame_bytes {
+            return text;
         }
+        let error = VenueError::new(format!(
+            "Engine response of {} bytes exceeds the {}-byte native message limit",
+            text.len(),
+            self.config.max_frame_bytes
+        ))
+        .outcome(safe_cex_engine::Outcome::Unknown);
+        encode_notice(ServerNotice::Done {
+            command,
+            result: None,
+            error: Some(error.legacy_text().into()),
+            detail: Some(&error),
+        })
+    }
+
+    /// Replaces one undeliverable notice with a short warning, when even that fits.
+    fn oversized_notice(&self, bytes: usize) -> Option<Outgoing> {
+        let message = format!(
+            "Dropped a {bytes}-byte notice over the {}-byte native message limit",
+            self.config.max_frame_bytes
+        );
+        eprintln!("safe-cex native server: {message}");
+        let text = encode_notice(ServerNotice::Log {
+            level: "warning",
+            message: &message,
+        });
+        (text.len() <= self.config.max_frame_bytes).then_some(Outgoing::Text(text))
+    }
+
+    fn send(&mut self, client: u64, message: Outgoing) {
+        let message = match message {
+            Outgoing::Text(text) if text.len() > self.config.max_frame_bytes => {
+                match self.oversized_notice(text.len()) {
+                    Some(notice) => notice,
+                    None => return,
+                }
+            }
+            Outgoing::Frame(frame) if frame.len() > self.config.max_frame_bytes => {
+                self.leave(client);
+                return;
+            }
+            message => message,
+        };
         if let Some(peer) = self.peers.get(&client)
             && peer.outgoing.try_send(message).is_err()
         {
@@ -487,13 +528,45 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn broadcast(&mut self, message: Outgoing) {
-        if message.len() > self.config.max_frame_bytes {
-            let clients: Vec<_> = self.peers.keys().copied().collect();
-            for client in clients {
-                self.leave(client);
+        match message {
+            Outgoing::Text(text) if text.len() > self.config.max_frame_bytes => {
+                if let Some(notice) = self.oversized_notice(text.len()) {
+                    self.deliver(notice);
+                }
             }
-            return;
+            Outgoing::Frame(frame) if frame.len() > self.config.max_frame_bytes => {
+                match segment_frame(&frame, self.config.max_frame_bytes) {
+                    Some(segments) => {
+                        eprintln!(
+                            "safe-cex native server: {}-byte frame exceeded the {}-byte limit; sent as {} frames",
+                            frame.len(),
+                            self.config.max_frame_bytes,
+                            segments.len()
+                        );
+                        for segment in segments {
+                            self.deliver(Outgoing::Frame(segment));
+                        }
+                    }
+                    None => {
+                        // One section alone exceeds the limit: no peer can apply this delta,
+                        // and resuming without it would diverge, so every peer resnapshots.
+                        eprintln!(
+                            "safe-cex native server: {}-byte frame has a section over the {}-byte limit; disconnecting peers to resnapshot",
+                            frame.len(),
+                            self.config.max_frame_bytes
+                        );
+                        let clients: Vec<_> = self.peers.keys().copied().collect();
+                        for client in clients {
+                            self.leave(client);
+                        }
+                    }
+                }
+            }
+            message => self.deliver(message),
         }
+    }
+
+    fn deliver(&mut self, message: Outgoing) {
         let gone: Vec<_> = self
             .peers
             .iter()
@@ -802,6 +875,88 @@ enum ServerNotice<'a> {
         detail: &'a VenueError,
     },
 }
+/// The parent a section is only read beside, in the same frame, by frame consumers.
+fn section_parent(kind: u16) -> Option<u16> {
+    use safe_cex_engine::wire::section;
+    match kind {
+        section::PREDICTION_MARKETS
+        | section::INSTRUMENT_CLASSIFICATIONS
+        | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
+        section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        _ => None,
+    }
+}
+
+/// Splits a delta frame into consecutive frames under `max` bytes. The engine
+/// writes sections in the order consumers apply them, so applying the segments
+/// in sequence equals applying the frame, given that each carries the header and
+/// full string table, dependent sections stay with their parent, and STATUS
+/// (loaded and hedge flags) arrives last with the SETTINGS that read its hedge
+/// flag. `None` when the frame is malformed or a unit cannot fit with the table.
+fn segment_frame(frame: &[u8], max: usize) -> Option<Vec<Arc<[u8]>>> {
+    use safe_cex_engine::wire::section;
+    const HEADER: usize = 16;
+    let count = u16::from_le_bytes(frame.get(6..8)?.try_into().ok()?) as usize;
+    // A unit is a parent section and its dependents: (head kind, bytes, sections).
+    let mut units: Vec<(u16, usize, Vec<&[u8]>)> = Vec::with_capacity(count);
+    let mut tail: Vec<&[u8]> = Vec::new();
+    let mut strings: &[u8] = &[];
+    let mut at = HEADER;
+    for _ in 0..count {
+        let header = frame.get(at..at + 8)?;
+        let kind = u16::from_le_bytes([header[0], header[1]]);
+        let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+        let bytes = frame.get(at..at.checked_add(8 + length)?)?;
+        at += bytes.len();
+        match (kind, section_parent(kind)) {
+            (section::STRINGS, _) => strings = bytes,
+            (section::STATUS | section::SETTINGS, _) => tail.push(bytes),
+            (_, Some(parent)) => {
+                let unit = units.last_mut().filter(|unit| unit.0 == parent)?;
+                unit.1 += bytes.len();
+                unit.2.push(bytes);
+            }
+            _ => units.push((kind, bytes.len(), vec![bytes])),
+        }
+    }
+    if at != frame.len() {
+        return None;
+    }
+    if !tail.is_empty() {
+        units.push((section::STATUS, tail.iter().map(|s| s.len()).sum(), tail));
+    }
+    let fixed = HEADER + strings.len();
+    let mut groups: Vec<Vec<&[u8]>> = vec![Vec::new()];
+    let mut size = fixed;
+    for (_, bytes, sections) in units {
+        if fixed + bytes > max {
+            return None;
+        }
+        if size + bytes > max {
+            groups.push(Vec::new());
+            size = fixed;
+        }
+        size += bytes;
+        groups.last_mut()?.extend(sections);
+    }
+    Some(
+        groups
+            .into_iter()
+            .map(|group| {
+                let mut out = Vec::with_capacity(max.min(frame.len()));
+                out.extend_from_slice(&frame[..HEADER]);
+                let sections = group.len() + usize::from(!strings.is_empty());
+                out[6..8].copy_from_slice(&(sections as u16).to_le_bytes());
+                for section in group {
+                    out.extend_from_slice(section);
+                }
+                out.extend_from_slice(strings);
+                out.into()
+            })
+            .collect(),
+    )
+}
+
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)
         .expect("notice contains only strings, numbers and enums")
@@ -1251,6 +1406,234 @@ mod tests {
             commands.borrow().last(),
             Some(Command::UnsubscribeOrderBook { .. })
         ));
+    }
+
+    fn sectioned_frame(payloads: &[usize]) -> Vec<u8> {
+        let names: Vec<String> = (0..payloads.len()).map(|i| format!("symbol-{i}")).collect();
+        let mut w = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 7.0);
+        for (i, bytes) in payloads.iter().enumerate() {
+            w.begin(100 + i as u16);
+            let name = w.string(&names[i]);
+            w.u32(name);
+            w.f64s(std::iter::repeat_n(i as f64, bytes / 8));
+            w.end();
+        }
+        w.finish()
+    }
+
+    fn sections_of(frames: &[&[u8]]) -> Vec<(u16, Vec<u8>)> {
+        frames
+            .iter()
+            .flat_map(|frame| safe_cex_engine::wire::sections(frame))
+            .filter(|(kind, _)| *kind != safe_cex_engine::wire::section::STRINGS)
+            .map(|(kind, payload)| (kind, payload.to_vec()))
+            .collect()
+    }
+
+    #[test]
+    fn oversized_frames_split_into_ordered_segments_sharing_the_string_table() {
+        let frame = sectioned_frame(&[400, 400, 400, 400]);
+        let max = frame.len() / 2;
+        let segments = segment_frame(&frame, max).expect("every section fits alone");
+        assert!(segments.len() >= 2);
+        let strings = safe_cex_engine::wire::sections(&frame)
+            .find(|(kind, _)| *kind == safe_cex_engine::wire::section::STRINGS)
+            .unwrap()
+            .1;
+        for segment in &segments {
+            assert!(segment.len() <= max);
+            assert_eq!(segment[..4], frame[..4]);
+            assert_eq!(
+                segment[8..16],
+                frame[8..16],
+                "segments keep the frame clock"
+            );
+            assert_eq!(
+                safe_cex_engine::wire::sections(segment)
+                    .find(|(kind, _)| *kind == safe_cex_engine::wire::section::STRINGS)
+                    .unwrap()
+                    .1,
+                strings
+            );
+        }
+        let parts: Vec<&[u8]> = segments.iter().map(|s| s.as_ref()).collect();
+        assert_eq!(sections_of(&parts), sections_of(&[&frame]));
+        let one_section = sectioned_frame(&[4000]);
+        assert!(segment_frame(&one_section, one_section.len() - 1).is_none());
+        assert!(
+            segment_frame(&frame[..frame.len() - 1], max).is_none(),
+            "malformed"
+        );
+    }
+
+    fn kinded_frame(sections: &[(u16, usize)]) -> Vec<u8> {
+        let mut w = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 3.0);
+        for (kind, bytes) in sections {
+            w.begin(*kind);
+            let name = w.string("BTC");
+            w.u32(name);
+            w.f64s(std::iter::repeat_n(1.0, bytes / 8));
+            w.end();
+        }
+        w.finish()
+    }
+
+    #[test]
+    fn segments_keep_dependent_sections_with_their_parent_and_status_last() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[
+            (STATUS, 64),
+            (SETTINGS, 64),
+            (MARKETS, 400),
+            (PREDICTION_MARKETS, 300),
+            (INSTRUMENT_CLASSIFICATIONS, 300),
+            (TICKERS, 400),
+            (POSITIONS, 400),
+            (POSITION_GREEKS, 300),
+            (PREDICTION_HOLDINGS, 300),
+            (BOOK, 400),
+        ]);
+        let segments = segment_frame(&frame, 1_300).expect("units fit");
+        assert!(segments.len() >= 3);
+        let kinds: Vec<Vec<u16>> = segments
+            .iter()
+            .map(|segment| {
+                safe_cex_engine::wire::sections(segment)
+                    .map(|(kind, _)| kind)
+                    .filter(|kind| *kind != STRINGS)
+                    .collect()
+            })
+            .collect();
+        let segment_of = |wanted: u16| kinds.iter().position(|k| k.contains(&wanted)).unwrap();
+        for (parent, child) in [
+            (MARKETS, PREDICTION_MARKETS),
+            (MARKETS, INSTRUMENT_CLASSIFICATIONS),
+            (POSITIONS, POSITION_GREEKS),
+            (POSITIONS, PREDICTION_HOLDINGS),
+        ] {
+            assert_eq!(
+                segment_of(parent),
+                segment_of(child),
+                "{child} stays with {parent}"
+            );
+        }
+        assert_eq!(
+            segment_of(STATUS),
+            kinds.len() - 1,
+            "loaded flags follow their data"
+        );
+        assert_eq!(
+            segment_of(SETTINGS),
+            segment_of(STATUS),
+            "settings read the hedge flag"
+        );
+        // A unit larger than the limit, or a dependent without its parent, cannot be split.
+        assert!(segment_frame(&frame, 1_000).is_none());
+        let orphan = kinded_frame(&[(TICKERS, 400), (POSITION_GREEKS, 400), (BOOK, 400)]);
+        assert!(segment_frame(&orphan, 900).is_none());
+    }
+
+    fn peer(
+        actor: &mut Account<Stub, NoTransport>,
+        client: u64,
+    ) -> (mpsc::Receiver<Outgoing>, watch::Receiver<bool>) {
+        let (outgoing, frames) = mpsc::channel(32);
+        let (cancel, canceled) = watch::channel(false);
+        actor.peers.insert(
+            client,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+            },
+        );
+        (frames, canceled)
+    }
+
+    fn stub_account(max_frame_bytes: usize) -> Account<Stub, NoTransport> {
+        Account::new(
+            Host::new(
+                Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                NoTransport,
+            ),
+            ServerConfig {
+                max_frame_bytes,
+                ..ServerConfig::default()
+            },
+        )
+    }
+
+    #[test]
+    fn one_oversized_frame_reaches_every_peer_in_segments_without_disconnecting() {
+        let frame = sectioned_frame(&[400, 400, 400]);
+        let mut actor = stub_account(frame.len() - 100);
+        let mut peers = [peer(&mut actor, 1), peer(&mut actor, 2)];
+        actor.broadcast(Outgoing::Frame(frame.clone().into()));
+        assert_eq!(actor.peers.len(), 2, "no peer is dropped");
+        for (frames, canceled) in &mut peers {
+            assert!(!*canceled.borrow());
+            let mut received = Vec::new();
+            while let Ok(Outgoing::Frame(segment)) = frames.try_recv() {
+                received.push(segment);
+            }
+            assert!(received.len() >= 2);
+            let parts: Vec<&[u8]> = received.iter().map(|s| s.as_ref()).collect();
+            assert_eq!(sections_of(&parts), sections_of(&[&frame]));
+        }
+        // A section that cannot fit alone leaves no deliverable delta: peers resnapshot.
+        let unsplittable = sectioned_frame(&[actor.config.max_frame_bytes]);
+        actor.broadcast(Outgoing::Frame(unsplittable.into()));
+        assert!(actor.peers.is_empty());
+        assert!(peers.iter().all(|(_, canceled)| *canceled.borrow()));
+    }
+
+    #[test]
+    fn oversized_notices_are_replaced_for_that_message_only() {
+        let mut actor = stub_account(256);
+        let (mut a, a_canceled) = peer(&mut actor, 1);
+        let (mut b, b_canceled) = peer(&mut actor, 2);
+        let huge = "x".repeat(1_000);
+        actor.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
+            level: "error",
+            message: &huge,
+        })));
+        for frames in [&mut a, &mut b] {
+            let Ok(Outgoing::Text(text)) = frames.try_recv() else {
+                panic!("peer receives the replacement warning");
+            };
+            assert!(text.len() <= 256 && text.contains("native message limit"));
+            assert!(!text.contains(&huge));
+        }
+        let done = actor.bounded_done(
+            9,
+            encode_notice(ServerNotice::Done {
+                command: 9,
+                result: Some(&huge),
+                error: None,
+                detail: None,
+            }),
+        );
+        actor.send(1, Outgoing::Text(done));
+        let Ok(Outgoing::Text(text)) = a.try_recv() else {
+            panic!("the command still settles");
+        };
+        let done: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(done["command"], 9);
+        assert!(done.get("result").is_none());
+        assert!(
+            done["error"]
+                .as_str()
+                .unwrap()
+                .contains("exceeds the 256-byte")
+        );
+        assert_eq!(actor.peers.len(), 2);
+        assert!(!*a_canceled.borrow() && !*b_canceled.borrow());
+        assert!(
+            b.try_recv().is_err(),
+            "a per-client completion stays per-client"
+        );
     }
 
     struct FailsStartup;

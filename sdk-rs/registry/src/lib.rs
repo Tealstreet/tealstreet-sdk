@@ -121,6 +121,120 @@ fn finish<T: Visit, V: Venue + 'static>(
     Ok(visitor.visit(engine))
 }
 
+#[cfg(feature = "breakoutprop")]
+fn breakoutprop_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    // Market data needs a DXtrade session too, so public accounts are not exempt.
+    if options.key.as_deref().is_none_or(str::is_empty)
+        || options.secret.as_deref().is_none_or(str::is_empty)
+    {
+        return Err(invalid(
+            "BreakoutProp market data requires a legacy DXtrade username and password",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "polymarket", feature = "asterdex"))]
+fn hex_of(value: &str, digits: usize) -> bool {
+    value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(feature = "polymarket")]
+fn polymarket_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    if options.public_data_only {
+        return Ok(());
+    }
+    let key = options.key.as_deref().unwrap_or_default();
+    if !hex_of(key.strip_prefix("0x").unwrap_or(key), 64) {
+        return Err(invalid(
+            "Polymarket requires a local 32-byte wallet private key",
+        ));
+    }
+    let Some(account) = &options.polymarket else {
+        return Ok(());
+    };
+    let credentials = [
+        &account.api_key,
+        &account.api_secret,
+        &account.api_passphrase,
+    ];
+    if credentials.iter().any(|value| value.is_some())
+        && !credentials
+            .iter()
+            .all(|value| value.as_deref().is_some_and(|text| !text.trim().is_empty()))
+    {
+        return Err(invalid(
+            "Polymarket requires all three L2 API credentials together",
+        ));
+    }
+    if account.signer_type > 3 {
+        return Err(invalid("Invalid Polymarket signature type"));
+    }
+    if (account.signer_type != 0 || account.funder_address.is_some())
+        && !account
+            .funder_address
+            .as_deref()
+            .and_then(|address| address.strip_prefix("0x"))
+            .is_some_and(|address| hex_of(address, 40))
+    {
+        return Err(invalid(
+            "Polymarket requires a valid funder address for non-EOA signing",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "orderly")]
+fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    if options.public_data_only {
+        return Ok(());
+    }
+    let application_id = options.application_id.as_deref().unwrap_or_default();
+    if application_id.is_empty()
+        || !application_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(invalid("Orderly private applicationId is required"));
+    }
+    if !safe_cex_venue_orderly::signing_keys_valid(
+        options.key.as_deref().unwrap_or_default(),
+        options.secret.as_deref().unwrap_or_default(),
+    ) {
+        return Err(invalid(
+            "Orderly requires base58-encoded 32-byte key and secret",
+        ));
+    }
+    Ok(())
+}
+
+/// The message names the Main Wallet Address field; the app routes on its first sentence.
+#[cfg(feature = "asterdex")]
+const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
+
+#[cfg(feature = "asterdex")]
+fn asterdex_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    // V3 wallet credentials under the V1 API mean the user put the API wallet where the main wallet goes.
+    let key = options.key.as_deref().unwrap_or_default();
+    let secret = options.secret.as_deref().unwrap_or_default();
+    if !options.public_data_only
+        && !matches!(
+            options.asterdex.api_version,
+            Some(safe_cex_venue_asterdex::sign::Version::V3)
+        )
+        && key
+            .strip_prefix("0x")
+            .is_some_and(|address| hex_of(address, 40))
+        && hex_of(secret.strip_prefix("0x").unwrap_or(secret), 64)
+        && [&options.asterdex.user_address, &options.application_id]
+            .iter()
+            .all(|value| value.as_deref().is_none_or(|text| text.trim().is_empty()))
+    {
+        return Err(invalid(ASTERDEX_MAIN_WALLET_REQUIRED));
+    }
+    Ok(())
+}
+
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
@@ -160,28 +274,31 @@ pub fn build<T: Visit>(
     let account_startup = options.account_startup;
     match venue {
         #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => finish(
-            visitor,
-            policy,
-            account_startup,
-            Engine::new(BreakoutProp::new(BreakoutOptions {
-                key: options.key.take().unwrap_or_default(),
-                secret: options.secret.take().unwrap_or_default(),
-                subaccount: options.subaccount.take(),
-                public_data_only: options.public_data_only,
-                tick_interval: if options.polling_enabled == Some(false) {
-                    f64::INFINITY
-                } else {
-                    safe_cex_engine::engine::bounded_tick_interval(
-                        options.tick_interval.take().unwrap_or(2_000.0),
-                    )
-                },
-                timeout_ms: options
-                    .recv_window
-                    .unwrap_or(20_000.0)
-                    .clamp(1.0, u32::MAX as f64) as u32,
-            })),
-        ),
+        "breakoutprop" => {
+            breakoutprop_rules(&options)?;
+            finish(
+                visitor,
+                policy,
+                account_startup,
+                Engine::new(BreakoutProp::new(BreakoutOptions {
+                    key: options.key.take().unwrap_or_default(),
+                    secret: options.secret.take().unwrap_or_default(),
+                    subaccount: options.subaccount.take(),
+                    public_data_only: options.public_data_only,
+                    tick_interval: if options.polling_enabled == Some(false) {
+                        f64::INFINITY
+                    } else {
+                        safe_cex_engine::engine::bounded_tick_interval(
+                            options.tick_interval.take().unwrap_or(2_000.0),
+                        )
+                    },
+                    timeout_ms: options
+                        .recv_window
+                        .unwrap_or(20_000.0)
+                        .clamp(1.0, u32::MAX as f64) as u32,
+                })),
+            )
+        }
         #[cfg(feature = "grvt")]
         "grvt" => finish(
             visitor,
@@ -215,16 +332,19 @@ pub fn build<T: Visit>(
             ),
         ),
         #[cfg(feature = "polymarket")]
-        "polymarket" => finish(
-            visitor,
-            policy,
-            account_startup,
-            Engine::new(Polymarket::new(PolymarketOptions {
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                polymarket: options.polymarket.take(),
-            })),
-        ),
+        "polymarket" => {
+            polymarket_rules(&options)?;
+            finish(
+                visitor,
+                policy,
+                account_startup,
+                Engine::new(Polymarket::new(PolymarketOptions {
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    polymarket: options.polymarket.take(),
+                })),
+            )
+        }
         #[cfg(feature = "paradex")]
         "paradex" => finish(
             visitor,
@@ -305,29 +425,33 @@ pub fn build<T: Visit>(
             })),
         ),
         #[cfg(feature = "asterdex")]
-        "asterdex" => finish(
-            visitor,
-            policy,
-            account_startup,
-            Engine::new(AsterDex::new(AsterOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
-                application_id: options.application_id.take(),
-                auth_user_address: options.asterdex.user_address.take(),
-                auth_signer_address: options.asterdex.signer_address.take(),
-                auth_private_key: options.asterdex.private_key.take(),
-                api_version: options.asterdex.api_version,
-                builder_address: options.asterdex.builder_address.take(),
-                builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
-                builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
-                read_key: options.asterdex.read_key.take(),
-                read_secret: options.asterdex.read_secret.take(),
-            })),
-        ),
+        "asterdex" => {
+            asterdex_rules(&options)?;
+            finish(
+                visitor,
+                policy,
+                account_startup,
+                Engine::new(AsterDex::new(AsterOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    auth_user_address: options.asterdex.user_address.take(),
+                    auth_signer_address: options.asterdex.signer_address.take(),
+                    auth_private_key: options.asterdex.private_key.take(),
+                    api_version: options.asterdex.api_version,
+                    builder_address: options.asterdex.builder_address.take(),
+                    builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
+                    builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
+                    read_key: options.asterdex.read_key.take(),
+                    read_secret: options.asterdex.read_secret.take(),
+                })),
+            )
+        }
         #[cfg(feature = "orderly")]
         "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+            orderly_rules(&options)?;
             finish(
                 visitor,
                 policy,
