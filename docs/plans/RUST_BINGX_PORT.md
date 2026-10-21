@@ -368,3 +368,18 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   Full workspace408tests, native/wasm clippy, bans and fmt pass; rebuilt SDK19,
   host10 and harness23tests pass. Refreshed package typecheck/lint pass.
   Combined public/private replays now run on this artifact before landing.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify hedge leverage/bracket working-type findings and preserve existing
+   correct behavior. Keep risky amend, trigger-source and financial-history
+   contract changes documented rather than guessing.
+2. Add explicit per-symbol leverage/margin metadata reads with strict native
+   decoding, independent request correlation and fencing against newer writes.
+   Keep the shared capability contract and caller metadata flow aligned.
+3. Isolate malformed ACCOUNT_UPDATE position rows, retain valid peers, emit a
+   coded row-skipped warning and schedule authoritative REST repair. Preserve
+   strict order/fill/config handling where identity cannot be proven.
+4. Add regressions reproducing current failures, run focused BingX/Binance tests,
+   fmt/strict Clippy/bans and relevant host/TS checks with CARGO_BUILD_JOBS=4.
+   Independently review, fix and push for CI; merge only after overseer hold lifts.
