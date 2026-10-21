@@ -934,6 +934,8 @@ pub fn build<T: Visit>(
             let mut options = BybitOptions {
                 recv_window: tighter_recv_window(options.recv_window),
                 read_credentials: options.read_credentials.take(),
+                bybit_site_id: options.bybit_site_id.take(),
+                remote_signing: options.remote_signing,
                 enable_inverse_markets: options.enable_inverse_markets,
                 enable_option_markets: options.enable_option_markets,
                 variant: match venue {
@@ -1128,6 +1130,10 @@ pub struct EngineOptions {
     #[cfg(feature = "blofin")]
     #[serde(default)]
     pub broker_attribution: bool,
+    /// Regional selection suppresses cross-environment auth diagnostics; it does not change routing.
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    pub bybit_site_id: Option<String>,
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub enable_inverse_markets: bool,

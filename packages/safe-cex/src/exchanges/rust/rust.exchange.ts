@@ -762,6 +762,7 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         omniKeySeed,
         testnet: Boolean(testnet),
+        bybitSiteId: this.options.bybitSiteId,
         brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy),
         publicDataOnly: Boolean(publicDataOnly),
         publicMode: {

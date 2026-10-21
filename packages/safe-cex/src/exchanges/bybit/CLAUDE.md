@@ -1705,6 +1705,16 @@ primary environment. The probe is scoped out for `options.testnet`,
 `bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
 `bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
 
+The Rust engine applies this diagnostic to its terminal startup fee-read 10003.
+One opposite-host GET uses the exact rejected GET credential, including a
+secondary read key, and has both a two-second native deadline and request timeout.
+Only HTTP success plus native `retCode: 0` adds the hint. Failed/malformed probes
+retain the original error, while concurrent category failures share one probe
+and late replies cannot emit another terminal failure. The original native
+message stays in `venueMessage`; primary/read-key deactivation policy is retained.
+Native eligibility receives the SDK's site marker and excludes any nonempty
+site, custom endpoint, testnet, Hyro, inverse, spot or remote-signing account.
+
 **`start()` does not claim the account is ready when the key was rejected.** All
 three bybit variants end startup with a readiness line, and they used to log
 `Ready to trade on Bybit` unconditionally — beside the auth error, for an account

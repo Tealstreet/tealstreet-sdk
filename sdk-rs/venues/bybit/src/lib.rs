@@ -51,6 +51,8 @@ const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
+/// Diagnostics must not leave a definitive startup rejection waiting on another host.
+const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -60,6 +62,10 @@ pub struct Options {
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
     pub testnet: bool,
+    /// Regional accounts must never send an auth diagnostic to a global environment.
+    pub bybit_site_id: Option<String>,
+    /// Cross-environment diagnostics are limited to ordinary local signing.
+    pub remote_signing: bool,
     pub enable_inverse_markets: bool,
     pub enable_option_markets: bool,
     /// Markets, tickers, books and candles only; no account.
@@ -134,6 +140,8 @@ pub enum Then {
         rejected: bool,
     },
     Fees(HashMap<String, (f64, f64)>),
+    /// Diagnostic only: bypass ordinary retries, startup and account success handling.
+    EnvironmentProbe,
     Tickers(Vec<Ticker>),
     OptionSeed {
         base_coin: String,
@@ -154,6 +162,12 @@ pub struct Pending {
     category: Category,
     rest: Rest,
     then: Then,
+}
+
+struct EnvironmentProbe {
+    category: Category,
+    timer: TimerId,
+    message: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -255,6 +269,9 @@ pub struct BybitLinear {
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     /// Set once a startup read proved the key unusable; startup never retries it.
     credentials_rejected: bool,
+    environment_probe_origin: Option<&'static str>,
+    environment_probe_attempted: bool,
+    environment_probe: Option<EnvironmentProbe>,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -405,6 +422,19 @@ impl BybitLinear {
         }
         let paths = Paths::for_options(&options);
         let config_error = options.validate().err();
+        let environment_probe_origin = if !options.testnet
+            && !options.remote_signing
+            && options.endpoints.is_none()
+            && options.bybit_site_id.as_deref().is_none_or(str::is_empty)
+        {
+            match (options.variant, paths.rest.as_str()) {
+                (Variant::Linear, "https://api.bybit.com") => Some("https://api-demo.bybit.com"),
+                (Variant::Demo, "https://api-demo.bybit.com") => Some("https://api.bybit.com"),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
                 Some(Credentials {
@@ -437,6 +467,9 @@ impl BybitLinear {
             credentials,
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
+            environment_probe_origin,
+            environment_probe_attempted: false,
+            environment_probe: None,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -797,6 +830,7 @@ impl BybitLinear {
         if !self.startup.markets_loaded
             && self.credentials.is_some()
             && !self.credentials_rejected
+            && self.environment_probe.is_none()
             && self.startup.fees.is_none()
             && !self.startup.fees_in_flight
         {
@@ -815,8 +849,21 @@ impl BybitLinear {
     /// Only the trading key's own invalid, bad-signature or expired verdicts
     /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
     fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
+        self.reject_credentials_with_hint(cx, code, message, None);
+    }
+
+    fn reject_credentials_with_hint(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        code: i64,
+        message: &str,
+        hint: Option<&str>,
+    ) {
         if std::mem::replace(&mut self.credentials_rejected, true) {
             return;
+        }
+        if let Some(probe) = self.environment_probe.take() {
+            cx.clear_timer(probe.timer);
         }
         let kind = match code {
             33004 => ErrorKind::AuthExpired,
@@ -830,7 +877,9 @@ impl BybitLinear {
         } else {
             "API key"
         };
-        let text = format!("Bybit rejected the {which} ({code}): {message}");
+        let diagnostic =
+            hint.map_or_else(|| message.to_owned(), |hint| format!("{hint} [{message}]"));
+        let text = format!("Bybit rejected the {which} ({code}): {diagnostic}");
         cx.notice(Level::Error, code::AUTH_REJECTED, &text);
         cx.startup_failed(
             VenueError::new(text)
@@ -841,6 +890,67 @@ impl BybitLinear {
         if !read_key && code != 10010 {
             cx.deactivate();
         }
+    }
+
+    /// Probe only the credential used by the rejected startup GET. Never switch origins
+    /// for normal reads or writes, and never log the probe's key-bearing response.
+    fn probe_rejected_environment(&mut self, cx: &mut Cx<'_, Pending>, message: &str) -> bool {
+        if self.environment_probe.is_some() {
+            return true; // Concurrent product fee reads share the same rejected GET key.
+        }
+        if self.credentials_rejected || self.environment_probe_attempted {
+            return false;
+        }
+        let Some(origin) = self.environment_probe_origin else {
+            return false;
+        };
+        let read = self.read_credentials.as_ref().map(|read| Credentials {
+            key: read.key.clone(),
+            secret: read.secret.clone(),
+        });
+        let Some(credentials) = read.as_ref().or(self.credentials.as_ref()) else {
+            return false;
+        };
+        if credentials.key.is_empty() || credentials.secret.is_empty() {
+            return false;
+        }
+        let headers =
+            credentials.headers_window(cx.now + self.clock_offset_ms, "", self.recv_window);
+        self.environment_probe_attempted = true;
+        let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
+        self.environment_probe = Some(EnvironmentProbe {
+            category: self.category,
+            timer,
+            message: message.to_owned(),
+        });
+        let request = cx.request(
+            Method::Get,
+            format!("{origin}/v5/user/query-api"),
+            headers,
+            None,
+            Pending {
+                category: self.category,
+                rest: Rest::get("/v5/user/query-api", Query::new()).signed(),
+                then: Then::EnvironmentProbe,
+            },
+        );
+        cx.request_timeout(request, ENVIRONMENT_PROBE_TIMEOUT_MS);
+        true
+    }
+
+    fn finish_environment_probe(&mut self, cx: &mut Cx<'_, Pending>, confirmed: bool) {
+        // Taking the state retires timeout/late HTTP races before any terminal notice.
+        let Some(probe) = self.environment_probe.take() else {
+            return;
+        };
+        cx.clear_timer(probe.timer);
+        self.select_category(probe.category);
+        let hint = confirmed.then_some(if self.variant == Variant::Demo {
+            "Bybit API key environment mismatch: this key is valid for live Bybit, but this account is configured for Bybit Demo Trading. Create a Demo Trading API key or switch the account to live Bybit."
+        } else {
+            "Bybit API key environment mismatch: this key is valid for Bybit Demo Trading, but this account is configured for live Bybit. Create a live Bybit API key or switch the account to Bybit Demo Trading."
+        });
+        self.reject_credentials_with_hint(cx, 10003, &probe.message, hint);
     }
 
     /// A required startup list failed: try the missing ones again, backing off.
@@ -1624,6 +1734,7 @@ impl BybitLinear {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match then {
+            Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
             Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets {
                 prelaunch,
@@ -1638,6 +1749,9 @@ impl BybitLinear {
                     .and_then(venue_error)
                     .filter(|(code, _)| CREDENTIAL_REJECTIONS.contains(code));
                 if let Some((code, message)) = rejected {
+                    if code == 10003 && self.probe_rejected_environment(cx, &message) {
+                        return;
+                    }
                     return self.reject_credentials(cx, code, &message);
                 }
                 if let Some(error) = failure {
@@ -2081,6 +2195,13 @@ impl Venue for BybitLinear {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if matches!(&pending.then, Then::EnvironmentProbe) {
+            let confirmed = (200..300).contains(&response.status)
+                && serde_json::from_str::<Status>(response.body)
+                    .is_ok_and(|status| status.ret_code == Some(0));
+            self.finish_environment_probe(cx, confirmed);
+            return;
+        }
         self.select_category(pending.category);
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
@@ -2143,6 +2264,10 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(&pending.then, Then::EnvironmentProbe) {
+            self.finish_environment_probe(cx, false);
+            return;
+        }
         self.select_category(pending.category);
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, error) {
@@ -2158,6 +2283,14 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self
+            .environment_probe
+            .as_ref()
+            .is_some_and(|probe| probe.timer == timer)
+        {
+            self.finish_environment_probe(cx, false);
+            return;
+        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);

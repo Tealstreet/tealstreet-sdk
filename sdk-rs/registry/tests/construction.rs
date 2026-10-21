@@ -593,3 +593,49 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
     // Existing native endpoint inputs remain valid when the SDK raw config is absent.
     construct("hyrotrader", r#"{"publicDataOnly":true,"endpoints":{"rest":"https://legacy.example","publicWs":"wss://legacy.example/public","privateWs":"wss://legacy.example/private"}}"#).unwrap();
 }
+
+#[cfg(feature = "bybit")]
+#[test]
+fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics() {
+    struct RejectFee;
+    impl Visit for RejectFee {
+        type Output = Vec<safe_cex_engine::Action>;
+        fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+            engine.start(1_000.0);
+            let request = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    safe_cex_engine::Action::Http(request)
+                        if request.url.contains("/v5/account/fee-rate") =>
+                    {
+                        Some(request.id)
+                    }
+                    _ => None,
+                })
+                .expect("private startup fee read");
+            engine.handle(
+                1_001.0,
+                safe_cex_engine::Event::HttpResponse {
+                    request,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"retCode":10003,"retMsg":"API key is invalid.","result":{}}"#,
+                    },
+                },
+            );
+            engine.drain_actions().collect()
+        }
+    }
+    for (site, remote, expected_probe) in [
+        (None, false, true),
+        (Some(""), false, true),
+        (Some("BRA_BTL"), false, false),
+        (None, true, false),
+    ] {
+        let raw = serde_json::json!({"key":"key","secret":"secret","bybitSiteId":site,"remoteSigning":remote});
+        let options: EngineOptions = serde_json::from_value(raw).unwrap();
+        let actions = build("bybit", options, RejectFee).unwrap();
+        assert_eq!(actions.iter().any(|action| matches!(action, safe_cex_engine::Action::Http(request) if request.url == "https://api-demo.bybit.com/v5/user/query-api")), expected_probe);
+    }
+}
