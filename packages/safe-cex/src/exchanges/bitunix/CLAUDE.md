@@ -796,3 +796,9 @@ execution and optimistic/terminal guards remain. Partial initial halves cannot
 establish readiness, both staged serials/generations must be current, and partial
 command-owned refreshes cannot qualify as trading prerequisites. WS generation
 fences and financial/side defaults remain separate unchanged policies.
+
+Rust Bitunix declares synchronized host-clock input. The SDK adopts that capability
+before the first engine start and supplies its virtual clock for authenticated
+REST and private-login timestamps, including later socket epochs. Signing keeps
+its existing millisecond flooring and byte format. This does not add automatic
+signature-rejection retries or resend writes.
