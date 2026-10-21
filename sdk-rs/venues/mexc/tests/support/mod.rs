@@ -30,7 +30,7 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         .collect()
 }
 pub fn started() -> (TestEngine, SocketId) {
-    let mut e = Engine::new(MexcFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -85,7 +85,7 @@ pub fn private_started_with_retry(
     safe_cex_engine::TimerId,
     Option<safe_cex_engine::TimerId>,
 ) {
-    let mut e = Engine::new(MexcFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         recv_window: None,
         read_credentials: None,
         public_data_only: false,

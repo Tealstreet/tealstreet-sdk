@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Engine, Event, PublicFeedPolicy, SocketId, TimerId};
+use safe_cex_engine::{Event, PublicFeedPolicy, SocketId, TimerId};
 use safe_cex_venue_bitget::{BitgetFutures, Options};
 use support::Harness;
 
@@ -168,7 +168,7 @@ fn silent_secondary_public_feed_times_out_and_reconnects() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut engine = Engine::new(BitgetFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

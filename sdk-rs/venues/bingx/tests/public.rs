@@ -28,7 +28,7 @@ fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
     );
 }
 fn seeded() -> Engine<Bingx> {
-    let mut engine = Engine::new(Bingx::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -113,7 +113,7 @@ fn full_depth_replaces_previous_snapshot_and_watchdog_reconnects() {
 }
 #[test]
 fn error_envelope_after_streamed_array_does_not_publish_markets() {
-    let mut e = Engine::new(Bingx::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options::default()));
     e.start(0.);
     respond(&mut e, 1., r#"{"data":[],"code":100004,"msg":"denied"}"#);
     assert!(!e.store().loaded().markets);
@@ -169,7 +169,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
 }
 #[test]
 fn startup_failure_retries_the_read_without_loading_empty_markets() {
-    let mut e = Engine::new(Bingx::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options::default()));
     e.start(0.);
     respond(&mut e, 1., r#"{"code":100004,"msg":"temporary","data":[]}"#);
     assert!(!e.store().loaded().markets);
@@ -189,7 +189,7 @@ fn startup_failure_retries_the_read_without_loading_empty_markets() {
 
 #[test]
 fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
-    let mut e = Engine::new(Bingx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -373,7 +373,7 @@ impl Suppressed {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = Engine::new(Bingx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

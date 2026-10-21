@@ -101,8 +101,15 @@ fn mint_id(
     }
     Err("ApeX Omni could not allocate a unique client order ID".into())
 }
-fn generated_id(account: &str, now: f64, issued: &mut HashSet<String>) -> Result<String, String> {
-    mint_id(account, now, issued, safe_cex_crypto::uuid::uuid)
+fn generated_id(
+    cx: &Cx<'_, Pending>,
+    account: &str,
+    now: f64,
+    issued: &mut HashSet<String>,
+) -> Result<String, String> {
+    mint_id(account, now, issued, || {
+        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+    })
 }
 fn parent_id(id: &str) -> &str {
     id.strip_suffix("__stop_loss")
@@ -348,11 +355,10 @@ impl ApexOmni {
         }
         let mut steps = Vec::new();
         for amount in lots(order, market)? {
-            let id = order
-                .client_order_id
-                .clone()
-                .map(Ok)
-                .unwrap_or_else(|| generated_id(&self.account.account_id, cx.now, issued))?;
+            let id =
+                order.client_order_id.clone().map(Ok).unwrap_or_else(|| {
+                    generated_id(cx, &self.account.account_id, cx.now, issued)
+                })?;
             let mut receipts = vec![OrderIdentityReceipt {
                 symbol: order.symbol.clone(),
                 kind: OrderIdentityKind::ClientOrderId,
@@ -454,7 +460,7 @@ impl ApexOmni {
                 if !positive(leg_price) || !positive(trigger) {
                     return Err("ApeX Omni bracket price rounds to zero".into());
                 }
-                let leg_id = generated_id(&self.account.account_id, cx.now, issued)?;
+                let leg_id = generated_id(cx, &self.account.account_id, cx.now, issued)?;
                 receipts.push(OrderIdentityReceipt {
                     symbol: order.symbol.clone(),
                     kind: OrderIdentityKind::ClientOrderId,

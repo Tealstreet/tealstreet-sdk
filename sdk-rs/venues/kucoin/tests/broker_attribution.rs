@@ -3,7 +3,7 @@ use safe_cex_venue_kucoin::{Kucoin, Options};
 
 #[test]
 fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
-    let mut engine = Engine::new(Kucoin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -31,10 +31,12 @@ fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
 #[cfg(feature = "spot")]
 #[test]
 fn spot_public_catalogue_preserves_the_same_broker_header() {
-    let mut engine = Engine::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_kucoin::spot::KucoinSpot::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }),
+    );
     engine.start(0.0);
     let requests: Vec<_> = engine
         .drain_actions()
@@ -190,7 +192,7 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
 #[test]
 fn authenticated_futures_public_reads_keep_configured_partner_signatures() {
     verify_partner_catalogue_and_followup(
-        Engine::new(Kucoin::new(partner_options())),
+        safe_cex_engine::test_support::seeded_engine(Kucoin::new(partner_options())),
         r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}]}"#,
         assert_partner,
     );
@@ -199,7 +201,7 @@ fn authenticated_futures_public_reads_keep_configured_partner_signatures() {
 #[test]
 fn authenticated_spot_public_reads_stay_channel_only_with_configured_partner() {
     verify_partner_catalogue_and_followup(
-        Engine::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(
+        safe_cex_engine::test_support::seeded_engine(safe_cex_venue_kucoin::spot::KucoinSpot::new(
             partner_options(),
         )),
         r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.0001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"10"}]}"#,

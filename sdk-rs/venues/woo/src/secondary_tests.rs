@@ -1,6 +1,6 @@
 use super::*;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, Engine, ReadCredentials};
+use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -37,7 +37,7 @@ fn probe(venue: Woo) -> ProbeVenue<Woo, impl FnMut(&mut Woo, &mut Cx<'_, Pending
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(probe(Woo::new(options())));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Woo::new(options())));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()
@@ -81,7 +81,7 @@ fn secondary_get_keeps_primary_mutations() {
 fn invalid_secondary_identity_stops_startup_before_io() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = Engine::new(Woo::new(opts));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Woo::new(opts));
     engine.start(1700000000000.0);
     assert!(
         !engine

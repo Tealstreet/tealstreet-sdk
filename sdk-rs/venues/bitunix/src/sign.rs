@@ -1,5 +1,5 @@
 //! Bitunix signs compact body bytes and sorted, delimiter-free query parameters.
-use safe_cex_crypto::{hex, sha256, uuid::uuid};
+use safe_cex_crypto::{hex, sha256, uuid::uuid_with_entropy};
 use safe_cex_engine::num;
 #[derive(Clone)]
 pub struct Credentials {
@@ -64,12 +64,13 @@ pub fn encode(v: &str) -> String {
     out
 }
 pub fn headers(
+    fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
     c: &Credentials,
     params: &Params,
     body: &str,
     now: f64,
 ) -> Result<Vec<(&'static str, String)>, String> {
-    let nonce = uuid()?;
+    let nonce = uuid_with_entropy(fill)?;
     let timestamp = num::format(now.floor());
     let sign = signature(c, &nonce, &timestamp, &params.signing(), body);
     Ok(vec![

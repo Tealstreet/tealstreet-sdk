@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event};
+use safe_cex_engine::{Action, Command, Event};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -74,7 +74,7 @@ fn buffers_depth_discards_old_versions_and_invalidates_gaps() {
 
 #[test]
 fn streamed_200_error_does_not_commit_markets_even_with_an_empty_array() {
-    let mut e = Engine::new(MexcFutures::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(
@@ -199,7 +199,7 @@ fn resubscribe_ignores_an_old_subscriptions_inflight_snapshot() {
 
 #[test]
 fn startup_network_failures_retry_reads_without_committing_partial_state() {
-    let mut e = Engine::new(MexcFutures::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
     e.start(0.0);
     let first = requests(&mut e).remove(0);
     e.handle(
@@ -364,7 +364,7 @@ fn malformed_live_or_buffered_deltas_invalidate_before_advancing_the_anchor() {
 
 #[test]
 fn all_market_prices_and_selected_ticker_details_survive_reconnect() {
-    let mut e = Engine::new(MexcFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

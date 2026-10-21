@@ -697,13 +697,13 @@ fn terminal_events_cannot_be_undone_by_delayed_creates_or_cached_rest() {
 }
 #[test]
 fn signature_headers_cover_sorted_query_and_exact_body() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
-        safe_cex_venue_bitunix::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             ..Default::default()
-        },
-    ));
+        }),
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);
@@ -972,13 +972,13 @@ fn live_fill_price_and_amount_drop_binary_noise() {
 
 /// Starts without sockets, answering every startup read; returns the timers set.
 fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, f64)>) {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
-        safe_cex_venue_bitunix::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             ..Default::default()
-        },
-    ));
+        }),
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     reply(&mut e, r.id, PAIRS);

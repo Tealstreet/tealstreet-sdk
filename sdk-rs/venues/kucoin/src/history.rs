@@ -721,7 +721,7 @@ mod tests {
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
     use safe_cex_engine::{Action, Engine, Event, Notice, Response};
     fn engine() -> Engine<Kucoin> {
-        let mut e = Engine::new(Kucoin::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
             key: Some("fixture-key".into()),
             secret: Some("fixture-secret".into()),
             passphrase: Some("fixture-passphrase".into()),
@@ -803,7 +803,7 @@ mod tests {
     }
     #[test]
     fn client_id_lookup_fails_explicitly_without_network_io() {
-        let mut e = Engine::new(Kucoin::new(Options::default()));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
         e.handle(
             1740640088002.5,
             Event::Command(safe_cex_engine::Command::Query {
@@ -1211,7 +1211,7 @@ mod tests {
     }
     #[test]
     fn public_trades_need_no_credentials() {
-        let mut e = Engine::new(Kucoin::new(Options::default()));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
         e.store_mut()
             .set_markets(engine().store().markets().to_vec());
         let r = query(

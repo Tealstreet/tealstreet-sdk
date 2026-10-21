@@ -42,7 +42,7 @@ fn ready() -> (Driver, SocketId) {
     ready_with(|_| {})
 }
 fn ready_with(before_seed: impl FnOnce(&mut Driver)) -> (Driver, SocketId) {
-    let mut e = Engine::new(Orderly::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -252,7 +252,7 @@ fn failed_snapshot_retries_without_another_delta_and_clears_on_reconnect() {
 }
 #[test]
 fn malformed_seed_and_candles_do_not_commit_partial_results() {
-    let mut e = Engine::new(Orderly::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options::default()));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(
@@ -612,7 +612,7 @@ fn predecessor_gap_requires_a_fresh_snapshot() {
 }
 
 fn ready_sockets(markets: &str, tickers: &str) -> (Driver, Vec<SocketId>) {
-    let mut e = Engine::new(Orderly::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -778,7 +778,7 @@ fn malformed_quotes_empty_broker_suffixes_and_duplicates_preserve_valid_peers() 
         vec!["PERP_XLM_USDC_mythos?other"],
         vec!["PERP_XLM_USDC", "PERP_XLM_USDC"],
     ] {
-        let mut e = Engine::new(Orderly::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
             public_data_only: true,
             ..Default::default()
         }));
@@ -947,7 +947,7 @@ fn funding_watchdog_reconnects_only_its_shard_and_ignores_late_old_socket_frames
 
 #[test]
 fn stalled_public_handshake_retries_and_duplicate_open_does_not_resubscribe() {
-    let mut e = Engine::new(Orderly::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -1063,7 +1063,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
 }
 
 fn ready_feed_connections(count: usize) -> (Driver, Vec<(SocketId, SocketContext)>, Vec<Action>) {
-    let mut e = Engine::new(Orderly::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

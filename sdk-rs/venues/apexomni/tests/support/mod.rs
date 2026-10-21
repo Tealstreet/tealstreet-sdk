@@ -28,7 +28,7 @@ pub fn response(e: &mut TestEngine, r: &HttpRequest, now: f64, body: &str) {
     );
 }
 pub fn started() -> (TestEngine, SocketId) {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

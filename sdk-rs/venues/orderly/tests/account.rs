@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Engine, Event, SocketId};
+use safe_cex_engine::{Action, Event, SocketId};
 use safe_cex_venue_orderly::Orderly;
 use support::*;
 
@@ -96,7 +96,7 @@ fn bootstrap_signed_headers_and_dual_margin_positions() {
 }
 #[test]
 fn subscribes_only_after_successful_auth_and_paces_failure() {
-    let mut e = Engine::new(Orderly::new(options()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(
@@ -365,7 +365,7 @@ fn root_terminal_before_any_children_blocks_a_held_startup_snapshot() {
 fn only_definitive_account_validation_rejection_deactivates() {
     use safe_cex_engine::Notice;
     for status in [401, 403, 408, 429, 503] {
-        let mut e = Engine::new(Orderly::new(options()));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
         e.start(1000.0);
         let mut output = vec![];
         for _ in 0..4 {
@@ -400,7 +400,7 @@ fn only_definitive_account_validation_rejection_deactivates() {
 }
 
 fn private_connecting() -> (Driver, SocketId, Clock) {
-    let mut e = Engine::new(Orderly::new(options()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
     let mut clock = Clock::new(1000.0);
     e.start(1000.0);
     for _ in 0..10 {

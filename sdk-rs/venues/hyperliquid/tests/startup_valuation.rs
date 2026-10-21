@@ -120,7 +120,7 @@ fn pending_live_collateral_fences_older_rest_and_uses_latest_position_pnl() {
 
 #[test]
 fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
-    let mut engine = Engine::new(Hyperliquid::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),

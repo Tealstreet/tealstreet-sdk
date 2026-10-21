@@ -226,13 +226,13 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
 
 #[test]
 fn private_connection_that_never_opens_is_closed_and_backed_off() {
-    let mut e = Engine::new(safe_cex_venue_mexc::MexcFutures::new(
-        safe_cex_venue_mexc::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_mexc::MexcFutures::new(safe_cex_venue_mexc::Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             ..Default::default()
-        },
-    ));
+        }),
+    );
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, support::MARKETS);

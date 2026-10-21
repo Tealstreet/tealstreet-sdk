@@ -704,3 +704,8 @@ leverage-then-margin pair when current. Superseded reads finish without another
 metadata request; a write pending at issue keeps that read ineligible to publish
 even after the write settles. A failed current margin read leaves the prior
 complete settings intact; no partial rails are published.
+
+Sequential placement failures retain earlier acknowledged native order IDs in
+the existing typed partial-error details and legacy `partialOrderIds` field.
+Callers can reconcile those orders before retrying. The original native error
+and uncertain-write outcome remain; a failed step does not resend the unsent tail.

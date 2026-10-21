@@ -19,6 +19,7 @@ safe-cex-venue-binance.workspace = true
 workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom.workspace = true
 safe-cex-engine = { workspace = true, features = ["book-deltas", "command-tracking"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
@@ -31,4 +32,5 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "test-util"] }

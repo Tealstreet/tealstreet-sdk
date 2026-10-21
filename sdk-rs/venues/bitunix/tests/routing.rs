@@ -1,9 +1,9 @@
-use safe_cex_engine::{Action, Engine, Event, Response, SocketChannel};
+use safe_cex_engine::{Action, Event, Response, SocketChannel};
 use safe_cex_venue_bitunix::{BitunixFutures, Options};
 
 #[test]
 fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
-    let mut engine = Engine::new(BitunixFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         ..Options::default()

@@ -52,7 +52,7 @@ impl Harness {
 
     pub fn started(options: Options) -> Self {
         let mut harness = Self {
-            engine: Engine::new(BybitLinear::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(BybitLinear::new(options)),
             now: 1_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),

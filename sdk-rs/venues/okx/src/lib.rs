@@ -1762,7 +1762,7 @@ mod price_index_tests {
         );
     }
     fn engine() -> Engine<Okx> {
-        Engine::new(Okx::new(Options {
+        safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
             public_data_only: true,
             ..Options::default()
         }))
