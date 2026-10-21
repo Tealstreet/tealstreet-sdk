@@ -213,7 +213,7 @@ it('does not classify HTTP status/body or background logs in JavaScript', async 
   const r = fixture();
   await r.start();
   r.deliver(
-    { op: 'log', level: 'warning', message: 'invalid API key' },
+    { op: 'event', level: 'warn', code: 'request.failed', message: 'invalid API key', fields: {} },
     { op: 'http', request: 3, method: 'GET', url: 'https://api.binance.com/private', headers: [] },
   );
   await vi.advanceTimersByTimeAsync(0);
