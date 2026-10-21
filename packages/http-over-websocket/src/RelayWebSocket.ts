@@ -250,7 +250,8 @@ export class RelayWebSocket extends EventTarget {
     this.inner.removeEventListener('open', this.onInnerOpen);
     this.inner.removeEventListener('message', this.onInnerMessage);
     this.inner.removeEventListener('close', this.onInnerClose as EventListener);
-    this.inner.removeEventListener('error', this.onInnerError);
+    // The error listener stays: closing a still-connecting Node `ws` emits its abort
+    // error on a later tick, and an emitter with no listener throws it uncaught.
     const event = makeCloseEvent(code, reason, wasClean);
     this.onclose?.(event);
     this.dispatchEvent(event);
