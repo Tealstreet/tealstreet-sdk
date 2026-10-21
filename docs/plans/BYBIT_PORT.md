@@ -88,3 +88,18 @@ protocol improvement: Rust requires `execution` and `wallet` on every connection
 TS infers fills from cumulative order updates and waits for REST wallet reads.
 The declared exception adds those two required topics to the TS oracle; it does
 not copy Rust subscriptions or hide missing native topics.
+# Demo-key diagnostic plan (2026-10-21)
+
+On a startup fee-read 10003 for built-in live linear/demo, diagnose the opposite
+environment with one signed `/v5/user/query-api` GET using the same rejected
+credential, including a secondary read key. Only HTTP success and native code
+zero add the TS environment-mismatch hint. Preserve the original native failure,
+credential role and deactivation policy; bound the probe to two seconds and
+retire timeout/late-response races before the terminal notice.
+
+Exclude regional/site, custom endpoints, testnet, Hyro, inverse, spot, public-only
+and remote signing. Forward eligibility markers through the SDK and registry.
+Test both directions, signatures/credential roles, negative probes, coalescing,
+timeouts and exclusions. Run focused Bybit/Binance/registry/TS gates, independent
+review and current-head CI, then land with the lane's separate merge guard.
+
