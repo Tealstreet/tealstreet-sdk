@@ -114,6 +114,37 @@ Venues whose profile refuses a mode, or that have no profile, stay at "no live
 write proof". That status is listed per venue on the readiness table; it is not
 inferred.
 
+## 3a. Owner-run venue probes
+
+These are single questions only a live account can answer. They are not part of
+the generic shadow or smoke runs. Each one is **owner-run**: Sam runs it, or an
+operator he delegates, on that person's own account, with environment-only
+credentials, read-only, and no artifact committed. The result goes back to the
+named code as a reviewed change, or as a documented limitation.
+
+- **Kraken futures income/ledger paging past 500 rows** (from claude-cbzmw6's
+  audit note).
+  - **Current behaviour:** `sdk-rs/venues/kraken/src/history.rs` reads
+    `/api/history/v3/account-log`. Only the `since` cursor is proven to page;
+    `before` and ascending sorts return 0 rows. Past 500 rows, Rust matches TS:
+    it returns the newest 500 with a truncation warning, never a silently cut
+    history.
+  - **Probe:** take an account with more than 500 ledger rows in one window and
+    request the same window several ways:
+    - `since` with `sort=asc`;
+    - `since` with `sort=desc`;
+    - `before` alone;
+    - `before` with `since`;
+    - `count` at and above 500.
+
+    For each, record the row counts, the boundary timestamps, and whether rows
+    repeat or are skipped at page edges.
+  - **Pass condition:** a cursor that walks past 500 rows without gaps or
+    duplicates, as checked against the account's own ledger total in the Kraken
+    UI. If one exists, the Rust income pager adopts it with a regression test
+    built from the redacted shapes of the measured responses. If none exists,
+    the truncation is documented as a venue limit.
+
 ## 4. Canary criteria
 
 A canary routes real accounts to Rust through the per-account
