@@ -447,7 +447,10 @@ impl Hyperliquid {
         for market in &markets {
             self.excluded.remove(&market.id.to_ascii_lowercase());
             // Account start seeded only the markets known then.
-            if self.account.started && cx.store.setting(&market.symbol).is_none() {
+            if self.account.started
+                && self.has_setting(market)
+                && cx.store.setting(&market.symbol).is_none()
+            {
                 let seed = self.seed_setting(market);
                 cx.store.update_setting(&market.symbol, |s| *s = seed);
             }

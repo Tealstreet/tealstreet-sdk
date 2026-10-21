@@ -131,10 +131,9 @@ fn spot_pairs_list_after_perps_with_the_unit_alias_and_real_quotes() {
         (t.last, t.mark, t.index, t.funding_rate),
         (60000.0, 60010.0, 0.0, 0.0)
     );
-    // 1x cross settings, and no activeAssetData for spot pairs.
-    let setting = r.e.store().setting("UBTC/USDC").unwrap();
-    assert_eq!(setting.leverage, 1.0);
-    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+    // TS gives spot pairs no position, so no leverage row; and no activeAssetData.
+    assert!(r.e.store().setting("UBTC/USDC").is_none());
+    assert!(r.e.store().setting("BTC-PERP").is_some());
     assert!(
         !r.sends
             .iter()
@@ -182,8 +181,8 @@ fn a_failed_spot_read_warns_retries_and_never_holds_back_perps() {
             "HYPE/USDH"
         ]
     );
-    // The account was already running, so the new pairs get settings straight away.
-    assert_eq!(r.e.store().setting("UBTC/USDC").unwrap().leverage, 1.0);
+    // A late catalogue still adds no leverage rows for spot pairs.
+    assert!(r.e.store().setting("UBTC/USDC").is_none());
 }
 
 #[test]
