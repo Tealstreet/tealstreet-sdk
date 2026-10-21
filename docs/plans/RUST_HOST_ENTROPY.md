@@ -48,3 +48,30 @@ No direct upstream or downstream deployment. New host options are optional at
 the JS production boundary (secure defaults), while core construction requires
 explicit providers. Public core/registry constructor changes and mechanical
 fixture migrations will be listed in the PR with affected native callers.
+
+## Implementation audit
+
+Construction, channel routing and the final replay shape passed independent
+security/correctness review. Native and WASM production factories keep OS/WebCrypto;
+all 23 families use Cx. Seeded native Binance IDs reproduce, while production IDs
+differ; missing providers and post-start replacement are typed failures.
+
+Both replay modes now create their own exact tape-SHA identity source. Legacy
+initializer return values are ignored (Aster returns a module, not a provider).
+The global patch and Bitget-only catalog hooks are retired; the original Bitget
+SHA/domain/counter byte stream is pinned in tests. Owner codex-mxb4mq approved
+this common mode policy and retains full raw-ID comparison with no exclusions.
+
+No Rust assertions were lost. Three tests were renamed; clock-driven jitter checks
+now cover host-source repeatability and seed variation, and pass-through checks
+prove no bytes were consumed. Coinbase assertions gained explicit signing source
+arguments. The Bybit stable-socket fixture crosses 30 seconds by 1 ms to avoid
+fractional-start rounding; its reset assertion is retained and independently
+reviewed. KuCoin spot/futures cross-engine uniqueness uses distinct explicit host seeds and
+adds same-source replay equality, retaining every old assertion. Old JS global-patch/fallback checks now test isolated providers and
+typed failure without WebCrypto. Actual-WASM regression tests run in existing CI.
+
+Local strict Clippy/fmt, wasm32 check, SDK typecheck, 142 host and 994 harness
+unit tests pass. 4831 unique Rust tests pass across all 32 touched crates (focused runs after
+fixture corrections). Landing integration, CI/size gates, a fresh separate revert
+guard and merge reporting remain pending.

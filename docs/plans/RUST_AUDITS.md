@@ -374,7 +374,10 @@ against current code before fixing. Lifecycle differences alone are not defects.
   `safe-cex-venues` crate shared by both hosts.~~ Done: `sdk-rs/registry` is shared
   by the hosts (RUST_QUALITY helper 6).
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
-- Client ids use OS randomness in the deterministic core (`crypto/src/uuid.rs`).
+- ~~Client ids use OS randomness in the deterministic core (`crypto/src/uuid.rs`).~~
+  Host-owned identity and separate signing entropy now enter through `Engine`/`Cx`;
+  production hosts bind OS/WebCrypto and replay hosts inject tape-derived identity.
+  Missing providers fail construction; CI bans ambient core/venue draws.
 - ~~~30 URL encoders in three dialects → `engine::url`.~~ Done (RUST_QUALITY helper 2).
 - ~~`RangeWalk` used by 6 of 26 venues~~ (shared `CursorWalk`/`windows`/`OffsetWalk`
   page 12 venues; the rest stay hand-rolled with reasons in

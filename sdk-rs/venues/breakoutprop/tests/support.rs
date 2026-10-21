@@ -26,7 +26,7 @@ pub struct Rig {
 impl Rig {
     pub fn new(options: Options) -> Self {
         let mut rig = Self {
-            engine: Engine::new(BreakoutProp::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(BreakoutProp::new(options)),
             now: 0.0,
             requests: VecDeque::new(),
             timers: HashMap::new(),

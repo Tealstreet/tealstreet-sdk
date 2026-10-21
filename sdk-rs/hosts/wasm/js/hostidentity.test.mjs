@@ -6,13 +6,14 @@ const receipt = (identity = 'native-1', kind = 'clientOrderId', symbol = 'BTCUSD
 const progress = (command, receipts) => ({ op: 'commandProgress', command, receipts });
 const done = (command, extra = {}) => ({ op: 'done', command, ...extra });
 
-function rig(actions = () => [], handlers = {}) {
+function rig(actions = () => [], handlers = {}, options = {}) {
   const events = [];
   const timers = new Map();
   const io = [];
   const logs = [];
   let next = 0;
   const engine = {
+    setEntropy(source) { this.entropy = source; },
     command(json) { return JSON.stringify(actions(JSON.parse(json))); },
     start() { throw new WebAssembly.RuntimeError('unreachable'); },
     payloadSigned() { return '[]'; },
@@ -29,7 +30,7 @@ function rig(actions = () => [], handlers = {}) {
     onCommandProgress(event) { events.push(event); },
     onLog(level, message) { logs.push({ level, message }); },
     ...handlers,
-  }, { commandTimeoutMs: 20 });
+  }, { commandTimeoutMs: 20, ...options });
   host.sockets.set(7, { send() { io.push('ws'); }, close() {} });
   return { host, engine, transport, events, timers, io, logs,
     run: (actions) => host.run(JSON.stringify(actions)),
@@ -229,12 +230,15 @@ test('throwing progress and both diagnostic reporters cannot change a dispatched
   assert.equal(report.mock.calls.length, 2);
 });
 
-test('host sessions isolate equal command IDs, including hosts without Web Crypto', async (t) => {
-  t.mock.method(Math, 'random', () => 0.5);
+test('host sessions isolate equal command IDs with explicit entropy without Web Crypto', async (t) => {
+  t.mock.method(Math, 'random', () => assert.fail('no weak entropy fallback'));
   const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
   try {
-    const hosts = [rig(), rig()];
+    assert.throws(() => rig(), (error) => error.kind === 'invalidInput');
+    const hosts = [1, 2].map((seed) => rig(undefined, undefined, {
+      entropy: (length) => Uint8Array.from({ length }, () => seed++ & 255),
+    }));
     const errors = [];
     for (const r of hosts) {
       const pending = r.host.command({ op: 'placeOrders', orders: [] });

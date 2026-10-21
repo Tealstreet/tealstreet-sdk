@@ -45,6 +45,14 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    fn set_entropy(
+        &mut self,
+        _fill: safe_cex_engine::entropy::Fill,
+        _signing: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        Err(entropy_configuration_error())
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities;
     fn apply_public_feed(
         &mut self,
@@ -63,6 +71,18 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn set_entropy(
+        &mut self,
+        fill: safe_cex_engine::entropy::Fill,
+        signing: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        if signing {
+            Engine::set_signing_entropy(self, fill)
+        } else {
+            Engine::set_entropy(self, fill)
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         Engine::capabilities(self)
     }
@@ -364,6 +384,73 @@ pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, J
     Ok(serde_json::to_string(&options.construction(venue))?)
 }
 
+fn entropy_configuration_error() -> safe_cex_engine::VenueError {
+    safe_cex_engine::VenueError::new("Cryptographic host entropy is unavailable")
+        .kind(safe_cex_engine::ErrorKind::InvalidInput)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn crypto_entropy() -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
+    let crypto = js_sys::Reflect::get(&js_sys::global(), &"crypto".into())
+        .map_err(|_| entropy_configuration_error())?;
+    let fill = js_sys::Reflect::get(&crypto, &"getRandomValues".into())
+        .map_err(|_| entropy_configuration_error())?
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| entropy_configuration_error())?;
+    Ok(Box::new(move |bytes| {
+        let size = u32::try_from(bytes.len()).map_err(|_| "Entropy request is too large")?;
+        // Separate storage: arbitrary JS callbacks must never see a Rust memory view.
+        let output = js_sys::Uint8Array::new_with_length(size);
+        fill.call1(&crypto, output.as_ref())
+            .map_err(|_| "Host entropy unavailable")?;
+        output.copy_to(bytes);
+        Ok(())
+    }))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn crypto_entropy() -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
+    Ok(Box::new(|bytes| {
+        getrandom::getrandom(bytes).map_err(|error| error.to_string())
+    }))
+}
+
+fn production_entropy() -> Result<safe_cex_engine::entropy::Entropy, safe_cex_engine::VenueError> {
+    Ok(safe_cex_engine::entropy::Entropy::new(
+        crypto_entropy()?,
+        crypto_entropy()?,
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn callback_entropy(
+    source: js_sys::Function,
+) -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
+    if !source.is_function() {
+        return Err(entropy_configuration_error());
+    }
+    Ok(Box::new(move |bytes| {
+        let size = u32::try_from(bytes.len()).map_err(|_| "Entropy request is too large")?;
+        let output = source
+            .call1(source.as_ref(), &f64::from(size).into())
+            .map_err(|_| "Host entropy unavailable")?
+            .dyn_into::<js_sys::Uint8Array>()
+            .map_err(|_| "Entropy provider must return Uint8Array")?;
+        if output.length() != size {
+            return Err("Entropy provider returned the wrong byte length".into());
+        }
+        output.copy_to(bytes);
+        Ok(())
+    }))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn callback_entropy(
+    _source: js_sys::Function,
+) -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
+    Err(entropy_configuration_error())
+}
+
 fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
     let error = js_sys::Error::new(&detail.message);
     if let Ok(json) = serde_json::to_string(&detail) {
@@ -416,11 +503,30 @@ impl WasmEngine {
             .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build(venue, options, Boxed).map_err(construction_error)?;
+        let inner = safe_cex_venues::build(
+            venue,
+            options,
+            Some(production_entropy().map_err(construction_error)?),
+            Boxed,
+        )
+        .map_err(construction_error)?;
         Ok(Self {
             inner,
             construction,
         })
+    }
+
+    #[wasm_bindgen(js_name = setEntropy)]
+    pub fn set_entropy(&mut self, source: js_sys::Function) -> Result<(), js_sys::Error> {
+        self.inner
+            .set_entropy(callback_entropy(source).map_err(construction_error)?, false)
+            .map_err(construction_error)
+    }
+    #[wasm_bindgen(js_name = setSigningEntropy)]
+    pub fn set_signing_entropy(&mut self, source: js_sys::Function) -> Result<(), js_sys::Error> {
+        self.inner
+            .set_entropy(callback_entropy(source).map_err(construction_error)?, true)
+            .map_err(construction_error)
     }
 
     /// Resolved account choices; contains no credentials.

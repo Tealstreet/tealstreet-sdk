@@ -1244,10 +1244,10 @@ fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_engine::{Action, Engine, Event};
+    use safe_cex_engine::{Action, Event};
     #[test]
     fn price_bands_are_normalized_and_only_committed_with_a_valid_market_snapshot() {
-        let mut e = Engine::new(Paradex::new(crate::Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(crate::Options {
             public_data_only: true,
             ..Default::default()
         }));
@@ -1275,10 +1275,11 @@ mod tests {
             e.venue().public.price_bands.get("SOL-USD-PERP"),
             Some(&0.07)
         );
-        let mut failed = Engine::new(Paradex::new(crate::Options {
-            public_data_only: true,
-            ..Default::default()
-        }));
+        let mut failed =
+            safe_cex_engine::test_support::seeded_engine(Paradex::new(crate::Options {
+                public_data_only: true,
+                ..Default::default()
+            }));
         failed.start(0.);
         let id = failed
             .drain_actions()

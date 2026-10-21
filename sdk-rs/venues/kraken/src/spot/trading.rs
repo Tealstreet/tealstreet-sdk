@@ -78,7 +78,7 @@ impl KrakenSpot {
             _ => return Err("Kraken Spot unsupported order type".into()),
         };
         let mut entropy = [0; 16];
-        getrandom::getrandom(&mut entropy)
+        cx.fill_entropy(&mut entropy)
             .map_err(|_| "Kraken Spot client ID entropy unavailable")?;
         let client_id = safe_cex_crypto::hex(&entropy);
         let mut params = vec![

@@ -10,7 +10,7 @@ fn boot() -> (Engine<Grvt>, SocketId) {
     (engine, socket)
 }
 fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId, Vec<String>) {
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -258,7 +258,7 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
 }
 #[test]
 fn silent_unopened_socket_has_watchdog_and_reconnect() {
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -430,7 +430,7 @@ fn unsupported_unicode_candle_interval_fails_without_trapping() {
 
 #[test]
 fn catalog_refresh_remaps_ticker_state_sequences_and_subscriptions_by_native_id() {
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -674,7 +674,7 @@ impl Suppressed {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

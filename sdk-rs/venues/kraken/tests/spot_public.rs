@@ -218,9 +218,9 @@ fn public_candle_network_read_retries_three_times_and_settles() {
 
 #[test]
 fn missing_credentials_automatically_select_public_only_like_ts() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(
-        safe_cex_venue_kraken::Options::default(),
-    ));
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_kraken::KrakenSpot::new(safe_cex_venue_kraken::Options::default()),
+    );
     e.start(NOW);
     let m = requests(&mut e).pop().unwrap();
     reply(&mut e, &m, META);
@@ -329,8 +329,9 @@ fn blank_stream_quantities_cannot_delete_a_book_level_or_zero_a_live_quote() {
 
 #[test]
 fn first_rest_seed_retains_live_quotes_and_values_early_native_holdings_with_them() {
-    let mut engine =
-        safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(options()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_kraken::KrakenSpot::new(options()),
+    );
     engine.start(NOW);
     let metadata = requests(&mut engine).pop().unwrap();
     reply(&mut engine, &metadata, META);

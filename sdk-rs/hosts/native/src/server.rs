@@ -135,7 +135,7 @@ impl FrameServer {
             token,
             transport,
         };
-        safe_cex_venues::build(venue, options, register)
+        safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
     }
 
@@ -1314,7 +1314,7 @@ mod tests {
     use super::*;
     use crate::{Events, HostEvent};
     use safe_cex_engine::book::Book;
-    use safe_cex_engine::{Cx, Engine, HttpRequest, Response, SocketId, TimerId};
+    use safe_cex_engine::{Cx, HttpRequest, Response, SocketId, TimerId};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -1414,7 +1414,10 @@ mod tests {
         max_frame_bytes: usize,
     ) -> (Account<Stub, NoTransport>, Vec<mpsc::Receiver<Outgoing>>) {
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                NoTransport,
+            ),
             ServerConfig {
                 max_frame_bytes,
                 ..ServerConfig::default()
@@ -1563,7 +1566,9 @@ mod tests {
         for _ in 0..2 {
             let mut actor = Account::new(
                 Host::new(
-                    Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                    safe_cex_engine::test_support::seeded_engine(Stub(Rc::new(RefCell::new(
+                        Vec::new(),
+                    )))),
                     NoTransport,
                 ),
                 ServerConfig::default(),
@@ -1631,7 +1636,9 @@ mod tests {
     fn command_errors_keep_original_client_id_and_cannot_leak_after_completion() {
         let mut actor = Account::new(
             Host::new(
-                Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                safe_cex_engine::test_support::seeded_engine(Stub(Rc::new(RefCell::new(
+                    Vec::new(),
+                )))),
                 NoTransport,
             ),
             ServerConfig::default(),
@@ -1706,7 +1713,10 @@ mod tests {
     fn command_receipts_keep_owner_mapping_until_done_and_never_reach_other_peers() {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(commands)), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(commands)),
+                NoTransport,
+            ),
             ServerConfig::default(),
         );
         let mut receivers = Vec::new();
@@ -1812,7 +1822,10 @@ mod tests {
     async fn full_peer_queue_cancels_and_releases_interest_without_dropping_a_delta() {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(commands.clone())), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(commands.clone())),
+                NoTransport,
+            ),
             ServerConfig::default(),
         );
         let (outgoing, mut frames) = mpsc::channel(1);
@@ -2002,7 +2015,9 @@ mod tests {
     fn stub_account(max_frame_bytes: usize) -> Account<Stub, NoTransport> {
         Account::new(
             Host::new(
-                Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                safe_cex_engine::test_support::seeded_engine(Stub(Rc::new(RefCell::new(
+                    Vec::new(),
+                )))),
                 NoTransport,
             ),
             ServerConfig {
@@ -2111,7 +2126,10 @@ mod tests {
     #[tokio::test]
     async fn a_startup_failure_reaches_clients_that_join_later() {
         let mut actor = Account::new(
-            Host::new(Engine::new(FailsStartup), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(FailsStartup),
+                NoTransport,
+            ),
             ServerConfig::default(),
         );
         actor.host.engine.start((actor.host.clock)());
@@ -2133,7 +2151,10 @@ mod tests {
     #[tokio::test]
     async fn oversized_log_notice_is_truncated_instead_of_disconnecting_peers() {
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                NoTransport,
+            ),
             ServerConfig {
                 max_frame_bytes: 96,
                 ..ServerConfig::default()
@@ -2174,7 +2195,10 @@ mod tests {
     #[tokio::test]
     async fn dropping_account_aborts_timers_and_closes_transport_input() {
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                NoTransport,
+            ),
             ServerConfig::default(),
         );
         let timer = tokio::spawn(std::future::pending::<()>());
@@ -2235,7 +2259,12 @@ mod tests {
                     .is_err()
                 );
                 let mut server = FrameServer::new(ServerConfig::default()).unwrap();
-                let host = || Host::new(Engine::new(Stub(Rc::default())), NoTransport);
+                let host = || {
+                    Host::new(
+                        safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                        NoTransport,
+                    )
+                };
                 for (id, token) in [
                     ("", "valid"),
                     ("../bad", "valid"),

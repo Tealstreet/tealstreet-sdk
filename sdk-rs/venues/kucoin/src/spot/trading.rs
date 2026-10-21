@@ -103,7 +103,9 @@ impl KucoinSpot {
         if amount <= 0.0 || amount > m.limits.amount.max {
             return Err("KuCoin Spot order exceeds native size limits".into());
         }
-        let client_oid = client_oid(o.client_order_id.as_deref(), safe_cex_crypto::uuid::uuid)?;
+        let client_oid = client_oid(o.client_order_id.as_deref(), || {
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+        })?;
         let price = if o.kind == OrderType::Limit {
             Some(format(adjust(
                 o.price.ok_or("KuCoin Spot limit order needs a price")?,

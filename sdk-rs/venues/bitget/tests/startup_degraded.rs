@@ -33,7 +33,7 @@ fn events(out: &[Action], code: &str) -> usize {
 #[test]
 fn public_startup_degrades_once_keeps_retrying_and_recovers() {
     for fail_tickers in [false, true] {
-        let mut e = Engine::new(BitgetFutures::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
             public_data_only: true,
             ..Default::default()
         }));
@@ -140,7 +140,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
 
 #[test]
 fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
-    let mut e = Engine::new(BitgetFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
@@ -189,7 +189,7 @@ fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
 
 #[test]
 fn malformed_body_does_not_leak_preview_into_degradation() {
-    let mut e = Engine::new(BitgetFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }));

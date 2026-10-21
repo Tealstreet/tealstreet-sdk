@@ -20,7 +20,7 @@ struct Harness {
 
 impl Harness {
     fn new(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(Okx::new(options));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
         engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
             engine,

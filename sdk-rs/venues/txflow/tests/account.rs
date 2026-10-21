@@ -694,7 +694,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
 
 #[test]
 fn account_execution_window_opens_after_the_paced_ticker_seed() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_txflow::TxFlow::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_txflow::TxFlow::new(
         safe_cex_venue_txflow::Options {
             testnet: true,
             application_id: Some(WALLET.into()),
@@ -736,7 +736,7 @@ fn account_execution_window_opens_after_the_paced_ticker_seed() {
 
 #[test]
 fn a_failing_ticker_seed_read_does_not_block_account_start() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_txflow::TxFlow::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_txflow::TxFlow::new(
         safe_cex_venue_txflow::Options {
             testnet: true,
             application_id: Some(WALLET.into()),

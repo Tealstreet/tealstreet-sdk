@@ -25,7 +25,7 @@ fn boot_with_builders(
 ) -> (Engine<Grvt>, SocketId, Option<HttpRequest>) {
     let mut private_socket = None;
     let mut held = None;
-    let mut e = Engine::new(Grvt::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
         trading_account_id: Some("9007199254740993".into()),

@@ -29,7 +29,7 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let mut h = Self {
-            e: Engine::new(PhemexPerpetuals::new(Options {
+            e: safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()

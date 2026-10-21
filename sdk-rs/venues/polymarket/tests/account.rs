@@ -1,5 +1,6 @@
+use safe_cex_engine::Engine;
 use safe_cex_engine::model::OrderSide;
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
+use safe_cex_engine::{Action, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions, sign};
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -68,7 +69,7 @@ impl H {
     }
     fn with_catalogue(options: Options, markets: &str, seed: bool) -> Self {
         let mut h = Self {
-            e: Engine::new(Polymarket::new(options)),
+            e: safe_cex_engine::test_support::seeded_engine(Polymarket::new(options)),
             now: 1_700_000_000_000.0,
             http: vec![],
             private: None,

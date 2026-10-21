@@ -834,7 +834,7 @@ impl Trading {
             if matches!(o.kind, OrderType::Limit | OrderType::Market) {
                 let id = match &o.client_order_id {
                     Some(id) => id.clone(),
-                    None => generated_id()?,
+                    None => generated_id(cx)?,
                 };
                 p = p.str("clientOrderId", &id);
                 receipts.push(OrderIdentityReceipt {
@@ -1123,7 +1123,7 @@ impl Trading {
                 id.parse().map_err(|_| "Order id is not a numeric int64")?,
             );
         }
-        let identity = generated_id()?;
+        let identity = generated_id(cx)?;
         params = params.str("clientOrderId", &identity);
         if !cx.store.hedged() && o.reduce_only {
             params = params.boolean("reduceOnly", true);
@@ -1226,10 +1226,11 @@ fn positive(value: Option<f64>, field: &str) -> Result<f64, String> {
         .filter(|n| n.is_finite() && *n > 0.0)
         .ok_or_else(|| format!("{field} must be finite and greater than zero"))
 }
-fn generated_id() -> Result<String, String> {
+fn generated_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
     Ok(format!(
         "ts{}",
-        safe_cex_crypto::uuid::uuid()?.to_ascii_lowercase()
+        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+            .to_ascii_lowercase()
     ))
 }
 fn side(side: OrderSide) -> &'static str {

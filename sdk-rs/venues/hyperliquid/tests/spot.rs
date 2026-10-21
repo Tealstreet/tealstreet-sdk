@@ -16,7 +16,7 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_policy(private, PublicFeedPolicy::Direct)
 }
 fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         public_data_only: !private,
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
@@ -259,7 +259,7 @@ fn standalone_spot_triggers_are_rejected_before_write() {
 
 #[test]
 fn documented_contexts_without_coin_follow_metadata_order() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -683,7 +683,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
 }
 #[test]
 fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -756,7 +756,7 @@ fn fills_before_resting_ack_preserve_native_executed_quantity() {
 }
 #[test]
 fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -823,7 +823,7 @@ fn positional_context_fallback_requires_a_complete_homogeneous_documented_array(
                 .unwrap()
                 .push(serde_json::json!({"midPx":"999"}));
         }
-        let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
             public_data_only: true,
             ..Options::default()
         }));
@@ -841,7 +841,7 @@ fn positional_context_fallback_requires_a_complete_homogeneous_documented_array(
 }
 const MULTI_QUOTE_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HYPE","index":150,"szDecimals":2},{"name":"USDT0","index":268,"szDecimals":2},{"name":"USDH","index":360,"szDecimals":2},{"name":"USDE","index":235,"szDecimals":2}],"universe":[{"name":"@207","tokens":[150,268],"index":207},{"name":"@232","tokens":[150,360],"index":232},{"name":"@255","tokens":[150,235],"index":255},{"name":"@107","tokens":[150,0],"index":107},{"name":"@200","tokens":[268,0],"index":200}]},[{"coin":"@255","midPx":"13","markPx":"13"},{"coin":"@107","midPx":"40","markPx":"40"},{"coin":"@207","midPx":"11","markPx":"11"},{"coin":"@232","midPx":"12","markPx":"12"},{"coin":"@200","midPx":"0.98","markPx":"0.98"}]]"#;
 fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
@@ -1039,7 +1039,7 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
         (TEST_SECRET, "invalid-wallet"),
         (" ", TEST_WALLET),
     ] {
-        let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
             secret: Some(secret.into()),
             key: Some(key.into()),
             application_id: Some(TEST_WALLET.into()),
@@ -1064,7 +1064,7 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
 }
 #[test]
 fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         secret: Some(TEST_SECRET.into()),
         key: Some(TEST_WALLET.to_uppercase()),
         application_id: Some("0x0000000000000000000000000000000000000002".into()),
@@ -1112,7 +1112,7 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
             ..Options::default()
         },
     ] {
-        let mut e = Engine::new(Hyperliquid::new_spot(options));
+        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(options));
         e.start(1000.0);
         let r = take_http(&mut e);
         support::reply(&mut e, &r, 200, META);
@@ -1481,7 +1481,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
 }
 #[test]
 fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
@@ -1533,7 +1533,7 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
 }
 #[test]
 fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
@@ -1599,7 +1599,7 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
 
 #[test]
 fn a_spot_market_without_a_positive_step_is_skipped_as_malformed() {
-    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
     }));

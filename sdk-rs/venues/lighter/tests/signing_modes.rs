@@ -13,7 +13,7 @@ struct Startup {
 }
 fn startup(options: Options) -> Startup {
     let mut result = Startup {
-        engine: Engine::new(Lighter::new(options)),
+        engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
         sockets: 0,
         private_requests: 0,
         timers: Vec::new(),
