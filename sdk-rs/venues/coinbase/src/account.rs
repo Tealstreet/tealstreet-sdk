@@ -2066,8 +2066,9 @@ impl Coinbase {
                     let t = cx.set_timer(delay);
                     self.account.startup_retry = Some((t, req));
                 } else if self.account.startup_retry.is_none() {
-                    cx.retried_failure(
-                        "coinbase.account:2071",
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
                         format!("Coinbase account discovery failed after retries: {error}"),
                     );
                 }

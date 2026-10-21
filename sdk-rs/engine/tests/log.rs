@@ -36,6 +36,8 @@ impl Venue for Logger {
             Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
             Some(("deactivate", _)) => cx.deactivate(),
             Some(("retry", "a")) => cx.retried_failure("site.a", "read failed"),
+            Some(("retry", "c")) => cx.retried_failure("site.a", "read failed: retry in 3s"),
+            Some(("retry", "d")) => cx.retried_failure("site.a", "API key is invalid"),
             Some(("retry", _)) => cx.retried_failure("site.b", "read failed"),
             Some(("rejectlogged", _)) => {
                 cx.notice(Level::Error, code::AUTH_REJECTED, "key rejected");
@@ -389,7 +391,17 @@ fn a_retried_read_is_an_error_once_per_quiet_spell_and_per_site() {
         Level::Error,
         "sites are independent"
     );
-    // Still failing every poll: the quiet spell is measured from the latest failure.
-    assert_eq!(level_at(&mut engine, 290_000., "a"), Level::Warn);
-    assert_eq!(level_at(&mut engine, 590_001., "a"), Level::Error);
+    // A failure that keeps repeating is an Error again every 90 s, so the app's
+    // auth badge (120 s) never lapses while a key stays rejected.
+    assert_eq!(level_at(&mut engine, 89_000., "a"), Level::Warn);
+    assert_eq!(level_at(&mut engine, 90_000., "a"), Level::Error);
+    assert_eq!(level_at(&mut engine, 100_000., "a"), Level::Warn);
+    // A different failure (an auth rejection after a transport blip) is an Error at once.
+    assert_eq!(level_at(&mut engine, 101_000., "c"), Level::Error);
+    assert_eq!(
+        level_at(&mut engine, 102_000., "c"),
+        Level::Warn,
+        "digits do not make text new"
+    );
+    assert_eq!(level_at(&mut engine, 103_000., "d"), Level::Error);
 }
