@@ -464,8 +464,13 @@ pub fn build<T: Visit>(
                     secret: options.secret.take().unwrap_or_default(),
                     subaccount: options.subaccount.take(),
                     public_data_only: options.public_data_only,
-                    // The runtime polling policy (`setPollScale`) owns the cadence from here.
-                    tick_interval: 2_000.0,
+                    tick_interval: if options.polling_enabled == Some(false) {
+                        f64::INFINITY
+                    } else {
+                        safe_cex_engine::engine::bounded_tick_interval(
+                            options.tick_interval.take().unwrap_or(2_000.0),
+                        )
+                    },
                     timeout_ms: options
                         .recv_window
                         .unwrap_or(20_000.0)
@@ -644,7 +649,10 @@ pub fn build<T: Visit>(
                     key: options.key.take(),
                     secret: options.secret.take(),
                     application_id: options.application_id.take(),
-                    tick_interval: None,
+                    tick_interval: options
+                        .tick_interval
+                        .take()
+                        .map(safe_cex_engine::engine::bounded_tick_interval),
                 })),
             )
         }
@@ -1234,9 +1242,15 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub endpoints: Option<EndpointOptions>,
+    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
+    #[serde(default)]
+    pub tick_interval: Option<f64>,
     #[cfg(feature = "breakoutprop")]
     #[serde(default)]
     pub subaccount: Option<String>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    pub polling_enabled: Option<bool>,
 }
 #[cfg(any(
     feature = "coinbase",
