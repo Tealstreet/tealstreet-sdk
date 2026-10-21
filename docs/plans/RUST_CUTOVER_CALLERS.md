@@ -396,11 +396,16 @@ states public-internet WebSocket connections to 8443 stop on that date; 443
 already works, with the same hosts and paths. #1588 removes `:8443` from SDK
 global/EEA live/demo URLs; relay metadata covers only global live private/business
 upstreams. This merge does not migrate deployed proxy upstreams or allowlists.
+The overseer identified these deployment prerequisites on 2026-10-21; repo
+[OKX routing notes](../../packages/safe-cex/src/exchanges/okx/CLAUDE.md) describe
+the global/EEA tunnels and Caddy passthrough, while the
+[routing table](../../packages/safe-cex/src/transport/tealstreet/routing/routingTable.ts)
+pins the global relay targets and host+path allowlist requirement.
 
 | Ops dependency | Required action / owner boundary |
 | --- | --- |
 | Python `ws-proxy` global/EEA termination | Move global `okx/private` / `okx/business` upstreams on `ws.okx.com:8443` and EEA `okxeu/private` / `okxeu/business` upstreams on `wseea.okx.com:8443` to default 443, preserving each entity host and channel path. Changing only client URLs does not update these server-side destinations. |
-| `okx-proxy-ja.tealstreet.io` passthrough | The overseer identifies HAProxy; repo routing/OKX docs describe a Caddy passthrough. Confirm the active deployed configuration and move its upstream destination from 8443 to 443 before the deadline. Its client-facing 443 listener is not proof that its OKX upstream already uses 443. |
+| `okx-proxy-ja.tealstreet.io` Caddy passthrough | Move its deployed upstream destination from 8443 to 443 before the deadline. Its client-facing 443 listener is not proof that its OKX upstream already uses 443. |
 | `tradetunnel` relay allowlist | Ensure deployed `RELAY_ALLOWED_UPSTREAMS` host+path-prefix rules accept the port-less global-live `wss://ws.okx.com/ws/v5/private` and `/ws/v5/business` targets from relay metadata, retaining the intended host/path match. |
 | Live master / hot patch | The overseer reports live master still uses 8443; checked mirror `origin/master` `1f91dfe4dcb` also retains those URLs. Sam decides the production hot patch and rollout timing; the Rust landing merge is not a deployed fix. |
 
