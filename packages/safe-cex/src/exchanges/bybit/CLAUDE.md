@@ -2010,6 +2010,25 @@ the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
 
 
+## Rust private row admission
+
+Ordinary REST order/position snapshots and WS order/position arrays admit healthy
+peers when another row is malformed. A rejected native order retains its cached
+parent, attached TP/SL family and position-bound metadata; a valid admitted parent
+owns its complete family, including explicit removal of old brackets. Rejected
+positions retain the affected symbol's cached legs and Greeks without republishing
+cached leverage/mode as newly confirmed settings. Unknown identity holds absence
+removal for the category, while valid peers can progress; ambiguous same-symbol
+mode transitions remain coherent. Coverage storage is bounded and exhaustion
+holds the scope conservatively.
+
+Rejected WS evidence fences older REST joins and coalesces a newer read-only
+repair. Orders use the existing bounded retry cadence; positions use account
+polling. Strict Hyro handshake/account evidence and financial execution/history
+coverage remain separate. Structural/envelope or paging failures never establish
+authoritative empty exposure.
+
+
 Rust acknowledged leverage writes (including native leverage-not-modified replies)
 advance the existing positions revision before publishing the selected leverage.
 An older in-flight positions join cannot restore stale leverage/settings; it

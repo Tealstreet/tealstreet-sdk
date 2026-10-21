@@ -962,3 +962,42 @@ fn failed_option_seed_after_other_seeds_still_publishes_working_products() {
             .any(|m| m.contains("option markets recovered"))
     );
 }
+
+#[test]
+fn unidentified_rest_neighbor_preserves_exactly_one_fresh_option_greek_and_removes_closed_greeks() {
+    for close in [false, true] {
+        let mut h = ready(true);
+        let row = r#"{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","side":"Buy","size":"0.2","avgPrice":"1000","positionValue":"200","unrealisedPnl":"3","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8"}"#;
+        h.message(
+            "/private",
+            &format!(r#"{{"topic":"position","data":[{row}]}}"#),
+        );
+        // Complete the startup read that predates the stream; a fresh poll owns the repair.
+        for category in ["linear", "inverse", "option"] {
+            while h.requests.iter().any(|r| {
+                r.url.contains("/v5/position/list")
+                    && r.url.contains(&format!("category={category}"))
+            }) {
+                respond(&mut h, "/v5/position/list", category, None, EMPTY);
+            }
+        }
+        h.advance(5_000.0);
+        let updated = if close {
+            row.replace("\"size\":\"0.2\"", "\"size\":\"0\"")
+        } else {
+            row.replace("\"delta\":\"0.4\"", "\"delta\":\"0.7\"")
+        };
+        respond(
+            &mut h,
+            "/v5/position/list",
+            "option",
+            None,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{{}},{updated}],"nextPageCursor":""}}}}"#),
+        );
+        let greeks = h.engine.store().position_greeks().unwrap();
+        assert_eq!(greeks.len(), usize::from(!close));
+        if !close {
+            assert_eq!(greeks[0].greeks.delta, 0.7);
+        }
+    }
+}

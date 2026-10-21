@@ -1786,7 +1786,7 @@ fn an_unsupported_order_type_keeps_its_last_state_without_starving_other_orders(
 }
 
 #[test]
-fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
+fn an_unidentified_order_row_holds_absence_while_valid_peers_commit() {
     let mut h = ready();
     h.message(
         "/v5/private",
@@ -1794,9 +1794,7 @@ fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
     );
     let list = OPEN_ORDERS.split("\"list\":[").nth(1).unwrap();
     let good = &list[..list.find("}],").unwrap() + 1];
-    let bad = good
-        .replace(ORDER_ID, "bad-1")
-        .replace("\"qty\":\"0.10\"", "\"qty\":\"NaN\"");
+    let bad = "{}";
     let page = format!(
         r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{},{}],"nextPageCursor":"","category":"linear"}}}}"#,
         good.replace(ORDER_ID, "new-1"),
@@ -1813,7 +1811,7 @@ fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
         EMPTY_LIST,
     );
     assert!(h.engine.store().order(ORDER_ID).is_some());
-    assert!(h.engine.store().order("new-1").is_none());
+    assert!(h.engine.store().order("new-1").is_some());
 }
 
 #[test]
@@ -1979,6 +1977,434 @@ fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
         );
     }
     assert_eq!(balance_info(&mut h, 93), expected);
+}
+
+fn snapshot_rows(body: &str) -> Vec<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(body).unwrap()["result"]["list"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+fn snapshot_page(rows: &[serde_json::Value]) -> String {
+    serde_json::json!({"retCode":0,"result":{"list":rows,"nextPageCursor":"","category":"linear"}})
+        .to_string()
+}
+fn refresh_orders(h: &mut Harness, rows: &[serde_json::Value]) {
+    h.message("/v5/private", r#"{"success":true,"op":"subscribe"}"#);
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &snapshot_page(rows),
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+}
+#[test]
+fn malformed_identified_rest_order_keeps_parent_and_protection_while_peers_commit() {
+    for structural in [false, true] {
+        let mut h = ready();
+        let mut bad = snapshot_rows(OPEN_ORDERS).remove(0);
+        bad["qty"] = if structural {
+            serde_json::json!({"bad":1})
+        } else {
+            serde_json::json!("NaN")
+        };
+        let mut good = snapshot_rows(OPEN_ORDERS).remove(0);
+        good["orderId"] = serde_json::json!("healthy-peer");
+        refresh_orders(&mut h, &[bad, good]);
+        assert!(
+            h.engine.store().order("healthy-peer").is_some(),
+            "healthy order starved"
+        );
+        for id in [
+            ORDER_ID.to_string(),
+            format!("{ORDER_ID}__stop_loss"),
+            format!("{ORDER_ID}__take_profit"),
+        ] {
+            assert!(
+                h.engine.store().order(&id).is_some(),
+                "rejected lineage {id} erased"
+            );
+        }
+        assert!(h.notices.iter().any(|n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+        h.requests.clear();
+        h.advance(15_000.0);
+        assert!(
+            h.has_request("/v5/order/realtime"),
+            "bounded repair missing"
+        );
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDT",
+            200,
+            EMPTY_LIST,
+        );
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert!(
+            h.engine.store().order(ORDER_ID).is_none(),
+            "clean omission must remove retained order"
+        );
+    }
+}
+#[test]
+fn malformed_rest_position_keeps_exposure_while_other_symbols_commit() {
+    for structural in [false, true] {
+        let mut h = ready();
+        h.advance(POLL_MS);
+        let mut rows = snapshot_rows(POSITIONS);
+        rows[0]["size"] = if structural {
+            serde_json::json!({"bad":1})
+        } else {
+            serde_json::json!("NaN")
+        };
+        rows[1]["side"] = serde_json::json!("Sell");
+        rows[1]["size"] = serde_json::json!("2");
+        rows[1]["avgPrice"] = serde_json::json!("1600");
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDT",
+            200,
+            &snapshot_page(&rows),
+        );
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.symbol == "ETHUSDT")
+                .unwrap()
+                .contracts,
+            2.0,
+            "healthy position starved"
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.symbol == "BTCUSDT")
+                .unwrap()
+                .contracts,
+            0.01,
+            "rejected exposure erased"
+        );
+        assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    }
+}
+#[test]
+fn structural_ws_order_rejection_keeps_cached_lineage_and_admits_healthy_peer() {
+    let mut h = ready();
+    let mut bad = snapshot_rows(OPEN_ORDERS).remove(0);
+    bad["qty"] = serde_json::json!({"bad":1});
+    let mut good = snapshot_rows(OPEN_ORDERS).remove(0);
+    good["orderId"] = serde_json::json!("ws-healthy");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order","data":[bad,good]}).to_string(),
+    );
+    assert!(
+        h.engine.store().order("ws-healthy").is_some(),
+        "healthy WS order starved"
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert!(
+        h.engine
+            .store()
+            .order(&format!("{ORDER_ID}__stop_loss"))
+            .is_some()
+    );
+    h.advance(15_000.0);
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "WS reject must request bounded repair"
+    );
+}
+#[test]
+fn structural_ws_position_rejection_keeps_exposure_and_admits_healthy_peer() {
+    let mut h = ready();
+    let mut rows = snapshot_rows(POSITIONS);
+    rows[0]["size"] = serde_json::json!({"bad":1});
+    rows[1]["side"] = serde_json::json!("Sell");
+    rows[1]["size"] = serde_json::json!("3");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"position","data":rows}).to_string(),
+    );
+    assert_eq!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "ETHUSDT")
+            .unwrap()
+            .contracts,
+        3.0,
+        "healthy WS position starved"
+    );
+    assert_eq!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "BTCUSDT")
+            .unwrap()
+            .contracts,
+        0.01
+    );
+    h.advance(POLL_MS);
+    assert!(h.has_request("/v5/position/list"));
+}
+
+#[test]
+fn unidentified_neighbor_cannot_restore_brackets_removed_by_an_admitted_parent() {
+    let mut h = ready();
+    let mut parent = snapshot_rows(OPEN_ORDERS).remove(0);
+    parent["stopLoss"] = serde_json::json!("0");
+    parent["takeProfit"] = serde_json::json!("0");
+    refresh_orders(&mut h, &[serde_json::json!({}), parent]);
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert!(
+        h.engine
+            .store()
+            .order(&format!("{ORDER_ID}__stop_loss"))
+            .is_none()
+    );
+    assert!(
+        h.engine
+            .store()
+            .order(&format!("{ORDER_ID}__take_profit"))
+            .is_none()
+    );
+}
+#[test]
+fn bad_ws_order_during_clean_rest_join_coalesces_a_newer_repair() {
+    let mut h = ready();
+    h.message("/v5/private", r#"{"success":true,"op":"subscribe"}"#);
+    let mut bad = snapshot_rows(OPEN_ORDERS).remove(0);
+    bad["qty"] = serde_json::json!({"bad":1});
+    for _ in 0..3 {
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"topic":"order","data":[bad]}).to_string(),
+        );
+    }
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        EMPTY_LIST,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/v5/order/realtime"))
+            .count(),
+        2,
+        "one fresh join, not one per bad event"
+    );
+    assert!(
+        h.engine.store().order(ORDER_ID).is_some(),
+        "older clean read cannot erase exposure after rejected stream evidence"
+    );
+}
+#[test]
+fn unidentified_position_neighbor_cannot_mix_new_oneway_and_cached_hedge_legs() {
+    let mut h = coherent_hedge();
+    let before = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .filter(|p| p.symbol == "BTCUSDT")
+        .cloned()
+        .collect::<Vec<_>>();
+    h.advance(POLL_MS);
+    let one_way = snapshot_rows(POSITIONS).remove(0);
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDT",
+        200,
+        &snapshot_page(&[serde_json::json!({}), one_way]),
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert_eq!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == "BTCUSDT")
+            .cloned()
+            .collect::<Vec<_>>(),
+        before
+    );
+}
+#[test]
+fn rejected_duplicate_ws_order_cannot_be_replaced_by_its_valid_peer_in_either_order() {
+    for reverse in [false, true] {
+        let mut h = ready();
+        let before = h.engine.store().order(ORDER_ID).unwrap().clone();
+        let mut good = snapshot_rows(OPEN_ORDERS).remove(0);
+        good["price"] = serde_json::json!("1700");
+        let mut bad = good.clone();
+        bad["qty"] = serde_json::json!({"bad":1});
+        let rows = if reverse {
+            vec![good, bad]
+        } else {
+            vec![bad, good]
+        };
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"topic":"order","data":rows}).to_string(),
+        );
+        assert_eq!(h.engine.store().order(ORDER_ID).unwrap(), &before);
+    }
+}
+
+#[test]
+fn repeated_bad_ws_identity_does_not_starve_other_rest_orders() {
+    let mut h = ready();
+    h.message("/v5/private", r#"{"success":true,"op":"subscribe"}"#);
+    for round in 0..2 {
+        let mut bad = snapshot_rows(OPEN_ORDERS).remove(0);
+        bad["qty"] = serde_json::json!({"bad":1});
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"topic":"order","data":[bad]}).to_string(),
+        );
+        let mut good = snapshot_rows(OPEN_ORDERS).remove(0);
+        good["orderId"] = serde_json::json!("rest-only");
+        good["price"] = serde_json::json!((1700 + round).to_string());
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDT",
+            200,
+            &snapshot_page(&[good]),
+        );
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .order("rest-only")
+                .expect("REST-only peer starved")
+                .price,
+            (1700 + round) as f64
+        );
+        assert!(
+            h.engine.store().order(ORDER_ID).is_some(),
+            "bad WS identity retained across older REST"
+        );
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|r| r.url.contains("/v5/order/realtime"))
+                .count(),
+            2
+        );
+    }
+}
+#[test]
+fn repeated_bad_ws_symbol_does_not_starve_other_rest_positions() {
+    let mut h = ready();
+    for round in 1..=2 {
+        h.advance(POLL_MS);
+        let mut rows = snapshot_rows(POSITIONS);
+        let mut bad = rows[0].clone();
+        bad["size"] = serde_json::json!({"bad":1});
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"topic":"position","data":[bad]}).to_string(),
+        );
+        rows[0]["size"] = serde_json::json!("9");
+        rows[1]["side"] = serde_json::json!("Buy");
+        rows[1]["size"] = serde_json::json!(round.to_string());
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDT",
+            200,
+            &snapshot_page(&rows),
+        );
+        h.respond(
+            "/v5/position/list?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.symbol == "ETHUSDT")
+                .expect("REST-only position starved")
+                .contracts,
+            round as f64
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.symbol == "BTCUSDT")
+                .unwrap()
+                .contracts,
+            0.01
+        );
+    }
+}
+fn coherent_hedge() -> Harness {
+    let mut h = ready();
+    h.advance(POLL_MS);
+    let mut row = snapshot_rows(POSITIONS).remove(0);
+    row["positionIdx"] = serde_json::json!(1);
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDT",
+        200,
+        &snapshot_page(&[row]),
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert_eq!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == "BTCUSDT")
+            .count(),
+        1
+    );
+    h
+}
+#[test]
+fn unidentified_ws_neighbor_cannot_mix_oneway_and_coherent_cached_hedge() {
+    let mut h = coherent_hedge();
+    let before = h.engine.store().positions().to_vec();
+    let one_way = snapshot_rows(POSITIONS).remove(0);
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"position","data":[{},one_way]}).to_string(),
+    );
+    assert_eq!(h.engine.store().positions(), before);
 }
 
 #[test]
