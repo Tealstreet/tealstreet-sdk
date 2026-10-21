@@ -25,3 +25,16 @@ and mark the owning query incomplete rather than fail the entire fill history.
 Index triggers, missing income assets and other owner/live/protocol exclusions
 remain unchanged. This is separate from pending Bitunix balance/settings PRs;
 no unlanded Bitunix code is carried. No budgets or local release/replay/load work.
+
+Verification:
+- Three original-source regressions failed before the fix; restored full
+  WEEX+Binance native suite passes all 407 tests, including all 23 history tests.
+- Native-verified event fixture passes the host result-flag test and worker
+  translated-owner isolation test. Error-only logging preserves the semantic
+  marker; unrelated callers and genuine empty/filtered rows stay complete.
+- Strict WEEX all-target Clippy, format and banned-pattern gates pass. Two
+  independent source/test reviews are clear. Additional filtered order/time
+  controls pass the final history suite.
+- Kraken #1663 owns the current shared-source/harness merge window; this PR
+  includes shared host/worker tests and remains held until that actual merge.
+  No production host/worker serialization changes are needed for this repair.
