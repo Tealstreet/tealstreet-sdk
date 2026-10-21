@@ -135,6 +135,9 @@ The private-snapshot follow-up checks #1524 at `b69285f9909`; caller shapes
 and diagnostic delivery remain the already documented SDK/host contracts.
 The construction build follow-up checks #1599 at `e7f0b3d3628`; the shared
 JSON remains a source-build input, now consumed by the Cargo build script.
+The BingX overlap follow-up checks #1604 at `0d4f17a1bdd`, including its
+integration with the landed auth work; publication and read-return semantics
+are documented separately below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -192,6 +195,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1592 / `389f42aa2e` | Rust always writes FILLS revision 2 with optional execution-ID refs and aligned financial columns. Updated readers retain revisions 0/1; old readers reject revision 2, requiring coordinated producer/consumer builds. Hyperliquid perp/merged spot/spot-only `tid` becomes SDK fill `id`, with `orderId` separately preserved; other venues retain order-ID fallback. See [Fill identity and wire compatibility](#fill-identity-and-wire-compatibility-1592). |
 | #1524 / `b69285f990` | Private snapshots (batch-3 venues) isolate rejected rows while valid peers commit; stored rows protected by rejected identities remain visible, including Bitrue protective children and Kraken open orders. Unidentified rows prevent absence-based removal within their snapshot scope. Coded `row.skipped` / `snapshot.discarded` diagnostics use the existing event/health paths. No new caller shape; see [Private snapshot row isolation](#private-snapshot-row-isolation-1524). |
 | #1599 / `e7f0b3d36` | Rust construction rules are compiled from the shared JSON into a static table by Cargo `build.rs`, replacing runtime JSON decoding. B1 source builds still require the JSON input; compiled engines contain the table. TS rules, parity and caller options/eligibility are unchanged. |
+| #1604 / `0d4f17a1b` | BingX revision/query-generation races and reads issued during pending settings writes fence stale store publication while returning usable cached buy/sell rails, with validated-read fallback independently per missing rail. Overlap alone no longer fails the read or causes `null`; genuine read failures remain possible. Current reads retain atomic leverage/margin publication; caller APIs and write retry behavior stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
