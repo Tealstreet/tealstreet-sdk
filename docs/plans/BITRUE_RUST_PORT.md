@@ -208,3 +208,15 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - Progress and prior adversarial findings are committed and posted on PR1314.
   Push this docs-only merge checkpoint and wait for its CI before merging;
   destination remains feat/rust-rewrite. Create fresh follow-up afterwards.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Decode private order conditionOrder/triggerType and classify SL/TP before
+   the generic execution MARKET/LIMIT type. Keep cached protective child
+   direction/identity, price/reference, reduce-only and fill accounting unchanged.
+2. Reproduce uncached stream misclassification; cover numeric/string trigger
+   values, false conditional flags, cached children and interval regressions.
+3. Strike stale catalogue/order-loaded findings; retain malformed account
+   snapshot admission as intentional/RISKY to bypass, with usable state preserved.
+4. Run focused Bitrue/Binance tests, touched fmt/strict Clippy/bans, independent
+   review and exact-head CI; merge only after the overseer's short hold lifts.
