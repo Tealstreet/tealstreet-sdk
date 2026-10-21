@@ -203,7 +203,7 @@ fn failed_candle_reads_complete_with_error() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSD-PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -305,11 +305,12 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
             _ => None,
         })
         .collect();
-    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    // The malformed instruments make the catalogue partial, so it is re-read later.
     assert_eq!(
         warnings,
         [
             "Crypto.com skipped 2 unmappable instrument rows (first: XRPUSD-PERP)",
+            "Public discovery read failed; retry scheduled",
             "Crypto.com skipped 1 unmappable ticker rows (first: ETHUSD-PERP)"
         ]
     );

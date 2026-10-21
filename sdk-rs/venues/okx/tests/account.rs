@@ -529,63 +529,46 @@ fn documented_empty_bal_data_is_a_valid_zero_balance() {
 }
 
 #[test]
-fn unavailable_owned_metadata_never_turns_account_scopes_into_empty_success() {
-    for prior in [false, true] {
-        let (mut e, private, _, mut pending) = startup();
-        if prior {
-            ws(
-                &mut e,
-                private,
-                &format!(r#"{{"arg":{{"channel":"positions"}},"data":[{POSITION}]}}"#),
-            );
-            ws(
-                &mut e,
-                private,
-                &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{ORDER}]}}"#),
-            );
-            actions(&mut e);
-        }
-        let positions = e.store().positions().to_vec();
-        let orders = e.store().orders().to_vec();
-        let unknown_position = POSITION.replace("BTC-USDT-SWAP", "MISSING-USDT-SWAP");
-        let unknown_order = ORDER.replace("BTC-USDT-SWAP", "MISSING-USDT-SWAP");
-        let mut logs = vec![];
-        while let Some(action) = pending.pop() {
-            match &action {
-                Action::Http(r) => {
-                    let body = if r.url.contains("account-position-risk") {
-                        envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
-                    } else if r.url.contains("/positions?") {
-                        envelope(&unknown_position)
-                    } else if r.url.contains("orders-pending") {
-                        envelope(&unknown_order)
-                    } else {
-                        envelope("")
-                    };
-                    reply(&mut e, &action, &body, 5.0);
-                    pending.extend(actions(&mut e));
-                }
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
-                    logs.push(message.clone())
-                }
-                _ => {}
+fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
+    let (mut e, _, _, mut pending) = startup();
+    let filtered_position = POSITION.replace("BTC-USDT-SWAP", "BTC-USD-250926");
+    let filtered_order = ORDER
+        .replace("BTC-USDT-SWAP", "BTC-USD-250926")
+        .replace("\"123\"", "\"456\"");
+    let mut logs = vec![];
+    while let Some(action) = pending.pop() {
+        match &action {
+            Action::Http(r) => {
+                let body = if r.url.contains("account-position-risk") {
+                    envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+                } else if r.url.contains("/positions?") {
+                    envelope(&format!("{filtered_position},{POSITION}"))
+                } else if r.url.contains("orders-pending") {
+                    envelope(&format!("{filtered_order},{ORDER}"))
+                } else {
+                    envelope("")
+                };
+                reply(&mut e, &action, &body, 5.0);
+                pending.extend(actions(&mut e));
             }
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                logs.push(message.clone())
+            }
+            _ => {}
         }
-        assert_eq!(e.store().positions(), positions);
-        assert_eq!(e.store().orders(), orders);
-        if !prior {
-            assert!(!e.store().loaded().positions);
-            assert!(!e.store().loaded().orders);
-        }
-        assert!(
-            logs.iter()
-                .any(|log| log.contains("owned position market unavailable"))
-        );
-        assert!(
-            logs.iter()
-                .any(|log| log.contains("working order market unavailable"))
-        );
     }
+    let loaded = e.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "BTCUSDT");
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(e.store().orders()[0].id, "123");
+    assert_eq!(e.store().balance().total, 4950.0);
+    assert!(
+        logs.iter()
+            .any(|log| log.contains("BTC-USD-250926 is not a listed market"))
+    );
+    assert!(!logs.iter().any(|log| log.contains("preserving")));
 }
 
 #[test]
@@ -650,19 +633,89 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let positions = actions(&mut e)
-        .into_iter()
+    let joined = actions(&mut e);
+    let positions = joined
+        .iter()
         .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+        .unwrap();
+    let risk = joined
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
         .unwrap();
     reply(
         &mut e,
-        &positions,
-        &envelope(&POSITION.replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")),
+        positions,
+        &envelope(&format!(
+            "{},{POSITION}",
+            POSITION.replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
+        )),
         4.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::Log { message, .. })
             if message.contains("ETH-USDT-SWAP has open exposure")
     )));
+    reply(
+        &mut e,
+        risk,
+        &envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#),
+        5.0,
+    );
+    // Exposure on a malformed catalogue row holds the whole positions/balance join.
+    assert!(!e.store().loaded().positions);
+    assert!(!e.store().loaded().balance);
+    assert!(e.store().positions().is_empty());
+}
+
+#[test]
+fn partial_catalogue_is_reread_without_restarting_the_account() {
+    let eth = MARKET
+        .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
+        .replace("\"BTC\"", "\"ETH\"");
+    let bad = eth.replace("\"lotSz\":\"0.01\"", "\"lotSz\":\"0\"");
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
+    assert!(e.store().loaded().markets);
+    let out = actions(&mut e);
+    assert_eq!(
+        out.iter()
+            .filter(|a| is_get(a, "/api/v5/account/config"))
+            .count(),
+        1
+    );
+    let retry = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1001.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("partial catalogue schedules a re-read");
+    e.handle(1001.0, Event::TimerFired { timer: retry });
+    let reread = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/public/instruments?instType=SWAP"))
+        .unwrap();
+    reply(
+        &mut e,
+        &reread,
+        &envelope(&format!("{MARKET},{eth}")),
+        1002.0,
+    );
+    assert!(e.store().market("ETHUSDT").is_some());
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|a| is_get(a, "/api/v5/account/config")));
+    // The complete re-read clears the retry instead of scheduling another.
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 3002.0))
+    );
 }

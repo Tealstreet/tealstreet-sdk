@@ -1,7 +1,8 @@
 //! Shapes and depth values from the official Aster V3 API's market-data examples.
 //! github.com/asterdex/api-docs: V3(Recommended)/EN/aster-finance-futures-api-v3.md
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketChannel,
+    SocketId, TimerId,
 };
 use safe_cex_venue_asterdex::{AsterDex, Options, sign::Version};
 
@@ -18,10 +19,15 @@ struct Harness {
     timers: Vec<(TimerId, f64)>,
     closed: Vec<SocketId>,
     done: Vec<(u32, Result<String, String>)>,
+    fired: usize,
 }
 
 impl Harness {
     fn start(options: Options) -> Self {
+        Self::start_with_policy(options, PublicFeedPolicy::Direct)
+    }
+
+    fn start_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut harness = Self {
             engine: Engine::new(AsterDex::new(options)),
             now: 1_700_000_000_000.0,
@@ -31,7 +37,9 @@ impl Harness {
             timers: Vec::new(),
             closed: Vec::new(),
             done: Vec::new(),
+            fired: 0,
         };
+        harness.engine.set_public_feed_policy(policy).unwrap();
         harness.engine.start(harness.now);
         harness.collect();
         harness
@@ -47,6 +55,12 @@ impl Harness {
     }
 
     fn load(&mut self) {
+        self.bootstrap();
+        let socket = self.socket();
+        self.event(Event::WsOpened { socket });
+    }
+
+    fn bootstrap(&mut self) {
         if self
             .requests
             .iter()
@@ -62,8 +76,6 @@ impl Harness {
             200,
             r#"[{"symbol":"BTCUSDT","openInterest":"123.45"}]"#,
         );
-        let socket = self.socket();
-        self.event(Event::WsOpened { socket });
     }
 
     fn socket(&self) -> SocketId {
@@ -140,6 +152,7 @@ impl Harness {
             self.timers.remove(0);
             self.now = at;
             self.event(Event::TimerFired { timer });
+            self.fired += 1;
         }
         self.now = until;
     }
@@ -388,7 +401,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 12,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(1499040000000.0),
         to_ms: None,
@@ -424,7 +437,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 13,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -672,4 +685,52 @@ fn supervisor_backs_off_open_flaps_and_retires_a_connection_that_never_opens() {
         code: 1006,
     });
     assert_eq!(h.sockets.len(), count);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::start_with_policy(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    h.bootstrap();
+    h.subscribe();
+    h.advance(600_000.0);
+    assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(
+        h.fired, 2,
+        "only the unanswered interest and clock refreshes fire"
+    );
+}
+
+// AsterDEX used to serve unsupported intervals as 1h candles under the
+// requested interval; they are now rejected and nothing is requested.
+#[test]
+fn unsupported_candle_intervals_are_rejected_not_served_as_one_hour() {
+    let mut h = Harness::ready();
+    let sent = h.sent.len();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::H8,
+    });
+    assert_eq!(h.sent.len(), sent, "no kline subscription is sent");
+    let requests = h.requests.len();
+    h.command(Command::FetchCandles {
+        command: 14,
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::H8,
+        limit: None,
+        from_ms: None,
+        to_ms: None,
+    });
+    assert_eq!(h.requests.len(), requests);
+    let (_, result) = h.done.iter().find(|(command, _)| *command == 14).unwrap();
+    assert_eq!(
+        result.as_ref().unwrap_err(),
+        "AsterDEX does not support 8h candles"
+    );
 }

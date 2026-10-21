@@ -1,4 +1,5 @@
 //! Borrowed MEXC futures records. Numeric identifiers never pass through f64.
+use safe_cex_engine::model::Interval;
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -62,6 +63,12 @@ pub struct Message<'a> {
     #[serde(borrow)]
     pub data: Option<&'a RawValue>,
     pub success: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct ContractIdentity<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
 }
 
 #[derive(Deserialize)]
@@ -204,16 +211,17 @@ pub fn millis(t: f64) -> f64 {
 pub fn compact(s: &str) -> String {
     s.replace('_', "")
 }
-pub fn interval(s: &str) -> Option<&'static str> {
-    Some(match s {
-        "1m" => "Min1",
-        "5m" => "Min5",
-        "15m" => "Min15",
-        "30m" => "Min30",
-        "1h" => "Min60",
-        "4h" => "Hour4",
-        "1d" => "Day1",
-        "1w" => "Week1",
+pub fn interval(i: Interval) -> Option<&'static str> {
+    use Interval::*;
+    Some(match i {
+        M1 => "Min1",
+        M5 => "Min5",
+        M15 => "Min15",
+        M30 => "Min30",
+        H1 => "Min60",
+        H4 => "Hour4",
+        D1 => "Day1",
+        W1 => "Week1",
         _ => return None,
     })
 }

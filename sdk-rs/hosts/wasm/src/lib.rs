@@ -349,7 +349,8 @@ impl WasmEngine {
     ))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
-        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)?;
+        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+            .map_err(|_| JsError::new("Invalid engine options"))?;
         let inner = safe_cex_venues::build(venue, options, Boxed)
             .map_err(|error| JsError::new(&error.message))?;
         Ok(Self { inner })
@@ -804,6 +805,20 @@ mod tests {
                     _ => QuantityUnits::Base,
                 },
                 account_tier: any(&["lighter", "lighter-robinhood"], venue),
+                closed_positions: any(
+                    &["bybit", "bybitdemo", "hyrotrader", "bybitinverse", "blofin"],
+                    venue,
+                ) || any(&OKX, venue),
+                balance_info: any(
+                    &[
+                        "bybit",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bybitinverse",
+                        "bybitspot",
+                    ],
+                    venue,
+                ),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

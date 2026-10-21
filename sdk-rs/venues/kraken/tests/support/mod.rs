@@ -47,11 +47,24 @@ pub fn ready() -> (Engine<Kraken>, SocketId) {
     ready_with(options())
 }
 pub fn ready_with(options: Options) -> (Engine<Kraken>, SocketId) {
+    let (e, socket, _) = ready_with_catalogue(options, META);
+    (e, socket)
+}
+/// Bootstraps against `meta` and returns the timers scheduled on the way.
+pub fn ready_with_catalogue(
+    options: Options,
+    meta: &str,
+) -> (
+    Engine<Kraken>,
+    SocketId,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
     let public_only = options.public_data_only;
     let mut e = Engine::new(Kraken::new(options));
     e.start(NOW);
     let mut private = None;
     let mut public = None;
+    let mut timers = vec![];
     for _ in 0..30 {
         let actions = e.drain_actions().collect::<Vec<_>>();
         if actions.is_empty() {
@@ -61,7 +74,7 @@ pub fn ready_with(options: Options) -> (Engine<Kraken>, SocketId) {
             match a {
                 Action::Http(r) => {
                     let body = if r.url.contains("/instruments") {
-                        META
+                        meta
                     } else if r.url.contains("/tickers") {
                         TICKERS
                     } else if r.url.contains("/openorders") {
@@ -113,6 +126,7 @@ pub fn ready_with(options: Options) -> (Engine<Kraken>, SocketId) {
                         );
                     }
                 }
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }
         }
@@ -124,6 +138,7 @@ pub fn ready_with(options: Options) -> (Engine<Kraken>, SocketId) {
         } else {
             private.expect("private socket")
         },
+        timers,
     )
 }
 pub fn fill_count(frame: &[u8]) -> u32 {
@@ -137,4 +152,35 @@ pub fn fill_count(frame: &[u8]) -> u32 {
         at += 8 + size;
     }
     0
+}
+/// Drains actions with failures as the plain text the host renders.
+pub trait Plain {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action>;
+}
+impl<V: safe_cex_engine::Venue> Plain for Engine<V> {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action> {
+        use safe_cex_engine::Notice;
+        self.drain_actions()
+            .map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    })
+                }
+                a => a,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+}
+/// Drains the classified failures, dropping every other action.
+pub fn failures<V: safe_cex_engine::Venue>(e: &mut Engine<V>) -> Vec<safe_cex_engine::VenueError> {
+    use safe_cex_engine::Notice;
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect()
 }

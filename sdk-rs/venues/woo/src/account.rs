@@ -1,6 +1,8 @@
 //! Authenticated account snapshots and monotonic execution reconciliation.
 use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
+use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -13,6 +15,8 @@ use safe_cex_engine::{
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Info {
@@ -147,6 +151,7 @@ pub struct Account {
     pause_until: f64,
     info_pending: bool,
     positions_pending: bool,
+    positions_guard: StaleGuard,
     orders: Option<OrdersJoin>,
     generation: u64,
     revision: u64,
@@ -415,10 +420,10 @@ impl Woo {
             }
         }
     }
-    /// Whether exposure on an unlisted native symbol could belong to a skipped catalogue row.
+    /// Whether exposure on an unlisted native symbol sits on a catalogue row skipped as
+    /// malformed. An anonymous skipped row names no market, so it holds nothing.
     fn catalogue_may_list(&self, native: &str) -> bool {
-        native.starts_with("PERP_")
-            && (self.skipped_anonymous || self.skipped_markets.contains(native))
+        native.starts_with("PERP_") && self.skipped_markets.contains(native)
     }
     // Exposure the store cannot show must be visible once, not every poll.
     fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {
@@ -1202,14 +1207,19 @@ impl Woo {
                     cx.log(LogLevel::Error, "Invalid WOO positions page");
                     return;
                 }
-                // A fill after this read began takes precedence, including fills on newly-opened symbols.
-                if self
-                    .account
-                    .versions
-                    .get("$positions")
-                    .is_some_and(|v| *v > revision)
-                    || self.account_revision("$mode") > revision
+                if self.account_revision("$mode") > revision
                     || self.account.writes.contains_key("$mode")
+                {
+                    return;
+                }
+                // A fill after this read began takes precedence, including fills on newly-opened
+                // symbols. One-way fill estimates stay protected by `expected` below; hedged
+                // positions come only from REST, so an admitted stale read is re-read at once.
+                let current = self.account_revision("$positions") <= revision;
+                if !self
+                    .account
+                    .positions_guard
+                    .admit(current, STALE_SNAPSHOT_LIMIT)
                 {
                     return;
                 }
@@ -1291,6 +1301,9 @@ impl Woo {
                 self.account_metadata(cx);
                 if !retry_symbols.is_empty() {
                     self.account_schedule_fill_refresh(cx);
+                }
+                if !current && cx.now >= self.account.pause_until {
+                    self.account_positions_read(cx);
                 }
             }
             Request::Orders {
@@ -1531,7 +1544,8 @@ impl Woo {
         let delay = if self.account.refresh_attempt == 0 {
             0.0
         } else {
-            150.0 * 2f64.powi(self.account.refresh_attempt as i32 - 1)
+            Backoff::new(150.0, u32::MAX, f64::INFINITY)
+                .delay(self.account.refresh_attempt.saturating_sub(1))
         };
         self.account.refresh = Some(cx.set_timer(delay));
     }

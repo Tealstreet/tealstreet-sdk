@@ -149,6 +149,17 @@ fn documented_private_snapshots_and_browser_rest_fallback() {
     );
 }
 #[test]
+fn account_and_position_events_during_a_read_cannot_starve_the_balance() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    for text in [r#"{"e":"account","d":{}}"#, r#"{"e":"positions","d":[]}"#] {
+        e.handle(NOW, Event::WsMessage { socket, text });
+    }
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert_eq!(e.store().balance().free, 5413.06);
+    assert!(e.store().loaded().balance);
+}
+#[test]
 fn failed_or_malformed_half_never_replaces_order_snapshot() {
     let (mut e, actions) = started(false);
     complete(&mut e, &actions, NORMAL, ALGO);

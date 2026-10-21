@@ -252,8 +252,8 @@ export type EngineSnapshot = {
   fetchedLeverage: Record<string, FetchedLeverage>;
 };
 
-/** Trading methods a main-thread Rust mirror forwards whole to its worker's engine. */
-export const WORKER_TRADING_METHODS = [
+/** Methods a main-thread Rust mirror forwards whole to its worker's engine. */
+export const WORKER_FORWARDED_METHODS = [
   'placeOrder',
   'placeOrders',
   'placeOrderWithClientOrderId',
@@ -265,17 +265,47 @@ export const WORKER_TRADING_METHODS = [
   'nuke',
   'nukePositions',
   'nukeOrders',
+  'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
 ] as const;
 
-export type WorkerTradingMethod = (typeof WORKER_TRADING_METHODS)[number];
+export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
+
+/**
+ * Methods only some exchanges define (Rust capability-adopted ones), forwarded
+ * by name; the worker rejects them where its exchange lacks the method.
+ */
+export const WORKER_OPTIONAL_METHODS = [
+  'fetchHistoricalPositions',
+  'changeAccountTier',
+  'fetchAccountTier',
+  'fetchEngineCapabilities',
+] as const;
+
+const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
+  'findOrderByClientOrderId',
+  'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
+  'fetchHistoricalPositions',
+  'fetchAccountTier',
+  'fetchEngineCapabilities',
+]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
-export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<CallableMethodsInWorker>([
+export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
   'setLeverage',
   'scheduleCancel',
   'changePositionMode',
   'changeMarginType',
-  ...WORKER_TRADING_METHODS.filter((method) => method !== 'findOrderByClientOrderId'),
+  ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
 ]);
 
 /** Caller client order IDs a worker placement RPC carries, for an interrupted write's outcome. */
@@ -291,7 +321,7 @@ export const workerCallClientOrderIds = (method: unknown, args: unknown): string
 };
 
 export type CallableMethodsInWorker =
-  | WorkerTradingMethod
+  | WorkerForwardedMethod
   | 'setLeverage'
   | 'scheduleCancel'
   | 'changePositionMode'

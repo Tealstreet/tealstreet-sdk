@@ -1,4 +1,4 @@
-//! Signing primitives shared by venue engines. Pure functions: no I/O, no host.
+//! Signing primitives and host-independent nonce coordination. No I/O.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -41,6 +41,8 @@ pub mod eip712;
 pub mod es256;
 pub mod ethereum;
 pub mod lighter;
+pub mod nonce;
+pub mod secrets;
 pub mod starknet;
 pub mod uuid;
 pub mod zklink;

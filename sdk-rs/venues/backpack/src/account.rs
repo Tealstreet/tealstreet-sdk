@@ -3,11 +3,14 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone, Copy)]
 pub enum Next {
@@ -49,6 +52,7 @@ pub struct Account {
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
+    balance_guard: StaleGuard,
     tick: Option<TimerId>,
     orders_timer: Option<TimerId>,
     fill_timer: Option<TimerId>,
@@ -68,6 +72,7 @@ impl Default for Account {
             orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
+            balance_guard: StaleGuard::default(),
             tick: None,
             orders_timer: None,
             fill_timer: None,
@@ -416,10 +421,11 @@ impl Backpack {
             Request::Positions { rows, invalid, .. } => {
                 let result = serde_json::from_str::<PositionRow<'_>>(item).map(|r| {
                     if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
-                        // A malformed catalogue row hides its exposure; an absent market rejects the snapshot.
-                        if !self.report_skipped_market(cx, &r.symbol) {
+                        // A malformed catalogue row holds the snapshot; a filtered market is skipped.
+                        if self.report_skipped_market(cx, &r.symbol) {
                             *invalid = true;
-                            cx.log(LogLevel::Warning, "Backpack owned position market unavailable; preserving previous snapshot");
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else if r.net_quantity != 0.0 {
                         rows.push(position(
@@ -447,15 +453,11 @@ impl Backpack {
             } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
                     if cx.store.market(&r.symbol).is_none() {
-                        if !self.report_skipped_market(cx, &r.symbol)
-                            && r.symbol.ends_with("_PERP")
-                            && status(&r.status) == OrderStatus::Open
-                        {
-                            *invalid = true;
-                            cx.log(
-                                LogLevel::Warning,
-                                "Backpack working order market unavailable; preserving previous orders",
-                            );
+                        // Only a working order on a malformed market holds the snapshot.
+                        if self.report_skipped_market(cx, &r.symbol) {
+                            *invalid |= status(&r.status) == OrderStatus::Open;
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else {
                         if r.trigger_price.is_some()
@@ -534,7 +536,12 @@ impl Backpack {
                 } => {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    if revision == self.account.balance_revision {
+                    let current = revision == self.account.balance_revision;
+                    if self.account.balance_guard.admit_issued(
+                        current,
+                        revision,
+                        STALE_SNAPSHOT_LIMIT,
+                    ) {
                         cx.store.set_balance(Balance {
                             used: r.net_equity_locked,
                             free: r.net_equity_available,
@@ -545,6 +552,9 @@ impl Backpack {
                                 r.pnl_unrealized
                             },
                         });
+                        if !current {
+                            self.balance_read(cx, recalculate, Next::None);
+                        }
                     }
                     self.next_account(cx, next);
                 }

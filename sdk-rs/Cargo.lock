@@ -3589,6 +3589,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -3639,6 +3640,7 @@ dependencies = [
  "safe-cex-engine",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -3844,6 +3846,7 @@ dependencies = [
  "serde",
  "serde_json",
  "starknet-crypto",
+ "zeroize",
 ]
 
 [[package]]
@@ -3935,6 +3938,7 @@ dependencies = [
  "safe-cex-venue-woo",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

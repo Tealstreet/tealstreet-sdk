@@ -1,5 +1,6 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -7,9 +8,11 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use sign::Credentials;
 use std::collections::{HashMap, HashSet};
@@ -17,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub eea: bool,
@@ -26,6 +29,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,17 +61,31 @@ struct Product {
     settle_ccy: String,
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
     authenticated: bool,
-    auth_deadline: Option<f64>,
-    last_received: f64,
-    ping_at: Option<f64>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Connection {
+    // Only pongs prove liveness: an unanswered ping retires the socket one cadence later.
+    fn new(login: bool) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            authenticated: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 10_000.0,
+                auth_timeout_ms: login.then_some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 30_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -71,6 +99,7 @@ struct BookState {
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Markets {
         kind: InstrumentType,
@@ -97,7 +126,7 @@ pub enum Pending {
 
 pub struct CandleRead {
     instrument: String,
-    interval: String,
+    interval: Interval,
     limit: u32,
     before: f64,
     after: f64,
@@ -106,16 +135,17 @@ pub struct CandleRead {
 }
 
 pub struct Okx {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    closed: closed::ClosedState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
     indexes: HashSet<String>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     products: HashMap<String, Product>,
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
@@ -125,10 +155,14 @@ pub struct Okx {
     ticker_refresh_pending: bool,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     skipped_instruments: HashSet<String>,
+    /// Instruments skipped as malformed by the catalogue read in flight.
+    skipping_instruments: HashSet<String>,
+    catalogue_partial: bool,
 }
 
 impl Okx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -144,13 +178,15 @@ impl Okx {
                     passphrase: passphrase.clone(),
                 })
         };
+        let login = credentials.is_some();
         Self {
             options,
             credentials,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
-            connections: std::array::from_fn(|_| Connection::default()),
+            closed: closed::ClosedState::default(),
+            connections: std::array::from_fn(|channel| Connection::new(channel != PUBLIC && login)),
             books: HashMap::new(),
             marks: HashSet::new(),
             indexes: HashSet::new(),
@@ -164,6 +200,8 @@ impl Okx {
             ticker_refresh_pending: false,
             live_tickers: Default::default(),
             skipped_instruments: HashSet::new(),
+            skipping_instruments: HashSet::new(),
+            catalogue_partial: false,
         }
     }
 
@@ -329,6 +367,12 @@ impl Okx {
         );
     }
 
+    fn load_catalogue(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.skipping_instruments.clear();
+        self.catalogue_partial = false;
+        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
+    }
+
     fn load_tickers(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -364,6 +408,10 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        // Suppressed public feeds get a placeholder socket that never opens.
+        if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.connections[channel].supervisor.connecting(cx);
+        }
         let socket = cx.connect_channel(
             self.socket_url(channel),
             match channel {
@@ -376,9 +424,6 @@ impl Okx {
         c.socket = Some(socket);
         c.open = false;
         c.authenticated = false;
-        c.last_received = cx.now;
-        c.ping_at = None;
-        c.watchdog = Some(cx.set_timer(10_000.0));
     }
 
     fn channel(&self, socket: SocketId) -> Option<usize> {
@@ -476,9 +521,11 @@ impl Okx {
                 return;
             }
             for (symbol, interval) in self.candles.keys() {
-                if let Some(m) = cx.store.market(symbol) {
+                if let Some(m) = cx.store.market(symbol)
+                    && let Some(bar) = bar(*interval)
+                {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(interval));
+                    let name = format!("candle{bar}");
                     self.topics(cx, BUSINESS, "subscribe", &[Topic::instrument(&name, &id)]);
                 }
             }
@@ -557,18 +604,17 @@ impl Okx {
             return;
         }
         if let Some(interval) = channel.strip_prefix("candle") {
-            let interval = interval_for_bar(interval);
+            let Some(interval) = interval_for_bar(interval) else {
+                return;
+            };
             if let Some(m) = cx.store.market_by_id(message.arg.inst_id) {
                 let symbol = m.symbol.clone();
-                if !self
-                    .candles
-                    .contains_key(&(symbol.clone(), interval.clone()))
-                {
+                if !self.candles.contains_key(&(symbol.clone(), interval)) {
                     return;
                 }
                 let _ = json::each::<Vec<&str>>(data.get(), |row| {
                     if let Some(c) = wire::candle(&row) {
-                        cx.candle(&symbol, &interval, c);
+                        cx.candle(&symbol, interval, c);
                     }
                 });
             }
@@ -689,6 +735,7 @@ impl Venue for Okx {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            closed_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -705,7 +752,7 @@ impl Venue for Okx {
             cx.log(LogLevel::Error, error);
             return;
         }
-        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
+        self.load_catalogue(cx);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -714,27 +761,21 @@ impl Venue for Okx {
         };
         let c = &mut self.connections[channel];
         c.open = true;
-        c.attempts = 0;
-        c.last_received = cx.now;
-        c.auth_deadline =
-            (channel != PUBLIC && self.credentials.is_some()).then_some(cx.now + 10_000.0);
+        c.supervisor.opened(cx);
         if channel != PUBLIC && self.credentials.is_some() {
             self.login(cx, channel);
         } else {
             self.subscribe(cx, channel);
         }
         cx.send(socket, "ping");
-        self.connections[channel].ping_at = Some(cx.now);
     }
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(channel) = self.channel(socket) else {
             return;
         };
-        let c = &mut self.connections[channel];
-        c.last_received = cx.now;
         if text == "pong" {
-            c.ping_at = None;
+            self.connections[channel].supervisor.received(cx.now);
             return;
         }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
@@ -772,12 +813,7 @@ impl Venue for Okx {
         c.socket = None;
         c.open = false;
         c.authenticated = false;
-        if let Some(timer) = c.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        c.attempts = c.attempts.saturating_add(1);
-        c.reconnect =
-            Some(cx.set_timer((500.0 * 2f64.powi(c.attempts.min(6) as i32)).min(30_000.0)));
+        c.supervisor.retry(cx);
         if channel == PUBLIC {
             for state in self.books.values_mut() {
                 state.sequence = None;
@@ -792,6 +828,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -819,7 +856,7 @@ impl Venue for Okx {
                     {
                         *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -875,7 +912,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -898,7 +935,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -911,7 +948,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(
@@ -968,7 +1005,7 @@ impl Venue for Okx {
                     if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
                         && !row.inst_id.is_empty()
                     {
-                        self.skipped_instruments.insert(row.inst_id.into());
+                        self.skipping_instruments.insert(row.inst_id.into());
                     }
                 }
             },
@@ -1060,6 +1097,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
+            Pending::Closed(request) => self.closed_response(cx, request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1068,12 +1106,14 @@ impl Venue for Okx {
                 incomplete,
             } => {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
+                self.catalogue_partial |= invalid;
                 if let Some(next) = self.next_instrument_type(kind) {
                     self.load_markets(cx, next, rows, incomplete);
                     return;
                 }
                 self.catalogue_incomplete = incomplete;
-                if incomplete {
+                // A partial catalogue commits so private reads start, and is re-read.
+                if incomplete || self.catalogue_partial {
                     self.startup.failed(cx, true);
                 } else {
                     self.startup.succeeded(cx, &true);
@@ -1083,14 +1123,19 @@ impl Venue for Okx {
                 }
                 let was_loaded = cx.store.loaded().markets;
                 let mut merged = cx.store.markets().to_vec();
+                let mut added = false;
                 for row in rows {
                     if let Some(old) = merged.iter_mut().find(|old| old.id == row.id) {
                         *old = row;
                     } else {
                         merged.push(row);
+                        added = true;
                     }
                 }
                 cx.store.set_markets(merged);
+                let mut skipped = std::mem::take(&mut self.skipping_instruments);
+                skipped.retain(|id| cx.store.market_by_id(id).is_none());
+                self.skipped_instruments = skipped;
                 self.products
                     .retain(|id, _| cx.store.market_by_id(id).is_some());
                 self.price_tickers = price_ticker_indexes(cx.store);
@@ -1103,10 +1148,11 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                self.ticker_seed(cx, was_loaded);
                 if !was_loaded {
+                    self.ticker_seed(cx, false);
                     self.account_start(cx);
-                } else {
+                } else if added {
+                    self.ticker_seed(cx, true);
                     if self.connections[PUBLIC].open {
                         self.subscribe(cx, PUBLIC);
                     }
@@ -1210,6 +1256,8 @@ impl Venue for Okx {
             self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
@@ -1225,43 +1273,57 @@ impl Venue for Okx {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(markets) = self.startup.on_timer(timer) {
-            if markets {
+            if markets && cx.store.loaded().markets {
+                self.load_catalogue(cx);
+            } else if markets {
                 self.start(cx);
             } else {
                 self.ticker_seed(cx, false);
             }
             return;
         }
-        if self.history_timer(cx, timer) {
+        if self.history_timer(cx, timer) || self.closed_timer(cx, timer) {
             return;
         }
         if self.account_timer(cx, timer) {
             return;
         }
-        for channel in 0..3 {
-            let c = &mut self.connections[channel];
-            if c.reconnect == Some(timer) {
-                c.reconnect = None;
-                self.connect(cx, channel);
-                return;
-            }
-            if c.watchdog == Some(timer) {
-                c.watchdog = None;
+        let Some(channel) = (0..3).find(|&c| self.connections[c].supervisor.owns_timer(timer))
+        else {
+            return;
+        };
+        let c = &mut self.connections[channel];
+        match c.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => {
                 if let Some(socket) = c.socket {
-                    if !c.open
-                        || c.auth_deadline.is_some_and(|at| cx.now >= at)
-                        || c.ping_at.is_some_and(|at| cx.now - at >= 10_000.0)
-                    {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                        return;
-                    }
                     cx.send(socket, "ping");
-                    c.ping_at = Some(cx.now);
                 }
-                c.watchdog = Some(cx.set_timer(10_000.0));
-                return;
             }
+            Tick::TimedOut(_) => match c.socket {
+                Some(socket) => {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+                None => c.supervisor.retry(cx),
+            },
+            Tick::Handled | Tick::Unhandled => {}
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 
@@ -1296,30 +1358,33 @@ impl Venue for Okx {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let Some(bar) = bar(interval) else {
+                    cx.log(LogLevel::Error, interval.unsupported("OKX"));
+                    return;
+                };
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(m) = cx.store.market(&symbol)
                 {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(&interval));
+                    let name = format!("candle{bar}");
                     self.topics(cx, BUSINESS, "subscribe", &[Topic::instrument(&name, &id)]);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     *count = count.saturating_sub(1);
                     if *count > 0 {
                         return;
                     }
                 }
-                self.candles.remove(&(symbol.clone(), interval.clone()));
-                if let Some(m) = cx.store.market(&symbol) {
+                self.candles.remove(&(symbol.clone(), interval));
+                if let Some(m) = cx.store.market(&symbol)
+                    && let Some(bar) = bar(interval)
+                {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(&interval));
+                    let name = format!("candle{bar}");
                     self.topics(
                         cx,
                         BUSINESS,
@@ -1351,11 +1416,8 @@ impl Venue for Okx {
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
                 let end = to_ms.unwrap_or(cx.now);
-                let Some(default_start) = subtract_bars(end, &interval, limit) else {
-                    cx.done(
-                        command,
-                        Err(format!("unsupported candle interval {interval}")),
-                    );
+                let Some(default_start) = subtract_bars(end, interval, limit) else {
+                    cx.done(command, Err(interval.unsupported("OKX")));
                     return;
                 };
                 let before = if explicit_limit.is_none() {
@@ -1369,13 +1431,13 @@ impl Venue for Okx {
                 }
                 let read = CandleRead {
                     instrument: m.id.clone(),
-                    interval: interval.clone(),
+                    interval,
                     limit,
                     before,
                     after: end,
                     historical: false,
                     force_history: to_ms.is_some_and(|to| {
-                        subtract_bars(cx.now, &interval, 1440).is_some_and(|oldest| to < oldest)
+                        subtract_bars(cx.now, interval, 1440).is_some_and(|oldest| to < oldest)
                     }),
                 };
                 let path = read.path();
@@ -1450,25 +1512,29 @@ struct Subscription<'a> {
     args: &'a [Topic<'a>],
 }
 
-fn bar(interval: &str) -> &str {
-    match interval {
-        "1h" => "1H",
-        "2h" => "2H",
-        "4h" => "4H",
-        "6h" => "6H",
-        "12h" => "12H",
-        "1d" => "1D",
-        "1w" => "1W",
-        "1M" => "1Mutc",
-        other => other,
-    }
+const BARS: [(Interval, &str); 14] = [
+    (Interval::S1, "1s"),
+    (Interval::M1, "1m"),
+    (Interval::M3, "3m"),
+    (Interval::M5, "5m"),
+    (Interval::M15, "15m"),
+    (Interval::M30, "30m"),
+    (Interval::H1, "1H"),
+    (Interval::H2, "2H"),
+    (Interval::H4, "4H"),
+    (Interval::H6, "6H"),
+    (Interval::H12, "12H"),
+    (Interval::D1, "1D"),
+    (Interval::W1, "1W"),
+    (Interval::Mo1, "1Mutc"),
+];
+fn bar(interval: Interval) -> Option<&'static str> {
+    BARS.iter()
+        .find(|(i, _)| *i == interval)
+        .map(|(_, bar)| *bar)
 }
-fn interval_for_bar(value: &str) -> String {
-    if value == "1Mutc" {
-        "1M".into()
-    } else {
-        value.to_lowercase()
-    }
+fn interval_for_bar(value: &str) -> Option<Interval> {
+    BARS.iter().find(|(_, bar)| *bar == value).map(|(i, _)| *i)
 }
 fn percentage(last: &str, open: &str) -> f64 {
     let open = num::parse(open);
@@ -1496,7 +1562,7 @@ impl CandleRead {
         format!(
             "/api/v5/market/{endpoint}?instId={}&bar={}&limit={}&before={}&after={}",
             self.instrument,
-            bar(&self.interval),
+            bar(self.interval).unwrap_or_default(),
             if self.historical {
                 self.limit.min(100)
             } else {
@@ -1508,22 +1574,13 @@ impl CandleRead {
     }
 }
 
-fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
+fn subtract_bars(end: f64, interval: Interval, count: u32) -> Option<f64> {
+    bar(interval)?;
     let duration = match interval {
-        "1m" => 60_000.0,
-        "3m" => 180_000.0,
-        "5m" => 300_000.0,
-        "15m" => 900_000.0,
-        "30m" => 1_800_000.0,
-        "1h" => 3_600_000.0,
-        "2h" => 7_200_000.0,
-        "4h" => 14_400_000.0,
-        "6h" => 21_600_000.0,
-        "12h" => 43_200_000.0,
-        "1d" => 86_400_000.0,
-        "1w" => 604_800_000.0,
-        "1M" => return Some(safe_cex_engine::time::sub_months(end.floor() as i64, count) as f64),
-        _ => return None,
+        Interval::Mo1 => {
+            return Some(safe_cex_engine::time::sub_months(end.floor() as i64, count) as f64);
+        }
+        _ => interval.ms(),
     };
     Some(end - duration * f64::from(count))
 }

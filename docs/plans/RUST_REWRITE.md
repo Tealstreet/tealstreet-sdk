@@ -186,8 +186,8 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 ## Correctness gate
 
 Recorded traffic (websocket frames, REST responses, user commands, timestamps)
-is replayed through TS and Rust. The final `StoreData`, the emitted
-order-book/candle deltas and the outbound REST/WS requests must match after
+is replayed through TS and Rust. The `StoreData` at startup, fixed tape quarters, every
+command and terminal checkpoints, the emitted order-book/candle deltas and the outbound REST/WS requests must match after
 normalisation: numbers compared as numbers, map order ignored. A known TS bug
 is fixed in Rust and listed in the PR. The test is the same outcome, not
 byte-identical behaviour.
@@ -197,13 +197,28 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS. A CPU objective under 10 ms TS allows Rust 1 ms
-  above TS: at that size tied runs differ by up to 0.9 ms
-  (`RUST_GATE_TIMING.md`).
-- Peak and steady memory (Wasm linear memory plus JS heap retained by the
-  worker): Rust < TS.
+- At least seven fresh interleaved public pairs with alternating first runner.
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians
+  clearly below TS, except that small main/steady CPU windows only need to be
+  within run-to-run noise of TS. The exact thresholds, pair counts and their
+  rationale live only in `sdk-rs/harness/performance-policy.mjs`.
+  Overseer decision (2026-10-21): small windows trade the improvement margin
+  for a noise floor (#1461; evidence in `RUST_GATE_TIMING.md`); revisit if a
+  small-window regression slips through. Include cold implementation loading/WASM compilation in total CPU;
+  exclude audit callbacks, checkpoint reconstruction and baseline collection.
+- Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
+  reservation; never clamp releases to zero. Each measured run must reproduce
+  its implementation's audited output and transport receipt.
+- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
+  use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
 
-Every venue PR states both numbers. A PR that loses on either does not merge.
+Peak memory and browser cold-start remain cutover requirements; this replay
+gate measures idle-loaded retained memory rather than establishing either.
+
+Every venue PR states the measurements and incomplete evidence. A venue port
+that loses does not merge. Gate-infrastructure changes may land explicit,
+tape-hash-bound known failures in `harness/known-gate-failures.json`; they retain
+strict FAIL and do not certify venue parity. New or invalid evidence fails CI.
 
 ## Banned (CI fails)
 
@@ -418,6 +433,12 @@ fixture assumptions, not a live-feed bandwidth forecast.
   wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
+
+The stricter gate-honesty matrix has 107 mandatory cases. Its single
+[`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
+list records exact venue/tape/diagnostic failures; accepted known failures stay
+FAIL and do not certify parity. Port states below describe implementation and
+historical checks, not a claim that every stricter replay case passes.
 
 ### 8. Remaining venues — in progress
 
@@ -676,7 +697,11 @@ of mutation acknowledgements. These redacted reads are retained under
 `live-smoke-verify-*`; their success marker is an operational check by the runner,
 while the TS/Rust replay compares the primary lifecycle. A scripted Binance run
 round-trips through that gate; other profiles still need credentialed proof on
-their actual products. The runner never silently upgrades size after rejection
+their actual products. The runner applies a fixed $100 quote-notional cap to both the initial and amended
+order, including inverse face value and native contract multipliers; rounding a
+minimum above the cap refuses before any account mutation. No CLI or environment
+option raises the cap. Limit orders request post-only on engine-supported profiles
+(all currently reviewed profiles except Bitrue and Polymarket). The runner never silently upgrades size after rejection
 or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
 and cleanup; incomplete cleanup remains a failure.
 After cancel-all, mutable leverage is lowered by one (bounded by the market
@@ -684,7 +709,9 @@ minimum) and restored to its captured value, exercising both writes. Fixed or
 already-minimum leverage is set to its original value without increasing risk.
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
-family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read
+family, selected mode (`TESTNET`, `DEMO`, or `MAINNET`) and suffix, for example
+`RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY`. Every optional field uses the same mode
+prefix. Legacy names and another mode's values are never used as a fallback. Credentials are read
 only from the process environment, never command-line arguments or committed
 configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
@@ -734,7 +761,7 @@ The environment table and credential option mapping live in
 `sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling
 another venue or endpoint. A supported endpoint profile does not itself prove
 that every lifecycle command is available for every product/account type.
-Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS` is a comma-separated
+Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS` is a comma-separated
 list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
 for the desired outcome. It is public selection metadata, not a credential.
 Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks

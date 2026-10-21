@@ -24,6 +24,14 @@ pub struct Options {
     /// A saved read-only key signs REST reads; writes and the user stream keep the primary key.
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductKind {
     Intx,
@@ -38,7 +46,7 @@ pub enum Pending {
     History(history::Request),
 }
 pub struct Coinbase {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
     pub(crate) read_credentials: Option<sign::Credentials>,
@@ -51,7 +59,7 @@ pub struct Coinbase {
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
-        let mut options = options;
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let raw_key = Zeroizing::new(std::mem::take(&mut options.key));
         let secret = Zeroizing::new(std::mem::take(&mut options.secret));
         let credentials = if options.public_data_only || raw_key.is_empty() {
@@ -79,7 +87,7 @@ impl Coinbase {
             read_supplied: read_credentials.is_some(),
             read_credentials,
             rest: rest::Rest::default(),
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
         })

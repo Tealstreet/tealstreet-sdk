@@ -1421,6 +1421,14 @@ fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
         200,
         r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
     );
+    // An explicit retCode before any create landed is a refusal.
+    assert_eq!(
+        h.outcomes,
+        [
+            (91, Some(safe_cex_engine::Outcome::Rejected)),
+            (92, Some(safe_cex_engine::Outcome::Rejected))
+        ]
+    );
     assert_eq!(h.command_errors.len(), 2);
     assert_eq!(h.command_errors[0].0, 91);
     assert_eq!(h.command_errors[1].0, 92);
@@ -1766,6 +1774,57 @@ fn transitional_trigger_and_pending_cancel_do_not_tombstone_native_id() {
             safe_cex_engine::model::OrderStatus::Open,
             "{status} is transitional"
         );
+    }
+}
+
+#[test]
+fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
+    for (case, unknown) in [
+        ("transport", true),
+        ("502", true),
+        ("retCode 10016", true),
+        ("504 with envelope", true),
+        ("missing order id", true),
+        ("retCode 170131", false),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 2, vec![order("BTCUSDT", 0.1)]);
+        let request = h.take("/v5/order/create");
+        match case {
+            "transport" => h.event(Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            }),
+            "502" => h.reply(request.id, 502, "<html>Bad Gateway</html>"),
+            "retCode 10016" => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":10016,"retMsg":"Internal system error","result":{}}"#,
+            ),
+            "504 with envelope" => h.reply(
+                request.id,
+                504,
+                r#"{"retCode":10002,"retMsg":"request expired","result":{}}"#,
+            ),
+            "missing order id" => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+            ),
+            _ => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":170131,"retMsg":"Insufficient balance.","result":{}}"#,
+            ),
+        }
+        assert!(
+            h.done
+                .iter()
+                .any(|(command, result)| *command == 2 && result.is_err()),
+            "{case}: {:?}",
+            h.done
+        );
+        assert_eq!(h.unknown == [2], unknown, "{case}");
     }
 }
 

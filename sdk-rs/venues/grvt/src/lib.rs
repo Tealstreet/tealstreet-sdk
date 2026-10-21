@@ -6,15 +6,16 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -24,6 +25,14 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone)]
 pub struct InstrumentInfo {
     pub hash: String,
@@ -45,6 +54,8 @@ pub(crate) enum Job {
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
+        /// Instrument ids whose rows were skipped as malformed.
+        malformed: Vec<String>,
         failed: bool,
     },
     Candles {
@@ -101,14 +112,14 @@ struct TickerState {
     subscriptions: u8,
 }
 pub struct Grvt {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
     public: Connection,
     books: HashMap<String, Depth>,
-    candle_sockets: HashMap<String, Connection>,
-    candles: HashMap<(String, String), u32>,
+    candle_sockets: HashMap<Interval, Connection>,
+    candles: HashMap<(String, Interval), u32>,
     // Catalog-indexed state shares the Store identities instead of allocating
     // the same stream/selector strings in four separate maps.
     ticker_state: Vec<TickerState>,
@@ -130,22 +141,29 @@ struct Selector<'a> {
     stream: &'a str,
     selectors: [&'a str; 1],
 }
-fn interval(s: &str) -> Option<String> {
-    if !s.is_ascii() {
-        return None;
-    }
-    let (digits, unit) = s.split_at(s.len().checked_sub(1)?);
-    let allowed = match unit {
-        "m" => ["1", "3", "5", "15", "30"].contains(&digits),
-        "h" => ["1", "2", "4", "6", "8", "12"].contains(&digits),
-        "d" => ["1", "3", "5"].contains(&digits),
-        "w" => ["1", "2", "3", "4"].contains(&digits),
-        _ => false,
-    };
-    allowed.then(|| format!("CI_{}_{}", digits, unit.to_ascii_uppercase()))
+fn interval(i: Interval) -> Option<&'static str> {
+    use Interval::*;
+    Some(match i {
+        M1 => "CI_1_M",
+        M3 => "CI_3_M",
+        M5 => "CI_5_M",
+        M15 => "CI_15_M",
+        M30 => "CI_30_M",
+        H1 => "CI_1_H",
+        H2 => "CI_2_H",
+        H4 => "CI_4_H",
+        H6 => "CI_6_H",
+        H8 => "CI_8_H",
+        H12 => "CI_12_H",
+        D1 => "CI_1_D",
+        D3 => "CI_3_D",
+        W1 => "CI_1_W",
+        _ => return None,
+    })
 }
 impl Grvt {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
@@ -290,6 +308,7 @@ impl Grvt {
             Job::Markets {
                 rows: vec![],
                 metadata: HashMap::new(),
+                malformed: vec![],
                 failed: false,
             },
         );
@@ -300,7 +319,10 @@ impl Grvt {
         }
         self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
         self.public.last_received = cx.now;
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
     }
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, selector: &str, remove: bool) {
         if !self.public.open {
@@ -382,45 +404,45 @@ impl Grvt {
         }
         self.public.supervisor.retry(cx);
     }
-    fn candle_connect(&mut self, cx: &mut Cx<'_, Pending>, timeframe: &str) {
+    fn candle_connect(&mut self, cx: &mut Cx<'_, Pending>, timeframe: Interval) {
         let url = self.public_url();
-        let c = self.candle_sockets.entry(timeframe.to_owned()).or_default();
+        let c = self.candle_sockets.entry(timeframe).or_default();
         if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
-        let feed = match timeframe {
-            "1m" => "candles-1m",
-            "3m" => "candles-3m",
-            "5m" => "candles-5m",
-            "15m" => "candles-15m",
-            "30m" => "candles-30m",
-            "1h" => "candles-1h",
-            "2h" => "candles-2h",
-            "4h" => "candles-4h",
-            "6h" => "candles-6h",
-            "8h" => "candles-8h",
-            "12h" => "candles-12h",
-            "1d" => "candles-1d",
-            "3d" => "candles-3d",
-            "5d" => "candles-5d",
-            "1w" => "candles-1w",
-            "2w" => "candles-2w",
-            "3w" => "candles-3w",
-            "4w" => "candles-4w",
+        // Each supported interval has its own feed identity on the shared URL.
+        let feed: &'static str = match timeframe {
+            Interval::M1 => "candles-1m",
+            Interval::M3 => "candles-3m",
+            Interval::M5 => "candles-5m",
+            Interval::M15 => "candles-15m",
+            Interval::M30 => "candles-30m",
+            Interval::H1 => "candles-1h",
+            Interval::H2 => "candles-2h",
+            Interval::H4 => "candles-4h",
+            Interval::H6 => "candles-6h",
+            Interval::H8 => "candles-8h",
+            Interval::H12 => "candles-12h",
+            Interval::D1 => "candles-1d",
+            Interval::D3 => "candles-3d",
+            Interval::W1 => "candles-1w",
             _ => return,
         };
         c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
         c.last_received = cx.now;
-        c.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            c.supervisor.connecting(cx);
+        }
     }
     fn candle_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        timeframe: &str,
+        timeframe: Interval,
         remove: bool,
     ) {
-        let Some(c) = self.candle_sockets.get(timeframe).filter(|c| c.open) else {
+        let Some(c) = self.candle_sockets.get(&timeframe).filter(|c| c.open) else {
             return;
         };
         let (Some(socket), Some(market), Some(interval)) =
@@ -620,10 +642,10 @@ impl Grvt {
                 for ((symbol, interval_name), subscribers) in &self.candles {
                     if *subscribers > 0
                         && *symbol == market_symbol
-                        && interval(interval_name).as_deref() == Some(grvt_interval)
+                        && interval(*interval_name) == Some(grvt_interval)
                         && let Some(candle) = feed.candle()
                     {
-                        cx.candle(symbol, interval_name, candle);
+                        cx.candle(symbol, *interval_name, candle);
                     }
                 }
             }
@@ -659,7 +681,7 @@ impl Venue for Grvt {
             .candle_sockets
             .iter()
             .find(|(_, c)| c.socket == Some(socket))
-            .map(|(i, _)| i.clone())
+            .map(|(i, _)| *i)
         {
             let c = self
                 .candle_sockets
@@ -675,7 +697,7 @@ impl Venue for Grvt {
                 .map(|((s, _), _)| s.clone())
                 .collect();
             for symbol in symbols {
-                self.candle_subscription(cx, &symbol, &interval, false);
+                self.candle_subscription(cx, &symbol, interval, false);
             }
             return;
         }
@@ -750,10 +772,14 @@ impl Venue for Grvt {
             Job::Markets {
                 rows,
                 metadata,
+                malformed,
                 failed: _,
             } => {
                 let Ok(i) = serde_json::from_str::<wire::Instrument<'_>>(item) else {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if let Some(id) = instrument_id(item) {
+                        malformed.push(id);
+                    }
                     return;
                 };
                 if i.kind != "PERPETUAL" {
@@ -761,6 +787,9 @@ impl Venue for Grvt {
                 }
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if !i.id.is_empty() {
+                        malformed.push(i.id.to_string());
+                    }
                     return;
                 }
                 metadata.insert(
@@ -854,8 +883,9 @@ impl Venue for Grvt {
             Job::Trade(request) => self.trade_response(cx, request, response),
             Job::History(request) => self.history_response(cx, *request, response),
             Job::Markets {
-                rows,
-                metadata,
+                mut rows,
+                mut metadata,
+                malformed,
                 failed,
             } => {
                 if failed || rows.is_empty() {
@@ -866,10 +896,22 @@ impl Venue for Grvt {
                     self.startup_retry.failed(cx, ());
                     return;
                 }
+                // A held market whose row is briefly malformed keeps its previous row,
+                // so its positions and orders stay mapped across the refresh.
+                for id in malformed {
+                    if rows.iter().any(|market| market.id == id) {
+                        continue;
+                    }
+                    if let Some(previous) = cx.store.market_by_id(&id)
+                        && let Some(info) = self.metadata.get(&id)
+                    {
+                        rows.push(previous.clone());
+                        metadata.insert(id, info.clone());
+                    }
+                }
                 // The public instrument catalog has no authenticated leverage
                 // rails. Retain those already fetched from the trading API;
                 // replacing signing metadata must not restore the 1..100 defaults.
-                let mut rows = rows;
                 let has_new_markets = rows
                     .iter()
                     .any(|market| cx.store.market_by_id(&market.id).is_none());
@@ -967,10 +1009,12 @@ impl Venue for Grvt {
                 Job::Markets {
                     rows,
                     metadata,
+                    malformed,
                     failed,
                 } => {
                     rows.clear();
                     metadata.clear();
+                    malformed.clear();
                     *failed = false;
                 }
                 Job::Candles { rows, failed, .. } => {
@@ -1000,14 +1044,14 @@ impl Venue for Grvt {
             .candle_sockets
             .iter()
             .find(|(_, c)| c.supervisor.owns_timer(timer))
-            .map(|(i, _)| i.clone())
+            .map(|(i, _)| *i)
         {
             let c = self
                 .candle_sockets
                 .get_mut(&timeframe)
                 .expect("candle timer");
             match c.supervisor.on_timer(cx, timer) {
-                SocketTick::Reconnect => self.candle_connect(cx, &timeframe),
+                SocketTick::Reconnect => self.candle_connect(cx, timeframe),
                 SocketTick::TimedOut(_) => {
                     if let Some(socket) = c.socket.take() {
                         cx.close(socket);
@@ -1114,29 +1158,29 @@ impl Venue for Grvt {
                 symbol,
                 interval: timeframe,
             } => {
-                let (Some(m), Some(i)) = (cx.store.market(&symbol), interval(&timeframe)) else {
+                if interval(timeframe).is_none() {
+                    cx.log(LogLevel::Error, timeframe.unsupported("GRVT"));
                     return;
-                };
-                let _ = m;
-                let _ = i;
-                let symbol_key = symbol.clone();
-                let interval_key = timeframe.clone();
-                let count = self.candles.entry((symbol, timeframe)).or_default();
+                }
+                if cx.store.market(&symbol).is_none() {
+                    return;
+                }
+                let count = self.candles.entry((symbol.clone(), timeframe)).or_default();
                 *count += 1;
                 if *count == 1 {
-                    self.candle_connect(cx, &interval_key);
-                    self.candle_subscription(cx, &symbol_key, &interval_key, false);
+                    self.candle_connect(cx, timeframe);
+                    self.candle_subscription(cx, &symbol, timeframe, false);
                 }
             }
             Command::UnsubscribeCandles {
                 symbol,
                 interval: timeframe,
             } => {
-                if let Some(count) = self.candles.get_mut(&(symbol.clone(), timeframe.clone())) {
+                if let Some(count) = self.candles.get_mut(&(symbol.clone(), timeframe)) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
-                        self.candles.remove(&(symbol.clone(), timeframe.clone()));
-                        self.candle_subscription(cx, &symbol, &timeframe, true);
+                        self.candles.remove(&(symbol.clone(), timeframe));
+                        self.candle_subscription(cx, &symbol, timeframe, true);
                         if !self.candles.keys().any(|(_, i)| i == &timeframe)
                             && let Some(mut c) = self.candle_sockets.remove(&timeframe)
                         {
@@ -1156,11 +1200,12 @@ impl Venue for Grvt {
                 from_ms,
                 to_ms,
             } => {
-                let (Some(m), Some(i)) = (cx.store.market(&symbol), interval(&timeframe)) else {
-                    cx.done(
-                        command,
-                        Err("Unknown GRVT market or candle interval".into()),
-                    );
+                let Some(i) = interval(timeframe) else {
+                    cx.done(command, Err(timeframe.unsupported("GRVT")));
+                    return;
+                };
+                let Some(m) = cx.store.market(&symbol) else {
+                    cx.done(command, Err("Unknown GRVT market".into()));
                     return;
                 };
                 #[derive(Serialize)]
@@ -1186,7 +1231,7 @@ impl Venue for Grvt {
                 let body = serde_json::to_string(&Body {
                     i: &m.id,
                     t: "TRADE",
-                    interval: &i,
+                    interval: i,
                     st: from_ms.map(|v| format!("{:.0}", v * 1e6)),
                     et: to_ms.map(|v| format!("{:.0}", v * 1e6)),
                     l: limit.unwrap_or(500).clamp(1, 1000),
@@ -1239,4 +1284,15 @@ impl Venue for Grvt {
                 .map(|(s, d)| (s.as_str(), &d.book)),
         )
     }
+}
+
+/// The native id of an instrument row that failed to decode, when it has one.
+fn instrument_id(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow, rename = "i", alias = "instrument")]
+        id: std::borrow::Cow<'a, str>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (!row.id.is_empty()).then(|| row.id.into_owned())
 }

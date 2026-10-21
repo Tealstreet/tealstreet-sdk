@@ -79,4 +79,66 @@ describe('main-thread Rust trading routing', () => {
       },
     });
   });
+
+  it('learns capability methods from the worker and forwards Lighter tier changes there', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange('lighter', { key: 'k', secret: 's', apiKeyIndex: '3' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const answers: Record<string, unknown> = {
+      fetchEngineCapabilities: { accountTier: true, fillHistory: false, orderHistory: true, incomeHistory: true },
+      changeAccountTier: null,
+      fetchAccountTier: 'premium',
+    };
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', {
+          requestId: event.requestId,
+          success: true,
+          result: answers[event.method],
+        }),
+      );
+    });
+    expect(main.changeAccountTier).toBeUndefined();
+    main.store.update({ loaded: { ...main.store.loaded, markets: true } });
+    await vi.waitFor(() => expect(main!.changeAccountTier).toBeTypeOf('function'));
+    expect(main.capabilities.fillHistory).toBe(false);
+    await main.changeAccountTier!('premium');
+    await expect(main.fetchAccountTier!()).resolves.toBe('premium');
+    expect(calls).toEqual([
+      { method: 'fetchEngineCapabilities', args: [] },
+      { method: 'changeAccountTier', args: ['premium'] },
+      { method: 'fetchAccountTier', args: [] },
+    ]);
+    expect(main.hasStarted).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('forwards main-thread candle and journal reads to the worker', async () => {
+    main = new RustEngineExchange('kraken', { key: 'k', secret: 's' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] }),
+      );
+    });
+    const window = { from: 1, to: 2 };
+    await main.fetchOHLCV({ symbol: 'PF_XBTUSD', interval: '1m', from: 1, to: 2 });
+    await main.fetchHistoricalFills(window);
+    await main.fetchHistoricalOrders(window);
+    await main.fetchIncomeHistory({ startTime: 1, endTime: 2 });
+    await main.fetchIncomeHistoryRange(1, 2);
+    await main.fetchHistoricalPositions!({ ...window, account: 'a' });
+    expect(calls.map(({ method }) => method)).toEqual([
+      'fetchOHLCV',
+      'fetchHistoricalFills',
+      'fetchHistoricalOrders',
+      'fetchIncomeHistory',
+      'fetchIncomeHistoryRange',
+      'fetchHistoricalPositions',
+    ]);
+    expect(main.hasStarted).toBe(false);
+  });
 });
