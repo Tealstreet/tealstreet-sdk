@@ -1390,3 +1390,34 @@ fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
     assert_eq!(poll(&mut h, &bad), [LogLevel::Error]);
     assert_eq!(poll(&mut h, &bad), []);
 }
+
+#[test]
+fn a_match_without_match_price_fills_at_the_order_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.engine.take_frame(h.now);
+    let matched = r#"{"orderId":"5cdfc138b21023a909e5ad55","symbol":"XBTUSDTM","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","size":10,"filledSize":3,"remainSize":7,"matchSize":1,"tradeId":"1794175373645","ts":1610000000001000000}"#;
+    h.ws("/contractMarket/tradeOrders", matched);
+    assert_eq!(h.fill_rows(), vec![(90.0, 0.001)]);
+}
+
+#[test]
+fn a_balance_row_missing_secondary_fields_still_updates_the_balance() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply(
+        "/account-overview",
+        r#"{"code":"200000","data":{"availableBalance":"1950","accountEquity":"2010"}}"#,
+    );
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    h.reply("/orders?", &Harness::page(ORDER, 1));
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().balance);
+    assert_eq!(h.engine.store().balance().total, 2010.0);
+}

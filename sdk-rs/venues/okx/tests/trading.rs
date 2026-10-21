@@ -1653,3 +1653,21 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
         assert!(e.store().loaded().orders);
     }
 }
+
+#[test]
+fn conditional_zero_price_executes_at_market_once_triggered() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":41000,"price":0}"#,
+        )],
+    );
+    let request = http(&out);
+    assert!(matches!(request, Action::Http(r) if r.url.ends_with("/order-algo")));
+    assert!(
+        body(request).contains(r#""orderPx":"-1""#),
+        "{}",
+        body(request)
+    );
+}

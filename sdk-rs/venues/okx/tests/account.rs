@@ -1024,3 +1024,19 @@ fn undecodable_out_of_scope_position_row_fails_the_position_read() {
     }
     assert!(!e.store().loaded().positions);
 }
+
+#[test]
+fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
+    for kind in ["mmp", "mmp_and_post_only", "elp"] {
+        let (mut e, _, _, pending) = startup();
+        complete(
+            &mut e,
+            pending,
+            &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+        );
+        let o = &e.store().orders()[0];
+        assert_eq!(o.id, "123", "{kind}");
+        assert_eq!(o.filled, 0.01, "{kind}");
+        assert_eq!(o.client_order_id.as_deref(), Some("caller123"), "{kind}");
+    }
+}

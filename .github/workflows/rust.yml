@@ -163,6 +163,9 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: bitunix
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bitunix
           - venue: orderly
             books: BTCUSDC,ETHUSDC
             private_script: rust:private-tape-orderly

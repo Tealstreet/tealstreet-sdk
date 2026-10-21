@@ -2055,9 +2055,10 @@ impl Okx {
                 None,
             )),
         }
-        let algo = !matches!(
+        // Same allow-list as valid_order: mmp/elp and other regular types carry an ordId.
+        let algo = matches!(
             o.ord_type,
-            "market" | "limit" | "post_only" | "fok" | "ioc" | "optimal_limit_ioc"
+            "trigger" | "conditional" | "oco" | "move_order_stop"
         );
         legs.into_iter()
             .map(|(kind, suffix, price, trigger_type)| {

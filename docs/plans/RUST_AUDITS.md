@@ -450,17 +450,18 @@ per-venue canary holding the formerly circular-evidence venues last.
 Reviewed on `feat/rust-bitunix` at `846f285d13` (PR #1309, not yet merged); paths
 are relative to `sdk-rs/venues/bitunix/src`. REST and WS signing match TS byte for
 byte; positions, aggregate balance and history paging are at parity.
-- High: app stop payloads are rejected. `trading.rs:265` refuses any order with
+- High: ~~app stop payloads are rejected. `trading.rs:265` refuses any order with
   `trigger_price`, including StopLoss/TakeProfit sent with `triggerPrice == price`
   (TS places them from `price`, `bitunix.exchange.ts` `formatTPSLOrder`), so a
   dragged SL/TP leaves the position unprotected. Accept protective kinds whose
-  trigger equals the price (as Orderly does).
-- High: the futures socket (books, candles) is tagged `SocketChannel::Public`
+  trigger equals the price (as Orderly does).~~ (accepted via
+  `redundant_protective_trigger`; distinct triggers still reject)
+- High: ~~the futures socket (books, candles) is tagged `SocketChannel::Public`
   (`lib.rs:127`), so the host applies the public route; its fallback is the public
   proxy, not `bitunixFutures` (`routingTable.ts` `business`). After two silent
   connects or a watchdog recover the socket sticks to an endpoint that ignores
   depth/kline subscriptions while still answering pings: books and live candles go
-  dead with no log. Tag it `SocketChannel::Business`.
+  dead with no log. Tag it `SocketChannel::Business`.~~ (tagged Business)
 - Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
   network speed across futures, private and every ticker shard.
 - Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
@@ -515,8 +516,11 @@ byte; positions, aggregate balance and history paging are at parity.
   bad rows are skipped and counted in a warning; `fetchLeverage` reads
   `leverage-info` (it previously never answered); config is re-read every 30 s
   and a changed mode/level reconciles positions.
-- Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
-  rejected; income limit truncates.
+- Low: ~~`mmp`/`elp` order types get an empty id; conditional `price: 0`
+  rejected~~ (regular types keep their `ordId`; `price: 0` sends `orderPx: -1`,
+  market once triggered, as TS); income limit truncates (kept: Rust returns the
+  newest `limit` whole bills where TS returns up to a page more, and the EEA
+  SWAP+FUTURES merge relies on it).
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
   staying open, X-Perp history SWAP hardcode, market-order amend placing a new
   order, duplicate algo cancels. Shared by both: reduce-only conditional sent
@@ -766,8 +770,12 @@ TxFlow loses nothing (master TS was a placeholder).
   attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
-- Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
-  5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
+- Low: leverage sent as `10.0` (RISKY, `num::whole`); ~~fill without `matchPrice`
+  dropped~~ (fills at the order price, as TS); spot polls 5 s vs 500 ms (kept:
+  10× the REST load needs live rate-limit evidence); ~~per-symbol cancel-all~~
+  (stale: symbol cancels use `?symbol=` and cancel-all is one native call, as
+  TS); ~~partial balance rows ignored~~ (missing `orderMargin`/`unrealisedPNL` read
+  as zero; equity and free stay required).
 - Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
   keeping trigger type and post-only, standalone stop client id, open-order
   paging, spot partial snapshot, swallowed cancel errors.
