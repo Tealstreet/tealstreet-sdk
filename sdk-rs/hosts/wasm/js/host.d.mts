@@ -105,6 +105,7 @@ export interface CommandProgress {
 export class EngineDeadError extends Error {
   constructor(cause: unknown, command?: CommandIdentity);
   readonly code: 'ENGINE_DEAD';
+  readonly kind: 'internal';
   readonly command?: string;
   /** An interrupted write may already have been accepted; reconcile before retrying. */
   readonly outcome?: 'unknown';
