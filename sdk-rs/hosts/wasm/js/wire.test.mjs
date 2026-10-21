@@ -1036,6 +1036,8 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     maxLeverage: 'unsupported',
     quantityUnits: 'inverseContractSized',
   });
+  assert.equal(capabilities(0, 3 << 8).leverageQuery, 'onReadAndMetadata');
+  assert.throws(() => capabilities(0, 4 << 8), /unknown capability leverageQuery/);
   assert.throws(() => capabilities(0, 9), /unknown capability account/);
   assert.equal(numericFrame([]).capabilities(), undefined);
 });
