@@ -290,6 +290,7 @@ fn filtered_missing_symbol_and_invalid_bill_values_fail_after_bounded_retries() 
 #[test]
 fn failed_account_detection_has_a_deadline() {
     let mut h = Harness::private_started();
+    h.expect_startup_failure = true;
     query(&mut h, fills());
     h.respond(
         "/account/settings",
@@ -316,6 +317,11 @@ fn failed_account_detection_has_a_deadline() {
             .as_ref()
             .unwrap_err()
             .contains("account detection")
+    );
+    assert_eq!(
+        h.startup_failures.len(),
+        1,
+        "a refused permission fails startup"
     );
 }
 #[test]

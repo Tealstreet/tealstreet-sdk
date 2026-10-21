@@ -103,11 +103,11 @@ fn late_uta_detection_that_never_responds_completes_with_a_bounded_error() {
 }
 
 #[test]
-fn confirmed_uta_probe_retry_exhaustion_cannot_restart_classic_detection() {
+fn repeated_confirmed_uta_probe_failures_cannot_restart_classic_detection() {
     let mut h = Harness::classic();
     late_uta_query(&mut h);
     for _ in 0..4 {
-        for _ in 0..20 {
+        for _ in 0..200 {
             if h.requests
                 .iter()
                 .any(|r| r.url.contains("/account/settings"))

@@ -209,7 +209,7 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3 && self.account.supervisor.is_waiting() {
+        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
             return;
         }
         let url = if index == 3 {
@@ -554,6 +554,11 @@ impl Venue for BitgetFutures {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         self.discovery_read(cx, false);

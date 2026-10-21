@@ -25,9 +25,16 @@ pub struct Harness {
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
+    /// Set by tests that expect startup to fail; any other failure panics.
+    pub expect_startup_failure: bool,
+    pub startup_failures: Vec<safe_cex_engine::VenueError>,
+    pub deactivations: usize,
 }
 impl Harness {
     pub fn started(options: Options) -> Self {
+        Self::started_expecting(options, false)
+    }
+    pub fn started_expecting(options: Options, expect_startup_failure: bool) -> Self {
         let mut h = Self {
             engine: Engine::new(BitgetFutures::new(options)),
             now: 1_000_000.0,
@@ -44,6 +51,9 @@ impl Harness {
             command_notices: vec![],
             progress: vec![],
             progress_at_request: vec![],
+            expect_startup_failure,
+            startup_failures: vec![],
+            deactivations: 0,
         };
         h.engine.start(h.now);
         h.collect();
@@ -110,12 +120,20 @@ impl Harness {
                     self.failures.push(error);
                 }
                 Action::Notice(Notice::StartupFailed { error }) => {
-                    panic!("unexpected Bitget startup failure: {error}")
+                    assert!(
+                        self.expect_startup_failure,
+                        "unexpected Bitget startup failure: {error}"
+                    );
+                    self.startup_failures.push(error);
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 Action::Notice(Notice::Deactivate) => {
-                    panic!("unexpected Bitget account deactivation")
+                    assert!(
+                        self.expect_startup_failure,
+                        "unexpected Bitget account deactivation"
+                    );
+                    self.deactivations += 1;
                 }
             }
         }
