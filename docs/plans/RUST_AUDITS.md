@@ -480,8 +480,14 @@ Remaining resilience and completeness findings are independent of request parity
 - Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
   forever (`lib.rs:453,477,570,587`; strict `Pair`/`Daily` in `wire.rs:118-143`); a
   tickers failure also blocks the private start (`lib.rs:541`). TS skips such rows.
-- Medium: one unmappable positions/orders row keeps the previous snapshot forever
-  (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
+- Medium: ~~one unmappable position row holds all financial peers and absence
+  forever~~. Rejected native symbols retain their cached hedge legs, settings and
+  REST routing IDs; valid peers and explicitly closed zero rows advance after a
+  complete envelope. Unknown identities hold absence, known duplicate conflicts
+  quarantine their whole symbol, and partial mode mixes remain atomic. Partial
+  initial reads cannot establish readiness or prove trading prerequisites.
+  Regular/TP-SL order rows still hold the whole order snapshot on a malformed peer;
+  native raw-family retention remains a separate open repair.
 - Medium: every WS position/order/tpsl event bumps the snapshot generation and the
   in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
   events do not update positions; under steady activity positions never commit.

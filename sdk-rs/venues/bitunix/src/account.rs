@@ -7,7 +7,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
 pub const POSITIONS: &str = "/api/v1/futures/position/get_pending_positions";
@@ -21,17 +21,79 @@ pub enum Axis {
     Orders,
     Tpsl,
 }
+#[derive(Default)]
+pub struct RejectedPositionRows {
+    keys: HashSet<String>,
+    unidentified: bool,
+    overflowed: bool,
+}
+impl RejectedPositionRows {
+    fn reject(&mut self, key: Option<String>) {
+        match key {
+            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
+                self.keys.insert(key);
+            }
+            Some(_) => {
+                self.unidentified = true;
+                self.overflowed = true;
+            }
+            None => self.unidentified = true,
+        }
+    }
+    fn holds(&self, symbol: &str) -> bool {
+        self.unidentified || self.keys.contains(symbol)
+    }
+    fn conflicts(&self, symbol: &str) -> bool {
+        self.overflowed || self.keys.contains(symbol)
+    }
+    pub(crate) fn any(&self) -> bool {
+        self.unidentified || !self.keys.is_empty()
+    }
+}
+pub struct PositionAdmission {
+    id: String,
+    symbol: String,
+    route: String,
+    mode: PositionMode,
+}
 pub struct Read {
     pub axis: Axis,
     pub generation: u64,
     pub serial: u64,
     pub after: Option<u32>,
     pub positions: Vec<Position>,
+    pub position_rejected: RejectedPositionRows,
+    pub position_admitted: Vec<PositionAdmission>,
     pub identities: Vec<(String, String)>,
     pub orders: Vec<Order>,
     pub native: Vec<(String, NativeOrder)>,
     pub invalid: bool,
     pub baselines: Vec<(String, (f64, f64))>,
+}
+impl Read {
+    fn reject_position(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(
+                borrow,
+                default,
+                alias = "instId",
+                alias = "contract",
+                alias = "instrument"
+            )]
+            symbol: Str<'a>,
+        }
+        let key = serde_json::from_str::<Identity<'_>>(item)
+            .ok()
+            .filter(|v| !v.symbol.is_empty())
+            .map(|v| v.symbol.into_owned());
+        self.position_rejected.reject(key);
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "Bitunix malformed position row; keeping its cached scope",
+        );
+    }
 }
 #[derive(Clone, Default)]
 pub struct NativeOrder {
@@ -253,6 +315,8 @@ impl BitunixFutures {
             axis,
             generation: self.account.generations[axis.index()],
             positions: vec![],
+            position_rejected: Default::default(),
+            position_admitted: vec![],
             identities: vec![],
             orders: vec![],
             native: vec![],
@@ -461,7 +525,7 @@ impl BitunixFutures {
         let result = match read.axis {
             Axis::Positions => serde_json::from_str::<PositionRow<'_>>(item).map(|p| {
                 if p.symbol.is_empty() {
-                    read.invalid = true;
+                    read.reject_position(cx, item);
                     return;
                 }
                 let qty = p.quantity();
@@ -492,6 +556,12 @@ impl BitunixFutures {
                         .unwrap_or(MarginType::Cross),
                 };
                 let key = position_key(&p.symbol, side);
+                read.position_admitted.push(PositionAdmission {
+                    id: id.clone(),
+                    symbol: p.symbol.to_string(),
+                    route: key.clone(),
+                    mode,
+                });
                 if !p.position_id.is_empty() {
                     read.identities.push((key, p.position_id.to_string()));
                 }
@@ -549,13 +619,17 @@ impl BitunixFutures {
             Axis::Balance => return,
         };
         if result.is_err() {
-            read.invalid = true;
+            if read.axis == Axis::Positions {
+                read.reject_position(cx, item);
+            } else {
+                read.invalid = true;
+            }
         }
     }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        read: Read,
+        mut read: Read,
         response: Response<'_>,
     ) {
         if read.axis == Axis::Balance {
@@ -640,14 +714,77 @@ impl BitunixFutures {
                 }
             }
             Axis::Positions => {
+                if read.position_rejected.any() && !cx.store.loaded().positions {
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
+                        "Bitunix partial initial positions cannot establish readiness",
+                    );
+                    self.debounce(cx, Axis::Positions);
+                    return;
+                }
+                read.position_admitted
+                    .retain(|p| !read.position_rejected.conflicts(&p.symbol));
+                read.positions
+                    .retain(|p| !read.position_rejected.conflicts(&p.symbol));
+                let admitted_ids: HashSet<_> = read
+                    .position_admitted
+                    .iter()
+                    .map(|p| p.id.as_str())
+                    .collect();
+                let admitted_routes: HashSet<_> = read
+                    .position_admitted
+                    .iter()
+                    .map(|p| p.route.as_str())
+                    .collect();
+                let mut held: Vec<_> = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|p| {
+                        read.position_rejected.holds(&p.symbol)
+                            && !admitted_ids.contains(p.id.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if read.position_rejected.any() {
+                    let mut modes = read
+                        .position_admitted
+                        .iter()
+                        .map(|p| p.mode)
+                        .chain(held.iter().filter_map(|p| p.position_mode));
+                    if let Some(first) = modes.next()
+                        && modes.any(|mode| mode != first)
+                    {
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Bitunix partial positions disagree on position mode; keeping last snapshot");
+                        self.debounce(cx, Axis::Positions);
+                        return;
+                    }
+                }
+                let mut identities: HashMap<_, _> = read
+                    .identities
+                    .into_iter()
+                    .filter(|(key, _)| admitted_routes.contains(key.as_str()))
+                    .collect();
+                for (key, native) in &self.account.position_ids {
+                    let symbol = key
+                        .strip_suffix(":long")
+                        .or_else(|| key.strip_suffix(":short"));
+                    if symbol.is_some_and(|symbol| read.position_rejected.holds(symbol))
+                        && !admitted_routes.contains(key.as_str())
+                    {
+                        identities.insert(key.clone(), native.clone());
+                    }
+                }
                 for p in &read.positions {
                     cx.store.update_setting(&p.symbol, |s| {
                         s.leverage = p.leverage;
                         s.margin_type = p.margin_type;
                     });
                 }
-                self.account.position_ids = read.identities.into_iter().collect();
-                cx.store.set_positions(read.positions);
+                self.account.position_ids = identities;
+                held.extend(read.positions);
+                cx.store.set_positions(held);
                 self.read_axis(cx, Axis::Tpsl);
             }
             Axis::Orders | Axis::Tpsl => {

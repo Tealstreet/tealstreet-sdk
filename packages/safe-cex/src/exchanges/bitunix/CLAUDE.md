@@ -733,3 +733,13 @@ After a confirmed write, a later rejection cannot claim the whole command was
 rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
+
+Rust position snapshots isolate typed malformed rows by the native symbol (exact
+existing aliases/case), retaining both cached hedge legs and REST routing metadata
+for a rejected symbol. Unknown row identities hold absence, while valid rows may
+replace their own IDs, including explicit zero closes. Known bad/valid duplicates
+quarantine the symbol in either order; bounded coverage overflow holds everything
+conservatively. A partial snapshot cannot mix held exposure with contradictory
+position modes, establish first readiness or qualify as a trading prerequisite.
+Only admitted rows update settings; WS routing hints and existing financial/side
+fallbacks stay unchanged. Order/TP-SL rows use a separate policy.

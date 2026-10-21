@@ -26,3 +26,10 @@ clean recovery and strict command prerequisites. Keep all existing account/
 execution/write-fence tests unchanged. Red/green proof, independent reviews,
 Bitunix/Binance native and strict checks, CI, actual intervening same-crate/shared
 integration and separate exact guard. Source hold1637 remains active.
+
+Verification: three corrected structurally invalid numeric-row regressions fail
+original source and pass fixed source; preserve existing numeric-string fallback
+instead of treating a legacy zero as a decoder error. Eight regression families
+pass, with 376 combined native tests and strict Clippy/fmt/bans. Independent plan
+and implementation reviews CLEAR. Source hold released after actual1637; real
+integration and refreshed focused checks required before publication/merge.
