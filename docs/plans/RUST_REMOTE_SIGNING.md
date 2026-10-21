@@ -55,8 +55,10 @@ Sources: SDK `origin/feat/rust-rewrite` `193077a0ae`; tealstreet-next
 ### Rust engine today
 
 - `RustEngineExchange` refuses keyless private accounts at startup outside a
-  short list (`rust.exchange.ts:596-612`), and no engine path forwards an HTTP
-  config or WS auth to a `RemoteSigner`.
+  short list (`rust.exchange.ts:606-621`), and no engine path forwards an HTTP
+  config or WS auth to a `RemoteSigner`. Coinbase is on that list but still
+  fails, inside `Credentials::new(key, "")` (`sdk-rs/venues/coinbase/src/lib.rs:68`);
+  Orderly fails its base58 key check.
 - **One sans-I/O signer exists: Paradex `payloadSigner`.** The engine parks the
   queued HTTP action as a `PendingSignature`, emits
   `Action::SignPayload { request, payload, timeout_ms }` (max 256 pending,
@@ -66,7 +68,7 @@ Sources: SDK `origin/feat/rust-rewrite` `193077a0ae`; tealstreet-next
 - Lighter's `lighterRemoteSigner` is only a read-only flag (no transaction
   signing); Paradex's `remoteSigner` path wraps the transport in TS
   (`paradex.signing.ts`), not the engine.
-- **B2 hedge (#1498).** `runsOnRustEngine` keeps every keyless remote-signed
+- **B2 hedge (#1498, open at this writing).** `runsOnRustEngine` keeps every keyless remote-signed
   account on the TS venue, and a direct engine refuses it with a clear reason.
   That keeps every **opt-in** venue working through cutover with no port. It
   cannot help the 9 **default-Rust** names, whose TS classes are deleted:
@@ -76,9 +78,10 @@ Sources: SDK `origin/feat/rust-rewrite` `193077a0ae`; tealstreet-next
 
 ## Venue signing inventory
 
-HTTP scheme and WS auth as the TS venue signs them on master; "engine sign
-sites" counts `sign::` uses in the Rust venue (a proxy for how many request
-builders a port touches).
+HTTP scheme and WS auth as the TS venue signs them on master. "Engine sign
+sites" is a raw `sign::` grep in the Rust venue, imports and test modules
+included, so it only indicates size (OKX's 1 is an import; Binance's 8 is 3 real
+uses).
 
 | Family (names) | HTTP signing | Private WS auth | Engine sign sites | Port shape |
 | --- | --- | --- | --- | --- |
@@ -87,8 +90,8 @@ builders a port touches).
 | okx (4 names) | HMAC-SHA256 base64, ISO timestamp + passphrase | `base64` (private + business) | 1 | simple |
 | bitget (3 names) | HMAC-SHA256 base64 + passphrase | `base64` | 8 | simple |
 | blofin | HMAC-SHA256 hex → base64 + nonce | `hex-base64` | 3 | simple |
-| mexc, phemex, woo, bitrue, bingx, kucoin (+spot), cryptocom, weex | HMAC-SHA256 variants | listenKey/token over REST, `hex`, or local secret today (cryptocom, weex private WS need a local secret) | 4-14 each | simple, WS gaps |
-| kraken (+spot) | HMAC-SHA512 over SHA256(nonce+body), base64 secret | `kraken-challenge` (venue override) | 12 | simple + custom WS |
+| mexc, phemex, woo, bitrue, bingx, kucoin (+spot), cryptocom, weex | HMAC-SHA256 variants | listenKey/token over REST, `hex`, or local secret today (cryptocom, weex private WS need a local secret) | 4-22 each | simple, WS gaps |
+| kraken (+spot) | HMAC-SHA512 over SHA256(nonce+body), base64 secret | `kraken-challenge` (venue override) | 14 | simple + custom WS |
 | apexomni | HMAC base64 + local Stark seed for orders | `apexomni-base64` | 24 | hard: Stark order signature is local |
 | asterdex | v1 HMAC hex; v3 EIP-712 | none | 13 | v1 simple; v3 hard |
 | backpack | ed25519 over sorted params + window | local secret today | 9 | medium |
@@ -127,9 +130,10 @@ The port keeps today's wire protocol, so neither exchange-server's
    `orderly-timestamp` at sign time from its synced clock (`virtualClock`
    re-sync, NX `signingHost.ts:39-72`). Nonce venues (Hyperliquid, Lighter) keep
    choosing the nonce on the server engine and send it inside the unsigned body,
-   so ordering stays server-side. A sign can take up to 15 s of a 20 s
-   `recvWindow` (Binance/Bybit TS; the Rust Binance account path uses 5 s, which
-   must be widened for hosted accounts or signing will expire requests).
+   so ordering stays server-side. A sign can take up to 15 s of the 20 s
+   `recvWindow` both stacks use for Binance/Bybit REST (`binance/src/sign.rs:5`).
+   The one tight window is Binance spot's user-data WS auth at 5 s (Rust
+   `account.rs:2364`, TS `USER_DATA_RECV_WINDOW`), already the case on master.
 4. **Timeouts.** The command deadline includes signing; the HTTP request is
    re-emitted with the remaining budget, as Paradex does. Signing work counts
    against `SIGN_TIMEOUT_MS` on the server.
@@ -170,7 +174,7 @@ signer that is a pure function of the request and a timestamp.
 | cryptocom, weex, backpack (private WS needs a local secret today) | 1-1.5 each | WS auth path is new |
 | hyperliquid (+spot), asterdex v3, grvt, apexomni (Stark) | 2-3 each | signature or seed inside the body |
 | lighter | 3+ | tx signing; read-only today on both stacks |
-| **Full port** | **~35-45** | plus a hosted soak on exchange-server |
+| **Full port** | **~30-45** | plus a hosted soak on exchange-server |
 
 ## Coinbase and Orderly: restore TS vs port first
 
@@ -179,9 +183,9 @@ before cutover. Two options:
 
 | | (a) Restore TS Coinbase/Orderly as keyless-only venues | (c) Port remote signing for Coinbase and Orderly first |
 | --- | --- | --- |
-| What | Promote the TS copies under `__tests__/reference/{coinbase,orderly}` (they already compile against landing and are close to master: Coinbase +51/−11 lines, Orderly ~170 bytes) back to venue modules. `createExchange`/`ExchangeWorker` load them for keyless remote-signed accounts on those names; `RustEngineExchange.signHttpRequest`/`signWsAuth` for those names delegate to a lazily built TS instance, so the browser signs as on master | Shared core (rows 1-2 of the design) plus the Coinbase and Orderly signer splits |
+| What | Restore master's TS venue files (their imports all resolve on landing; the `__tests__/reference` copies are not the source, since they carry replay-only patches such as Orderly's ungated broker-suffixed market ids). `createExchange`/`ExchangeWorker` load them for keyless remote-signed accounts on those names through an options-aware loader (`exchanges/hostedSigningVenues.ts`); `RustEngineExchange.signHttpRequest`/`signWsAuth` for those names delegate to a lazily built TS instance, so the browser signs as on master | Shared core (rows 1-2 of the design) plus the Coinbase and Orderly signer splits |
 | tealstreet-next change | none | none |
-| Effort | ~2 days | ~8-10 days |
+| Effort | ~2-2.5 days (React Native unaffected: the 9 names are not offered on mobile) | ~8.5-11 days |
 | Risk | Low: hosted users get master's code path back. Cost: two implementations of these venues until the port or session keys land, and the frozen references must stay separate from the live copies | Moderate: new money-path signing protocol, first shipped on two venues; needs a hosted soak |
 | Thrown away later | All of it, when the engine signs remotely or session keys land | Nothing if the full port proceeds; the shared core is discarded if session keys replace remote signing |
 
