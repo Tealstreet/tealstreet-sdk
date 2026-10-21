@@ -771,7 +771,7 @@ impl Kucoin {
             }
             let job = self.trading.jobs.remove(&command).unwrap();
             match job.error {
-                None => cx.done(command, Ok(json(&job.ids))),
+                None => cx.done(command, json(&job.ids)),
                 Some(mut error) => {
                     if (job.effective || !job.ids.is_empty())
                         && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))

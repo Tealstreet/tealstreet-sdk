@@ -277,7 +277,7 @@ fn candle_ranges_are_not_truncated_without_an_explicit_limit() {
         .find_map(|a| {
             if let Action::Notice(safe_cex_engine::Notice::CommandDone {
                 command: 17,
-                result: Ok(json),
+                result: json,
             }) = a
             {
                 Some(json)

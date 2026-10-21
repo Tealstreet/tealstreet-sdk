@@ -17,7 +17,10 @@ fn result(e: &mut Engine<Kraken>) -> Result<Value, String> {
             Action::Notice(Notice::CommandDone {
                 command: 91,
                 result,
-            }) => Some(result.map(|s| serde_json::from_str(&s).unwrap())),
+            }) => Some(Ok(serde_json::from_str(&result).unwrap())),
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("query completion")
@@ -292,7 +295,6 @@ fn saturated_descending_ledger_returns_the_newest_page_marked_truncated() {
             }) => Some(result),
             _ => None,
         })
-        .expect("query completion")
         .expect("truncated, not failed");
     let rows: Vec<Value> = serde_json::from_str(&rows).unwrap();
     assert!(!rows.is_empty(), "the cash legs read are returned");
@@ -496,7 +498,7 @@ fn concurrent_history_queries_keep_their_own_range_and_completion() {
         a,
         Action::Notice(Notice::CommandDone {
             command: 92,
-            result: Ok(_)
+            result: _
         })
     )));
     answer(&mut e, &r, "fills", vec![fill("1", "2023-11-14T22:13:20Z")]);

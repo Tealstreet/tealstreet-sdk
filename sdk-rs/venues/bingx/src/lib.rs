@@ -1015,10 +1015,10 @@ impl Venue for Bingx {
                 valid: true,
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(
-                    command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
-                )
+                match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
             }
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
@@ -1071,7 +1071,7 @@ impl Venue for Bingx {
             }
             Pending::Candles { command, .. } => {
                 cx.command_error(command, error);
-                cx.done(command, Err(error.into()));
+                cx.fail(command, error);
                 return;
             }
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
@@ -1221,11 +1221,11 @@ impl Venue for Bingx {
                 to_ms,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("unknown market {symbol}")));
+                    cx.fail(command, format!("unknown market {symbol}"));
                     return;
                 };
                 let Some(step) = interval_ms(interval) else {
-                    cx.done(command, Err(interval.unsupported("BingX")));
+                    cx.fail(command, interval.unsupported("BingX"));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1235,7 +1235,7 @@ impl Venue for Bingx {
                     end - step * f64::from(limit.unwrap_or(500).min(1500))
                 };
                 if !start.is_finite() || !end.is_finite() || start > end {
-                    cx.done(command, Err("invalid candle time range".into()));
+                    cx.fail(command, "invalid candle time range");
                     return;
                 }
                 let params = Params::new()

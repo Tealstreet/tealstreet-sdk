@@ -40,7 +40,9 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
         &envelope(r#"{"ordId":"1234","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1234\"]")));
+    assert!(actions(&mut e).iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1234\"]")
+    ));
 }
 
 #[test]
@@ -59,10 +61,10 @@ fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
             ],
         );
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 
@@ -110,7 +112,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"3","sCode":"0","sMsg":""}"#),
         8.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1\",\"2\",\"3\"]")));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1\",\"2\",\"3\"]")));
 }
 
 #[test]
@@ -145,10 +147,10 @@ fn lost_write_response_never_retries() {
         !out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 fn stored(id: &str, kind: safe_cex_engine::model::OrderType) -> safe_cex_engine::model::Order {
@@ -217,10 +219,10 @@ fn negative_protective_amount_never_turns_into_close_all() {
         )],
     );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -302,10 +304,10 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
     );
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 #[test]
@@ -344,10 +346,10 @@ fn market_and_terminal_amends_are_rejected_before_writes() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 
@@ -425,7 +427,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     let out = ack(&mut e, a, true);
     assert!(
         out.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(_), .. })))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
     );
 }
 
@@ -454,10 +456,10 @@ fn replacement_never_runs_after_cancellation_rejection() {
     );
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
@@ -576,10 +578,10 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
         "write must not be retried"
     );
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert!(
         !e.store()
             .setting("BTCUSDT")
@@ -602,7 +604,7 @@ fn positive_dust_protection_rejects_the_whole_batch_before_writes() {
             ],
         );
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("too small"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("too small"))));
     }
 }
 
@@ -648,7 +650,7 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("execution price"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("execution price"))));
         assert_eq!(e.store().order(id), Some(&original));
     }
 }
@@ -671,8 +673,8 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
         );
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         assert!(out.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { result: Err(message), .. })
-                if message.contains("only on Bybit"))));
+            Action::Notice(Notice::CommandFailed { error: message, .. })
+                if message.legacy_text().contains("only on Bybit"))));
     }
 }
 
@@ -779,13 +781,10 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
         );
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 11,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 11, .. })))
+        );
     }
 }
 
@@ -845,7 +844,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
         a,
         Action::Notice(Notice::CommandDone {
             command: 2,
-            result: Ok(_)
+            result: _
         })
     )));
 }
@@ -867,13 +866,11 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
         r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 1,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
     e.handle(
         7.0,
         Event::Command(Command::CancelSymbolOrders {
@@ -1028,13 +1025,12 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                 expected,
                 "{status}: {body}"
             );
-            assert!(out.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandDone {
-                    command: 81,
-                    result: Err(_)
-                })
-            )));
+            assert!(
+                out.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 81, .. })
+                ))
+            );
             assert!(
                 !out.iter()
                     .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
@@ -1118,13 +1114,10 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
             e.store().order("rejected").unwrap().status,
             OrderStatus::Open
         );
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 82,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 82, .. })))
+        );
     }
 }
 
@@ -1172,8 +1165,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("456") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -1205,7 +1198,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
 }
 
@@ -1240,7 +1233,7 @@ fn fetch_leverage_reads_flat_symbol_cross_leverage_into_settings() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: Ok(s) }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: s }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 25.0);
 }
 
@@ -1262,13 +1255,11 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
         r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 8,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+    );
     e.handle(
         7.0,
         Event::Command(Command::FetchLeverage {
@@ -1276,13 +1267,11 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
             symbol: "NOPE".into(),
         }),
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 9,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. })))
+    );
 }
 
 /// A ready account plus every action emitted after its config reply.
@@ -1474,7 +1463,7 @@ fn leverage_read_survives_unrelated_private_pushes() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"30"}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: Ok(s) }) if s.contains("30.0"))));
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: s }) if s.contains("30.0"))));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
 }
 

@@ -270,11 +270,11 @@ impl KrakenSpot {
             let job = self.trading.active.take().unwrap();
             cx.done(
                 job.command,
-                Ok(if job.cancel {
+                if job.cancel {
                     "null".into()
                 } else {
                     serde_json::to_string(&job.ids).unwrap()
-                }),
+                },
             );
             self.trade_next(cx);
             return;
@@ -415,11 +415,11 @@ impl KrakenSpot {
                 self.enqueue(cx, *command, steps, true)
             }
             Command::FetchAccount { command } => self.balance_read(cx, Some(*command)),
-            Command::FetchOrderBook { command, .. } => cx.done(
+            Command::FetchOrderBook { command, .. } => cx.fail(
                 *command,
-                Err("Kraken Spot order book snapshots use subscriptions".into()),
+                "Kraken Spot order book snapshots use subscriptions",
             ),
-            Command::FetchLeverage { command, .. } => cx.done(*command, Ok("null".into())),
+            Command::FetchLeverage { command, .. } => cx.done(*command, "null".into()),
             Command::SetLeverage { command, .. }
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. }
@@ -431,13 +431,12 @@ impl KrakenSpot {
             ),
             Command::Query { command, query } => match query {
                 Query::OrderByClientId { .. } => {
-                    cx.done(*command, Ok(r#"{"found":false,"definitive":false}"#.into()))
+                    cx.done(*command, r#"{"found":false,"definitive":false}"#.into())
                 }
-                Query::PublicTrades { .. } => cx.done(
-                    *command,
-                    Err("Kraken Spot public trades are not implemented".into()),
-                ),
-                _ => cx.done(*command, Ok("[]".into())),
+                Query::PublicTrades { .. } => {
+                    cx.fail(*command, "Kraken Spot public trades are not implemented")
+                }
+                _ => cx.done(*command, "[]".into()),
             },
             _ => return false,
         }

@@ -254,22 +254,16 @@ impl TxFlow {
                 kind.clone(),
             ),
             Query::PublicTrades { .. } => {
-                cx.done(command,Err("TxFlow does not document a REST public trades history query; use the trades stream".into()));
+                cx.fail(command, "TxFlow does not document a REST public trades history query; use the trades stream");
                 return;
             }
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("TxFlow indexed lookup cannot prove non-placement".into()),
-                );
+                cx.fail(command, "TxFlow indexed lookup cannot prove non-placement");
                 return;
             }
         };
         if !self.options.testnet || self.user().is_none() {
-            cx.done(
-                command,
-                Err("TxFlow testnet account identity required".into()),
-            );
+            cx.fail(command, "TxFlow testnet account identity required");
             return;
         }
         if from
@@ -279,17 +273,14 @@ impl TxFlow {
             || from.zip(to).is_some_and(|(a, b)| a > b)
             || limit == Some(0)
         {
-            cx.done(command, Err("Invalid TxFlow history range or limit".into()));
+            cx.fail(command, "Invalid TxFlow history range or limit");
             return;
         }
         if symbol
             .as_ref()
             .is_some_and(|s| self.historical_assets.get(s).and_then(|id| *id).is_none())
         {
-            cx.done(
-                command,
-                Err("Unknown or ambiguous TxFlow history symbol".into()),
-            );
+            cx.fail(command, "Unknown or ambiguous TxFlow history symbol");
             return;
         }
         let mut request = Request {
@@ -321,17 +312,14 @@ impl TxFlow {
             && (request.symbol.is_some()
                 || (!request.include("deposit") && !request.include("withdraw")))
         {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         self.history_page(cx, request);
     }
     fn history_page(&self, cx: &mut Cx<'_, Pending>, request: Request) {
         let Some(user) = self.user() else {
-            cx.done(
-                request.command,
-                Err("TxFlow account identity required".into()),
-            );
+            cx.fail(request.command, "TxFlow account identity required");
             return;
         };
         let kind = match request.kind {
@@ -594,7 +582,7 @@ impl TxFlow {
         let page = match valid {
             Ok(p) => p,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.fail(r.command, e);
                 return;
             }
         };
@@ -609,9 +597,9 @@ impl TxFlow {
                 return;
             }
             OffsetStep::Stalled(_) => {
-                cx.done(
+                cx.fail(
                     r.command,
-                    Err("Incomplete TxFlow history: stalled page or offset cap".into()),
+                    "Incomplete TxFlow history: stalled page or offset cap",
                 );
                 return;
             }
@@ -648,17 +636,17 @@ impl TxFlow {
         r.rows.truncate(r.limit);
         cx.done(
             r.command,
-            Ok(format!(
+            format!(
                 "[{}]",
                 r.rows
                     .iter()
                     .map(|r| r.json.as_str())
                     .collect::<Vec<_>>()
                     .join(",")
-            )),
+            ),
         );
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.done(r.command, Err(error.into()));
+        cx.fail(r.command, error);
     }
 }

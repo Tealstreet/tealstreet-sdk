@@ -516,7 +516,7 @@ impl WeexFutures {
                     self.book_failed(cx, &symbol);
                 }
             }
-            Task::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Task::Candles { command, .. } => cx.fail(command, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -916,7 +916,7 @@ impl Venue for WeexFutures {
             }
             Task::Candles { command, mut rows } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).expect("candles")));
+                cx.done(command, serde_json::to_string(&rows).expect("candles"));
             }
         }
     }
@@ -1065,7 +1065,7 @@ impl Venue for WeexFutures {
                 to_ms,
             } => {
                 if !interval(i, false) {
-                    cx.done(command, Err(i.unsupported("WEEX")));
+                    cx.fail(command, i.unsupported("WEEX"));
                     return;
                 }
                 let historical = from_ms.is_some() || to_ms.is_some();

@@ -558,7 +558,7 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     e.drain_actions().for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: Ok(ids) }) if ids == "[]")));
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
     assert!(http(actions).is_empty());
 }
 
@@ -622,7 +622,7 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
         response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
         let actions = e.drain_actions().collect::<Vec<_>>();
         if status == "FILLED" {
-            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: Ok(ids) }) if ids == "[]")));
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
             assert!(http(actions).is_empty());
         } else {
             assert_eq!(form(&http(actions).remove(0))["size"], "2");

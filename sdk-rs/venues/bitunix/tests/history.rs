@@ -5,12 +5,10 @@ use serde::Deserialize;
 use support::*;
 fn done(e: &mut TestEngine) -> Result<String, String> {
     e.drain_actions()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
+            _ => None,
         })
         .unwrap()
 }
@@ -217,8 +215,8 @@ fn client_order_lookup_rejects_without_a_request_or_panic() {
     );
     assert!(actions.iter().any(|action| matches!(
         action,
-        Action::Notice(Notice::CommandDone { command: 8, result: Err(error) })
-            if error == "Bitunix client order lookup is not supported by the Rust engine"
+        Action::Notice(Notice::CommandFailed { command: 8, error })
+            if error.legacy_text() == "Bitunix client order lookup is not supported by the Rust engine"
     )));
 }
 
@@ -279,6 +277,6 @@ fn an_id_free_order_page_never_counts_as_paging_progress() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a,Action::Notice(Notice::CommandDone {result:Ok(s),..}) if s=="[]"))
+            .any(|a| matches!(a,Action::Notice(Notice::CommandDone {result:s,..}) if s=="[]"))
     );
 }
