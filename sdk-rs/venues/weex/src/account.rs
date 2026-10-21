@@ -1015,6 +1015,80 @@ impl WeexFutures {
     }
 }
 
+pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Task::Account(r) = task else {
+        return None;
+    };
+    Some(match r.kind {
+        Kind::Balance => Balance,
+        Kind::Positions => Positions,
+        Kind::Normal | Kind::Algo => Orders,
+        Kind::Config | Kind::Metadata => Settings,
+    })
+}
+impl WeexFutures {
+    /// One endpoint's rejection holds back its scope siblings' acceptance.
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let outcome = self.account_auth_evidence(pending, response);
+        let Task::Account(r) = &pending.task else {
+            return outcome;
+        };
+        match r.kind {
+            Kind::Normal => self.orders_auth.report(0, outcome),
+            Kind::Algo => self.orders_auth.report(1, outcome),
+            Kind::Config => self.settings_auth.report(0, outcome),
+            Kind::Metadata => self.settings_auth.report(1, outcome),
+            Kind::Balance | Kind::Positions => outcome,
+        }
+    }
+    fn account_auth_evidence(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Task::Account(r) = &pending.task else {
+            return None;
+        };
+        if r.cycle != self.account.cycle {
+            return None;
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Code {
+            Number(i64),
+            Text(String),
+        }
+        #[derive(Deserialize)]
+        struct Evidence {
+            code: Code,
+        }
+        if let Ok(e) = serde_json::from_str::<Evidence>(response.body) {
+            let code = match e.code {
+                Code::Number(n) => Some(n),
+                Code::Text(s) => s.parse().ok(),
+            };
+            if matches!(code, Some(40006 | 40009 | 40012 | 40014 | 40018)) {
+                return Some(Rejected);
+            }
+            return None;
+        }
+        if !(200..300).contains(&response.status) || pending.invalid {
+            return None;
+        }
+        let valid = match r.kind {
+            Kind::Metadata => serde_json::from_str::<AccountConfig>(response.body).is_ok(),
+            _ => serde_json::from_str::<Vec<&RawValue>>(response.body).is_ok(),
+        };
+        valid.then_some(Accepted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

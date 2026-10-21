@@ -1,3 +1,5 @@
+import type { AccountAuthResult } from '@tealstreet/safe-cex-wasm/host';
+
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 
 /** The standard WebSocket surface; no Node-specific socket implementation is required. */
@@ -17,8 +19,11 @@ export type NativeFrameSocketFactory = (url: string, protocols: string[]) => Nat
 export interface NativeFrameSessionSink {
   /** Delivery is serial, and commands remain gated until the snapshot delivery completes. */
   onFrame(buffer: ArrayBuffer, metadata: { snapshot: boolean }): void | Promise<void>;
-  /** Native progress/done/error/log/deactivate JSON, retaining caller command IDs and identity strings. */
+  /** Native notices, including accountAuth, retaining their original JSON. */
   onNotice(rawJson: string): void | Promise<void>;
+  /** Optional typed account evidence, delivered before its raw onNotice callback.
+   * Scoped to this connection; it never belongs to a pending command. */
+  onAccountAuth?(result: AccountAuthResult): void | Promise<void>;
   /** Called once, including explicit close. The error never contains connection credentials. */
   onClose(error: Error): void;
 }
@@ -41,9 +46,11 @@ export interface NativeFrameSessionOptions {
 }
 
 type Limits = Required<Pick<NativeFrameSessionOptions, 'connectTimeoutMs' | 'maxQueuedMessages' | 'maxQueuedBytes' | 'maxFrameBytes' | 'maxCommandBytes' | 'maxBufferedAmount'>>;
-type Delivery = { bytes: number } & ({ buffer: ArrayBuffer; snapshot: boolean } | { text: string });
+type Delivery = { bytes: number } & ({ buffer: ArrayBuffer; snapshot: boolean } | { text: string; auth?: AccountAuthResult });
 
 const PROTOCOL = 'safe-cex-frame.v1';
+// Opts in to accountAuth notices; servers that predate it ignore the offer.
+const ACCOUNT_AUTH_PROTOCOL = 'safe-cex-frame.account-auth';
 const encoder = new TextEncoder();
 const error = () => new Error('Native frame session closed');
 const invalid = () => new Error('Invalid native frame session configuration');
@@ -51,10 +58,18 @@ const uint32 = (value: unknown) => Number.isInteger(value) && Number(value) >= 0
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every((key) => allowed.includes(key));
 
-function validateNotice(text: string): void {
+function validateNotice(text: string): AccountAuthResult | undefined {
   const value: unknown = JSON.parse(text);
   if (!record(value)) throw error();
   switch (value.type) {
+    case 'accountAuth':
+      if (keys(value, ['type', 'credential', 'scope', 'outcome'])
+        && (value.credential === 'primary' || value.credential === 'secondary')
+        && typeof value.scope === 'string' && ['account', 'balance', 'orders', 'positions', 'settings'].includes(value.scope)
+        && (value.outcome === 'accepted' || value.outcome === 'rejected')) {
+        return Object.freeze({ credential: value.credential, scope: value.scope as AccountAuthResult['scope'], outcome: value.outcome });
+      }
+      break;
     case 'commandError':
       if (keys(value, ['type', 'command', 'message']) && uint32(value.command) && typeof value.message === 'string') return;
       break;
@@ -99,7 +114,7 @@ function configuration(options: NativeFrameSessionOptions): { url: string; limit
     const url = new URL(options.url);
     if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.href.includes('?') || url.href.includes('#') || !/^\/accounts\/[a-zA-Z0-9_-]{1,128}$/.test(url.pathname)) throw invalid();
     if (typeof options.token !== 'string' || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(options.token)) throw invalid();
-    if (!options.sink || typeof options.sink.onFrame !== 'function' || typeof options.sink.onNotice !== 'function' || typeof options.sink.onClose !== 'function' || (options.socketFactory !== undefined && typeof options.socketFactory !== 'function')) throw invalid();
+    if (!options.sink || typeof options.sink.onFrame !== 'function' || typeof options.sink.onNotice !== 'function' || typeof options.sink.onClose !== 'function' || (options.sink.onAccountAuth !== undefined && typeof options.sink.onAccountAuth !== 'function') || (options.socketFactory !== undefined && typeof options.socketFactory !== 'function')) throw invalid();
     if (options.signal !== undefined && (typeof options.signal.aborted !== 'boolean' || typeof options.signal.addEventListener !== 'function' || typeof options.signal.removeEventListener !== 'function')) throw invalid();
     const limits: Limits = {
       connectTimeoutMs: options.connectTimeoutMs ?? 10_000,
@@ -204,7 +219,7 @@ export class NativeFrameSession {
     if (this.signal?.aborted) { this.close(); return; }
     this.timer = setTimeout(() => this.close(), this.limits.connectTimeoutMs);
     try {
-      const socket = factory(url, [PROTOCOL, `bearer.${token}`]);
+      const socket = factory(url, [PROTOCOL, ACCOUNT_AUTH_PROTOCOL, `bearer.${token}`]);
       // An injected factory can synchronously abort the owning downstream session.
       // Teardown may therefore have happened before a socket was available to close.
       if (this.isClosed) {
@@ -239,8 +254,8 @@ export class NativeFrameSession {
       if (typeof data === 'string') {
         const bytes = encoder.encode(data).byteLength;
         if (bytes > this.limits.maxFrameBytes || bytes > this.limits.maxQueuedBytes - this.queuedBytes) throw error();
-        validateNotice(data);
-        delivery = { text: data, bytes };
+        const auth = validateNotice(data);
+        delivery = { text: data, bytes, auth };
       } else {
         let buffer: ArrayBuffer;
         if (data instanceof ArrayBuffer) buffer = data;
@@ -280,7 +295,11 @@ export class NativeFrameSession {
             clearTimeout(this.timer);
             this.resolveConnected();
           }
-        } else await this.sink.onNotice(delivery.text);
+        } else {
+          if (delivery.auth) await this.sink.onAccountAuth?.(delivery.auth);
+          if (this.isClosed) return;
+          await this.sink.onNotice(delivery.text);
+        }
         if (this.isClosed) return;
         this.queuedMessages--;
         this.queuedBytes -= delivery.bytes;

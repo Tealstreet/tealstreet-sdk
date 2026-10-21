@@ -5,9 +5,11 @@
 // Clients open a WebSocket to the object and speak JSON:
 //   -> { op: 'start', venue, options }      options as WasmEngine takes them
 //   -> { op: 'command', id, command }       any EngineHost command
+//   -> { op: 'accountAuth' }                opts this client in to accountAuth evidence
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'event', level, code, message, fields }
 //      | { op: 'deactivate' } | { op: 'startupFailed', detail }
+//      | { op: 'accountAuth', credential, scope, outcome }  (opted-in clients only)
 //      levels are debug/info/warn/error; code is stable, message is display data
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
@@ -186,6 +188,8 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
       this.state = state;
       this.env = env;
       this.clients = new Set();
+      // Clients that predate accountAuth may reject an unknown op, so it is opt-in.
+      this.accountAuthClients = new Set();
       this.host = undefined;
       this.starting = undefined;
       this.timers = [];
@@ -227,6 +231,10 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         return;
       }
       if (!message || typeof message !== 'object' || Array.isArray(message)) return;
+      if (message.op === 'accountAuth') {
+        this.accountAuthClients.add(client);
+        return;
+      }
       if (message.op === 'start') {
         if (this.host || this.starting) {
           this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine is already started or starting' });
@@ -271,6 +279,9 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
                 this.notify(level === 'warn' || level === 'error', {
                   op: 'event', level, message, code, fields,
                 });
+              },
+              onAccountAuth: (result) => {
+                for (const optedIn of this.accountAuthClients) this.reply(optedIn, { op: 'accountAuth', ...result });
               },
             },
           );
@@ -327,6 +338,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
     /** The last client leaving stops the engine and drops its credentials. */
     leave(client) {
       this.clients.delete(client);
+      this.accountAuthClients.delete(client);
       if (this.clients.size > 0) return;
       this.starting = undefined;
       this.timers.forEach(clearInterval);
