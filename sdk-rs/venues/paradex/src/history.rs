@@ -253,11 +253,11 @@ impl History {
         if public_only && !matches!(query, Query::PublicTrades { .. }) {
             cx.done(
                 command,
-                Ok(if matches!(query, Query::OrderByClientId { .. }) {
+                if matches!(query, Query::OrderByClientId { .. }) {
                     "{\"found\":false,\"definitive\":false}".into()
                 } else {
                     "[]".into()
-                }),
+                },
             );
             return;
         }
@@ -268,7 +268,7 @@ impl History {
                 || client_order_id.chars().count() > 64
                 || client_order_id.contains(['\r', '\n']))
         {
-            cx.done(command, Err("invalid Paradex client order ID".into()));
+            cx.fail(command, "invalid Paradex client order ID");
             return;
         }
         let bounds = match &query {
@@ -284,11 +284,11 @@ impl History {
             .any(|v| !v.is_finite() || v < 0.)
             || matches!(bounds, (Some(a),Some(b)) if a>b)
         {
-            cx.done(command, Err("invalid Paradex history time range".into()));
+            cx.fail(command, "invalid Paradex history time range");
             return;
         }
         if matches!(query, Query::Fills { symbol: None, .. }) {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let rows = match query {
@@ -386,28 +386,22 @@ impl History {
         if from.into_iter().chain(to).any(|v| !v.is_finite())
             || matches!((from, to), (Some(a),Some(b)) if a>b)
         {
-            cx.done(
-                request.command,
-                Err("invalid Paradex history time range".into()),
-            );
+            cx.fail(request.command, "invalid Paradex history time range");
             return;
         }
         if !public && account.credentials().is_none() {
-            cx.done(
-                request.command,
-                Err("Paradex private auth is not initialized".into()),
-            );
+            cx.fail(request.command, "Paradex private auth is not initialized");
             return;
         }
         if let Some(symbol) = symbol {
             let Some(market) = cx.store.market(symbol) else {
                 cx.done(
                     request.command,
-                    Ok(if matches!(request.query, Query::OrderByClientId { .. }) {
+                    if matches!(request.query, Query::OrderByClientId { .. }) {
                         "{\"found\":false,\"definitive\":false}".into()
                     } else {
                         "[]".into()
-                    }),
+                    },
                 );
                 return;
             };
@@ -804,9 +798,12 @@ impl History {
                 })
             }
         };
-        cx.done(request.command, result.map_err(|e| e.to_string()));
+        match result.map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(request.command, data),
+            Err(error) => cx.fail(request.command, error),
+        };
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
 }

@@ -878,7 +878,13 @@ impl MexcFutures {
         };
         let Some(next) = job.steps.front() else {
             let job = self.trading.active.take().unwrap();
-            cx.done(job.command, json(&job.ids));
+            {
+                let result: Result<String, String> = json(&job.ids);
+                match result {
+                    Ok(data) => cx.done(job.command, data),
+                    Err(error) => cx.fail(job.command, error),
+                }
+            };
             self.advance_trade(cx);
             return;
         };

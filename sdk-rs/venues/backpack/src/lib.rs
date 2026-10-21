@@ -969,10 +969,8 @@ impl Venue for Backpack {
                 command,
                 rows,
                 invalid: false,
-            } => cx.done(command, Ok(serde_json::to_string(&rows).unwrap())),
-            Pending::Candles { command, .. } => {
-                cx.done(command, Err("Backpack invalid candles".into()))
-            }
+            } => cx.done(command, serde_json::to_string(&rows).unwrap()),
+            Pending::Candles { command, .. } => cx.fail(command, "Backpack invalid candles"),
             _ => cx.notice(
                 safe_cex_engine::Level::Error,
                 code::STREAM_MALFORMED,
@@ -989,7 +987,7 @@ impl Venue for Backpack {
                     .outcome(safe_cex_engine::Outcome::Unknown);
                 self.trade_failed(cx, request, error)
             }
-            Pending::History(request) => cx.done(request.command, Err(error.into())),
+            Pending::History(request) => cx.fail(request.command, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -998,7 +996,7 @@ impl Venue for Backpack {
             {
                 self.recover_book(cx, &symbol)
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
             Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
             Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
@@ -1105,7 +1103,7 @@ impl Venue for Backpack {
                 ..
             } => {
                 if !supported(interval) {
-                    cx.done(command, Err(interval.unsupported("Backpack")));
+                    cx.fail(command, interval.unsupported("Backpack"));
                     return;
                 }
                 let mut params: sign::Params = [

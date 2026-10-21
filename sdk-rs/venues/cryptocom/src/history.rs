@@ -213,11 +213,9 @@ impl Cryptocom {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, path, symbol, order_id, income_kind, from_ms, to_ms, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err(
-                        "Crypto.com client order lookup is not supported by the Rust engine".into(),
-                    ),
+                    "Crypto.com client order lookup is not supported by the Rust engine",
                 );
                 return;
             }
@@ -280,20 +278,17 @@ impl Cryptocom {
             ),
         };
         if !matches!(kind, Kind::Trades) && self.credentials.is_none() {
-            cx.done(command, Err("Crypto.com credentials are required".into()));
+            cx.fail(command, "Crypto.com credentials are required");
             return;
         }
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - 86_400_000.0);
         if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
-            cx.done(command, Err("Invalid history time range".into()));
+            cx.fail(command, "Invalid history time range");
             return;
         }
         let (Some(from_ns), Some(to_ns)) = (millis_ns(from), millis_ns(to)) else {
-            cx.done(
-                command,
-                Err("History time range exceeds nanosecond bounds".into()),
-            );
+            cx.fail(command, "History time range exceeds nanosecond bounds");
             return;
         };
         let request = Request {
@@ -325,7 +320,7 @@ impl Cryptocom {
             page_seen: vec![],
         };
         if request.limit == 0 || from_ns == to_ns {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         self.history_request(cx, request);
@@ -478,7 +473,7 @@ impl Cryptocom {
     }
     pub(crate) fn history_response(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         if request.invalid {
-            cx.done(request.command, Err("invalid history row".into()));
+            cx.fail(request.command, "invalid history row");
             return;
         }
         if !matches!(request.kind, Kind::Trades)
@@ -489,24 +484,21 @@ impl Cryptocom {
                 request.rows.truncate(request.limit);
                 cx.done(
                     request.command,
-                    Ok(serde_json::to_string(&request.rows).unwrap()),
+                    serde_json::to_string(&request.rows).unwrap(),
                 );
                 return;
             }
             if !request.exact_page {
-                cx.done(
+                cx.fail(
                     request.command,
-                    Err("Crypto.com history page omitted nanosecond cursors".into()),
+                    "Crypto.com history page omitted nanosecond cursors",
                 );
                 return;
             }
             let next = request.oldest.saturating_add(1);
             if request.oldest < request.from_ns { /* range exhausted */
             } else if next >= request.to_ns {
-                cx.done(
-                    request.command,
-                    Err("Crypto.com history cursor did not advance".into()),
-                );
+                cx.fail(request.command, "Crypto.com history cursor did not advance");
                 return;
             } else {
                 request.committed = request.rows.len();
@@ -524,7 +516,7 @@ impl Cryptocom {
         request.rows.truncate(request.limit);
         cx.done(
             request.command,
-            Ok(serde_json::to_string(&request.rows).unwrap()),
+            serde_json::to_string(&request.rows).unwrap(),
         );
     }
     pub(crate) fn history_failed(
@@ -553,7 +545,7 @@ impl Cryptocom {
             let timer = cx.set_timer(1000.0);
             self.history.waiting.insert(timer, request);
         } else {
-            cx.done(request.command, Err(error.into()));
+            cx.fail(request.command, error);
         }
     }
 }

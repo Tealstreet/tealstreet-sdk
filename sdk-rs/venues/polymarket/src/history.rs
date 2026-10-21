@@ -67,11 +67,11 @@ impl Polymarket {
                 limit,
             } => {
                 if limit == Some(0) {
-                    cx.done(command, Err("Invalid Polymarket order-book limit".into()));
+                    cx.fail(command, "Invalid Polymarket order-book limit");
                     return;
                 }
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err("Unknown Polymarket symbol".into()));
+                    cx.fail(command, "Unknown Polymarket symbol");
                     return;
                 };
                 let token = market.id.clone();
@@ -94,30 +94,33 @@ impl Polymarket {
                     user_id: &'a str,
                     affiliate_id: Option<&'a str>,
                 }
-                cx.done(
-                    command,
-                    serde_json::to_string(&Account {
+                {
+                    let result: Result<String, String> = serde_json::to_string(&Account {
                         user_id: self.address.as_deref().unwrap_or("unknown"),
                         affiliate_id: None,
                     })
-                    .map_err(|error| error.to_string()),
-                );
+                    .map_err(|error| error.to_string());
+                    match result {
+                        Ok(data) => cx.done(command, data),
+                        Err(error) => cx.fail(command, error),
+                    }
+                };
             }
             Command::FetchStpMode { command } | Command::SetStpMode { command, .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("Polymarket self-trade prevention settings are unsupported".into()),
+                    "Polymarket self-trade prevention settings are unsupported",
                 );
             }
             Command::FetchLeverage { command, .. } => {
-                cx.done(command, Ok(r#"{"buyLeverage":1,"sellLeverage":1}"#.into()))
+                cx.done(command, r#"{"buyLeverage":1,"sellLeverage":1}"#.into())
             }
-            Command::FetchMaxLeverage { command, .. } => cx.done(command, Ok("1".into())),
+            Command::FetchMaxLeverage { command, .. } => cx.done(command, "1".into()),
             Command::SetLeverage { command, .. }
             | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. } => cx.done(command, Ok("[]".into())),
+            | Command::SetPositionMode { command, .. } => cx.done(command, "[]".into()),
             Command::Query { command, query } => {
-                let result = match query {
+                let result: Result<String, String> = match query {
                     Query::OrderByClientId { .. } => {
                         Ok(r#"{"found":false,"definitive":false}"#.into())
                     }
@@ -132,7 +135,10 @@ impl Polymarket {
                         Err("Polymarket public trades are unsupported".into())
                     }
                 };
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
             }
             _ => unreachable!("only rare reads and immutable account settings"),
         }
@@ -169,6 +175,9 @@ impl Polymarket {
             };
             serde_json::to_string(&book).map_err(|error| error.to_string())
         })();
-        cx.done(command, result);
+        match result {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error),
+        };
     }
 }

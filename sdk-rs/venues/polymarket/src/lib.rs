@@ -656,7 +656,7 @@ impl Polymarket {
             }
             Err(e) => {
                 if let Some(command) = command {
-                    cx.done(command, Err(e));
+                    cx.fail(command, e);
                 } else {
                     cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e);
                 }
@@ -950,7 +950,7 @@ impl Venue for Polymarket {
             } => {
                 if invalid {
                     if let Some(c) = command {
-                        cx.done(c, Err("Invalid Polymarket price history".into()));
+                        cx.fail(c, "Invalid Polymarket price history");
                     }
                     return;
                 }
@@ -971,7 +971,14 @@ impl Venue for Polymarket {
                     rows.drain(..rows.len() - limit);
                 }
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    {
+                        let result: Result<String, String> =
+                            serde_json::to_string(&rows).map_err(|e| e.to_string());
+                        match result {
+                            Ok(data) => cx.done(c, data),
+                            Err(error) => cx.fail(c, error),
+                        }
+                    };
                 } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     for row in rows {
                         if row.timestamp > sub.last {
@@ -1122,7 +1129,7 @@ impl Venue for Polymarket {
             | Pending::Candles {
                 command: Some(c), ..
             } => {
-                cx.done(c, Err(error.into()));
+                cx.fail(c, error);
                 return;
             }
             Pending::Markets { .. } => Some(None),
@@ -1222,10 +1229,7 @@ impl Venue for Polymarket {
             Command::FetchOptionChain { command, .. }
             | Command::FetchOptionExpiries { command, .. }
             | Command::FetchAccountGreeks { command } => {
-                cx.done(
-                    command,
-                    Err("Options are not enabled on this account".into()),
-                );
+                cx.fail(command, "Options are not enabled on this account");
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1305,10 +1309,7 @@ impl Venue for Polymarket {
                 },
             ),
             Command::AmendOrderWithSymbol { command, .. } => {
-                cx.done(
-                    command,
-                    Err("Symbol-scoped amendment is unsupported".into()),
-                );
+                cx.fail(command, "Symbol-scoped amendment is unsupported");
             }
             command @ (Command::PlaceOrders { .. }
             | Command::CancelOrders { .. }

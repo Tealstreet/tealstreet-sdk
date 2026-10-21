@@ -114,7 +114,7 @@ impl Harness {
                 }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.command_notices.push((command, "done"));
-                    self.done.push((command, result))
+                    self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     self.done.push((command, Err(error.legacy_text())));

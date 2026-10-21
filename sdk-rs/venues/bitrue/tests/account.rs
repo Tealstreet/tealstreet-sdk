@@ -419,7 +419,7 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     );
     h.collect();
     h.reply("/account", POSITION);
-    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.as_ref().is_ok_and(|s|s.contains("\"buyLeverage\":25.0")))));
+    assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.contains("\"buyLeverage\":25.0"))));
     assert!(h.pending.iter().all(|r| r.method == Method::Get));
 }
 
@@ -880,7 +880,7 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
             expected
         );
         assert!(h.e.store().setting("E-BTC-USDT").is_none());
-        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: Ok(v) }) if v.parse::<f64>().ok() == Some(expected))));
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: v }) if v.parse::<f64>().ok() == Some(expected))));
     }
     for malformed in [
         r#"{"code":"0","data":{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":125}]}}"#,
@@ -910,13 +910,11 @@ fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() 
                 .max,
             75.0
         );
-        assert!(h.actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 52,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 52, .. })))
+        );
     }
     h.e.handle(
         h.now,
@@ -962,13 +960,11 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
             .max,
         100.0
     );
-    assert!(h.actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 61,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 61, .. })))
+    );
 }
 
 #[test]
@@ -1032,16 +1028,15 @@ fn leverage_bracket_failures_never_echo_private_transport_or_response_diagnostic
             .actions
             .iter()
             .filter_map(|action| match action {
-                Action::Notice(Notice::CommandDone {
-                    command: 62,
-                    result,
-                }) => Some(result),
+                Action::Notice(Notice::CommandFailed { command: 62, error }) => {
+                    Some(error.legacy_text())
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(completions.len(), 1);
         assert_eq!(
-            completions[0].as_ref().unwrap_err(),
+            completions[0],
             if transport_failure {
                 "Bitrue leverage bracket read failed"
             } else {
@@ -1105,7 +1100,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         assert_eq!(errors, [(91, expected), (92, expected)]);
         for owner in [91, 92] {
             let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command,..}) if *command==owner)).unwrap();
-            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command,result:Err(_)}) if *command==owner)).unwrap();
+            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed{command,..}) if *command==owner)).unwrap();
             assert!(error < done);
         }
         assert!(
@@ -1154,7 +1149,11 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
         if attempt < 3 {
             assert!(!h.actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandError { .. } | Notice::CommandDone { .. })
+                Action::Notice(
+                    Notice::CommandError { .. }
+                        | Notice::CommandDone { .. }
+                        | Notice::CommandFailed { .. }
+                )
             )));
             snapshot = h.take("/account");
         }
