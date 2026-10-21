@@ -710,6 +710,12 @@ writes before retrying` instead of `Timeout callMethodInWorker`.
 
 ### Incomplete history (#1542, #1554)
 
+SDK journal follow-up plan (2026-10-21): inspect the host-style incomplete marker
+before consuming income symbols/funding or folding fills. Reject flagged fills
+and symbol-scoped income; account-wide complete fills can still be folded while
+all flagged income enrichment is discarded. Add non-enumerable-marker regressions,
+run journal/typecheck/lint gates, and obtain independent review before CI/merge.
+
 **Open cutover work (B11), not a completed caller migration.** In the JS WASM
 host, a `history.incomplete` event with a pending `fields.command` marks that
 command's array result with non-enumerable `incomplete: true`. Currently Kraken
