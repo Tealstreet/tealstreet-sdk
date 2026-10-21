@@ -98,3 +98,18 @@ wasm's JavaScript crypto bindings before loading the engine, restricted to
 private Bitget Rust replay. Keep complete raw IDs in the comparison and
 leave production randomness unchanged. Native replays still use OS
 randomness; an explicit native host entropy hook is a separate follow-up.
+
+## Blofin phase
+
+Enable Blofin's virtual private clock without changing the authored tape,
+protocol validators or production behavior. Generate the unchanged CI fixture
+and use a fingerprint-matching CI engine for five focused private pairs.
+Inspect complete outputs, including client IDs, lifecycle checkpoints and
+transport receipts; compare all nonmetric fields within each implementation.
+Remove only exact unobserved declarations bound to this tape SHA, and review
+any new diagnostic before adding exact keys and a specific rationale.
+
+The existing matching sweep-branch flag supplies five private pairs in CI;
+normal jobs retain one. Require fresh two-case suite verification, independent
+review, full green head CI, a separate landing guard and an audited merge
+receipt before reporting the merge and moving to MEXC.
