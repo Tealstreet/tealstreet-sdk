@@ -138,6 +138,9 @@ JSON remains a source-build input, now consumed by the Cargo build script.
 The BingX overlap follow-up checks #1604 at `0d4f17a1bdd`, including its
 integration with the landed auth work; publication and read-return semantics
 are documented separately below.
+The rejected-row follow-up checks #1603 at `7fcd7193fe1`; Orderly margin-mode
+row isolation checks #1606 at `363139a6cc7`. Neither adds a caller API or wire
+revision; the observable retention and diagnostic rules are recorded below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -196,6 +199,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1524 / `b69285f990` | Private snapshots (batch-3 venues) isolate rejected rows while valid peers commit; stored rows protected by rejected identities remain visible, including Bitrue protective children and Kraken open orders. Unidentified rows prevent absence-based removal within their snapshot scope. Coded `row.skipped` / `snapshot.discarded` diagnostics use the existing event/health paths. No new caller shape; see [Private snapshot row isolation](#private-snapshot-row-isolation-1524). |
 | #1599 / `e7f0b3d36` | Rust construction rules are compiled from the shared JSON into a static table by Cargo `build.rs`, replacing runtime JSON decoding. B1 source builds still require the JSON input; compiled engines contain the table. TS rules, parity and caller options/eligibility are unchanged. |
 | #1604 / `0d4f17a1b` | BingX revision/query-generation races and reads issued during pending settings writes fence stale store publication while returning usable cached buy/sell rails, with validated-read fallback independently per missing rail. Overlap alone no longer fails the read or causes `null`; genuine read failures remain possible. Current reads retain atomic leverage/margin publication; caller APIs and write retry behavior stay unchanged. |
+| #1603 / `7fcd7193f` | Migrated Binance/Coinbase/WEEX/Kraken futures private snapshot order skips and Coinbase spot holding skips emit `row.skipped` at Error when no stored copy is retained, Warn when one is kept. Bounded identity caches suppress repeats but allow a prior Warn to escalate when its retained copy is lost; mapping/clean reads re-arm reporting. Store retention and caller shapes stay unchanged. |
+| #1606 / `363139a6c` | Orderly margin-mode lists retain a rejected symbol's old default while valid peers commit; an unidentified row protects the old defaults scope. Clean empty lists still clear, structural failures and settings-revision fences still hold, and this path emits Warn-level `row.skipped`. No new caller shape. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -457,6 +462,34 @@ suppressed until recovery; emitted levels vary by venue/path (several use Warn
 when retaining a stored copy and Error when none can be kept). Use code and
 level, not message matching or an assumed one-event-per-row count. The B9
 caller migration and snapshot collection requirements remain open.
+
+#### Rejected-row diagnostics and Orderly defaults (#1603, #1606)
+
+#1603 changes severity in the migrated Binance, Coinbase, WEEX and Kraken
+futures private snapshot order-rejection paths, plus Coinbase spot holdings.
+A skip that retains an eligible stored copy warns; a skip that retains none
+errors. Identity/symbol matching and terminal fences still decide whether a
+stored copy can actually be kept. This changes diagnostic severity, not the
+snapshot's retention policy, caller method shape or wire revision.
+
+Their bounded severity-aware identity caches suppress repeat reports. Within
+that cache window, a previously warned identity may escalate to Error once if
+its retained copy is lost; a mapped row or clean snapshot re-arms reporting.
+These events are not an exact count of rejected venue rows. Error-level
+`row.skipped` means missing/unrepresentable data, not an `auth.rejected` event;
+use the existing code-aware B9 integration and metadata-based duplicate handling.
+This severity policy is scoped to the migrated paths, not every venue skip.
+
+#1606 applies row isolation to Orderly's **default margin-mode cache**: a
+rejected row with a recoverable symbol retains that symbol's old default;
+an unidentified row protects the old defaults scope, while valid peers can
+still replace their entries. Valid empty lists clear the cache. Broker suffixes,
+empty mode meaning Cross and accepted duplicate last-wins behavior remain.
+Malformed/failed envelopes and settings-revision races still prevent replacement
+of the whole defaults map. This path reports fixed Warn-level `row.skipped`
+notices, including when no old default exists; it does not adopt #1603's
+Error-without-retention policy. Callers keep their APIs and can see valid peer
+margin defaults refresh without losing an unparseable symbol's previous value.
 
 #### Events and worker protocol
 
