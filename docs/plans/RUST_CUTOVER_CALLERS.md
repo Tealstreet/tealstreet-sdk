@@ -199,6 +199,8 @@ The settings/fill-identity batch checks Bitunix #1668 (`7fd70c13e34`) and
 WEEX #1670 (`ce906e1368e`) at their actual merges.
 The WEEX metadata-hook catch-up checks #1675 at `22c6c6133f2`; its incoming
 B8 and hook inventory updates are retained.
+The GRVT builder-error catch-up checks #1679 at `bcf9fc37afe`; the validated
+helper and required NX migration below use that actual merge.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -299,6 +301,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1668 / `7fd70c13e` | Bitunix per-symbol leverage/margin metadata and scoped auth/recovery use the current symbol attempt serial plus accepted-settings-write revision, so WS position-ID traffic no longer starves flat-symbol settings. Accepted leverage/margin/mode ACKs still fence older reads; caller APIs and command-owned prerequisites stay unchanged. |
 | #1670 / `ce906e136` | In-scope WEEX fill-history rows with parsed empty `id`/`tradeId`/`fillId` remain skipped without invented identity. Useful peers resolve with one per-query Warn `row.skipped` (`field: id`) and owned `history.incomplete`. Error-only logging retains the semantic marker, while the ordinary row diagnostic is suppressed. Strict parsing and method shapes remain; B11 consumers must not complete coverage for retained partial or flagged-empty rows. |
 | #1675 / `22c6c6133` | WEEX now reports `onReadAndMetadata`, so the existing ready private `updateSymbolMetadata(symbol)` hook performs a fresh native configuration read even for cached/flat symbols. Malformed reads reject while good rails remain; public-only skips private I/O. Explicit reads and caller arguments stay unchanged; await capability readiness and preserve ordinary hook rejection handling. |
+| #1679 / `bcf9fc37a` | Definitive GRVT builder refusals carry validated flat code/reason/raw caps through host errors and SDK command RPC. The SDK-root `builderAuthorizationOf(error)` helper works without class identity. **REQUIRED:** migrate NX's live class-only handler, preserving reason-specific modal/toast, cleanup/rethrow and approval reload. Upgrade sender/receiver together; keep the command's existing outcome and do not replay a write. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -1615,6 +1618,9 @@ also remains open. No NX source was changed by this audit.
 
 ## GRVT builder authorization failures: required caller migration
 
+**REQUIRED for cutover:** NX must migrate its live reauthorization handler;
+#1679 fixes SDK transport but does not implement this application change.
+
 Definitive native GRVT placement or amendment-preflight failures now expose
 `code: 'GRVT_BUILDER_UNAUTHORIZED'`, `reason: 'unauthorized' | 'cap-too-low'`,
 `requiredRaw: 300` and, for a low cap, `authorizedRaw`. The original message,
@@ -1628,7 +1634,24 @@ checks carry no approval record and must never open the reauthorization modal.
 Use the SDK-root `builderAuthorizationOf(error)` helper. It returns the validated
 code/reason/caps or `undefined`; code-only or message matching is insufficient.
 Keep the existing `GrvtBuilderUnauthorizedError` export for TS callers, but
-`instanceof` alone cannot recognize Rust or deserialized failures.
+`instanceof` alone cannot recognize Rust or deserialized failures. Import
+`builderAuthorizationOf` (and, if needed, `BuilderAuthorizationDetail`) from the
+SDK root, validate once, and read the returned record:
+
+```ts
+const approval = builderAuthorizationOf(error);
+if (!approval) return false;
+// Use approval.reason/requiredRaw/authorizedRaw in the existing modal path.
+```
+
+The helper accepts a positive uint32 `requiredRaw`; `unauthorized` has no
+`authorizedRaw`, while `cap-too-low` requires a uint32 cap below `requiredRaw`.
+Invalid/code-only records return `undefined`. Native #1679 sets the required
+cap to `300`. Preserve the command outcome: placement preflight retains
+`notSent`, while amendment
+inspection retains `unknown`, even though its regression sends no create/cancel
+write. Preserve the original error and normal outcome handling; do not replay
+the placement or amendment automatically.
 
 Read-only NX `65e086a3c9039a79e4c7e9f354aba31d8f83009e` findings:
 
@@ -1642,7 +1665,14 @@ The NX audit found whole-message hosted forwarding, but its audited embedded
 SDK sender/receiver dropped reason/caps. Upgrade the SDK sender and receiver
 together; downstream forwarding cannot repair fields already removed. Ordinary
 error-event telemetry does not open this modal. The native and SDK tests prove
-the transport contract, not deployed NX adoption. No NX source was edited.
+the transport contract, not deployed NX adoption. Both reasons now traverse the
+actual SDK sender and matching receiver under structured clone and JSON;
+`unauthorized` explicitly retains absence of `authorizedRaw`. Required NX proof
+still includes each placement catch reaching the reason-specific modal,
+malformed/unrelated failures remaining on their normal path, duplicate
+event/rejection handling, cleanup/rethrow and approval-triggered reload. The
+modal stores the raw caps but currently renders reason-based content rather
+than numeric caps. No NX source was edited.
 See [the implementation plan and regression scope](RUST_GRVT_BUILDER_ERROR.md).
 
 ## Ordered deletion plan
