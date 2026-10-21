@@ -455,9 +455,11 @@ per-venue canary holding the formerly circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### Bitunix
+
 - ~~Bitunix's query page-cap ownership omission~~ now carries the actual request
   command before partial completion, as do duplicate/nonadvancing-page markers.
   Failed pages reject rather than masquerading as complete empty/partial history.
+
 Originally reviewed on `feat/rust-bitunix` at `846f285d13`; #1309 merged as
 `3acf9e46392`. Paths below are relative to `sdk-rs/venues/bitunix/src`.
 Remaining resilience and completeness findings are independent of request parity.
