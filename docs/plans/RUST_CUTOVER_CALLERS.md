@@ -1524,16 +1524,6 @@ keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
 
-### WOO port-review warnings and confirmation
-
-Rust WOO keeps isolated exposure visible and logs one coded warning per symbol
-that isolated margin settings cannot be changed. Exhausted leverage readback
-reports an accepted write with unconfirmed setting and Unknown outcome, keeping
-cached settings until authoritative confirmation. No write is replayed and no
-unconfirmed success is returned. Caller method signatures and quantities remain
-unchanged; native algo reduce-only defaults and protective trigger semantics stay
-as documented.
-
 ### Lighter port-review confirmation and failures
 
 A Rust Lighter reduce-only limit order without matching known exposure now waits
@@ -1562,6 +1552,16 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+### WOO port-review warnings and confirmation
+
+Rust WOO keeps isolated exposure visible and logs one coded warning per symbol
+that isolated margin settings cannot be changed. Exhausted leverage readback
+reports an accepted write with unconfirmed setting and Unknown outcome, keeping
+cached settings until authoritative confirmation. No write is replayed and no
+unconfirmed success is returned. Caller method signatures and quantities remain
+unchanged; native algo reduce-only defaults and protective trigger semantics stay
+as documented.
 
 ## Coded diagnostic caller cutover (PR5)
 
