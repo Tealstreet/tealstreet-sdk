@@ -29,9 +29,10 @@ family_args() {
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
-  # WOO's isolated artifact missed the public steady-state CPU gate with the
-  # shared size profile. Keep its original arguments; combined is measured separately.
-  if [[ $family != woo ]]; then build_args+=("${wasm_profile_args[@]}"); fi
+  # WOO and KuCoin Spot need their original host/engine/dependency profiles:
+  # shared z missed public CPU gates (KuCoin Spot repeatedly after #1661).
+  # Combined is measured separately; keep every other family's selection.
+  if [[ $family != woo && $family != kucoinspot ]]; then build_args+=("${wasm_profile_args[@]}"); fi
   if [[ $family == paradex ]]; then
     # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
     build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
