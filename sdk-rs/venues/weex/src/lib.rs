@@ -1,6 +1,7 @@
 //! WEEX Contract V3 USDT perpetual futures on the sans-I/O engine.
 mod account;
 mod account_wire;
+mod depth_query;
 mod history;
 mod identity;
 mod paths;
@@ -51,6 +52,7 @@ pub struct Pending {
     seed_generation: u32,
 }
 enum Task {
+    BookQuery(CommandId),
     Markets(Vec<Market>),
     Account(account::Request),
     Trade(trading::Request),
@@ -631,6 +633,10 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
+        if let Task::BookQuery(command) = task {
+            cx.fail(command, depth_query::failure(error, ErrorKind::Network));
+            return;
+        }
         if let Task::Identity(command) = task {
             self.identity_failed(cx, command, error);
             return;
@@ -641,7 +647,7 @@ impl WeexFutures {
             format!("WEEX: {error}"),
         );
         match task {
-            Task::Identity(_) => unreachable!(),
+            Task::Identity(_) | Task::BookQuery(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
@@ -708,6 +714,7 @@ impl Venue for WeexFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
+            order_book_query: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
@@ -943,6 +950,10 @@ impl Venue for WeexFutures {
                 .paused_until
                 .max(cx.now + rate::delay(response, cx.now));
         }
+        if let Task::BookQuery(command) = p.task {
+            self.book_query_response(cx, command, response);
+            return;
+        }
         if response.status >= 400 {
             if let Task::Trade(request) = p.task {
                 let error = trading::http_failure(response.status, response.body);
@@ -982,6 +993,7 @@ impl Venue for WeexFutures {
             );
         }
         match p.task {
+            Task::BookQuery(_) => unreachable!(),
             Task::Leverage {
                 command,
                 symbol,
@@ -1147,6 +1159,26 @@ impl Venue for WeexFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchOrderBook {
+            command,
+            ref symbol,
+            limit,
+        } = command
+        {
+            self.get(
+                cx,
+                paths::DEPTH,
+                &format!(
+                    "symbol={}&limit={}",
+                    safe_cex_engine::url::encode(symbol),
+                    limit.unwrap_or(200)
+                ),
+                Task::BookQuery(command),
+                None,
+            );
+            return;
+        }
+
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
             return;

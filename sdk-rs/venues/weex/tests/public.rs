@@ -521,3 +521,146 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
                 if message.contains("ETHUSDT"))));
     }
 }
+
+#[test]
+fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchanged() {
+    let (mut e, socket) = started();
+    e.handle(
+        1.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let id = request(e.drain_actions().collect(), "/depth");
+    response(
+        &mut e,
+        id,
+        r#"{"lastUpdateId":160,"bids":[["100","2"]],"asks":[]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let before = (
+        e.store().tickers().to_vec(),
+        e.store().balance().clone(),
+        e.store().positions().to_vec(),
+        e.store().orders().to_vec(),
+    );
+    for (command, status, body) in [
+        (
+            7,
+            200,
+            r#"{"lastUpdateId":"999999999999999999999999","bids":[["1","3"]],"asks":[]}"#,
+        ),
+        (8, 200, r#"{"code":40006,"msg":"invalid api key"}"#),
+    ] {
+        e.handle(
+            2.0,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: "BTCUSDT".into(),
+                limit: Some(1),
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(actions.len(), 1);
+        let Action::Http(request) = &actions[0] else {
+            panic!("independent REST query")
+        };
+        e.handle(
+            3.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        if command == 7 {
+            let result = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(safe_cex_engine::Notice::CommandDone { command: 7, result }) => {
+                        Some(serde_json::from_str::<serde_json::Value>(result).unwrap())
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(result["bids"][0]["amount"], 3.0);
+            assert_eq!(result["bids"][0]["total"], 3.0);
+        } else {
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 8, .. })
+            )));
+        }
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_)
+                | Action::WsConnect { .. }
+                | Action::WsClose { .. }
+                | Action::SetTimer { .. }
+                | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        )));
+        assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(100.0, 2.0)]);
+        assert_eq!(
+            (
+                e.store().tickers().to_vec(),
+                e.store().balance().clone(),
+                e.store().positions().to_vec(),
+                e.store().orders().to_vec()
+            ),
+            before
+        );
+    }
+    e.handle(
+        4.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"e":"depth","s":"BTCUSDT","U":161,"u":161,"b":[["100","4"]],"a":[]}"#,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(100.0, 4.0)]);
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchOrderBook {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        }),
+    );
+    let query = request(e.drain_actions().collect(), "/depth");
+    e.handle(
+        6.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        7.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let seed = request(e.drain_actions().collect(), "/depth");
+    response(
+        &mut e,
+        query,
+        r#"{"lastUpdateId":9999,"bids":[["1","3"]],"asks":[]}"#,
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 9, .. })
+    )));
+    assert!(e.book("BTCUSDT").is_none());
+    response(
+        &mut e,
+        seed,
+        r#"{"lastUpdateId":200,"bids":[["99","2"]],"asks":[]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(99.0, 2.0)]);
+}
