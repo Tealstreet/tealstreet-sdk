@@ -40,3 +40,14 @@ reviews are clear. No private-read/preflight generations or financial mappings
 changed; metadata response/failure/auth consistently use accepted-write revision
 plus symbol attempt serial. Fresh full CI and actual same-crate integration if
 #1665 lands first remain mandatory before any guarded merge.
+
+Actual balance integration:
+- #1665 landed at `8f7b0cee3ff364edc9fb0691d3809abbaea5919e` and is now
+  genuinely merged into this branch. Only an adjacent CLAUDE paragraph conflicted;
+  both balance and settings explanations are retained.
+- All incoming files outside the six own paths match that landing exactly.
+  Independent preservation review confirms balance serial/write-revision fencing
+  and settings serial/accepted-write fencing coexist.
+- The integrated tree passes all 470 Bitunix+Binance native tests, strict Bitunix
+  all-target Clippy, format and banned-pattern checks. Fresh exact-head full CI
+  is required; the earlier pre-integration CI is historical only.
