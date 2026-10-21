@@ -183,6 +183,8 @@ retained row families and readiness/preflight limits use those actual merges.
 The Bitunix host-clock/login batch checks #1648 (`205ceb3fe8d`) and #1649
 (`fc5ab92248a`); synchronized SDK time and login diagnostic/retry ownership
 below use the merged source.
+The Bitunix explicit-route follow-up checks #1650 at `b2059cce998`; existing NX
+flag forwarding was checked read-only at `65e086a3c90`.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -273,6 +275,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1645 / `6642e5146` | Malformed Bitunix regular/TP-SL REST rows retain rejected native-ID families and routing metadata while admitted peers advance. Unknown identity holds absence within its endpoint scope; admitted parents can remove obsolete children. Only admitted groups advance execution baselines, and partial initial/preflight reads remain insufficient. Order/TP-SL WS scheduling and global generation fences are separate. |
 | #1648 / `205ceb3fe` | Bitunix advertises the existing `hostClock` capability, so the SDK supplies synchronized virtual-clock time before first engine start and later callbacks, including private login. REST/login timestamp units and signing formats stay unchanged; callers add no account field or constructor argument. |
 | #1649 / `fc5ab9224` | Missing/null/malformed private login results now emit sanitized Warn `stream.malformed`; explicit boolean false retains Error `auth.rejected`. The existing two-second same-socket login retry coalesces repeated failures; success/retirement cancel it and stale timers cannot sign on a replacement. Deactivation and trading retry policy stay unchanged. |
+| #1650 / `b2059cce9` | With a routing-capable transport, explicit Bitunix `tealstreetWsRoute: true` selects each channel's declared fallback proxy from the first connection and on reconnect. False/unset keeps the existing two-attempt direct-first policy. A direct-only provider stays direct and warns; callers must choose a routing-capable provider to force proxy use. Existing options and native routing-plan schema stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2368,6 +2371,32 @@ timer from an old socket cannot send login on a replacement. Authentication
 deactivation policy, private first-pong compatibility and trading write retries
 are unchanged. This batch does not change the separate proxy-route or order
 reconciliation scheduling contracts.
+
+### Bitunix explicit WebSocket routing (#1650)
+
+For engine transports with routing support, Bitunix `tealstreetWsRoute: true`
+selects each available declared fallback as the forced host for public ticker
+shards, private login and futures/business depth/candles. The first connection
+and reconnect use that proxy; the normalized forced route has no further fallback
+candidate. False/unset retains the existing two direct attempts before fallback
+and recovery routing. The native serialized routing plan uses the same selected
+hosts with its existing schema. Shared routing resolution for TS consumers and
+other venues is unchanged.
+
+The flag does not add routing support to a direct-only provider: that provider
+keeps sockets direct and emits its existing unsupported-option warning. Callers
+requiring proxy egress must select a routing-capable transport rather than rely
+on the flag alone. REST identity/egress, feed identities, authentication metadata
+and trading retries are unchanged.
+
+NX already saves the same flag through web `apps/web/src/components/newApiFlow/useAccountForm.ts:171`
+and CLI `packages/cli-core/src/commands/account/AccountsCommand.ts:210,257`.
+Hosted `services/exchange-server/src/server.ts:950` forwards it, and the shared
+`packages/safe-cex/src/createExchangeFromAccount.ts:130,187` maps it into engine
+options (read-only `65e086a3c90`). No new caller field is needed; test configured true versus
+false/unset through the selected transport, including first connection and
+reconnect for all three channels. SDK transport and native routing fixtures prove
+the route selection; deployed proxy reachability remains an operational check.
 
 ## Required startup degradation visibility
 
