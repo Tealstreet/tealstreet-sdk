@@ -148,7 +148,7 @@ Medium:
    private snapshot rows per identity across venues. A rejected row keeps its
    stored copy and logs once (Error when none is kept); snapshots still hold
    while discovery or the catalogue is incomplete, and structural failures stay
-   fatal. Follow-up: batch-3 skip logs still use the `cx.log` shim.
+   fatal. Skips are coded `row.skipped` notices.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every
