@@ -17570,7 +17570,7 @@
     },
     {
       "venue": "hyperliquid",
-      "tapeSha256": "a44f3bf62cb55f571d3fa6eb7f617a5499137d2e24b37ad49d29e038c9a4daa4",
+      "tapeSha256": "7b13a769157f3523faf2f64109c8594ffaca9e681561e43b59ae7f426d1aeb2e",
       "tape": "sdk-rs/harness/tapes/hyperliquid-private.jsonl",
       "diagnostics": [
         {
@@ -17603,7 +17603,7 @@
     },
     {
       "venue": "hyperliquid",
-      "tapeSha256": "4d735e68ad388c615fcdb85fc0fabeec9eecbfccc573077b62a25d61419902e2",
+      "tapeSha256": "7b2e2323e0e367eaf716b9a80dc458cf6d3f2e00643cc021504dd3e8e7590f46",
       "tape": "sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl",
       "diagnostics": [
         {
