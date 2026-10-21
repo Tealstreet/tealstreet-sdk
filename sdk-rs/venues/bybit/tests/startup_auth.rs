@@ -358,6 +358,33 @@ fn unproven_opposite_environment_answers_preserve_the_original_rejection_without
 }
 
 #[test]
+fn noninteger_probe_codes_preserve_the_original_rejected_credential() {
+    for read_key in [false, true] {
+        for code in [
+            "0.5",
+            "-0.5",
+            "0.0000000000000000001",
+            "-0.0000000000000000001",
+            "1e-400",
+            "-1e-400",
+            "0.0",
+            r#""0""#,
+        ] {
+            let mut h = if read_key { with_read_key() } else { private() };
+            rejected_fee(&mut h);
+            h.respond(
+                "/v5/user/query-api",
+                200,
+                &format!(r#"{{"retCode":{code},"retMsg":"OK"}}"#),
+            );
+            assert_original_failure(&h, read_key);
+            assert!(!h.has_request("/v5/user/query-api"));
+            assert!(!h.has_request("/v5/account/fee-rate"));
+        }
+    }
+}
+
+#[test]
 fn probe_failure_and_timeout_finish_once_and_ignore_late_opposite_host_success() {
     for transport_failure in [false, true] {
         let mut h = with_read_key();

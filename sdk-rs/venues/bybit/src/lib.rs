@@ -170,6 +170,13 @@ struct EnvironmentProbe {
     message: String,
 }
 
+// Require native integer success before attributing a key to another environment.
+#[derive(serde::Deserialize)]
+struct EnvironmentProbeStatus {
+    #[serde(rename = "retCode")]
+    ret_code: i64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Channel {
     Public,
@@ -2197,8 +2204,8 @@ impl Venue for BybitLinear {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if matches!(&pending.then, Then::EnvironmentProbe) {
             let confirmed = (200..300).contains(&response.status)
-                && serde_json::from_str::<Status>(response.body)
-                    .is_ok_and(|status| status.ret_code == Some(0));
+                && serde_json::from_str::<EnvironmentProbeStatus>(response.body)
+                    .is_ok_and(|status| status.ret_code == 0);
             self.finish_environment_probe(cx, confirmed);
             return;
         }

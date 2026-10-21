@@ -93,8 +93,9 @@ not copy Rust subscriptions or hide missing native topics.
 
 On a startup fee-read 10003 for built-in live linear/demo, diagnose the opposite
 environment with one signed `/v5/user/query-api` GET using the same rejected
-credential, including a secondary read key. Only HTTP success and native code
-zero add the TS environment-mismatch hint. Preserve the original native failure,
+credential, including a secondary read key. Only HTTP success and a native integer
+code zero add the TS environment-mismatch hint. Fractional, underflowed, floating
+zero and quoted codes retain the original rejection. Preserve the native failure,
 credential role and deactivation policy; bound the probe to two seconds and
 retire timeout/late-response races before the terminal notice.
 
