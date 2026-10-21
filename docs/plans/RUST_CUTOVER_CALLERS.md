@@ -128,6 +128,9 @@ The OKX port follow-up checks #1588 at `447134dbf24`; mirror `origin/master`
 the overseer's 2026-10-21 report, not evidence of a deployed change.
 The coded-only host follow-up checks #1586 at `ef68c4ba563`; its landed PR6
 protocol/deployment section above is retained as cutover work.
+The fill-identity follow-up checks #1592 at `389f42aa2e2`; focused live-fill
+callers were rechecked read-only at NX `65e086a3c90`. Earlier inventory pins
+still apply to the other caller rows.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -136,8 +139,8 @@ cannot proceed for the affected venues/hosts until one does.
 **Re-run** when a contract PR merges: repeat the three scans in
 [Audit method](#audit-method), then update the Status and Resolving PRs columns
 and the rows that cite that PR. Open contract work is tracked separately from
-the merged behavior below. #1430's fill financials are landed; their wire header
-remains revision 1, as detailed below.
+the merged behavior below. #1430 introduced financial tails under revision 1;
+#1592 now writes FILLS revision 2 with execution identity, as detailed below.
 
 ### Contract refresh, 2026-10-21
 
@@ -183,10 +186,12 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1588 / `447134dbf2` | Rust/TS OKX public/private/business WebSocket URLs use default TLS 443 across global/EEA live/demo, preserving host/path; relay upstream metadata changes the global live private/business targets. SDK arguments stay unchanged. Proxy upstreams and live master need a separate owner-run port migration before the public-internet 8443 deadline; see [OKX operations prerequisite](#okx-websocket-port-operations-prerequisite-1588). |
 | #1586 / `ef68c4ba56` | Removes `Cx::log`, `LogLevel`, `Notice::Log`, WASM `log` actions and native `log` notices. Diagnostics use coded `event` envelopes; DO changes from `op: 'log'` to `op: 'event'` with `warn`, preserving its host `onLog` callbacks as coded host events. Deploy compatible safe-cex-server before native clients receive Info+ venue events; DO clients must accept the new envelope before host adoption. Sam owns that deployment. See [Log shim removal](#log-shim-removal-pr6). |
 
+| #1592 / `389f42aa2e` | Rust always writes FILLS revision 2 with optional execution-ID refs and aligned financial columns. Updated readers retain revisions 0/1; old readers reject revision 2, requiring coordinated producer/consumer builds. Hyperliquid perp/merged spot/spot-only `tid` becomes SDK fill `id`, with `orderId` separately preserved; other venues retain order-ID fallback. See [Fill identity and wire compatibility](#fill-identity-and-wire-compatibility-1592). |
+
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
-downstream call shape. They add no cutover edit here. Execution-ID attribution and a literal FILLS revision 2
-are separate follow-up work; #1430 did not introduce either.
+downstream call shape. They add no cutover edit here. #1592 separately lands
+execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 
 ### Summary: cutover blockers (no new equivalent)
 
@@ -330,7 +335,7 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 | Native `nuke`/`nukePositions` (#1430) | web `hooks/trading/useNuke.ts:7`; mirrored CLI `commands/trading/NukeCommand.ts:32,42,51,60` | inherited store-based closes/retries | one native-state batch of reduce-only market closes; no automatic replay even if callers pass `3`. Observe/catch the promise and reconcile partial/unknown outcomes; CLI's max-retries text must not imply a guarantee | RT; caller error/retry handling |
 | `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced; the main-thread mirror forwards them (#1462) | none (B4) |
 | `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command; main-thread mirror forwards it (#1462) | RT (B4) |
-| Optional live fill `fee`/`realizedPnl` (#1430) | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949`; script-editor `monacoTypesString.ts:614-618` | fields absent from Rust events | `{ id, orderId, symbol, side?, price, amount, realizedPnl?, fee? }`; only reported finite values appear, including zero. Both IDs still identify the order. Existing script-editor types already declare the optional fields | additive; matching engine/reader/applier required |
+| Optional live fill `fee`/`realizedPnl` (#1430) | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949`; script-editor `monacoTypesString.ts:614-618` | fields absent from Rust events | `{ id, orderId, symbol, side?, price, amount, realizedPnl?, fee? }`; only reported finite values appear, including zero. Since #1592, `id` is the reported execution identity or falls back to `orderId`; `orderId` remains the order identity. Existing script-editor types already declare the optional fields | additive; matching engine/reader/applier required |
 | `options.enableSpotMarkets` on hyperliquid | web `ChartContainer.tsx:161`, `useChartSession.ts:303` | spot markets | the Rust perp engine merges spot markets, holdings and orders into the account, as the TS venue; best-effort spot discovery retries on the discovery backoff without holding back perps | none (handled) |
 | `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | Lighter tier bridged; Bybit (all five names) syncs the engine's last REST wallet account verbatim (`balanceInfo` capability, `fetchBalanceInfo` every 2 s), replacing `info` as TS does; frame-forwarding workers send `info` changes to main | none (handled) |
 | `Market.info` raw payload | cli-core `order/prepareCliOrder.ts:44`, `commands/session/CheckCommand.ts:14` (`classifyMarket`); MCP strips `info` (`tools.ts:113`) | raw venue JSON | typed exceptions only (Bybit class/region/underlying, Polymarket, OKX) | RT |
@@ -354,14 +359,42 @@ intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
 issues native `fetchLeverage` (Kraken spot still returns `null`); `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
-The work formerly called **FILLS revision 2** in this inventory landed as an
-extension of **revision 1**: the existing order/market/side/price/amount prefix
-and raw-symbol tail are followed, when any row reports financials, by aligned
-f64 `realizedPnl` and `fee` columns. The reader detects these tails by section
-length, accepts legacy rows without them and rejects literal revision 2.
-Missing/nonfinite values become absent SDK fields; reported zeroes survive.
-`id` and `orderId` remain the order ID, not a unique execution ID. Updating the
-engine alone does not enable financial fields in an older reader/applier.
+#### Fill identity and wire compatibility (#1592)
+
+#1430 introduced optional financial tails under revision 1. #1592 now always
+writes **FILLS revision 2**: the existing order/market/side/price/amount prefix
+and raw-symbol refs are followed by execution-ID refs (`NONE` when absent),
+then aligned f64 `realizedPnl[n]` and `fee[n]` columns (`NaN` when unreported).
+The updated reader accepts revisions 0/1, including revision-1 frames without
+financials and with #1430's financial tails; revision 2 is accepted only for
+FILLS. Missing/nonfinite financial values become absent SDK fields; reported
+zeroes survive.
+
+`FillRows.fillId?(i)` exposes the optional native execution identity. The SDK
+emits `id = fillId ?? orderId`, retaining `orderId` separately. Hyperliquid perp,
+merged spot and spot-only fills populate `id` with the decimal `tid` string;
+other native venues leave execution identity absent and retain order-ID fallback.
+Use `orderId` for order attribution; do not assume every venue's `id` identifies
+a unique execution. Live fills remain events rather than persisted store rows.
+
+**Build compatibility prerequisite:** old readers reject FILLS revision 2.
+Ship matching Rust/WASM producers, JS readers and SDK appliers, including both
+worker and main-thread consumers when forwarding frames. A new reader can read
+legacy producers; updating only the producer breaks older consumers. This
+requirement is separate from B1's choice of engine delivery mechanism.
+
+Focused NX checks at `65e086a3c90`: web optimistic-order retirement and CLI
+`recordFill` already prefer `orderId ?? id`; fill toast coalescing also prefers
+`orderId`. FillsModule uses live fills only as a symbol-based database refresh
+hint, and HistoricalIngestionWorker discards the payload and marks the account
+dirty. No edits to those handlers are required for the new identity. Script
+consumers assuming `id === orderId` must instead use the separate `orderId`.
+
+Replay now captures native `executionId` separately from order ID and captures
+finite fee. #1592's green Hyperliquid/HyperliquidSpot CI replay gates prove the
+four removed identity-only exception groups (37 paths); unrelated declarations
+remain. This does not claim identity parity for every venue. See the
+[fill execution identity plan](RUST_FILL_EXECUTION_ID.md).
 
 Live financial conventions remain venue-specific: Hyperliquid close fills use
 net PnL (`closedPnl - fee`, requiring both values) and the reported fee; opening
