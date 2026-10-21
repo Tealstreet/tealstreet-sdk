@@ -227,3 +227,16 @@ Removed duplicate slippage fields/literal entries from the automatic merge,
 keeping the incoming shared field. Independent registration/balance and
 harness cross-reviews accepted the merge; 175/175 harness tests pass. Re-running
 native/Wasm, JS and Lighter/Binance gates; final CI must cover the merged head.
+
+### Port-review lows plan (2026-10-21)
+
+1. Replace the fixed two-second reduce-only position recheck with completion-
+   driven account confirmation and a bounded deadline. Never sign a placement
+   before confirmed matching exposure; failed/empty/timeout reads settle once.
+2. Classify documented HTTP405/429 rate limits with useful guidance while
+   retaining native codes/messages and write outcome; never retry placement.
+3. On explicit invalid-margin-mode 21613 placement rejection, refresh account
+   as well as orders, without guessing mode or resending the write.
+4. Reproduce failures, add race/error regressions, run focused Lighter/Binance
+   tests and fmt/Clippy/bans with CARGO_BUILD_JOBS=4, independently review and
+   push for CI. Merge remains subject to overseer hold.
