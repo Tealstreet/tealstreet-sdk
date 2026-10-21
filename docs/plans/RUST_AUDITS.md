@@ -839,14 +839,23 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
   its executions still emit, the store keeps its copy; verification: documented
   `Deactivated`/`Expired` rows now cancel instead of leaving the order Open).
-- Medium: one bad public row stops startup; ~~one bad position row freezes a
+- Medium: ~~one bad public row stops startup~~ (stale: malformed product/ticker
+  rows are skipped while valid peers publish); ~~one bad position row freezes a
   currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
   store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.
-- Low: cancel batch refused on one uncached id; index triggers refused; daily
-  candle `to`; no 1 s REST resync after terminal events.
+- Low: cancel batch refused on one uncached id (intentional preflight: native
+  cancel needs symbol and position side; **RISKY** to infer routing or silently
+  change batch execution); ~~index triggers refused~~ (documented ByIndexPrice
+  is encoded for standalone and attached SL/TP, and preserved on readback);
+  ~~daily candle `to`~~ (Rust correctly honors the native cutoff; TS shifts to
+  the previous day and drops valid bars, now pinned by regression). No extra
+  1 s REST resync after terminal events is an accepted lifecycle difference:
+  WS publishes positions/balance immediately, local trade ACKs refresh REST,
+  and external terminal-only events use the policy-controlled 2 s poll. Extra
+  debounce reads would increase REST load and bypass slow/paused polling.
 - Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
   positions removed; amend re-places remainder; hedged margin per side; split
   stops at first failure.

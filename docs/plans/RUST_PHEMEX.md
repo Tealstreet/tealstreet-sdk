@@ -278,3 +278,43 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 -21optionalfeatures/build/factoryentriespreserved. IndependentscopedreviewsandcrossreviewsCLEAN acrossharness/WASM/JS/engine/native/wrapper/cryptocleanup. Fixed concreteautomergeomission: addPhemex tonewsecretfeaturecfgso single-venueprivateauthretainssecret. AllthreeexistingtextWSAPIs/legacyStringABIremainbyte-identical;separateexplicitbinaryevent/transportpreserves negotiatedbytesandnormalPhemextext/decompression. CallerIDrules/mints,ensureHostlifecycle,allpriorvenuehooksandstrictmemoryscoringremain. Retiredgenericcryptohelpershave no venuecallers;dynamicABIonlyindevoracles,starknet-core removed.
 -326affectednativePASS(86Phemex,107Paradex,7WASM),444SDK/32filesPASS(238focused+206transport),331harnessPASS,bans/fmt/lockedmetadata/workspace+WASMclippy/typecheck44/lint28PASS. Previousd414 allthreeCIrunsnowfullysuccess(66replays+7controls),preservedasprecedingproofonly. Publishthisstablemergefor68replays(25public43private)+7controls/26Rustjobs;runcombined21-featurehost+SDKWASM/6Phemex-Binance-Paradexreplaysinparallel. Requireallcurrentlocal/fullCIgreenbeforelanding.
+
+### Port-review lows plan (2026-10-21)
+
+1. Encode the documented `ByIndexPrice` trigger for standalone and attached
+   SL/TP; native account readback already supports it. Test exact wire fields
+   and cached readback without altering other trigger defaults.
+2. Pin correct daily candle `to`: native honors the caller; TS's previous-day
+   shift drops valid bars. Record the deliberate correction and stale public-row
+   startup finding. Retain cached cancel provenance and policy-controlled account
+   polling; explain safety/load choices in the audit rather than guessing IDs.
+3. Reproduce index refusal first; run Phemex/Binance focused native tests,
+   touched fmt/Clippy and bans with CARGO_BUILD_JOBS=4. Independent review,
+   PR into feat/rust-rewrite, green CI, revert guard, merge and report.
+
+Phemex index triggers follow the official USDⓈ-M g-order schema:
+https://phemex-docs.github.io/#place-order-http-put-prefered-2
+`triggerType`, `tpTrigger`, and `slTrigger` accept `ByIndexPrice`. Readback
+already preserves it; native placement now honors explicit SL/TP index sources.
+TS silently falls back to mark/last for index sources, so this is an intentional
+correction. Existing unspecified trigger defaults are preserved.
+
+Daily candle reads keep the exact native caller cutoff. Read-only public API
+verification returned the caller's current daily bar before a 22:13 UTC cutoff;
+TS's previous-day shift loses that bar and another at the exclusive boundary.
+A scripted regression pins both the request bound and retained timestamps.
+
+The uncached cancellation guard remains: an ID alone cannot prove symbol and
+position side. Account polling remains policy-controlled at 2 s; socket
+positions/balances update immediately and accepted local writes refresh REST.
+An extra terminal-event debounce would add currency reads and override deliberate
+slow/paused polling for a small default latency reduction.
+
+Verification: index-trigger regression reproduced the prior unsupported error.
+All 400 focused Phemex/Binance native tests pass, as do touched fmt, strict
+all-target Clippy and banned-pattern checks. Independent correctness review is
+clear. Full TypeScript/WASM/replay validation remains CI's gate before merge.
+- Integrated pinned34adfdb71a6 (including success-only Cx.done) via clean porcelain
+  merge. Updated the added daily-candle success assertion to plain String;
+  independent integration rereview clean. Phemex/Binance400 tests, fmt, strict
+  all-target Clippy and bans pass again. Guard remains six intended files.
