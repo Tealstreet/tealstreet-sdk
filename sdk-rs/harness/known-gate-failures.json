@@ -36113,48 +36113,10 @@
           ]
         },
         {
-          "divergence": "Native time-in-force is absent or differs in the TS/Rust order views.",
-          "keys": [
-            "checkpoint 10 account.orders[1].timeInForce",
-            "checkpoint 11 account.orders[1].timeInForce",
-            "checkpoint 12 account.orders[1].timeInForce",
-            "checkpoint 3 account.orders[1].timeInForce",
-            "checkpoint 4 account.orders[1].timeInForce",
-            "checkpoint 5 account.orders[1].timeInForce",
-            "checkpoint 6 account.orders[1].timeInForce",
-            "checkpoint 7 account.orders[1].timeInForce",
-            "checkpoint 8 account.orders[1].timeInForce",
-            "checkpoint 9 account.orders[1].timeInForce"
-          ]
-        },
-        {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
-            "checkpoint 10 account.orders[1].clientOrderId",
-            "checkpoint 10 account.orders[2].clientOrderId",
-            "checkpoint 11 account.orders[1].clientOrderId",
-            "checkpoint 11 account.orders[2].clientOrderId",
-            "checkpoint 12 account.orders[1].clientOrderId",
-            "checkpoint 12 account.orders[2].clientOrderId",
-            "checkpoint 3 account.orders[1].clientOrderId",
-            "checkpoint 4 account.orders[1].clientOrderId",
-            "checkpoint 4 account.orders[2].clientOrderId",
-            "checkpoint 4 account.orders[3].clientOrderId",
-            "checkpoint 5 account.orders[1].clientOrderId",
-            "checkpoint 5 account.orders[2].clientOrderId",
             "checkpoint 5 account.orders[3].clientOrderId",
-            "checkpoint 6 account.orders[1].clientOrderId",
-            "checkpoint 6 account.orders[2].clientOrderId",
-            "checkpoint 6 account.orders[3].clientOrderId",
-            "checkpoint 6 account.orders[4].clientOrderId",
-            "checkpoint 7 account.orders[1].clientOrderId",
-            "checkpoint 7 account.orders[2].clientOrderId",
-            "checkpoint 7 account.orders[3].clientOrderId",
-            "checkpoint 7 account.orders[4].clientOrderId",
-            "checkpoint 8 account.orders[1].clientOrderId",
-            "checkpoint 8 account.orders[2].clientOrderId",
-            "checkpoint 9 account.orders[1].clientOrderId",
-            "checkpoint 9 account.orders[2].clientOrderId"
+            "checkpoint 6 account.orders[4].clientOrderId"
           ]
         },
         {

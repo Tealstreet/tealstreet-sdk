@@ -322,3 +322,10 @@ private verification, five identical current-head pairs and full green CI.
 Integrate any actual shared-profile dependency landing before final proof. Guard
 Kraken separately from merging, audit actual parents/files, report, then move to
 Lighter mainnet/testnet before its Robinhood alias.
+
+Five focused pairs with a matching CI engine produce identical complete
+nonmetric outputs within each implementation. Prune only 33 unobserved private
+keys, reducing 193 to 160: ten time-in-force keys for order 201 now match, and
+23 client-ID child keys are unobserved. Retain the two observed generated-client-ID
+keys and all existing parent-row differences. The fixture and all public keys
+remain unchanged; strict FAIL and the remaining 160 exact private keys remain.
