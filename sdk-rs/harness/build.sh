@@ -4,7 +4,7 @@
 # place of the combined engine, for gates; --families builds every family into
 # pkg/{web,node}/<family>, which browser and Worker loaders fetch per venue.
 set -euo pipefail
-venues="breakoutprop, asterdex, binance, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
+venues="breakoutprop, asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
 if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --families ) ]]; then
   echo "Usage: $0 [--venue VENUE | --families]" >&2
   exit 2
@@ -12,7 +12,7 @@ fi
 # The Cargo arguments building the family that contains a venue.
 family_args() {
   case "$1" in
-    breakoutprop|asterdex|binance|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
+    breakoutprop|asterdex|binance|bitunix|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
     bitgetusdc) family=bitget ;;
     lighter-robinhood) family=lighter ;;
     hyperliquidspot) family=hyperliquid ;;
@@ -31,6 +31,22 @@ family_args() {
     build_args+=(--config 'profile.release.package.safe-cex-venue-bitrue.opt-level=3')
   fi
 }
+# Optimize a bound module with binaryen (behaviour-neutral; shrinks every
+# family). CI installs the pinned release (install-binaryen.sh) and sets
+# SAFE_CEX_WASM_OPT=required; a local build without wasm-opt only warns.
+# WASM_OPT_LEVEL defaults to -Oz.
+optimize() {
+  if command -v wasm-opt >/dev/null; then
+    wasm-opt "${WASM_OPT_LEVEL:--Oz}" --enable-bulk-memory --enable-bulk-memory-opt \
+      --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int \
+      --enable-reference-types --enable-multivalue "$1" -o "$1"
+  elif [[ ${SAFE_CEX_WASM_OPT:-} == required ]]; then
+    echo "wasm-opt is required (sdk-rs/harness/install-binaryen.sh)" >&2
+    exit 1
+  else
+    echo "warning: wasm-opt not found; $1 is unoptimized" >&2
+  fi
+}
 # Bind the last build for browsers/Workers and Node; Node bindings are
 # CommonJS inside an ESM package.
 bind() {
@@ -38,6 +54,8 @@ bind() {
     target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
   wasm-bindgen --remove-name-section --remove-producers-section --target nodejs --out-dir "$2" \
     target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+  optimize "$1/safe_cex_wasm_bg.wasm"
+  optimize "$2/safe_cex_wasm_bg.wasm"
   echo '{"type":"commonjs"}' > "$2/package.json"
 }
 cd "$(dirname "$0")/.."

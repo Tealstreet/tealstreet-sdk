@@ -541,6 +541,10 @@ impl Blofin {
                 if row.create_time.0 <= 0.0 || !matches!(row.side.as_ref(), "buy" | "sell") {
                     return;
                 }
+                // Sizes are contracts on the wire; like fills, report base units or nothing.
+                let Some(contract_size) = market.map(|m| m.contract_size.unwrap_or(1.0)) else {
+                    return;
+                };
                 rows.push(HistoricalOrder {
                     id,
                     symbol: symbol.clone(),
@@ -557,8 +561,8 @@ impl Blofin {
                     },
                     price: nonzero(row.price.0),
                     average_price: nonzero(row.average_price.0),
-                    amount: row.size.0,
-                    filled: row.filled_size.0,
+                    amount: account::clean(row.size.0 * contract_size),
+                    filled: account::clean(row.filled_size.0 * contract_size),
                     reduce_only: row.reduce_only.0,
                     position_side: position_side(&row.position_side),
                     created_time: row.create_time.0,

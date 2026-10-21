@@ -800,7 +800,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1100.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - 100.0, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");
@@ -1364,4 +1364,30 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     assert_eq!(rereads, 5);
     assert!(warned);
     assert!(e.store().market("BTCUSDT").is_some());
+}
+
+#[test]
+fn a_market_whose_amount_step_overflows_is_malformed_and_holds_its_exposure() {
+    let markets = catalogue_with("1e308").replace(
+        r#""contractSize":1e308,"volUnit":1,"#,
+        r#""contractSize":1e308,"volUnit":10,"#,
+    );
+    assert_ne!(markets, catalogue_with("1e308"));
+    let (mut e, socket, reads, _) = private_started_with_markets(&markets);
+    assert!(e.store().market("BADUSDT").is_none());
+    answer_snapshot(&mut e, reads, POSITION);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    let bad = POSITION
+        .replace("BTC_USDT", "BAD_USDT")
+        .replace("739113577038255616", "1");
+    let changed = POSITION.replace("\"holdVol\":60", "\"holdVol\":90");
+    answer_snapshot(&mut e, reads, &format!("{changed},{bad}"));
+    assert_eq!(
+        e.store().positions()[0].contracts,
+        0.006,
+        "previous snapshot kept"
+    );
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
 }

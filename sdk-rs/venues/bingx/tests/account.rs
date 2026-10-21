@@ -131,6 +131,22 @@ impl Harness {
         self.now = at;
         self.event(Event::TimerFired { timer });
     }
+    /// Whether a failed-read retry is armed at `sent` plus the engine's
+    /// jittered `[0.75, 1.0] * nominal`.
+    fn retry_index(&self, sent: f64, nominal: f64) -> Option<usize> {
+        self.timers
+            .iter()
+            .position(|(_, at)| (0.75 * nominal..=nominal).contains(&(at - sent)))
+    }
+    /// Fires that retry at its nominal due time, never before its jittered one.
+    fn fire_retry(&mut self, sent: f64, nominal: f64) {
+        let i = self.retry_index(sent, nominal).unwrap_or_else(|| {
+            panic!("no {nominal} ms retry after {sent}; have {:?}", self.timers)
+        });
+        let (timer, _) = self.timers.remove(i);
+        self.now = sent + nominal;
+        self.event(Event::TimerFired { timer });
+    }
     fn fire_latest_due(&mut self, at: f64) {
         let i = self
             .timers
@@ -995,7 +1011,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     h.take(MODE);
     h.requests.clear();
     let sockets = h.sockets.len();
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     h.respond("/quote/contracts", 200, BOTH_MARKETS);
     assert!(
         h.engine.store().market("ETHUSDT").is_some(),
@@ -1088,7 +1104,7 @@ fn a_failed_funding_read_starts_the_private_side_and_its_retry_fills_funding() {
     let ticker = &h.engine.store().tickers()[0];
     assert_eq!((ticker.last, ticker.funding_rate), (60000.0, 0.0));
     h.take(KEY);
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     h.respond("/quote/premiumIndex", 200, PREMIUM);
     let ticker = &h.engine.store().tickers()[0];
     assert_eq!((ticker.mark, ticker.funding_rate), (60001.0, 0.0001));
@@ -1310,7 +1326,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     h.respond(BALANCE, 200, BALANCES);
     h.respond(ORDERS, 200, OPEN);
     let listed = h.engine.store().market("BTCUSDT").cloned().unwrap();
-    h.fire_at(2000.0);
+    h.fire_retry(1000.0, 1000.0);
     // BTC-USDT drops out of the list while ETH-USDT stays malformed.
     h.respond(
         "/quote/contracts",
@@ -1334,14 +1350,14 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut h = with_markets(PARTIAL_MARKETS);
-    let (mut at, mut delay) = (2000.0, 1000.0);
+    let (mut sent, mut delay) = (1000.0, 1000.0);
     for _ in 0..5 {
-        h.fire_at(at);
+        h.fire_retry(sent, delay);
         h.respond("/quote/contracts", 200, PARTIAL_MARKETS);
+        sent += delay;
         delay *= 2.0;
-        at += delay;
     }
-    assert!(!h.timers.iter().any(|(_, t)| *t == at), "no sixth re-read");
+    assert!(h.retry_index(sent, 30_000.0).is_none(), "no sixth re-read");
     assert!(h.logs.iter().any(|log| log.contains("stops re-reading")));
     assert!(h.engine.store().market("BTCUSDT").is_some());
 }
@@ -1393,4 +1409,28 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         assert!(h.engine.store().hedged(), "stale step {step}");
         read = h.take(MODE);
     }
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let markets = PARTIAL_MARKETS.replace(
+        r#"{"symbol":"ETH-USDT","asset":"ETH"}"#,
+        r#"{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":400,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100}"#,
+    );
+    let mut h = with_markets(&markets);
+    assert!(h.engine.store().market("ETHUSDT").is_none());
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    h.fire_at(3000.0);
+    let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
+    h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
 }

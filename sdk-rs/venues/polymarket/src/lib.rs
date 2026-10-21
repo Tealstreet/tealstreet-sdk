@@ -1026,6 +1026,12 @@ impl Venue for Polymarket {
                     return;
                 }
                 let tick = gm.order_price_min_tick_size.map_or(0.01, |n| n.0);
+                // Precision holds the tick's decimal count, so the tick itself is checked.
+                if !tick.is_finite() || tick <= 0.0 {
+                    skipped.push(gm.slug.to_string());
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                }
                 for (id, outcome) in ids.into_iter().zip(outcomes) {
                     if id.is_empty()
                         || !id.bytes().all(|b| b.is_ascii_digit())

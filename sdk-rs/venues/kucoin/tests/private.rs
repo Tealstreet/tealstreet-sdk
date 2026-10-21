@@ -1,11 +1,13 @@
 //! Fixtures follow KuCoin Classic Futures documented account and private-order examples.
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_kucoin::{Kucoin, Options};
+use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
 
@@ -1165,7 +1167,9 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let i = h
         .actions
         .iter()
-        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1610000001000.0))
+        .position(|a| {
+            matches!(a, Action::SetTimer { at_ms, .. } if jittered(*at_ms - 1610000000000.0, 1000.0))
+        })
         .expect("partial catalogue retry");
     let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
         unreachable!()
@@ -1323,4 +1327,35 @@ fn unmappable_position_row_keeps_the_stored_position() {
         &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
     );
     assert_eq!(h.engine.store().positions(), before.as_slice());
+}
+
+#[test]
+fn a_match_without_match_price_fills_at_the_order_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.engine.take_frame(h.now);
+    let matched = r#"{"orderId":"5cdfc138b21023a909e5ad55","symbol":"XBTUSDTM","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","size":10,"filledSize":3,"remainSize":7,"matchSize":1,"tradeId":"1794175373645","ts":1610000000001000000}"#;
+    h.ws("/contractMarket/tradeOrders", matched);
+    assert_eq!(h.fill_rows(), vec![(90.0, 0.001)]);
+}
+
+#[test]
+fn a_balance_row_missing_secondary_fields_still_updates_the_balance() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply(
+        "/account-overview",
+        r#"{"code":"200000","data":{"availableBalance":"1950","accountEquity":"2010"}}"#,
+    );
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    h.reply("/orders?", &Harness::page(ORDER, 1));
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().balance);
+    assert_eq!(h.engine.store().balance().total, 2010.0);
 }

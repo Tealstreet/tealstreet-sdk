@@ -402,7 +402,7 @@ impl PhemexPerpetuals {
             0
         };
         let wait = if self.account.failed {
-            Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures)
+            cx.jittered(Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures))
         } else {
             2_000.
         };
@@ -1455,7 +1455,7 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
             entry.reading = false;
             entry.failures = entry.failures.saturating_add(1);
-            let wait = Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures);
+            let wait = cx.jittered(Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures));
             entry.not_before = entry.not_before.max(cx.now + wait);
         }
         // Keep the cause, never the response body.

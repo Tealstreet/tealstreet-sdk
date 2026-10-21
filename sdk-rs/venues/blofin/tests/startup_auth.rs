@@ -154,7 +154,11 @@ fn transient_settings_failures_back_off_and_the_account_still_loads() {
         sent = at;
         margin = next;
     }
-    assert_eq!(delays, [1_000., 2_000., 4_000., 8_000., 16_000., 30_000.]);
+    let nominal = [1_000., 2_000., 4_000., 8_000., 16_000., 30_000.];
+    assert!(
+        delays.iter().zip(nominal).all(|(d, n)| jittered(*d, n)),
+        "{delays:?}"
+    );
     respond(&mut engine, &margin, 200, MARGIN, sent);
     let out = rig.take(&mut engine);
     assert!(out.iter().any(get("account/positions")), "account loads");
@@ -447,4 +451,9 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
         assert_eq!(at, 2. + wait, "{status} {headers:?}");
         assert!(rig.failures.is_empty());
     }
+}
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
 }

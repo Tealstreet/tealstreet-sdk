@@ -63,7 +63,6 @@ import {
   hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -136,6 +135,7 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
   'mexc',
   'woo',
   'bingx',
+  'bitunix',
   'bybit',
   'bybitinverse',
   'bybitspot',
@@ -164,16 +164,27 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
 /**
- * Only Paradex consumes a payload signer natively; other engine venues would ignore it.
- * Lighter is excluded: its payload-only accounts start public on the engine by contract.
+ * TS venues whose signing honours `payloadSigner` (Bybit's API factory, Binance's signer).
+ * Other TS venues, including the kept hosted Coinbase/Orderly classes, ignore it while
+ * `canSign` still counts it, so routing those to TS would start a venue that cannot sign.
  */
+const TS_PAYLOAD_SIGNER_VENUES = new Set<ExchangeName>([
+  'bybit',
+  'bybitinverse',
+  'bybitspot',
+  'bybitdemo',
+  'hyrotrader',
+  'binance',
+  'binancepm',
+  'binancespot',
+  'binanceinverse',
+]);
+
+/** A payload-signed account the engine would ignore but a TS venue signs through. */
 const needsTsPayloadSigner = (
   name: ExchangeName,
   options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
-) =>
-  Boolean(options.payloadSigner) &&
-  !['paradex', 'lighter', 'lighter-robinhood'].includes(name) &&
-  options.publicDataOnly !== true;
+) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
 
 /**
  * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
@@ -259,6 +270,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be 1-40 characters with no uppercase letters',
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
+  bitunix: patternClientOrderIdRule('Bitunix', /^\S+$/),
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   grvt: {
     label: 'GRVT',
@@ -708,28 +720,10 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     // Factories route these to TS. A private engine account would otherwise ignore the
-    // signer and send unsigned requests, even on venues exempt from the guard below.
+    // signer and send unsigned requests, even on venues exempt from the Rust local-credential rule.
     if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
-    if (
-      ![
-        'hyperliquid',
-        'paradex',
-        'lighter',
-        'lighter-robinhood',
-        'txflow',
-        'coinbase',
-        'coinbasespot',
-        'polymarket',
-        'breakoutprop',
-      ].includes(this.name) &&
-      !this.isPublicDataOnly &&
-      (!this.options.key ||
-        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
-    ) {
-      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -785,6 +779,7 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
+        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,

@@ -1543,7 +1543,13 @@ fn on_item_public(
                     && (category != Category::Option
                         || (m.status == "Trading" && derivative_from_wire(&m, category).is_some()))
                 {
-                    markets.push(market_from_wire(&m, variant, category));
+                    let market = market_from_wire(&m, variant, category);
+                    if !market.precision.is_tradable() {
+                        *rejected = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    markets.push(market);
                 }
             }
             Then::Fees(fees) => {
@@ -1944,6 +1950,10 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn cancel_needs_stored_order(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {

@@ -16,7 +16,7 @@ fn private_auth_is_delayed_and_subscriptions_wait_for_ack() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -547,7 +547,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");
@@ -814,4 +814,24 @@ fn pushed_balance_publishes_per_coin_balances_with_the_aggregate() {
     );
     assert_eq!(h.engine.store().balance().total, 2100.0);
     assert_eq!(coins(&h).len(), 2);
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let valid = r#""symbol":"BADUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"X","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"#;
+    let zero_tick = r#""symbol":"BADUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"X","quote_ccy":"USD","price_tick_size":"0","qty_tick_size":"0.001","quote_decimals":400,"#;
+    let markets = catalogue(r#""50""#).replace(valid, zero_tick);
+    assert_ne!(markets, catalogue(r#""50""#));
+    let mut h = Harness::with_instruments(&markets);
+    assert!(h.engine.store().market("BADUSD-PERP").is_none());
+    h.reply("get-positions", &rows(&[BTC_POSITION]));
+    h.reply("user-balance", BALANCE);
+    h.reply("private/get-open-orders", EMPTY);
+    h.reply("advanced/get-open-orders", EMPTY);
+    next_tick(&mut h);
+    let changed = BTC_POSITION.replace("\"1\"", "\"3\"").replace(":1}", ":2}");
+    let malformed = BTC_POSITION.replace("BTCUSD-PERP", "BADUSD-PERP");
+    h.reply("get-positions", &rows(&[&changed, &malformed]));
+    assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
+    assert!(warned(&h, "owned position market unavailable"));
 }

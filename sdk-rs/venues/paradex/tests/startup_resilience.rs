@@ -1,6 +1,11 @@
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_paradex::{Options, Paradex};
 
+/// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 // A transport failure must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
@@ -48,7 +53,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         let timer = actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == now + delay => Some(*timer),
+                Action::SetTimer { timer, at_ms } if jittered(*at_ms - now, delay) => Some(*timer),
                 _ => None,
             })
             .expect("bounded public discovery backoff");
@@ -185,10 +190,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         let timer = actions
             .iter()
             .find_map(|action| match action {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 1000.0,
-                } => Some(*timer),
+                Action::SetTimer { timer, at_ms } if jittered(*at_ms, 1000.0) => Some(*timer),
                 _ => None,
             })
             .unwrap();

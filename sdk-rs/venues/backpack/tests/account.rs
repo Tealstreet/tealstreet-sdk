@@ -69,7 +69,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
     let (mut e, socket, _, timers) = ready_catalogue(&markets, POSITIONS, "[]");
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == 2000.0)
+        .find(|(_, at)| jittered(*at - 1000.0, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -615,7 +615,7 @@ fn malformed_spot_or_unnamed_rows_do_not_reread_the_catalogue() {
         "{logs:?}"
     );
     assert!(
-        !timers.iter().any(|(_, at)| *at == 2000.0),
+        !timers.iter().any(|(_, at)| jittered(*at - 1000.0, 1000.0)),
         "no catalogue re-read: {timers:?}"
     );
     assert!(e.store().loaded().positions);
@@ -645,7 +645,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     let listed = e.store().market(SYMBOL).cloned().unwrap();
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == 2000.0)
+        .find(|(_, at)| jittered(*at - 1000.0, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -670,7 +670,10 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
     let (mut e, _, _, timers) = ready_catalogue(&markets, POSITIONS, "[]");
-    let mut retry = timers.iter().find(|(_, at)| *at == 2000.0).copied();
+    let mut retry = timers
+        .iter()
+        .find(|(_, at)| jittered(*at - 1000.0, 1000.0))
+        .copied();
     let (mut rereads, mut warned) = (0, false);
     while let Some((timer, at)) = retry.take() {
         e.handle(at, Event::TimerFired { timer });
@@ -801,4 +804,23 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
         e.store().order("tp").unwrap().kind,
         safe_cex_engine::model::OrderType::TakeProfit
     );
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    for step in ["0", "-0.001"] {
+        let markets = MARKETS.replace(
+            BOGUS_BTC.0,
+            &BOGUS_BTC.0.replace("\"0.001\"", &format!("\"{step}\"")),
+        );
+        let btc_position = POSITIONS.replace("SOL_USDC_PERP", "BTC_USDC_PERP");
+        let (e, _, logs, _) = ready_catalogue(&markets, &btc_position, "[]");
+        assert!(e.store().market("BTC_USDC_PERP").is_none());
+        assert!(!e.store().loaded().positions);
+        assert!(
+            logs.iter()
+                .any(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is held")),
+            "{logs:?}"
+        );
+    }
 }

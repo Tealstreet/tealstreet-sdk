@@ -119,6 +119,9 @@
     },
     "weexTapeClock20261021": {
       "note": "WEEX private replay runs on the virtual tape clock. The generator now (a) gives each open-order/algo snapshot and write the stage of its command, and snapshots are served only after that command's write is acknowledged; (b) adds the documented Order Channel events that production sends 100 ms after the t=4100 cancels (61, 63), the t=4500 TP placement (64) and the t=5300 symbol cancel (60, 64), plus the missing post-cancel empty algo snapshot; (c) moves every command 100 ms off the 2 s TS tick and native REST cycles, so no poll ties a command. Tape rehashed; checkpoints renumbered. Every path below is identical across 5 local runs at the PR head (Node 22) and carries its specific cause. Prior hash entry replaced (no generator can emit it). Follow-up: the conditional-65 placeOrders moved from t=6100 to t=6300, after native's t=6250 reconciliation and off the TS 2 s tick, so its placement checkpoint no longer compares native-retained canceled rows; it shows only the placement-acknowledgement lag. Native now keeps 65's generated client ID to the end of the tape. Tape rehashed. Follow-up: TP 64's order event now arrives before its REST acknowledgement, and a new t=6700 post-only placement (66) is canceled by the venue with its CANCELED event before the acknowledgement (tape frames marked beforeAck reach the socket after the write is served, ahead of the client reading the acknowledgement). Native's insert-on-acknowledgement neither clobbers the newer event nor reopens the canceled order. Checkpoints renumbered; tape rehashed."
+    },
+    "paradexKucoinTapeTime20261022": {
+      "note": "Paradex and KuCoin private replays now run on tape time (virtualPrivateClock). Their order refreshes are timer-driven (Paradex: a 1 s debounce after the last private order event; KuCoin: TS keeps canceled rows until its REST order poll), so at wall time a checkpoint raced them (Paradex canceled-row retention at checkpoints 5-7; KuCoin checkpoints 6-7). The Paradex generator now stages each write with its command, so a command's snapshot is served only after its acknowledgement; tape rehashed and the landing-hash entry replaced by the 51 deterministic paths, all one cause. KuCoin's tape and its 60 declared paths are unchanged: on tape time every run yields exactly that set. Both verified by 5 identical CI-equivalent strict runs locally (Node 22)."
     }
   },
   "failures": [
@@ -36404,22 +36407,6 @@
       ]
     },
     {
-      "venue": "krakenspot",
-      "tapeSha256": "087a10d1f34d1ac3bf1d81a0e5d3166b070e2f7b97da04da683f19c309da953b",
-      "tape": "sdk-rs/harness/tapes/krakenspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
-          "keys": [
-            "checkpoint 10 account.orders[0].status",
-            "checkpoint 11 account.orders[0].status",
-            "checkpoint 12 account.orders[0].status",
-            "checkpoint 13 account.orders[0].status"
-          ]
-        }
-      ]
-    },
-    {
       "venue": "kucoin",
       "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
@@ -52266,7 +52253,7 @@
     },
     {
       "venue": "backpack",
-      "tapeSha256": "0877502441e921eda112d0ba38d914c43f1b4f95b4b045513dbd9fceed5e9070",
+      "tapeSha256": "f95174bf4bfff348fed06b8b101e5ebccf93a96b59255c44b4f1d97a6e3867c5",
       "tape": "sdk-rs/harness/tapes/backpack-private.jsonl",
       "diagnostics": [
         {
@@ -52866,38 +52853,21 @@
     },
     {
       "venue": "paradex",
-      "tapeSha256": "b706fac7123d50587e2d520b3382accba02e4c4916c4e04edf7dc19e89b9d581",
+      "tapeSha256": "43938d9213e62945e1ab74b7a67d043f3ae49038b0697d76b740cda88894c586",
       "tape": "sdk-rs/harness/tapes/paradex-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
+          "divergence": "Paradex checkpoints 5-9 (t=1700-2800): TS refreshes orders 1 s after the last private order event (debounced). The order events from t=1300 to t=2100 keep deferring that refresh to about t=3100, so TS still lists canceled 1001 (canceled at t=1300) and, from checkpoint 8, canceled 2001/2002 (t=2100); native reconciles each cancel and removes them sooner. Rows after 1000 therefore compare different orders. Production-visible: during a burst of order events TS keeps canceled rows until 1 s after the last event.",
           "keys": [
-            "checkpoint 5 account.orders[1].clientOrderId",
-            "checkpoint 5 account.orders[2].clientOrderId",
-            "checkpoint 6 account.orders[1].clientOrderId",
-            "checkpoint 6 account.orders[2].clientOrderId",
-            "checkpoint 7 account.orders[1].clientOrderId",
-            "checkpoint 7 account.orders[2].clientOrderId"
-          ]
-        },
-        {
-          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
-          "keys": [
-            "checkpoint 10 account.orders.length",
-            "checkpoint 10 account.orders[0]",
-            "checkpoint 11 account.orders.length",
-            "checkpoint 11 account.orders[0]",
-            "checkpoint 12 account.orders.length",
-            "checkpoint 12 account.orders[0]",
-            "checkpoint 13 account.orders.length",
-            "checkpoint 13 account.orders[0]",
             "checkpoint 5 account.orders.length",
             "checkpoint 5 account.orders[1].amount",
+            "checkpoint 5 account.orders[1].clientOrderId",
             "checkpoint 5 account.orders[1].id",
             "checkpoint 5 account.orders[1].price",
             "checkpoint 5 account.orders[1].remaining",
             "checkpoint 5 account.orders[1].status",
             "checkpoint 5 account.orders[2].amount",
+            "checkpoint 5 account.orders[2].clientOrderId",
             "checkpoint 5 account.orders[2].id",
             "checkpoint 5 account.orders[2].price",
             "checkpoint 5 account.orders[2].remaining",
@@ -52906,10 +52876,12 @@
             "checkpoint 5 account.orders[3]",
             "checkpoint 6 account.orders.length",
             "checkpoint 6 account.orders[1].amount",
+            "checkpoint 6 account.orders[1].clientOrderId",
             "checkpoint 6 account.orders[1].id",
             "checkpoint 6 account.orders[1].price",
             "checkpoint 6 account.orders[1].remaining",
             "checkpoint 6 account.orders[2].amount",
+            "checkpoint 6 account.orders[2].clientOrderId",
             "checkpoint 6 account.orders[2].id",
             "checkpoint 6 account.orders[2].price",
             "checkpoint 6 account.orders[2].remaining",
@@ -52918,10 +52890,12 @@
             "checkpoint 6 account.orders[3]",
             "checkpoint 7 account.orders.length",
             "checkpoint 7 account.orders[1].amount",
+            "checkpoint 7 account.orders[1].clientOrderId",
             "checkpoint 7 account.orders[1].id",
             "checkpoint 7 account.orders[1].price",
             "checkpoint 7 account.orders[1].remaining",
             "checkpoint 7 account.orders[2].amount",
+            "checkpoint 7 account.orders[2].clientOrderId",
             "checkpoint 7 account.orders[2].id",
             "checkpoint 7 account.orders[2].price",
             "checkpoint 7 account.orders[2].remaining",
@@ -52936,65 +52910,6 @@
             "checkpoint 9 account.orders[1]",
             "checkpoint 9 account.orders[2]",
             "checkpoint 9 account.orders[3]"
-          ]
-        },
-        {
-          "divergence": "TS retains canceled caller and batch orders 1001/2001/2002 at checkpoints 10\u201313 while native reconciliation omits them; commands, taped boundaries and write sequences agree.",
-          "keys": [
-            "checkpoint 10 account.orders[1]",
-            "checkpoint 10 account.orders[2]",
-            "checkpoint 10 account.orders[3]",
-            "checkpoint 11 account.orders[1]",
-            "checkpoint 11 account.orders[2]",
-            "checkpoint 11 account.orders[3]",
-            "checkpoint 12 account.orders[1]",
-            "checkpoint 12 account.orders[2]",
-            "checkpoint 12 account.orders[3]",
-            "checkpoint 13 account.orders[1]",
-            "checkpoint 13 account.orders[2]",
-            "checkpoint 13 account.orders[3]"
-          ]
-        },
-        {
-          "divergence": "Paradex terminal reconciliation is timing-sensitive: checkpoint 8 retains batch orders 2001/2002 natively for one more boundary, shifting rows against TS retained 1001; checkpoint 14 differs on retained canceled order 1000. These are different-ID row alignment/terminal-retention paths, not independent same-order economic differences.",
-          "keys": [
-            "checkpoint 14 account.orders.length",
-            "checkpoint 14 account.orders[0]",
-            "checkpoint 8 account.orders[1].amount",
-            "checkpoint 8 account.orders[1].clientOrderId",
-            "checkpoint 8 account.orders[1].id",
-            "checkpoint 8 account.orders[1].price",
-            "checkpoint 8 account.orders[1].remaining",
-            "checkpoint 8 account.orders[2].amount",
-            "checkpoint 8 account.orders[2].clientOrderId",
-            "checkpoint 8 account.orders[2].id",
-            "checkpoint 8 account.orders[2].price",
-            "checkpoint 8 account.orders[2].remaining",
-            "checkpoint 8 account.orders[2].side",
-            "checkpoint 8 account.orders[2].symbol"
-          ]
-        },
-        {
-          "divergence": "At checkpoint 9 after cancelSymbolOrders, TS retains open existing order 1000 while native applies the taped empty orders response. Commands and checkpoint boundaries are unchanged; per-engine receipts match run 39426820375. This is interim acknowledged-cancel reconciliation visibility.",
-          "keys": [
-            "checkpoint 9 account.orders[0]"
-          ]
-        },
-        {
-          "divergence": "At checkpoint 9, TS retains canceled caller order 1001 while native retains only the batch terminal rows 2001/2002 beside existing 1000. Sorted rows therefore compare different IDs and their associated client IDs/geometry. This repeats the independently observed checkpoint-8 reconciliation timing family; tape, commands, boundaries and per-engine receipts match run 39436814801.",
-          "keys": [
-            "checkpoint 9 account.orders[1].amount",
-            "checkpoint 9 account.orders[1].clientOrderId",
-            "checkpoint 9 account.orders[1].id",
-            "checkpoint 9 account.orders[1].price",
-            "checkpoint 9 account.orders[1].remaining",
-            "checkpoint 9 account.orders[2].amount",
-            "checkpoint 9 account.orders[2].clientOrderId",
-            "checkpoint 9 account.orders[2].id",
-            "checkpoint 9 account.orders[2].price",
-            "checkpoint 9 account.orders[2].remaining",
-            "checkpoint 9 account.orders[2].side",
-            "checkpoint 9 account.orders[2].symbol"
           ]
         }
       ]

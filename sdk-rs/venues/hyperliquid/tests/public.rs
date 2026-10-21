@@ -332,7 +332,10 @@ fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(at, 1000. + delay);
+        assert!(
+            (0.75 * delay..=delay).contains(&(at - 1000.)),
+            "{at} is not a jittered {delay} ms backoff"
+        );
         e.handle(at, Event::TimerFired { timer });
         assert!(!e.store().loaded().markets);
     }
@@ -343,4 +346,23 @@ fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
         r#"[{"universe":[{"name":"BTC","szDecimals":5}]},[{"midPx":"100"}]]"#,
     );
     assert_eq!(e.store().markets().len(), 1);
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for sz in ["400", "-2147483648"] {
+        let mut e = Engine::new(Hyperliquid::new(Options::default()));
+        e.start(0.);
+        let id = request(&mut e);
+        response(
+            &mut e,
+            id,
+            &format!(
+                r#"[{{"universe":[{{"name":"BTC","szDecimals":5}},{{"name":"ETH","szDecimals":{sz}}}]}},[{{"midPx":"100","markPx":"100"}},{{"midPx":"10","markPx":"10"}}]]"#
+            ),
+        );
+        let ids: Vec<_> = e.store().markets().iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["BTC"], "szDecimals {sz}");
+        assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    }
 }

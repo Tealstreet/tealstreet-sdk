@@ -1,8 +1,10 @@
 //! Scripted staging account; markPrice schema:
 //! https://docs.woox.io/#get-all-position-info-new. No network transport is used.
+mod support;
 use safe_cex_engine::model::Ticker;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response, TimerId};
 use safe_cex_venue_woo::{Options, Woo};
+use support::jittered;
 const CATALOGUE: &str = r#"{"success":true,"rows":[{"symbol":"PERP_JTO_USDT","base_tick":0.1,"quote_tick":0.0001,"base_min":0.1,"base_max":1000,"base_imr":0.1},{"symbol":"PERP_W_USDT","base_tick":0.1,"quote_tick":0.0001,"base_min":0.1,"base_max":1000,"base_imr":0.1}]}"#;
 const INFO: &str = r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY","freeCollateral":900,"totalCollateral":1000,"totalAccountValue":1000}}"#;
 const NATIVE: &str = r#"{"success":true,"data":{"positions":[{"symbol":"PERP_JTO_USDT","holding":20,"averageOpenPrice":2.0771,"markPrice":2.07460399,"pnl24H":0,"estLiqPrice":1.92748111,"leverage":10,"marginMode":"ISOLATED"},{"symbol":"PERP_W_USDT","holding":-50,"averageOpenPrice":0.1906,"markPrice":0.2103828568089886,"pnl24H":0,"estLiqPrice":4.542491646808989,"leverage":20,"marginMode":"CROSS"}]}}"#;
@@ -88,10 +90,7 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
     let retry = failed
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .unwrap();
