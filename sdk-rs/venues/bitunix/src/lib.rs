@@ -571,7 +571,10 @@ impl Venue for BitunixFutures {
                         .map_err(|e| e.to_string())?;
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                };
             }
             other => self.on_request_failed(cx, other, "malformed Bitunix list"),
         }
@@ -590,7 +593,7 @@ impl Venue for BitunixFutures {
                 cx.log(LogLevel::Warning, error);
                 self.debounce(cx, read.axis);
             }
-            Pending::Candles { command } => cx.done(command, Err(error.into())),
+            Pending::Candles { command } => cx.fail(command, error),
             Pending::SymbolSettings { symbol, .. } => {
                 // Retry on the next candle interest.
                 self.account.symbol_settings.remove(&symbol);
@@ -724,7 +727,7 @@ impl Venue for BitunixFutures {
                 to_ms,
             } => {
                 let Some(duration) = interval_ms(interval) else {
-                    cx.done(command, Err("Unsupported Bitunix candle interval".into()));
+                    cx.fail(command, "Unsupported Bitunix candle interval");
                     return;
                 };
                 let explicit_limit = limit;

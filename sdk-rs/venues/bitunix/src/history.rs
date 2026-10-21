@@ -172,18 +172,18 @@ fn optional(v: f64) -> Option<f64> {
 impl BitunixFutures {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: u32, query: Query) {
         if matches!(query, Query::OrderByClientId { .. }) {
-            cx.done(
+            cx.fail(
                 command,
-                Err("Bitunix client order lookup is not supported by the Rust engine".into()),
+                "Bitunix client order lookup is not supported by the Rust engine",
             );
             return;
         }
         if matches!(query, Query::PublicTrades { .. }) {
-            cx.done(command, Err("Not implemented".into()));
+            cx.fail(command, "Not implemented");
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         let (kind, symbol, order_id, from, to, limit) = match query {
@@ -224,11 +224,11 @@ impl BitunixFutures {
             Query::PublicTrades { .. } | Query::OrderByClientId { .. } => unreachable!(),
         };
         if kind == Kind::Fills && symbol.as_ref().is_none_or(|s| cx.store.market(s).is_none()) {
-            cx.done(command, Ok("[]".into()));
+            cx.done(command, "[]".into());
             return;
         }
         if [from, to].into_iter().flatten().any(|v| !v.is_finite()) {
-            cx.done(command, Err("Bitunix history time must be finite".into()));
+            cx.fail(command, "Bitunix history time must be finite");
             return;
         }
         let read = Request {
@@ -578,6 +578,9 @@ impl BitunixFutures {
                 serde_json::to_string(&read.income)
             }
         };
-        cx.done(read.command, result.map_err(|e| e.to_string()));
+        match result.map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(read.command, data),
+            Err(error) => cx.fail(read.command, error),
+        };
     }
 }
