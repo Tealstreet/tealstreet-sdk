@@ -790,9 +790,15 @@ Futures matches TS on nearly every input; no high regression.
 TxFlow loses nothing (master TS was a placeholder).
 - ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
-- Low: one bad market row or unknown order row fails closed (startup lane);
-  trailing-stop display price; cancels skipped for unknown/finished ids;
-  candle `from`/`to` filtering a latest-N fetch.
+- Low: ~~one bad market row or unknown order row fails closed~~ (stale:
+  discovery skips malformed rows; order snapshot coverage retains rejected
+  roots and commits valid peers); ~~trailing-stop display price~~ (maps native
+  extreme/callback value or rate using order side, for REST and WS);
+  ~~cancels skipped for unknown/finished ids~~ (unknown IDs reject explicitly;
+  finished IDs are an intentional no-op. **RISKY** to infer normal/algo endpoint,
+  symbol or sibling repair from an uncached ID; keep reconciled-order preflight);
+  ~~candle `from`/`to` filtering a latest-N fetch~~ (bounded reads use native
+  `/v1/tv/kline_history`, validate parallel arrays and filter exact bounds).
 
 ### KuCoin
 - High: ~~cancel-symbol also deletes the symbol's TP/SL stops

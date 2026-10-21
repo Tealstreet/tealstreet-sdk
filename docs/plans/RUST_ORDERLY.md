@@ -431,3 +431,23 @@ checks pass while its explicit60s constructor sweep times out. Previous code
 headcb132db8b1 passed both general CI runs with default budgets. Final merged
 head CI remains mandatory. Rebuilt WASM/replay results will be posted on PR1318
 before merge; no later source change is planned beyond a concrete CI finding.
+
+### Port-review lows: history candles and trailing display
+
+Bounded `FetchCandles` uses Orderly's native
+[`/v1/tv/kline_history`](https://orderly.network/docs/build-on-omnichain/restful-api/public/get-kline-history),
+with seconds in `from`/`to` and validated parallel OHLCV arrays. Unbounded latest
+reads keep `/v1/kline`. Results are sorted ascending, filtered at exact caller
+millisecond bounds, and limited to the newest requested bars. Malformed columns,
+duplicate timestamps or invalid OHLCV fail the whole read; `no_data` is empty.
+This deliberately improves on TS, which ignores bounds entirely.
+
+Trailing-stop display uses native extreme price with callback value (preferred)
+or rate, including REST snake_case and stream camelCase fields. BUY adds the
+callback; SELL subtracts it, matching the
+[official SDK](https://github.com/OrderlyNetwork/js-sdk/blob/main/packages/utils/src/order.ts).
+An explicit positive trigger wins; inactive/unpriced trails display zero.
+TS always subtracts a callback value and ignores rate, so its BUY/rate display
+is intentionally corrected. Placement/cancellation economics are unchanged.
+Uncached cancel IDs still reject: safe cancellation requires symbol, normal vs
+algo identity and sibling provenance. Finished IDs intentionally succeed locally.
