@@ -229,7 +229,8 @@ integration cross-reviews PASS; findings and resolutions are posted on PR1302.
 - Initial full repository verification PASS(27 tasks); targeted fixes and merge
   have their own passing regressions. PR must now pass the updated CI before
   merge; no requested implementation work remains beyond landing/CI handling.
-# WebSocket default-port migration plan (2026-10-21)
+
+## WebSocket default-port migration (2026-10-21)
 
 OKX's [September 30 changelog](https://www.okx.com/docs-v5/log_en/)
 retires public-internet WebSocket port 8443 on October 31, 2026. Remove the
@@ -237,4 +238,16 @@ explicit port in Rust and TS global/EEA live/demo URLs and routing metadata,
 preserving every host/path. Update the URL spec and transport expectations;
 verify focused OKX/Binance and TS transport checks, review, then merge on green
 CI after the overseer's hold lifts.
+
+Implemented in Rust, TS and relay metadata for all four variants. Historical
+replay URLs alias only the four exact OKX socket hosts, the retired port and
+the three documented channels; recorded public fixture bytes stay intact.
+New private tape URLs and smoke allowlists use default TLS. The four private
+tape SHA bindings change with those URLs; diagnostic keys and reasons remain
+exactly the same. Offline generation verifies each new tape is byte-identical
+to the old tape after removing only `:8443` from socket URLs.
+
+Validation: 443 OKX/Binance native tests, 15 TS transport tests, 162 focused
+harness tests, package typecheck, touched ESLint, Rust fmt/strict Clippy/bans
+pass. The transport regression failed against the old URLs before the fix.
 
