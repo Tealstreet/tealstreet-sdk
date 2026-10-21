@@ -52253,7 +52253,7 @@
     },
     {
       "venue": "backpack",
-      "tapeSha256": "0877502441e921eda112d0ba38d914c43f1b4f95b4b045513dbd9fceed5e9070",
+      "tapeSha256": "f95174bf4bfff348fed06b8b101e5ebccf93a96b59255c44b4f1d97a6e3867c5",
       "tape": "sdk-rs/harness/tapes/backpack-private.jsonl",
       "diagnostics": [
         {
