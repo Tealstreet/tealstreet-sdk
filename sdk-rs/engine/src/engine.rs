@@ -131,6 +131,16 @@ pub enum LogLevel {
     Error,
 }
 
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Info => Self::Info,
+            LogLevel::Warning => Self::Warn,
+            LogLevel::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
@@ -928,6 +938,11 @@ impl<P> Cx<'_, P> {
     /// an expensive Debug message.
     pub fn logs(&self, level: Level) -> bool {
         level >= self.io.min_level
+    }
+
+    /// [`Cx::event`] without fields.
+    pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        self.event(level, code, message, Vec::new());
     }
 
     /// Counted in [`Health`] whatever the host's minimum level.

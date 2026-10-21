@@ -3,8 +3,10 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
+use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
     OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
@@ -558,7 +560,7 @@ impl BinanceFutures {
                 } else {
                     LogLevel::Warning
                 };
-                cx.log(level, message);
+                cx.notice(Level::from(level), code::STREAM_UNAVAILABLE, message);
                 self.account.resync_orders_on_open = true;
                 let delay = LISTEN_KEY_RETRY.delay(self.account.listen_key_failures);
                 self.account.listen_key_failures += 1;
@@ -571,12 +573,16 @@ impl BinanceFutures {
                 } else {
                     LogLevel::Error
                 };
-                cx.log(level, message);
+                cx.notice(Level::from(level), code::STREAM_UNAVAILABLE, message);
                 self.account.keepalive_failing = true;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
             Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
-                cx.log(LogLevel::Error, format!("Binance positions: {message}"));
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
+                    format!("Binance positions: {message}"),
+                );
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
@@ -586,11 +592,16 @@ impl BinanceFutures {
             }
             Request::Account { .. } => {
                 self.account.account_in_flight = false;
-                cx.log(LogLevel::Error, format!("Binance account: {message}"));
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
+                    format!("Binance account: {message}"),
+                );
             }
             Request::OpenOrders { generation } | Request::OpenAlgoOrders { generation } => {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
                     format!("Binance fetchOrders error: {message}"),
                 );
                 if let Some(join) = &mut self.account.orders
@@ -601,7 +612,11 @@ impl BinanceFutures {
                 self.finish_orders(cx);
             }
             Request::LeverageBrackets(_) | Request::PositionMode => {
-                cx.log(LogLevel::Error, format!("Binance: {message}"));
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
+                    format!("Binance: {message}"),
+                );
             }
         }
     }
@@ -634,7 +649,11 @@ impl BinanceFutures {
                     {
                         join.failed = true;
                     }
-                    _cx.log(LogLevel::Error, "Binance positionRisk row malformed");
+                    _cx.notice(
+                        Level::Error,
+                        code::ROW_SKIPPED,
+                        "Binance positionRisk row malformed",
+                    );
                     return;
                 };
                 if self.is_inverse()
@@ -650,7 +669,7 @@ impl BinanceFutures {
                     {
                         join.failed = true;
                     }
-                    _cx.log(LogLevel::Warning, "Binance inverse owned position market unavailable; preserving previous snapshot");
+                    _cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Binance inverse owned position market unavailable; preserving previous snapshot");
                     return;
                 }
                 if let (Some(leverage), Some(join)) = (p.leverage, &mut self.account.positions)
@@ -687,8 +706,9 @@ impl BinanceFutures {
                         _ => None,
                     }
                     .map(|mode| position_id(&p.symbol, position_side(&p.position_side, 0.0), mode));
-                    _cx.log(
-                        LogLevel::Warning,
+                    _cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         format!(
                             "Binance positionRisk row {} has an unreadable positionAmt",
                             p.symbol
@@ -877,7 +897,11 @@ impl BinanceFutures {
                 });
                 match parsed {
                     Ok(()) => cx.store.set_balance(balance),
-                    Err(error) => cx.log(LogLevel::Error, format!("Binance balance: {error}")),
+                    Err(error) => cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
+                        format!("Binance balance: {error}"),
+                    ),
                 }
             }
             Request::Account { version } => {
@@ -919,10 +943,14 @@ impl BinanceFutures {
                             self.account.wallet_assets = None;
                             self.account.valuation_pending = false;
                             self.account.valuation_refresh_required = true;
-                            cx.log(LogLevel::Warning, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
                         }
                     }
-                    Err(error) => cx.log(LogLevel::Error, format!("Binance account: {error}")),
+                    Err(error) => cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
+                        format!("Binance account: {error}"),
+                    ),
                 }
             }
             Request::OpenOrders { generation } => {
@@ -1005,8 +1033,9 @@ impl BinanceFutures {
                     }
                 }
                 if let Some(detail) = &invalid {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::ROW_SKIPPED,
                         format!("Binance open order row has invalid economics: {detail}"),
                     );
                 }
@@ -1085,8 +1114,9 @@ impl BinanceFutures {
                     });
                 });
                 if let Some(detail) = &invalid {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::ROW_SKIPPED,
                         format!("Binance conditional order row has invalid economics: {detail}"),
                     );
                 }
@@ -1389,8 +1419,9 @@ impl BinanceFutures {
             return;
         };
         for id in ids {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!("Binance open order {id} has an unsupported type"),
             );
             join.skipped.reject(Some(id));
@@ -1487,8 +1518,9 @@ impl BinanceFutures {
         self.note_valuation_wait(cx, missing_price, zero_valued);
         if missing_price {
             if !self.account.valuation_warned {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::VALUATION_UNAVAILABLE,
                     "Binance wallet valuation price unavailable; preserving previous USD balance",
                 );
                 self.account.valuation_warned = true;
@@ -1499,8 +1531,7 @@ impl BinanceFutures {
         cx.store.set_balance(balance.clone());
         if !self.account.logged_balance && !details.is_empty() {
             self.account.logged_balance = true;
-            cx.log(
-                LogLevel::Info,
+            cx.notice(Level::Debug, code::BALANCE_SUMMARY,
                 format!(
                     "Balance aggregation: {}; Total: ${:.2}, Free: ${:.2}, Used: ${:.2}, UPnL: ${:.2}",
                     details.join(", "),
@@ -1934,7 +1965,7 @@ impl BinanceFutures {
             self.account.wallet_assets = None;
             self.account.valuation_pending = false;
             self.account.valuation_refresh_required = true;
-            cx.log(LogLevel::Warning, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
+            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
         }
         if update.positions.is_empty() {
             return;
@@ -1945,8 +1976,9 @@ impl BinanceFutures {
                 num::parse(&position.pa) != 0.0 && cx.store.market(&position.s).is_none()
             })
         {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
                 "Binance inverse owned position market unavailable; preserving previous snapshot",
             );
             return;
@@ -2237,8 +2269,7 @@ impl BinanceFutures {
             if !STABLECOINS.contains(&asset.as_str())
                 && self.account.zero_valued_assets.insert(asset.clone())
             {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE,
                     format!("Binance wallet asset {asset} has no supported valuation market; valued at 0, native amount retained"),
                 );
             }
@@ -2428,8 +2459,9 @@ impl BinanceFutures {
         self.account.spot_heartbeat_at = Some(cx.now);
     }
     fn fail_spot_stream(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
-        cx.log(
-            LogLevel::Error,
+        cx.notice(
+            Level::Error,
+            code::SUBSCRIPTION_REJECTED,
             format!("Binance Spot user-data subscription {reason}"),
         );
         if let Some(socket) = self.private.socket {
@@ -2518,7 +2550,11 @@ impl BinanceFutures {
                     .collect();
                 self.commit_spot_balance(cx);
             }
-            Err(error) => cx.log(LogLevel::Error, format!("Binance Spot account: {error}")),
+            Err(error) => cx.notice(
+                Level::Error,
+                code::REQUEST_FAILED,
+                format!("Binance Spot account: {error}"),
+            ),
         }
     }
     fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -2571,7 +2607,7 @@ impl BinanceFutures {
         self.account.valuation_pending = missing_price;
         if missing_price {
             if !self.account.valuation_warned {
-                cx.log(LogLevel::Warning, "Binance Spot wallet valuation price unavailable; preserving previous USD balance");
+                cx.notice(Level::Warn, code::VALUATION_UNAVAILABLE, "Binance Spot wallet valuation price unavailable; preserving previous USD balance");
                 self.account.valuation_warned = true;
             }
         } else {
