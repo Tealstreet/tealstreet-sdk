@@ -1442,6 +1442,18 @@ keep the same candle shape. Order lists/chart overlays see a real trailing
 trigger derived from native extreme/callback value or rate: BUY adds, SELL
 subtracts. This corrects TS's BUY/rate display, with no write-contract change.
 
+### Lighter port-review confirmation and failures
+
+A Rust Lighter reduce-only limit order without matching known exposure now waits
+for account-read completion, up to10 seconds, before any nonce/signing request.
+Unconfirmed, failed or timed-out reads refuse the unsent leg; a prior accepted
+leg remains reflected in the aggregate outcome. Late reads cannot release later
+queued orders. Both Lighter deployments keep their existing placement units and
+result shapes. HTTP405/429 include neutral guidance with native diagnostics;
+explicit invalid-margin21613 rejection refreshes state without changing cached
+mode by guess or automatically replaying a placement.
+
+
 ### Phemex explicit index triggers and daily cutoff
 
 Explicit SL/TP index-price sources now produce the documented `ByIndexPrice`
@@ -1458,3 +1470,36 @@ intentional corrections to the TS reference are not parity defects. CFM summary
 unrealized-PnL/equity aggregation remains an explicit accounting risk pending
 portfolio and downstream consumer evidence. This revalidation changes no API,
 selector, deployment status or runtime behavior.
+
+## Coded diagnostic caller cutover (PR5)
+
+The SDK exposes `engine-event` (`EngineEvent`), also forwarded by ExchangeWorker
+as `{ op: 'engine-event', data: [event] }`. Until callers migrate, Error still
+uses `error` with `opts.engineEvent`; Info/Warn uses `log` with the event as its
+third argument. Choose one path per report; skip a legacy notification only
+when its event metadata is present. Keep ordinary command/host error listeners. Use
+`ExchangeHealthMonitor.processEvent(event, classified?)` for native diagnostics
+and `processHealth(exchange.getHealth())` for authoritative lifetime counters;
+observed event counts cannot substitute for filtered/deduplicated engine counts.
+Keep `processMessage` only for legacy TS/unstructured diagnostics.
+
+Read-only tealstreet-next inventory; application changes remain cutover work:
+
+| Caller | Required change and preserved behavior |
+| --- | --- |
+| `apps/web/src/controllers/exchangeController/exchangeAccountController.ts:180-383` and its worker listener | Accept/forward `engine-event`; classify code and typed errors before toast, auth badge and terminal reload latch. Preserve 120 s auth badge/reload behavior and startup-phase tags. Avoid classifying the same diagnostic on both legacy and structured paths. |
+| `apps/cli/src/exchange-manager.ts` (health-monitor owner) and its error/log listeners | Feed events to `processEvent` and refresh engine counters via `getHealth()`; keep legacy fallback for TS venues. |
+| `apps/cli/src/error-classifier.ts` | Use typed venue codes/fields for Bybit environment mismatch rather than the message prefix; preserve critical dedup by account/category. |
+| `apps/web/src/utils/telemetry/safeCexTelemetrySink.ts` | Preserve `event_code` tags and use stable codes for grouping; builder-fee reporting stays independent. |
+| `packages/exchange-pretty-error-messages/src/bybit/bybitHandler.ts` and `bybitRejectReasonToLocale.ts` | Select translations from typed venue code/fields and event code, including signing failures and order rejection; message text is display data. |
+| `packages/exchange-pretty-error-messages/src/bingx/bingxHandler.ts` | Keep display passthrough; use the monitor's code-based severity/category rather than adding text classification. |
+
+`auth.rejected` identifies a credential rejection; typed `authExpired` and
+`authPermission` distinguish expiry and permission. A generic `request.failed`
+must not be upgraded to auth solely by message wording (Paradex signing/network
+failures still share that code). Preserve the current legacy Error notifications
+until callers and any remaining venue classifications are migrated together.
+
+Deployment ordering: **safe-cex-server must be deployed before Info+ venue events
+matter to native clients**. Old NativeFrameSession rejects the native `event`
+notice. Deployment is Sam's call; neither logging PR deploys anything.
