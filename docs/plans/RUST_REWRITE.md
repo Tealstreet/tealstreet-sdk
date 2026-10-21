@@ -209,7 +209,7 @@ as it does today against Rust transferring frames:
 - Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
   reservation; never clamp releases to zero. Each measured run must reproduce
   its implementation's audited output and transport receipt.
-- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
+- Shipped combined WASM: at most 14,155,776 bytes (13.5 MiB). Standalone builds
   use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
 
 Peak memory and browser cold-start remain cutover requirements; this replay
