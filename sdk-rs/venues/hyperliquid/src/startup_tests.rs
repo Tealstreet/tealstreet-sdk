@@ -77,7 +77,7 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
 fn notice(actions: &[Action], text: &str) -> bool {
     actions
         .iter()
-        .any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains(text)))
+        .any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains(text)))
 }
 #[test]
 fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {

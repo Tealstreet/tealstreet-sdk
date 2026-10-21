@@ -39,7 +39,10 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 Action::Notice(Notice::Log {
                     level: safe_cex_engine::LogLevel::Error,
                     ..
-                })
+                }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                    level: safe_cex_engine::Level::Error,
+                    ..
+                }))
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );
@@ -69,7 +72,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
@@ -172,7 +175,10 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
             Action::Notice(Notice::Log {
                 level: safe_cex_engine::LogLevel::Warning,
                 ..
-            })
+            }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                ..
+            }))
         )));
         let timer = actions
             .iter()

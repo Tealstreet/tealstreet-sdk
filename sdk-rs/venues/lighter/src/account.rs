@@ -1,10 +1,12 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::{
@@ -660,8 +662,9 @@ impl Lighter {
                 }),
             );
         } else {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "Failed to resolve Lighter account index. Provide account index in Application ID.",
             );
         }
@@ -692,8 +695,9 @@ impl Lighter {
                 self.account.signer = Some(signer);
                 self.connect_private(cx);
             }
-            Err(error) => cx.log(
-                LogLevel::Warning,
+            Err(error) => cx.notice(
+                Level::Warn,
+                code::CONFIG_INVALID,
                 format!("Lighter signer unavailable at startup: {error}"),
             ),
         }
@@ -750,7 +754,7 @@ impl Lighter {
             Ok(a) => a,
             Err(e) => {
                 self.account.orders_inflight = false;
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, e);
                 return;
             }
         };
@@ -832,7 +836,7 @@ impl Lighter {
             socket,
             format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
         );
-        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.log(LogLevel::Warning,e)}
+        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,e)}
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -1103,8 +1107,9 @@ impl Lighter {
             .filter(|pnl| pnl.is_finite())
             .unwrap_or(0.0);
         if reported_pnl.is_none() {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "Lighter position PnL unavailable; retaining prior valuation",
             );
         }
@@ -1219,8 +1224,9 @@ impl Lighter {
                     if identity.is_some() && size == Some(0.0) {
                         return;
                     }
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match &identity {
                             Some(id) => format!("Lighter skipped malformed position {id}"),
                             None => "Lighter skipped malformed position without a market".into(),
@@ -1276,8 +1282,9 @@ impl Lighter {
                         snapshot.positions.push(position);
                     }
                 } else if owned {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match &identity {
                             Some(id) => {
                                 format!("Lighter skipped position {id} on an unknown market")
@@ -1321,8 +1328,9 @@ impl Lighter {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => return orders.extend(order),
             Err(OrderRowError::Unmapped(id)) => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!("Lighter skipped order {id} on an unknown market"),
                 );
                 return coverage.reject(Some(id));
@@ -1350,8 +1358,9 @@ impl Lighter {
                     .and_then(|a| index(&a.0))
                     .map(|n| n.to_string())
             });
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
             match &id {
                 Some(id) => format!("Lighter skipped unmappable order {id}"),
                 None => "Lighter skipped unmappable order without an id".into(),
@@ -1764,8 +1773,9 @@ impl Lighter {
                     value.is_finite().then_some(value)
                 });
             let Some(upnl) = upnl else {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::VALUATION_UNAVAILABLE,
                     "Lighter position PnL invalid; preserving previous balance",
                 );
                 return;
@@ -1863,8 +1873,7 @@ impl Lighter {
                         self.request_backfill(cx, run);
                         return;
                     }
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                         "Lighter fill backfill stopped before the outage start; older fills may be missing",
                     );
                 }
@@ -1923,8 +1932,9 @@ impl Lighter {
                     }
                     self.trade_kick(cx);
                 } else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Lighter account snapshot failed; preserving account state",
                     );
                 }
@@ -1982,8 +1992,9 @@ impl Lighter {
                 } else {
                     self.account.orders_inflight = false;
                     self.account.batch = None;
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Lighter order snapshot failed; preserving all orders",
                     );
                 }
@@ -2040,16 +2051,18 @@ impl Lighter {
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
                     format!("Lighter account snapshot failed: {error}"),
                 );
             }
             Request::Orders { .. } => {
                 self.account.orders_inflight = false;
                 self.account.batch = None;
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
                     format!("Lighter order snapshot failed: {error}"),
                 );
             }
@@ -2066,7 +2079,11 @@ impl Lighter {
         }
         self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
-            cx.log(LogLevel::Warning, "Invalid Lighter private frame");
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Invalid Lighter private frame",
+            );
             return true;
         };
         if frame.kind == "ping" {
@@ -2160,7 +2177,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         if let Some(raw) = payload.positions {
@@ -2209,7 +2226,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         let live_after = if frame.kind.starts_with("subscribed") {
@@ -2224,7 +2241,7 @@ impl Lighter {
                 }
             });
             if let Err(e) = result {
-                cx.log(LogLevel::Warning, e);
+                cx.notice(Level::Warn, code::STREAM_MALFORMED, e);
             }
         }
         true
@@ -2346,14 +2363,14 @@ impl Lighter {
     }
     fn backfill_failed(&mut self, cx: &mut Cx<'_, Pending>, mut run: Backfill, error: String) {
         if run.retried {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                 format!("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect: {error}"),
             );
             return;
         }
-        cx.log(
-            LogLevel::Info,
+        cx.notice(
+            Level::Info,
+            code::REQUEST_FAILED,
             format!("Lighter fill backfill failed, retrying: {error}"),
         );
         run.retried = true;
@@ -2363,18 +2380,18 @@ impl Lighter {
         self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
     }
     fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
-        let auth = match self.account_auth(cx.now) {
-            Ok(auth) => auth,
-            Err(e) => {
-                cx.log(
-                    LogLevel::Warning,
+        let auth =
+            match self.account_auth(cx.now) {
+                Ok(auth) => auth,
+                Err(e) => {
+                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
                     format!(
                         "Lighter fill backfill skipped; fills during the outage may be missing: {e}"
                     ),
                 );
-                return;
-            }
-        };
+                    return;
+                }
+            };
         let account = self.account.account_index.unwrap();
         let mut url = format!(
             "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",

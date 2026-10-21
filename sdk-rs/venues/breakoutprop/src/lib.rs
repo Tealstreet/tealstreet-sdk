@@ -5,12 +5,13 @@ mod session;
 mod trading;
 pub(crate) mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, Cx, ErrorKind, LogLevel, Method, Outcome, Response, SocketId, TimerId, Venue,
-    VenueError,
+    Command, Cx, ErrorKind, Method, Outcome, Response, SocketId, TimerId, Venue, VenueError,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -586,7 +587,11 @@ impl BreakoutProp {
             {
                 self.instruments = None;
                 self.details = None;
-                cx.log(LogLevel::Error, "Invalid DXtrade instrument details");
+                cx.notice(
+                    Level::Error,
+                    code::REQUEST_FAILED,
+                    "Invalid DXtrade instrument details",
+                );
                 self.arm_poll(cx);
                 return;
             }
@@ -626,7 +631,11 @@ impl BreakoutProp {
         if markets.is_empty() {
             self.instruments = None;
             self.details = None;
-            cx.log(LogLevel::Error, "DXtrade returned no matching instruments");
+            cx.notice(
+                Level::Error,
+                code::REQUEST_FAILED,
+                "DXtrade returned no matching instruments",
+            );
             self.arm_poll(cx);
             return;
         }
@@ -695,12 +704,16 @@ impl BreakoutProp {
             Operation::Trade(request) => return self.on_trade_failed(cx, request, error),
             operation => operation,
         };
+        let session_code = match error.kind {
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission) => code::AUTH_REJECTED,
+            _ => code::REQUEST_FAILED,
+        };
         let error = error.message.as_str();
         match operation {
             Operation::Trade(_) => unreachable!("trade failures return above"),
             Operation::Portfolio { .. } => {
                 self.portfolio_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 if !self.auth_failed && !self.auth_draining {
                     self.fetch_quotes(cx);
                 }
@@ -710,7 +723,7 @@ impl BreakoutProp {
                 if !cx.store.loaded().markets {
                     self.auth_failed = true;
                     let message = format!("DXtrade startup failed: {error}");
-                    cx.log(LogLevel::Error, &message);
+                    cx.notice(Level::Error, session_code, &message);
                     cx.startup_failed(message);
                 }
                 if matches!(operation, Operation::Login) {
@@ -725,7 +738,7 @@ impl BreakoutProp {
                     self.fail_operation(cx, pending.operation, not_sent(error));
                 }
                 self.auth_draining = was_draining;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, session_code, error);
                 if self.auth_failed {
                     self.session.token = None;
                     self.session.expires_at = 0.0;
@@ -743,17 +756,17 @@ impl BreakoutProp {
             }
             Operation::Instruments { .. } => {
                 self.instruments_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
             Operation::Details { .. } => {
                 self.details_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
             Operation::Quotes { .. } => {
                 self.quotes_pending = false;
-                cx.log(LogLevel::Error, error);
+                cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
             Operation::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -839,8 +852,9 @@ impl Venue for BreakoutProp {
             } => {
                 self.portfolio_pending = false;
                 if invalid || snapshot.is_none() {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
                         "Invalid or missing selected DXtrade portfolio",
                     );
                 } else if revision == self.order_revision {
@@ -1143,7 +1157,11 @@ impl Venue for BreakoutProp {
                 if wire::synthetic_interval_seconds(interval).is_some() {
                     *self.candles.entry((symbol, interval)).or_default() += 1;
                 } else {
-                    cx.log(LogLevel::Error, interval.unsupported("DXtrade"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("DXtrade"),
+                    );
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {

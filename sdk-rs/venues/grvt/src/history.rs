@@ -2,7 +2,9 @@
 use crate::account::decode_order;
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{CommandId, Cx, Query, Response};
@@ -525,8 +527,9 @@ impl Grvt {
             Err(Rejected::Row(error)) => {
                 // The raw text stands in for the identity, so paging still sees a fresh row.
                 r.page_raw.insert(format!("skipped:{item}"));
-                cx.log(
-                    safe_cex_engine::LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!("Skipped malformed GRVT historical order: {error}"),
                 );
             }

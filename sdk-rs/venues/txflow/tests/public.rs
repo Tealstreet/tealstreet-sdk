@@ -1129,7 +1129,7 @@ fn ambiguous_native_identity_preserves_store_and_retries_with_backoff() {
     assert_eq!(e.store().markets(), prior_markets);
     assert_eq!(e.store().tickers(), prior_tickers);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Duplicate or ambiguous TxFlow"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Duplicate or ambiguous TxFlow"))));
     let timer = actions
         .iter()
         .find_map(|a| match a {

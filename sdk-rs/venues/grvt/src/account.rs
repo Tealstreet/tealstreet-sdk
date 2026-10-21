@@ -1,14 +1,16 @@
 //! Session authentication, private streams and atomic REST reconciliation.
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
+use safe_cex_engine::Level;
 use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Response, SocketChannel, SocketId, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -189,8 +191,9 @@ impl Skipped {
     }
     fn log(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
         if self.count > 0 {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!(
                     "Skipped {} malformed GRVT {kind} row(s), retaining known copies: {}",
                     self.count, self.first
@@ -320,8 +323,9 @@ impl Summary<'_> {
             .ok()?;
         }
         if skipped > 0 {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
                 format!("Skipped {skipped} malformed GRVT spot balance row(s)"),
             );
         }
@@ -761,7 +765,11 @@ impl Grvt {
             return;
         }
         let Some(key) = self.options.key.as_deref() else {
-            cx.log(LogLevel::Error, "GRVT private account requires an API key");
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "GRVT private account requires an API key",
+            );
             return;
         };
         #[derive(Serialize)]
@@ -808,8 +816,9 @@ impl Grvt {
         if self.account.login_retry.is_none() {
             self.account.login_retry = Some(cx.set_timer(5_000.));
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::STREAM_UNAVAILABLE,
             "GRVT login temporarily unavailable after network retries; retrying shortly",
         );
         self.fail_waiting(cx);
@@ -921,7 +930,8 @@ impl Grvt {
             cx.clear_timer(timer);
         }
     }
-    fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>) {
+    /// `code` is `auth.rejected` only when GRVT refused the credentials.
+    fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>, code: &'static str) {
         self.cancel_pong_ping(cx);
         self.account.authentication_failed = true;
         self.account.authenticated = false;
@@ -933,7 +943,7 @@ impl Grvt {
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
-        cx.log(LogLevel::Error,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+        cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.login_pending || self.account.authentication_failed {
@@ -948,7 +958,7 @@ impl Grvt {
             self.account.healthy_since = None;
         }
         if self.account.refresh_attempts >= 1 {
-            self.fail_authentication(cx);
+            self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
             return;
         }
         self.account.refresh_attempts += 1;
@@ -1350,7 +1360,7 @@ impl Grvt {
                 self.account.login_pending = false;
                 let (cookie, account_id) = session_headers(&response);
                 let (Some(cookie), Some(account_id)) = (cookie, account_id) else {
-                    self.fail_authentication(cx);
+                    self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
                     self.fail_waiting(cx);
                     return;
                 };
@@ -1400,8 +1410,9 @@ impl Grvt {
                         }
                     }
                     Err(_) => {
-                        cx.log(
-                            LogLevel::Error,
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
                             "Malformed GRVT account summary; retaining previous balance",
                         );
                         cx.store.set_balance(cx.store.balance().clone());
@@ -1586,7 +1597,7 @@ impl Grvt {
                     if let Some((command, _)) = &command {
                         cx.command_error(*command, message);
                     } else {
-                        cx.log(LogLevel::Error, message);
+                        cx.notice(Level::Error, code::SNAPSHOT_DISCARDED, message);
                     }
                 }
                 if let Some((command, _)) = command {
@@ -1685,8 +1696,9 @@ impl Grvt {
             self.account.builder_retry = Some(cx.set_timer(delay));
             return;
         }
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!(
                 "GRVT builder authorization check failed; rechecking before next order: {error}"
             ),
@@ -1738,8 +1750,9 @@ impl Grvt {
             self.refresh_positions(cx);
             self.refresh_orders(cx);
         } else {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
                 "GRVT trading account ID was not returned; configure a subaccount",
             );
             cx.store.set_orders(cx.store.orders().to_vec());
@@ -1755,7 +1768,15 @@ impl Grvt {
         match request {
             Request::Login => {
                 self.account.login_pending = false;
-                self.fail_authentication(cx);
+                let refused = error.contains("(HTTP 401") || error.contains("(HTTP 403");
+                self.fail_authentication(
+                    cx,
+                    if refused {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::STREAM_UNAVAILABLE
+                    },
+                );
                 self.fail_waiting(cx);
             }
             Request::Summary => {
@@ -1791,8 +1812,9 @@ impl Grvt {
                 return;
             }
         }
-        cx.log(
-            LogLevel::Error,
+        cx.notice(
+            Level::Error,
+            code::REQUEST_FAILED,
             "GRVT private request failed; retaining previous account state",
         );
     }
@@ -1821,7 +1843,11 @@ impl Grvt {
             return true;
         }
         let Ok(message) = serde_json::from_str::<PrivateMessage<'_>>(text) else {
-            cx.log(LogLevel::Warning, "Malformed GRVT private message");
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Malformed GRVT private message",
+            );
             return true;
         };
         let code = message.error.as_ref().map_or(&*message.code, |e| &*e.code);
@@ -1836,15 +1862,15 @@ impl Grvt {
             return true;
         }
         if code == "1008" {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(Level::Error, code::AUTH_REJECTED,
                 "GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).",
             );
             return true;
         }
         if !code.is_empty() && code != "0" {
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::STREAM_UNAVAILABLE,
                 format!("GRVT private stream rejected (code {code})"),
             );
             return true;
@@ -1922,7 +1948,11 @@ impl Grvt {
                             cx.store.upsert_order(order);
                         }
                     }
-                    Err(_) => cx.log(LogLevel::Warning, "Malformed GRVT order event; reconciling"),
+                    Err(_) => cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        "Malformed GRVT order event; reconciling",
+                    ),
                 }
                 if let Some(timer) = self.account.orders_timer.take() {
                     cx.clear_timer(timer);
@@ -1968,8 +1998,9 @@ impl Grvt {
                         }
                         self.sync_balance_upnl(cx);
                     }
-                    Err(_) => cx.log(
-                        LogLevel::Warning,
+                    Err(_) => cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
                         "Malformed GRVT position event; reconciling",
                     ),
                 }
@@ -2112,8 +2143,9 @@ impl Grvt {
         }
     }
     fn private_gap(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::WS_DISCONNECTED,
             "GRVT private sequence gap; reconnecting and reconciling account state",
         );
         cx.close(socket);

@@ -676,10 +676,13 @@ fn mini_ticker_zero_unavailable_prices_preserve_quotes_and_apply_valid_fields() 
         assert_eq!(ticker.mark, 62000.0);
         assert_eq!(ticker.index, 61900.0);
     }
-    assert!(
-        !e.drain_actions()
-            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
-    );
+    assert!(!e.drain_actions().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::Log { .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(
+                safe_cex_engine::LogEvent { .. }
+            ))
+    )));
 }
 
 #[test]
@@ -695,8 +698,11 @@ fn mini_ticker_unknown_inactive_symbols_are_ignored_without_warning() {
     );
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, before.last);
     assert_eq!(e.store().tickers().len(), 1);
-    assert!(
-        !e.drain_actions()
-            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
-    );
+    assert!(!e.drain_actions().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::Log { .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(
+                safe_cex_engine::LogEvent { .. }
+            ))
+    )));
 }
