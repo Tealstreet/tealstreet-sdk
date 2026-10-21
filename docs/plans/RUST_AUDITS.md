@@ -615,6 +615,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Both need a captured live packet before changing behaviour.
 
 ### Bybit family
+
+- ~~Bybit's closed-PnL and unbounded-order-history cap ownership omissions~~ now
+  carry the actual request command before retained rows complete. Both native
+  regressions check exact ownership and order at Error-only logging, preserving
+  row counts and existing window/cap policy.
+
 - ~~Medium: HTTP-200 discovery `retCode:10006` loses reset-timestamp headers
   and retries before the limit clears.~~ Fixed: typed rate-limit envelopes keep
   their headers; reset and Retry-After hints extend all waiting category retries

@@ -1817,6 +1817,8 @@ fn an_unidentified_order_row_holds_absence_while_valid_peers_commit() {
 #[test]
 fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
     let mut h = ready();
+    h.notices.clear();
+    h.engine.set_log_level(safe_cex_engine::Level::Error);
     h.command(Command::Query {
         command: 35,
         query: Query::OrderHistory {
@@ -1844,6 +1846,35 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
             .unwrap();
     assert_eq!(rows.len(), 1000);
     assert!(h.logs.iter().any(|m| m.contains("page limit")));
+    let (index, event) = h
+        .notices
+        .iter()
+        .enumerate()
+        .find_map(|(i, notice)| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .expect("owned semantic order-history warning");
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        event.fields,
+        vec![("command", safe_cex_engine::Value::Num(35.0))]
+    );
+    let done = h
+        .notices
+        .iter()
+        .position(|notice| {
+            matches!(
+                notice,
+                safe_cex_engine::Notice::CommandDone { command: 35, .. }
+            )
+        })
+        .unwrap();
+    assert!(index < done, "marker must precede retained rows");
 }
 
 /// Pins the exact request sequence of a windowed, cursor-paged read: 7-day

@@ -154,10 +154,11 @@ impl BybitLinear {
             cursor => {
                 if cursor.is_some() {
                     // Newest first, so the cap drops the oldest rows of this window.
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
                         format!(
                             "Closed-PnL paging hit the {MAX_PAGES}-page cap; older rows in this window were not fetched"
                         ),
+                        vec![("command", safe_cex_engine::Value::Num(f64::from(request.command)))],
                     );
                 }
                 match request.windows.pop_front() {
