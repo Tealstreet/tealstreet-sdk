@@ -42,6 +42,8 @@ pub struct Capabilities {
     /// Signed timestamps take the host clock as-is; the venue does no clock sync
     /// of its own, so hosts pass a server-synced clock.
     pub host_clock: bool,
+    /// Explicit public catalogue refresh through VenueAction::RefreshMarkets.
+    pub market_refresh: bool,
 }
 
 /// How a market's order and position quantities relate to its placement units.
@@ -127,6 +129,7 @@ impl Capabilities {
         closed_positions: false,
         balance_info: false,
         host_clock: false,
+        market_refresh: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -163,6 +166,7 @@ impl Capabilities {
             self.closed_positions,
             self.balance_info,
             self.host_clock,
+            self.market_refresh,
         ]
         .iter()
         .enumerate()
@@ -191,6 +195,7 @@ mod tests {
             options: true,
             closed_positions: true,
             host_clock: true,
+            market_refresh: true,
             cancel_all: CancelAll::EachPlacedSymbol,
             leverage_query: LeverageQuery::OnMetadata,
             max_leverage: MaxLeverage::Unsupported,
@@ -203,7 +208,7 @@ mod tests {
         let (kind, payload) = sections(&frame).next().unwrap();
         assert_eq!(kind, section::CAPABILITIES);
         let word = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
-        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12 | 1 << 14);
+        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12 | 1 << 14 | 1 << 15);
         assert_eq!(word(4), 2 | 1 << 4 | 2 << 8 | 3 << 12 | 4 << 16);
         // Append the combined policy without changing any existing wire discriminant.
         assert_eq!(LeverageQuery::Settings as u32, 0);

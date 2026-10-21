@@ -1705,6 +1705,17 @@ primary environment. The probe is scoped out for `options.testnet`,
 `bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
 `bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
 
+The Rust engine applies this diagnostic to its terminal startup fee-read 10003.
+One opposite-host GET uses the exact rejected GET credential, including a
+secondary read key, and has both a two-second native deadline and request timeout.
+Only HTTP success plus integer `retCode: 0` adds the hint. Fractional, floating
+zero, quoted and other malformed codes retain the original error. Concurrent
+category failures share one probe
+and late replies cannot emit another terminal failure. The original native
+message stays in `venueMessage`; primary/read-key deactivation policy is retained.
+Native eligibility receives the SDK's site marker and excludes any nonempty
+site, custom endpoint, testnet, Hyro, inverse, spot or remote-signing account.
+
 **`start()` does not claim the account is ready when the key was rejected.** All
 three bybit variants end startup with a readiness line, and they used to log
 `Ready to trade on Bybit` unconditionally — beside the auth error, for an account
@@ -1985,3 +1996,15 @@ and replacement errors remain visible. Missing-mark and standalone inverse
 amount-only fallbacks retain their distinct TS fields. Shared-family success
 requests authoritative order reconciliation even with a healthy private socket;
 it never restores the old canceled row to mimic a local TS lifecycle state.
+
+### Native explicit catalogue refresh
+
+Rust `refreshMarkets()` issues a bounded public catalogue walk across all enabled
+categories, commits atomically, then flushes the host before returning one
+added/removed delta. Account/order/settings/book/candle/ticker state and known
+symbol fees survive. It never starts signed reconciliation or restarts sockets.
+`fetchMarkets()` and `fetchTickers()` remain cached. New symbol fees need startup
+fee discovery after restart; degraded optional products also require restart.
+Shared consumers must refresh their source then restart provider/accounts through
+the existing identity-change contract. Hyro retains its USDT perpetual filter
+and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.

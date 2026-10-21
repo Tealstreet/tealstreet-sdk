@@ -655,15 +655,17 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   reported as not shown) while other orders commit; malformed rows still preserve
   the whole last-good snapshot. Hyro stays strict.
 - Low: ~~OHLCV from+limit~~ (a limit asks for the newest bars up to `to`, as
-  TS); no market refresh (needs an engine refresh command); ~~Hyro market filter;
+  TS); ~~no market refresh~~ (explicit atomic native catalogue refresh); ~~Hyro market filter;
   subscription breadth~~ (decided: USDT perpetuals only, Hyro's own rule; foreign
   categories are dropped by row, bandwidth only); split-lot error handling (RISKY:
   one unformattable lot rejects the batch before writes, where TS skips
   that order); ~~classic upnl; inverse reference price~~ (Rust is the
   same or better: live upnl on every account type, row mark before tickers);
-  demo key hint (open: needs a signed probe of the other host on a 10003);
+  ~~demo key hint~~ (bounded signed opposite-host probe on startup10003;
+  only confirmed built-in linear live/demo mismatches add guidance);
   ~~recvWindow~~ (decided: capped at 20 s); rate limiter (RISKY: send timing);
-  Hyro early pings (unproven; check supervisor staleness first).
+  ~~Hyro early pings~~ (stale: watch wakes do not advance the 10 s ping deadline;
+  active-cleared/consumed timer regression confirms supervision).
 - Confirm (TS bugs Rust fixed): spot amount precision, option books socket, spot
   cancel-all groups, spot trailing/full TP/SL endpoint, inverse position-mode
   category, stop with only price, category-filtered private topics,
