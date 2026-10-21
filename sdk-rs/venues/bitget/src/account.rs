@@ -4,7 +4,7 @@ use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor};
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId};
+use safe_cex_engine::{Cx, ErrorKind, Fill, LogLevel, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
 
@@ -87,8 +87,10 @@ pub struct Account {
     pub authenticated: bool,
     pub needs_recovery: bool,
     poll: Option<TimerId>,
-    probe_retry: Option<TimerId>,
-    probe_retries: u8,
+    /// Backs off the settings probe that gates private startup; transient failures never end it.
+    probe: safe_cex_engine::startup::Backoff<()>,
+    signature_rejections: u8,
+    pub startup_rejected: bool,
     tick: u32,
     positions_in_flight: bool,
     balance_in_flight: bool,
@@ -242,15 +244,19 @@ impl BitgetFutures {
             cx.store.set_orders(vec![]);
             return;
         }
+        if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
+            let error =
+                VenueError::new("Bitget requires a passphrase").kind(ErrorKind::InvalidInput);
+            self.reject_startup(cx, error, false);
+            return;
+        }
         self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
     }
 
     fn private_detected(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.detected = true;
-        self.account.probe_retries = 0;
-        if let Some(timer) = self.account.probe_retry.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.signature_rejections = 0;
+        self.account.probe.succeeded(cx, &());
         self.connect(cx, 3);
         self.refresh_positions(cx);
         self.refresh_balance(cx);
@@ -632,42 +638,7 @@ impl BitgetFutures {
             self.account.rest_paused_until = cx.now + 30_000.0;
         }
         if let Request::Probe = request {
-            match envelope {
-                Ok(header) if header.code.0 == Some(40084.0) => {
-                    self.account.uta = false;
-                    self.private_detected(cx);
-                }
-                Ok(header) if header.code.0 == Some(0.0) && response.status == 200 => {
-                    if self.options.testnet || self.inverse() {
-                        cx.log(LogLevel::Error, "Bitget inverse/testnet UTA is unsupported");
-                        return;
-                    }
-                    match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
-                        .map_err(|e| e.to_string())
-                        .and_then(Envelope::checked)
-                    {
-                        Ok(settings) => {
-                            self.account.uta = true;
-                            self.apply_settings(cx, &settings);
-                            self.private_detected(cx);
-                        }
-                        Err(error) => self.account_failed(cx, Request::Probe, &error),
-                    }
-                }
-                Ok(header) => self.account_failed(
-                    cx,
-                    Request::Probe,
-                    &format!("Bitget {}: {}", header.code.get(), header.msg),
-                ),
-                Err(_) if response.status >= 500 => {
-                    self.account_transport_failed(
-                        cx,
-                        Request::Probe,
-                        "Bitget settings transport failure",
-                    );
-                }
-                Err(error) => self.account_failed(cx, Request::Probe, &error.to_string()),
-            }
+            self.probe_response(cx, response, envelope.ok());
             return;
         }
         if envelope
@@ -897,15 +868,137 @@ impl BitgetFutures {
         request: Request,
         error: &str,
     ) {
-        if matches!(request, Request::Probe) && !self.account.uta {
-            self.private_detected(cx);
-        } else if matches!(request, Request::Probe) && self.account.probe_retries < 3 {
-            self.account.probe_retries += 1;
-            self.account.probe_retry =
-                Some(cx.set_timer(250.0 * f64::from(self.account.probe_retries)));
-            cx.log(LogLevel::Warning, error);
+        if matches!(request, Request::Probe) {
+            self.probe_transport_failed(cx, error);
         } else {
             self.account_failed(cx, request, error);
+        }
+    }
+
+    fn probe_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        response: Response<'_>,
+        envelope: Option<Envelope<IgnoredAny>>,
+    ) {
+        let Some(header) = envelope else {
+            if response.status >= 500 {
+                return self.probe_transport_failed(cx, "Bitget settings transport failure");
+            }
+            return self.probe_failed(cx, &format!("Bitget settings HTTP {}", response.status));
+        };
+        match header.code.0 {
+            Some(40084.0) => {
+                self.account.uta = false;
+                self.private_detected(cx);
+            }
+            Some(0.0) if response.status == 200 => {
+                if self.options.testnet || self.inverse() {
+                    let error = VenueError::new("Bitget UTA is unsupported on inverse or testnet")
+                        .kind(ErrorKind::Unsupported);
+                    return self.reject_startup(cx, error, false);
+                }
+                match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
+                    .map_err(|e| e.to_string())
+                    .and_then(Envelope::checked)
+                {
+                    Ok(settings) => {
+                        self.account.uta = true;
+                        self.apply_settings(cx, &settings);
+                        self.private_detected(cx);
+                    }
+                    Err(error) => self.probe_failed(cx, &error),
+                }
+            }
+            code => {
+                let code = code.unwrap_or(0.0);
+                if !self.startup_ready(cx)
+                    && let Some(kind) = key_rejection(code, &header.msg)
+                {
+                    let signature = code == 40009.0;
+                    if signature {
+                        self.account.signature_rejections += 1;
+                    }
+                    if !signature || self.account.signature_rejections >= 2 {
+                        let read_key = self.options.read_credentials.is_some();
+                        let which = if read_key {
+                            "read-only API key"
+                        } else {
+                            "API key"
+                        };
+                        let error = rejection(which, code, &header.msg, kind);
+                        return self.reject_startup(
+                            cx,
+                            error,
+                            kind == ErrorKind::AuthInvalid && !read_key,
+                        );
+                    }
+                } else {
+                    self.account.signature_rejections = 0;
+                }
+                self.probe_failed(cx, &format!("Bitget {code}: {}", header.msg));
+            }
+        }
+    }
+
+    /// Classic is the safe route when the first probe cannot reach Bitget; a
+    /// confirmed UTA account keeps probing instead of downgrading.
+    fn probe_transport_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        if self.account.uta {
+            self.probe_failed(cx, error);
+        } else {
+            self.private_detected(cx);
+        }
+    }
+
+    /// Transient probe failures retry with backoff until detection succeeds.
+    fn probe_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(LogLevel::Warning, error);
+        if !self.account.startup_rejected {
+            self.account.probe.failed(cx, ());
+        }
+    }
+
+    fn startup_ready(&self, cx: &Cx<'_, Pending>) -> bool {
+        let loaded = cx.store.loaded();
+        loaded.balance && loaded.positions && loaded.orders
+    }
+
+    /// Fails startup once and retires every private retry, read or socket.
+    fn reject_startup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        error: VenueError,
+        trading_key_refused: bool,
+    ) {
+        if std::mem::replace(&mut self.account.startup_rejected, true) {
+            return;
+        }
+        self.account.probe.succeeded(cx, &());
+        self.account.detected = false;
+        self.account.generation += 1;
+        for timer in [
+            self.account.poll.take(),
+            self.account.positions_timer.take(),
+            self.account.balance_timer.take(),
+            self.account.orders_timer.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cx.clear_timer(timer);
+        }
+        self.account.supervisor.cancel(cx);
+        self.account.authenticated = false;
+        self.sockets[3].open = false;
+        if let Some(socket) = self.sockets[3].socket.take() {
+            cx.close(socket);
+        }
+        cx.log(LogLevel::Error, &error.message);
+        cx.startup_failed(error);
+        // As Bybit: a refused trading key also stops the host's login loop.
+        if trading_key_refused {
+            cx.deactivate();
         }
     }
 
@@ -1289,8 +1382,11 @@ impl BitgetFutures {
         let Ok(header) = serde_json::from_str::<Message<'_, IgnoredAny>>(text) else {
             return;
         };
-        if header.event == "login" {
-            if header.code.and_then(|n| n.0) == Some(0.0) {
+        // Bitget answers a refused login with `event: "error"` and a 300xx code.
+        let refused = header.event == "error" && !self.account.authenticated;
+        if refused || header.event == "login" {
+            let code = header.code.and_then(|n| n.0);
+            if !refused && code == Some(0.0) {
                 if self.account.authenticated {
                     return;
                 }
@@ -1298,6 +1394,14 @@ impl BitgetFutures {
                 self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
             } else {
+                if !self.account.authenticated
+                    && !self.startup_ready(cx)
+                    && let Some(code) = code.filter(|c| matches!(*c as i64, 30011 | 30012))
+                {
+                    let error =
+                        rejection("API key login", code, &header.msg, ErrorKind::AuthInvalid);
+                    return self.reject_startup(cx, error, true);
+                }
                 cx.log(
                     LogLevel::Error,
                     format!("Bitget private WS login failed: {}", header.msg),
@@ -1694,8 +1798,7 @@ impl BitgetFutures {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.probe_retry == Some(timer) {
-            self.account.probe_retry = None;
+        if self.account.probe.on_timer(timer).is_some() {
             self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
         }
         if self.account.write_check.is_some_and(|(t, _)| t == timer) {
@@ -2288,6 +2391,34 @@ fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
             .filter(|v| *v > 0.0)
             .map(|v| ("ratio".to_owned(), v))
     }
+}
+
+/// Bitget key refusals no retry can fix (REST common codes): empty or invalid
+/// key/passphrase, missing key, permission or IP, wrong environment. 40009 (bad
+/// signature) is final only after one re-signed resend; others stay transient.
+fn key_rejection(code: f64, msg: &str) -> Option<ErrorKind> {
+    match code as i64 {
+        40001 | 40006 | 40009 | 40011 | 40012 | 40037 => Some(ErrorKind::AuthInvalid),
+        40014 | 40018 => Some(ErrorKind::AuthPermission),
+        _ if msg
+            .to_ascii_lowercase()
+            .contains("environment is incorrect") =>
+        {
+            Some(ErrorKind::AuthInvalid)
+        }
+        _ => None,
+    }
+}
+
+fn rejection(which: &str, code: f64, msg: &str, kind: ErrorKind) -> VenueError {
+    let code = safe_cex_engine::num::format(code);
+    let mut error = VenueError::new(format!("Bitget rejected the {which} ({code}): {msg}"))
+        .kind(kind)
+        .venue_code(code);
+    if !msg.is_empty() {
+        error = error.venue_message(msg);
+    }
+    error
 }
 
 #[cfg(test)]

@@ -800,6 +800,21 @@ queue eviction, so a later valid quote can recover the complete proven interval.
 An invalid pre-session quote instead advances a quiet historical quantity floor
 with unknown quote basis, preventing later rows from replaying that history.
 
+Rust private startup is gated on the margin-mode and position-mode reads. Until
+each loads, any failure (429, 5xx, transport, non-JSON, malformed row, unknown
+code, a read raced by a settings write) retries that read through
+`startup::Backoff` (1 s doubling to 30 s, forever); the 10 s tick no longer
+re-reads them. Only documented key refusals end startup with one
+`StartupFailed`: 152401/152408 (`AuthInvalid`), 152402 (`AuthExpired`), 152406
+(`AuthPermission`), and 152409 after one re-signed resend; 152405/152407/152410
+(timestamp/nonce) and 152404 stay transient. Before the account loads, a socket
+login refused with one of those codes fails startup too; BloFin's generic
+`60009 Login failed` closes and reconnects with backoff, now immediately rather
+than at the auth deadline. A rejection clears the settings retries and the tick
+and retires the private socket; a refused trading key also emits `Deactivate`.
+A missing passphrase or invalid read-only credentials fail startup with
+`InvalidInput`.
+
 Rust commands preflight an entire batch before I/O. Cancel responses must cover
 exactly the requested native identities even when the top-level code is zero;
 per-row failures are never swallowed. Cancel-replace keeps attached trigger
