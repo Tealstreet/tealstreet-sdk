@@ -518,10 +518,12 @@ Remaining resilience and completeness findings are independent of request parity
   unsubscribes actually sent.
 
 ### OKX
+
 - ~~OKX's three request-associated cap/cursor ownership omissions~~ now carry
   the actual closed-position or history query command before retained rows
   complete. Native regressions cover exact Warn ownership/order at Error-only
   logging; EEA composite-source failures remain failures.
+
 - ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
