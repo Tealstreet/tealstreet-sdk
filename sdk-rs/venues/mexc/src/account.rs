@@ -458,6 +458,7 @@ impl MexcFutures {
                 if raw.vol > 0.0 {
                     cx.fill_with_financials(
                         Fill {
+                            id: None,
                             order_id: raw.order_id.to_string(),
                             symbol,
                             side: side(raw.side),

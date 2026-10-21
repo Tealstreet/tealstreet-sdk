@@ -1047,6 +1047,7 @@ impl Bitrue {
                 let amount = self.account.execution_amount(&id, start, filled);
                 if amount > 0.0 {
                     cx.fill(Fill {
+                        id: None,
                         order_id: id.clone(),
                         symbol: market.symbol.clone(),
                         side,

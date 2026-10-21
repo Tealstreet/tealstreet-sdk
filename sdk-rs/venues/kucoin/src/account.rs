@@ -1228,6 +1228,7 @@ impl Kucoin {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
+                        id: None,
                         order_id: orders[0].id.clone(),
                         symbol: orders[0].symbol.clone(),
                         side: orders[0].side,

@@ -1857,6 +1857,7 @@ impl Blofin {
             .unwrap_or(1.0);
         let execution = Execution {
             fill: Fill {
+                id: None,
                 order_id: id.to_string(),
                 symbol: order.symbol.clone(),
                 side: order.side,

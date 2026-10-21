@@ -1821,6 +1821,7 @@ impl Woo {
                     .insert(order.id.clone(), execution_baseline + amount);
             }
             let fill = Fill {
+                id: None,
                 order_id: order.id,
                 symbol: order.symbol,
                 side: order.side,

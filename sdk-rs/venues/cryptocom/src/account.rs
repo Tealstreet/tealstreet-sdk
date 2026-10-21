@@ -967,6 +967,7 @@ impl Cryptocom {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
+                        id: None,
                         order_id: id(row.order_id),
                         symbol: row.instrument_name.into(),
                         side: side(row.side),
