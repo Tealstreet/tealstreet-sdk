@@ -28,3 +28,11 @@ Fresh actual landing branch; no unlanded sibling code. Independent plan review,
 red/green regressions, Bitunix/Binance native +strict checks, independent review,
 CI, actual same-crate/shared source integration and separate exact merge guard.
 Current source hold for1637 remains until overseer release.
+
+Plan audit and implementation review CLEAR. Capture token before dispatch and
+release on synchronous failure, HTTP/stream failure and completed response; late
+old completions preserve a newer token/deadline. Two original-source regressions
+fail, five regression families pass, and 373 combined native tests plus strict
+Clippy/fmt/bans pass. Unchanged existing leverage/margin/mode ACK race tests also
+fail when only new write-revision advancement is disabled and pass restored;
+symbol-settings and owned preflight generation checks remain unchanged.

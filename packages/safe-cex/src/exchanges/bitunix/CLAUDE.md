@@ -733,3 +733,12 @@ After a confirmed write, a later rejection cannot claim the whole command was
 rejected or unsent. A failed read while reconciling an acknowledged cancellation
 does not imply an uncertain new write. Recovery writes require definitive native
 rejection; malformed or server-error answers never trigger cancel/recreate.
+
+Rust ordinary position reconciliation treats private position-ID notifications
+as routing hints rather than newer financial snapshots. Reads retain latest-serial
+and accepted settings/mode write-revision fences, while command-owned preflight
+keeps full generation checks. Position notifications coalesce without postponing
+a read; an in-flight ordinary or owned serial is not superseded by background
+refresh before a 10-second lost-read bound. Only its matching completion/failure
+releases the token, and activity during a read schedules one follow-up. Existing
+REST/WS position-ID routing precedence and all financial mappers are unchanged.
