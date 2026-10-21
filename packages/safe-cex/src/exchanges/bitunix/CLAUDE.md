@@ -817,3 +817,22 @@ declared proxy. False/unset keeps two silent direct attempts before fallback;
 feed identities remain independent. The engine's native routing plan uses the
 same selection. The shared resolver and TS socket classes retain their existing
 fallback contract, and a direct transport still reports unsupported proxy routing.
+
+Rust regular and TP/SL reads retain independent in-flight serials and ten-second
+lost-read deadlines. Ordinary refresh coalesces against either a background or
+command-owned read until its deadline; matching completion/failure alone releases
+it. Notifications keep the first one-second repair deadline, and late callbacks
+cannot retire newer reads. This scheduling does not relax generation checks,
+financial admission, initial two-half readiness or command prerequisites.
+
+Rust ordinary order reconciliation admits healthy REST peers across WS-only
+notifications using endpoint serials and a separate command-mutation revision.
+Newer validated WS raw families retain their current visible rows, native metadata,
+fill watermarks and terminal absence over stale REST data. Malformed WS identity
+coverage holds affected families or endpoint absence without blocking healthy
+peers. Sparse unknown execution updates remain eligible for REST metadata repair.
+Both initial halves retain overlap coverage until a complete current pair can
+publish; malformed or overflowed coverage cannot establish readiness. Write
+planning/dispatch, responses (including partial cancel ACKs) and cleanup invalidate
+older ordinary reads. Command-owned prerequisites retain global generation fences;
+no write is retried by reconciliation.

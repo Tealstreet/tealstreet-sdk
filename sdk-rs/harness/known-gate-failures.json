@@ -122,6 +122,13 @@
     },
     "paradexKucoinTapeTime20261022": {
       "note": "Paradex and KuCoin private replays now run on tape time (virtualPrivateClock). Their order refreshes are timer-driven (Paradex: a 1 s debounce after the last private order event; KuCoin: TS keeps canceled rows until its REST order poll), so at wall time a checkpoint raced them (Paradex canceled-row retention at checkpoints 5-7; KuCoin checkpoints 6-7). The Paradex generator now stages each write with its command, so a command's snapshot is served only after its acknowledgement; tape rehashed and the landing-hash entry replaced by the 51 deterministic paths, all one cause. KuCoin's tape and its 60 declared paths are unchanged: on tape time every run yields exactly that set. Both verified by 5 identical CI-equivalent strict runs locally (Node 22)."
+    },
+    "bitunixOrderReadScheduling20261022": {
+      "ciRun": 39653858321,
+      "ciHead": "91a00f909ae7cbcccdd6b41a0751ecfbdf017fdd",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39653858321",
+      "tapeSha256": "e8d90edafa93fabcbd9cefb0e84be32a077399e0e3a2f4a906999d9d48a3850c",
+      "note": "Independent full raw checkpoint/tape audit: all 44 exact paths are removal of already terminal venue rows or positional shifts from that removal. All open orders and common-ID rows match completely across all 16 checkpoints. Missing IDs1001/second/1003/1004/1005 have native CLOSE evidence at2400/3600/6000/9200/9600ms before affected checkpoints. Thirteen command outcomes and seven writes agree; signature/protocol/missing-write checks clean. HTTP read counts differ under bounded reconciliation; no blanket receipt-equivalence claim. Overseer explicitly approved only these exact terminal-retention keys. No comparator, threshold, tape or integrity change."
     }
   },
   "failures": [
@@ -53273,6 +53280,62 @@
             "checkpoint 9 account.orders[3].trigger",
             "checkpoint 9 account.orders[4].takeProfitTrigger",
             "checkpoint 9 account.orders[4].trigger"
+          ]
+        }
+      ]
+    },
+    {
+      "venue": "bitunix",
+      "tapeSha256": "e8d90edafa93fabcbd9cefb0e84be32a077399e0e3a2f4a906999d9d48a3850c",
+      "tape": "sdk-rs/harness/tapes/bitunix-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Bounded Rust reconciliation retires orders already reported terminal by native CLOSE before these checkpoints; TS retains those closed/canceled rows. The exact remaining fields are array shifts caused by terminal-only removal. Every still-open order and every common-ID row matches completely at all 16 checkpoints; no removed open order is allowed.",
+          "keys": [
+            "checkpoint 1 account.orders.length",
+            "checkpoint 1 account.orders[3]",
+            "checkpoint 1 account.orders[4]",
+            "checkpoint 2 account.orders.length",
+            "checkpoint 2 account.orders[4]",
+            "checkpoint 2 account.orders[5]",
+            "checkpoint 3 account.orders.length",
+            "checkpoint 3 account.orders[4]",
+            "checkpoint 3 account.orders[5]",
+            "checkpoint 4 account.orders.length",
+            "checkpoint 4 account.orders[0].id",
+            "checkpoint 4 account.orders[0].clientOrderId",
+            "checkpoint 4 account.orders[0].status",
+            "checkpoint 4 account.orders[0].price",
+            "checkpoint 4 account.orders[0].amount",
+            "checkpoint 4 account.orders[0].filled",
+            "checkpoint 4 account.orders[0].remaining",
+            "checkpoint 4 account.orders[1].id",
+            "checkpoint 4 account.orders[1].clientOrderId",
+            "checkpoint 4 account.orders[1].type",
+            "checkpoint 4 account.orders[1].side",
+            "checkpoint 4 account.orders[1].price",
+            "checkpoint 4 account.orders[1].amount",
+            "checkpoint 4 account.orders[1].filled",
+            "checkpoint 4 account.orders[1].timeInForce",
+            "checkpoint 4 account.orders[1].remaining",
+            "checkpoint 4 account.orders[1].reduceOnly",
+            "checkpoint 4 account.orders[1].trigger",
+            "checkpoint 4 account.orders[1].stopLossTrigger",
+            "checkpoint 4 account.orders[2].id",
+            "checkpoint 4 account.orders[2].type",
+            "checkpoint 4 account.orders[2].price",
+            "checkpoint 4 account.orders[2].trigger",
+            "checkpoint 4 account.orders[2].takeProfitTrigger",
+            "checkpoint 4 account.orders[2].stopLossTrigger",
+            "checkpoint 4 account.orders[3]",
+            "checkpoint 4 account.orders[4]",
+            "checkpoint 4 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[3]",
+            "checkpoint 7 account.orders[4]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[3]",
+            "checkpoint 8 account.orders[4]"
           ]
         }
       ]

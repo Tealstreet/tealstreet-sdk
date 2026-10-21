@@ -601,13 +601,16 @@ impl Venue for BitunixFutures {
                 self.history_response(cx, read, response);
                 return;
             }
-            Pending::Private(read) => {
+            Pending::Private(mut read) => {
+                self.order_overlap(&mut read);
                 let after = read.after;
                 let success = (200..300).contains(&response.status)
                     && data(response.body).is_ok()
                     && !read.invalid
                     && !read.position_rejected.any()
-                    && !read.order_rejected.any()
+                    && !read.partial_orders()
+                    && (!matches!(read.axis, account::Axis::Orders | account::Axis::Tpsl)
+                        || read.order_write_revision == self.account.order_write_revision)
                     && self.account.generations[read.axis.index()] == read.generation
                     && self.account.serials[match read.axis {
                         account::Axis::Balance => 0,
@@ -760,6 +763,7 @@ impl Venue for BitunixFutures {
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 self.position_answered(cx, &read);
+                self.order_answered(cx, &read);
                 if read.axis == account::Axis::Balance {
                     self.account.balance_answered = self.account.balance_answered.max(read.serial);
                 }
