@@ -35,7 +35,7 @@ fn periodic_pause_keeps_dirty_snapshot_repair_active() {
     h.e.handle(
         h.now,
         Event::PollScaleChanged {
-            scale: 500. / POLL_MS,
+            scale: 1_500. / POLL_MS,
         },
     );
     let resumed: Vec<_> =
@@ -45,7 +45,7 @@ fn periodic_pause_keeps_dirty_snapshot_repair_active() {
                 _ => None,
             })
             .collect();
-    assert_eq!(resumed, [h.now + 500.]);
+    assert_eq!(resumed, [h.now + 1_500.]);
 }
 struct H {
     e: Engine<Polymarket>,
@@ -838,7 +838,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {

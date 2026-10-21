@@ -707,7 +707,13 @@ impl<P> Io<P> {
     }
 
     fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
-        let interval = default_ms * scale.unwrap_or(1.);
+        let scale = scale.unwrap_or(1.);
+        // Only an explicit infinite scale or native cadence pauses; a huge finite
+        // scale overflowing the product is still finite and takes the cap below.
+        if scale == f64::INFINITY || default_ms == f64::INFINITY {
+            return f64::INFINITY;
+        }
+        let interval = (default_ms * scale).min(f64::MAX);
         let interval = match ceiling_ms {
             Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
                 interval.min(default_ms.max(ceiling))
@@ -1058,6 +1064,16 @@ impl<P> Cx<'_, P> {
     /// Rearm from the venue callback or read completion for the next cycle.
     pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
         self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
+    }
+    /// The interval a registered poll is armed with under the current host
+    /// policy (bounded, and infinite while paused).
+    pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
+        let poll = self.io.poll_timers.get(&timer)?;
+        Some(
+            self.io
+                .poll_interval(poll.default_interval_ms)
+                .max(poll.bounds.minimum_interval_ms),
+        )
     }
 
     /// Configuration changes rearm from change-time, honoring both the recurring
@@ -4431,6 +4447,91 @@ mod startup_watch_tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    struct PollVenue;
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351: typed native policy events obey the same bounds as host
+    // commands, and invalid typed inputs retain the last policy.
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        for (input, expected) in [(0.00001, 1_000.0), (1e300, 120_000.0)] {
+            let scale = input / 2_000.0;
+            let typed = armed_after(|engine| {
+                engine.handle(0.0, Event::PollScaleChanged { scale });
+            });
+            assert_eq!(typed, [expected]);
+            #[cfg(feature = "polling-control")]
+            {
+                let json = format!(r#"{{"op":"setPollScale","scale":{scale}}}"#);
+                let crate::command::HostInput::PollScaleChanged { scale: decoded, .. } =
+                    crate::command::decode_host_input(&json).unwrap()
+                else {
+                    panic!("{json} must decode as a polling control")
+                };
+                let commanded = armed_after(|engine| {
+                    engine.handle(0.0, Event::PollScaleChanged { scale: decoded });
+                });
+                assert_eq!(typed, commanded, "typed and host-command bounds agree");
+            }
+        }
+        let mut engine = Engine::new(PollVenue);
+        engine.start(0.0);
+        engine.handle(
+            0.0,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
+            },
+        );
+        assert!(
+            engine
+                .drain_actions()
+                .any(|action| matches!(action, Action::ClearTimer { .. }))
+        );
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(0.0, Event::PollScaleChanged { scale: invalid });
+            assert!(
+                !engine
+                    .drain_actions()
+                    .any(|action| matches!(action, Action::SetTimer { .. })),
+                "{invalid} must retain the pause"
+            );
+        }
     }
 
     #[test]

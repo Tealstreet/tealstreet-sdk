@@ -557,9 +557,11 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         })
         .collect();
     assert_eq!(stale.len(), 1, "one recurring account registration");
-    let mut obsolete = stale;
+    let obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    // The 120s native cadence is both the venue minimum and the host policy cap,
+    // so every finite policy resolves to 120s: only resuming from pause re-arms.
+    for interval in [1_500_f64, 100_000.] {
         e.handle(
             now,
             Event::PollScaleChanged {
@@ -575,11 +577,13 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 _ => None,
             })
             .collect();
-        assert_eq!(timers.len(), 1);
-        assert_eq!(timers[0].1, now + interval.max(120000.0));
-        if let Some((timer, _)) = current.replace(timers[0]) {
-            obsolete.push(timer);
+        if current.is_some() {
+            assert!(timers.is_empty(), "unchanged 120s cadence keeps its timer");
+            continue;
         }
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + 120_000.0);
+        current = Some(timers[0]);
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });

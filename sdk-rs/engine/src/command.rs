@@ -843,6 +843,71 @@ mod tests {
         }
     }
 
+    /// A venue with one 2 s native poll, so a scale is the host interval / 2000.
+    #[cfg(feature = "polling-control")]
+    struct PollVenue;
+    #[cfg(feature = "polling-control")]
+    impl crate::Venue for PollVenue {
+        type Pending = ();
+        fn start(&mut self, cx: &mut crate::Cx<'_, ()>) {
+            cx.set_poll_timer(2_000.0);
+        }
+        fn on_open(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId) {}
+        fn on_message(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: crate::Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut crate::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::TimerId) {}
+        fn on_command(&mut self, _: &mut crate::Cx<'_, ()>, _: crate::Command) {}
+        fn book(&self, _: &str) -> Option<&crate::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    /// The effective poll deadline after a policy change on a fresh engine:
+    /// the last one armed, counting the native arm at startup.
+    #[cfg(feature = "polling-control")]
+    fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
+        let mut engine = crate::Engine::new(PollVenue);
+        engine.start(0.0);
+        change(&mut engine);
+        let armed: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                crate::Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        armed.last().copied().into_iter().collect()
+    }
+
+    // Port of #1351's decode bound: the host's absolute interval, sent as a scale
+    // of the native cadence, still cannot flood a venue or overflow a timer.
+    #[test]
+    #[cfg(feature = "polling-control")]
+    fn polling_intervals_cannot_create_request_floods_or_overflow_timers() {
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1.0, 1_000.0),
+            (2_000.0, 2_000.0),
+            (1e300, 120_000.0),
+        ] {
+            let json = format!(r#"{{"op":"setPollScale","scale":{}}}"#, input / 2_000.0);
+            let HostInput::PollScaleChanged { scale, ceiling_ms } =
+                decode_host_input(&json).unwrap()
+            else {
+                panic!("{json} must decode as a polling control")
+            };
+            let armed = armed_after(|engine| {
+                engine.handle(0.0, crate::Event::PollCeilingChanged { ceiling_ms });
+                engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+            });
+            assert_eq!(armed, [expected], "{json}");
+        }
+    }
+
     #[test]
     fn host_configuration_requires_a_typed_positive_scale_or_null() {
         for json in [

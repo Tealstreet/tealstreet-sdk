@@ -310,14 +310,16 @@ mod timer_tests {
     }
     impl Venue for TimerVenue {
         type Pending = ();
-        fn start(&mut self, _: &mut Cx<'_, ()>) {}
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            self.timer = Some(cx.set_timer(1e308));
+        }
         fn on_poll_scale(&mut self, cx: &mut Cx<'_, ()>, scale: f64) {
             if let Some(timer) = self.timer.take() {
                 cx.clear_timer(timer);
             }
-            // A 1ms native cadence keeps huge finite scales as huge finite deadlines.
+            // A 1 s native cadence, armed as a raw venue timer.
             if scale.is_finite() {
-                self.timer = Some(cx.set_timer(scale));
+                self.timer = Some(cx.set_timer(1_000. * scale));
             }
         }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -401,8 +403,8 @@ mod timer_tests {
     async fn huge_future_timer_stays_alive_until_cleared_then_normal_timers_fire() {
         let mut host = Host::new(Engine::new(TimerVenue::default()), NoNetwork);
         host.clock = || 0.;
-        host.engine
-            .handle(0., Event::PollScaleChanged { scale: 1e308 });
+        // Exercise raw venue timers independently of the clamped polling control.
+        host.engine.start(0.);
         host.execute(&mut |_| {});
         let parked = host.timers.values().next().unwrap().clone();
         // Let the spawned task run: a conversion panic would finish it while
@@ -423,7 +425,7 @@ mod timer_tests {
         assert!(parked.is_finished(), "ClearTimer aborts the parked task");
 
         host.engine
-            .handle(0., Event::PollScaleChanged { scale: 5. });
+            .handle(0., Event::PollScaleChanged { scale: 1. });
         host.execute(&mut |_| {});
         let normal = *host.timers.keys().next().unwrap();
         let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())

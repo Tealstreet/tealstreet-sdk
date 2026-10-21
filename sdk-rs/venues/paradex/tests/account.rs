@@ -1051,7 +1051,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert_eq!(stale.len(), 1, "one recurring account registration");
     let mut obsolete = stale;
     let mut current = None;
-    for interval in [200_000_f64, 500.] {
+    for interval in [100_000_f64, 1_500.] {
         e.handle(
             now,
             Event::PollScaleChanged {

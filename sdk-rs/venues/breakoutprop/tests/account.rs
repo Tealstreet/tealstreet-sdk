@@ -36,7 +36,7 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
         }
         assert!(h.timers.is_empty());
         let mut old = Vec::new();
-        for interval in [20_000., 500.] {
+        for interval in [20_000., 1_500.] {
             h.engine.handle(
                 h.now,
                 Event::PollScaleChanged {

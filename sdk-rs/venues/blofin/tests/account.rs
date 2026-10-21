@@ -446,7 +446,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -457,7 +457,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1_501.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -471,12 +471,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -487,9 +487,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_500.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_500.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -505,7 +505,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_501.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -594,17 +594,17 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     engine.handle(
         now,
         Event::PollScaleChanged {
-            scale: 100.0 / POLL_MS,
+            scale: 1_500.0 / POLL_MS,
         },
     );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
-    engine.handle(now + 100.0, Event::TimerFired { timer });
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let reads: Vec<_> = output
         .iter()
@@ -617,7 +617,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     // Keep any next periodic timer for a loop that rearms before HTTP completes.
     for r in reads {
         engine.handle(
-            now + 100.0,
+            now + 1_500.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -632,15 +632,15 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     let next = output
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 200.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == now + 3_000.0 => Some(*timer),
             _ => None,
         })
         .expect("next account tick");
-    engine.handle(now + 200.0, Event::TimerFired { timer: next });
+    engine.handle(now + 3_000.0, Event::TimerFired { timer: next });
     engine.drain_actions().for_each(drop);
-    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
         engine.handle(
-            now + 200.0 + offset,
+            now + 3_000.0 + offset,
             Event::PollScaleChanged {
                 scale: interval_ms / POLL_MS,
             },
@@ -655,7 +655,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         if interval_ms.is_infinite() {
             assert!(times.is_empty());
         } else {
-            assert_eq!(times, vec![now + 40_200.0]);
+            assert_eq!(times, vec![now + 43_000.0]);
         }
     }
 }
