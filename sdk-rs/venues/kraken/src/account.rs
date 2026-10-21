@@ -114,22 +114,29 @@ pub struct Account {
     read_failures: u32,
     unlisted_logged: HashSet<String>,
     /// `order:`/`position:` + identity (empty when unreadable) of REST skips already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: HashMap<String, bool>,
 }
 impl Account {
-    /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+    /// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
     fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
         if self.skip_logged.len() >= SKIP_LOG_LIMIT {
             self.skip_logged.clear();
         }
-        if self.skip_logged.insert(key) {
-            cx.notice(level, code::ROW_SKIPPED, message);
+        let error = level == Level::Error;
+        if self
+            .skip_logged
+            .get(&key)
+            .is_some_and(|&errored| errored || !error)
+        {
+            return;
         }
+        self.skip_logged.insert(key, error);
+        cx.notice(level, code::ROW_SKIPPED, message);
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
     fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
         if clean {
-            self.skip_logged.retain(|key| !key.starts_with(prefix));
+            self.skip_logged.retain(|key, _| !key.starts_with(prefix));
         } else {
             for id in ids {
                 self.skip_logged.remove(&format!("{prefix}{id}"));
@@ -1219,15 +1226,20 @@ impl Kraken {
     }
     /// A row without an id protects every stored order; otherwise only its own.
     fn account_reject_order(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, id: &str) {
+        let kept = cx
+            .store
+            .orders()
+            .iter()
+            .any(|o| (id.is_empty() || o.id == id) && !self.account.terminal.contains(&o.id));
+        let level = if kept { Level::Warn } else { Level::Error };
         if id.is_empty() {
             let message = "Kraken skipped order row without an id".to_owned();
-            self.account
-                .log_skip(cx, "order:".into(), Level::Warn, message);
+            self.account.log_skip(cx, "order:".into(), level, message);
             request.orders.reject(None);
         } else {
             let message = format!("Kraken skipped unmappable order {id}");
             self.account
-                .log_skip(cx, format!("order:{id}"), Level::Warn, message);
+                .log_skip(cx, format!("order:{id}"), level, message);
             request.orders.reject(Some(id.to_owned()));
         }
     }
