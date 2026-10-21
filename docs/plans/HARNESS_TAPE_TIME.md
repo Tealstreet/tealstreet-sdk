@@ -17,7 +17,8 @@ For each PR: review the plan and diff, run focused harness checks, require at
 least five identical strict runs using Node 22 and fresh record/verify outputs,
 review independently, and merge only after green CI. Use CI-built artifacts
 or CI's five-pair mode on `wip/harness-tape-time-<suite>` branches. That
-branch flag applies only to the matching replay matrix job; ordinary branches
+branch flag applies only to the matching replay matrix job (the Bitget family
+sweep also includes its USDC matrix job); ordinary branches
 keep one private pair. Compare all five raw outputs per implementation after
 excluding measured metrics and record run ID and output hashes in the PR.
 Do not build local release wasm or run public timing sweeps. Merge pinned landing SHAs with porcelain Git and inspect the complete
@@ -75,3 +76,25 @@ CI suite with five pairs for all five private identities (50 raw outputs).
 Record run ID, tape identities and every raw hash, verify fresh CI reports,
 require full green head CI and the normal Binance dependency guard, merge
 with a separate call and report the receipt before the next family.
+
+## Bitget family phase
+
+Enable the virtual private clock for Bitget USDT-M, inverse and USDC-M.
+All three aliases share the Bitget engine. Generate the unchanged CI tapes
+and use a fingerprint-matching CI engine for focused private iteration.
+Remove only exact unobserved declarations bound to those tapes; inspect any
+new diagnostics before adding exact keys, tape SHA and a specific rationale.
+
+The Bitget sweep branch must collect five private pairs in both the `bitget`
+and `bitgetusdc` matrix suites, including inverse in the former. Other
+branches and suites retain one pair. Require identical complete nonmetric
+outputs within each implementation for all three tapes, fresh mandatory
+suite verification, independent review, full green head CI and a separate
+landing guard before merging and reporting the receipt.
+
+Raw five-run inspection found generated amend client IDs varying in all
+three Rust aliases. Inject a stream seeded from the exact tape SHA through
+wasm's JavaScript crypto bindings before loading the engine, restricted to
+private Bitget Rust replay. Keep complete raw IDs in the comparison and
+leave production randomness unchanged. Native replays still use OS
+randomness; an explicit native host entropy hook is a separate follow-up.

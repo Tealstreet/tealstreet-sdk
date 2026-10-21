@@ -1407,3 +1407,69 @@ fn failed_reconciliation_heals_are_jittered_while_event_heals_keep_their_debounc
     }
     assert!(delays.iter().any(|(delay, nominal)| delay < nominal));
 }
+
+#[test]
+fn rejected_order_rows_report_error_only_without_a_retained_copy_and_rearm() {
+    use safe_cex_engine::{Level, Notice, log::code};
+    let (mut e, socket) = ready();
+    snapshot(&mut e, socket);
+    e.drain_actions().for_each(drop);
+    let bad = ORDER.replace(r#""type":"stop""#, r#""type":"unsupported""#);
+    let missing = bad.replace("order-1", "order-2");
+    let send = |e: &mut Engine<Kraken>, rows: &str| {
+        message(
+            e,
+            socket,
+            NOW,
+            &format!(r#"{{"feed":"open_orders","orders":[{rows}]}}"#),
+        );
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED => {
+                    Some((event.level, event.message))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let events = send(&mut e, &format!("{bad},{missing}"));
+    assert_eq!(
+        events,
+        [
+            (
+                Level::Warn,
+                "Kraken skipped unmappable order order-1".into()
+            ),
+            (
+                Level::Error,
+                "Kraken skipped unmappable order order-2".into()
+            )
+        ]
+    );
+    assert!(e.store().order("order-1").is_some());
+    assert!(e.store().order("order-2").is_none());
+    assert!(send(&mut e, &format!("{bad},{missing}")).is_empty());
+    send(&mut e, ORDER);
+    assert_eq!(
+        send(&mut e, &bad),
+        [(
+            Level::Warn,
+            "Kraken skipped unmappable order order-1".into()
+        )]
+    );
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"feed":"open_orders","is_cancel":true,"order_id":"order-1","reason":"full_fill"}"#,
+    );
+    e.drain_actions().for_each(drop);
+    assert_eq!(
+        send(&mut e, &bad),
+        [(
+            Level::Error,
+            "Kraken skipped unmappable order order-1".into()
+        )]
+    );
+    assert!(send(&mut e, &bad).is_empty());
+}
