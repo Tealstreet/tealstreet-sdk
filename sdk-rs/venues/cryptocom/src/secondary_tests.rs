@@ -27,6 +27,7 @@ fn probe(
                 rows: vec![],
                 indexes: Default::default(),
                 skipped: Default::default(),
+                malformed: Default::default(),
             },
             false,
         );

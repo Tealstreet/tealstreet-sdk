@@ -238,6 +238,8 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         }
         const attempt = {};
         this.starting = attempt;
+        // A new start replaces any failure reported by an earlier engine lifetime.
+        this.startupFailure = undefined;
         let host;
         try {
           const { WasmEngine } = await loadEngine(message.venue);
@@ -308,6 +310,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
       this.timers = [];
       this.host?.dispose();
       this.host = undefined;
+      this.startupFailure = undefined;
     }
 
     async alarm() {
