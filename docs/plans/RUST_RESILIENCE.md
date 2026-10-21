@@ -28,7 +28,8 @@ bootstrap remainder handed over from the public-startup work
    Bitrue, KuCoin, OKX, Kraken futures, Backpack and GRVT catalogue-filtered
    rows belong to claude-cbzmw6; WOO/AsterDEX/WEEX/ApeX/Polymarket rows to the
    venues-b lane.
-7. Startup discovery retries honour 418/429 and `Retry-After` (next).
+7. Startup discovery retries honour 418/429 and `Retry-After` (#1481);
+   Bybit HTTP-200 retCode 10006 remains below.
 
 Not done, by decision: BreakoutProp authenticated discovery startup. The venue
 is disabled in production and preview (`enabled: false`,
@@ -59,3 +60,10 @@ Each phase gets a failing regression before implementation, focused touched
 venue plus Binance tests, scoped formatting/Clippy, independent review, fresh
 CI and a separate fail-closed revert guard before its merge. No local release
 WASM builds, deployments or downstream application edits.
+
+Rejected-row severity implementation: the four venues use coded `row.skipped`
+notices and bounded severity-aware identity caches. A retained copy warns; no
+retained copy errors; a prior warning may escalate once. Coinbase includes
+spot holdings and REST, user-snapshot and deferred-detail orders. Existing
+reconciliation and parse-site notice timing stay intact. Retention tests cover
+terminal/symbol fences, repeat suppression, recovery and missing-copy upgrades.
