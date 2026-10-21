@@ -1067,6 +1067,8 @@ impl Venue for Hyperliquid {
                 position_history: safe_cex_engine::PositionHistory::FillsSymbol,
                 fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
+                schedule_cancel: true,
+                host_clock: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }
@@ -1509,6 +1511,19 @@ impl Venue for Hyperliquid {
                 }
             }
             Tick::Handled | Tick::Unhandled => (),
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ScheduleCancel { time_ms } => {
+                self.schedule_cancel(cx, command, time_ms)
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

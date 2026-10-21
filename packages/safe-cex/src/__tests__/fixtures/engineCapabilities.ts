@@ -61,7 +61,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', ...OKX),
     balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
     marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
-    hostClock: is('backpack', 'bitunix', 'coinbase', 'coinbasespot', ...ORDERLY),
+    hostClock: is('backpack', 'bitunix', 'coinbase', 'coinbasespot', 'hyperliquid', ...ORDERLY),
     positionHistory: is('kraken', 'bitget', 'bitgetusdc', 'bitgetinverse') ? 'fillsAccount'
       : is('binance', 'hyperliquid', 'paradex') ? 'fillsSymbol'
       : is('bybit', 'bybitdemo', 'hyrotrader') ? 'bybit'
@@ -79,6 +79,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     rejectOrderHistoryFilters: is('txflow', 'coinbase', 'coinbasespot', ...ORDERLY),
     publicCatalogueValidation: is('breakoutprop'),
     isolatedBookSubscriptions: is('asterdex'),
+    scheduleCancel: is('hyperliquid'),
     inverseClosedPositions: is('bybitinverse'),
     ...overrides,
   };

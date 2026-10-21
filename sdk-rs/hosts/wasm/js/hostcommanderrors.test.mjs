@@ -208,3 +208,16 @@ for (const builderAuthorization of [
     assert.deepEqual(r.logs, []);
   });
 }
+
+
+test('scheduleCancel interruptions stay unknown and cannot be mistaken for a cleared switch', async () => {
+  for (const interrupt of ['timeout', 'dispose']) {
+    const r = rig();
+    const pending = r.host.command({ op: 'scheduleCancel', time: 1_800_000_030_000 });
+    if (interrupt === 'timeout') r.expire();
+    else r.host.dispose();
+    await assert.rejects(pending, (error) => error.outcome === 'unknown');
+    r.run([done(1, { result: '[]' })]);
+    assert.equal(r.host.commands.size, 0);
+  }
+});
