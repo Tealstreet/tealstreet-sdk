@@ -1337,6 +1337,86 @@ fn write_failures_are_classified_without_changing_their_text() {
     assert_eq!(h.failures[0].kind, Some(ErrorKind::Network));
 }
 
+fn assert_prior_placements_survive_failure(failure: u8) {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for acknowledged in 0..=2 {
+        let mut h = Harness::new(None);
+        h.place(vec![opts(), opts(), opts()]);
+        let ids: Vec<_> = (0..acknowledged).map(|i| format!("accepted-{i}")).collect();
+        for id in &ids {
+            h.reply(&format!(r#"{{"code":0,"data":{{"orderId":"{id}"}}}}"#));
+        }
+        let failed_request = h.requests[0].id;
+        match failure {
+            0 => h.reply(r#"{"code":100400,"msg":"bad quantity"}"#),
+            1 => h.failed(),
+            _ => h.reply(r#"{"code":0,"data":{}}"#),
+        }
+        assert_eq!(h.done.len(), 1);
+        assert_eq!(h.failures.len(), 1);
+        assert!(
+            h.requests.is_empty(),
+            "failure must stop the remaining writes"
+        );
+        let error = &h.failures[0];
+        let expected_outcome = match failure {
+            0 if acknowledged == 0 => Some(Outcome::Rejected),
+            0 => None,
+            _ => Some(Outcome::Unknown),
+        };
+        assert_eq!(error.outcome, expected_outcome);
+        if failure == 0 {
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.venue_code.as_deref(), Some("100400"));
+            assert_eq!(error.venue_message.as_deref(), Some("bad quantity"));
+        } else if failure == 1 {
+            assert_eq!(error.kind, Some(ErrorKind::Network));
+        }
+        if ids.is_empty() {
+            assert!(error.partial.is_none(), "no accepted ID may be invented");
+        } else {
+            let partial = error
+                .partial
+                .as_ref()
+                .expect("prior native IDs must survive");
+            assert_eq!(partial.order_ids, ids);
+            let legacy: serde_json::Value =
+                serde_json::from_str(h.done[0].as_ref().unwrap_err()).unwrap();
+            assert_eq!(legacy["partialOrderIds"], serde_json::json!(ids));
+        }
+        // A duplicate late acknowledgement cannot turn this failure into success.
+        h.engine.handle(
+            1_002.0,
+            Event::HttpResponse {
+                request: failed_request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"code":0,"data":{"orderId":"late"}}"#,
+                },
+            },
+        );
+        h.collect();
+        assert_eq!(h.done.len(), 1);
+        assert!(h.requests.is_empty());
+    }
+}
+
+#[test]
+fn partial_placement_rejection_keeps_prior_native_ids() {
+    assert_prior_placements_survive_failure(0);
+}
+
+#[test]
+fn partial_placement_transport_loss_keeps_prior_native_ids() {
+    assert_prior_placements_survive_failure(1);
+}
+
+#[test]
+fn partial_placement_malformed_ack_keeps_prior_native_ids() {
+    assert_prior_placements_survive_failure(2);
+}
+
 #[test]
 fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     let app = |kind: &str, price: f64, trigger: Option<f64>| {
