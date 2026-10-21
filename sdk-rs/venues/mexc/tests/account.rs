@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
-use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -754,7 +754,7 @@ fn owned_position_on_filtered_market_is_skipped_and_the_snapshot_commits() {
     assert_eq!(positions[0].symbol, "BTCUSDT");
     assert!(e.store().order("739113577038255617").is_some());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("uncatalogued market HIDEUSDT"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("uncatalogued market HIDEUSDT"))));
 }
 
 #[test]
@@ -774,7 +774,68 @@ fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 0.006, "previous snapshot kept");
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn bad_position_row_keeps_its_stored_legs_while_peers_commit() {
+    let (mut e, socket, reads, _) = private_started_with_markets(&catalogue_with("0.0001"));
+    answer_snapshot(&mut e, reads, POSITION);
+    assert_eq!(e.store().positions()[0].contracts, 0.006);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    let bad = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let peer = POSITION
+        .replace("BTC_USDT", "BAD_USDT")
+        .replace("739113577038255616", "1");
+    answer_snapshot(&mut e, reads, &format!("{bad},{peer}"));
+    let btc = e.store().positions().iter().find(|p| p.symbol == "BTCUSDT");
+    assert_eq!(btc.unwrap().contracts, 0.006, "stored copy kept");
+    assert!(e.store().positions().iter().any(|p| p.symbol == "BADUSDT"));
+}
+
+#[test]
+fn bad_asset_row_keeps_its_stored_balance_while_peers_update() {
+    let (mut e, socket, reads, _) = private_started();
+    let r = reads.iter().find(|r| r.url.contains("assets")).unwrap();
+    response(
+        &mut e,
+        r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000},{"currency":"BTC","availableBalance":0.5,"cashBalance":0.75}]}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.asset","data":{"currency":"USDT","availableBalance":900}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1200.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1200.0, Event::TimerFired { timer });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("assets"))
+        .unwrap();
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":900,"equity":950},{"currency":"BTC","availableBalance":"bad"}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 950.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("BTC".into(), 0.75, 0.5, 0.25, 0.0),
+            ("USDT".into(), 950.0, 900.0, 50.0, 0.0),
+        ]
+    );
 }
 
 #[test]
@@ -851,7 +912,7 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
     let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed leverage transport")).unwrap();
     assert!(error < done);
-    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed leverage transport")));
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message=="failed leverage transport")));
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
@@ -1041,7 +1102,7 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 5);
-    assert_eq!(payload.len(), 248);
+    assert_eq!(payload.len(), 264);
     let symbol_refs: Vec<_> = payload[144..164]
         .as_chunks::<4>()
         .0
@@ -1061,17 +1122,17 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
             [65000., 0.001]
         );
     }
-    assert!(value(168).is_nan());
-    assert_eq!([value(176), value(184)], [0., -2.]);
+    assert!(value(184).is_nan());
+    assert_eq!([value(192), value(200)], [0., -2.]);
     assert!(
-        value(192).is_nan(),
+        value(208).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert_eq!(value(200), 5.);
-    assert!(value(208).is_nan());
-    assert_eq!([value(216), value(224)], [0.2, 0.]);
-    assert!(value(232).is_nan());
-    assert!(value(240).is_nan());
+    assert_eq!(value(216), 5.);
+    assert!(value(224).is_nan());
+    assert_eq!([value(232), value(240)], [0.2, 0.]);
+    assert!(value(248).is_nan());
+    assert!(value(256).is_nan());
     assert!(e.take_market_frame(200.).is_none());
 }
 #[test]
@@ -1095,7 +1156,7 @@ fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
         assert!(e.store().loaded().orders, "{surface}");
         assert!(e.store().order("valid").is_some(), "{surface}");
         assert!(e.store().order("unloaded").is_none());
-        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
+        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
     }
 }
 
@@ -1181,7 +1242,7 @@ fn unmappable_order_id_preserves_known_copy_but_empty_full_snapshot_clears_it() 
 }
 
 #[test]
-fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_load() {
+fn missing_order_identity_protects_known_orders_and_commits_its_peers() {
     for initialized in [false, true] {
         let (mut e, socket, mut reads, _) = private_started();
         if initialized {
@@ -1198,22 +1259,24 @@ fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_loa
             reads = requests(&mut e);
         }
         let missing_id = ORDER.replace("\"orderId\":739113577038255617,", "");
+        let fresh = ORDER.replace("739113577038255617", "\"fresh\"");
         for request in reads {
             let body = if request.url.contains("open_orders") {
-                format!(r#"{{"success":true,"code":0,"data":[{missing_id}]}}"#)
+                format!(r#"{{"success":true,"code":0,"data":[{missing_id},{fresh}]}}"#)
             } else {
                 r#"{"success":true,"code":0,"data":[]}"#.into()
             };
             response(&mut e, &request, &body);
         }
-        assert_eq!(e.store().loaded().orders, initialized);
+        assert!(e.store().loaded().orders);
+        assert!(e.store().order("fresh").is_some());
         if initialized {
             assert_eq!(e.store().order("739113577038255617").unwrap().amount, 0.003);
         } else {
-            assert!(e.store().orders().is_empty());
+            assert_eq!(e.store().orders().len(), 1);
         }
         assert!(e.drain_actions().any(|action| matches!(action,
-            Action::Notice(safe_cex_engine::Notice::Log {message,..}) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Malformed MEXC snapshot row"))));
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("MEXC skipped order row without an id"))));
     }
 }
 
@@ -1402,11 +1465,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, .. } => retry = Some(timer),
-                Action::Notice(Notice::Log {
-                    level: LogLevel::Warning,
-                    message,
-                })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Warn,
                     message,
                     ..
@@ -1444,7 +1503,6 @@ fn a_market_whose_amount_step_overflows_is_malformed_and_holds_its_exposure() {
         "previous snapshot kept"
     );
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. })
-            | Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
+        Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, .. }))
             if message.contains("owned position market unavailable"))));
 }

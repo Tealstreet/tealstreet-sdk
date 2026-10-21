@@ -81,12 +81,6 @@ impl H {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::Log { level, message }) => {
-                    if level == safe_cex_engine::LogLevel::Error {
-                        self.errors.push(message.clone());
-                    }
-                    self.logs.push(message)
-                }
                 Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
                     level, message, ..
                 })) => {

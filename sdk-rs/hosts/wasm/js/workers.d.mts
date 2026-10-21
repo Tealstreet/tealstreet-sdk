@@ -4,6 +4,8 @@ import type { EngineHost, Transport, WasmEngineLike } from './host.mjs';
 export const WorkersWebSocket: typeof globalThis.WebSocket;
 export function workersTransport(): Transport;
 
+/** Diagnostic messages are `{ op: "event", level, code, message, fields }`;
+ * levels use "warn". Host diagnostics have host.* codes. */
 export function createEngineObject<Venue extends string = string, Options = Record<string, unknown>>(configuration: {
   /** Resolve a deployment-managed bearer token for this object's account. Missing tokens deny upgrades. */
   accountToken(state: unknown, env: unknown): string | undefined | Promise<string | undefined>;

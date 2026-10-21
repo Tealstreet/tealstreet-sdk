@@ -772,7 +772,7 @@ export class FrameApplier {
       const realizedPnl = rows!.realizedPnl?.[i];
       const fee = rows!.fee?.[i];
       fills.push({
-        id: rows!.orderId(i),
+        id: rows!.fillId?.(i) ?? rows!.orderId(i),
         orderId: rows!.orderId(i),
         symbol,
         ...([OrderSide.Buy, OrderSide.Sell][rows!.side[i]] !== undefined && {

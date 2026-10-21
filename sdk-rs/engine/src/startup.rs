@@ -1,6 +1,7 @@
 //! Startup read retry policy, public discovery and private gates alike. Venues
 //! rebuild requests to refresh signatures.
-use crate::{Cx, LogLevel, TimerId};
+use crate::log::code;
+use crate::{Cx, Level, TimerId};
 
 struct Read<K> {
     key: K,
@@ -83,7 +84,11 @@ impl<K: PartialEq> Backoff<K> {
         let delay = cx.jittered(nominal).max(minimum);
         read.timer = Some(cx.set_timer(delay));
         read.due = cx.now + delay;
-        cx.log(LogLevel::Warning, "Startup read failed; retry scheduled");
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            "Startup read failed; retry scheduled",
+        );
     }
 
     pub fn succeeded<P>(&mut self, cx: &mut Cx<'_, P>, key: &K) {
@@ -126,7 +131,11 @@ pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f
 
 /// Do not expose raw catalogue rows, which can arrive through authenticated APIs.
 pub fn skipped_row<P>(cx: &mut Cx<'_, P>) {
-    cx.log(LogLevel::Warning, "Skipped malformed public discovery row");
+    cx.notice(
+        Level::Warn,
+        code::ROW_SKIPPED,
+        "Skipped malformed public discovery row",
+    );
 }
 
 /// TS numeric coercion for public fields that allow blank strings.
