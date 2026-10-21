@@ -13,3 +13,12 @@ missing identity, duplicates, terminal rows, pending reads and active repair,
 product filters, authoritative later empty snapshots and no financial fabrication.
 Run touched Bitget plus Binance native tests, strict Bitget Clippy/fmt/bans; push
 full CI/replays/size. Merge after Bybit row/fence work under fresh separate guard.
+
+Phase receipt: raw ordinary WS arrays admit healthy Classic/UTA peers; cached
+position scope and per-ID order revisions protect rejected identities. Four
+initial regressions proved red. Review additionally reproduced repeated malformed
+snapshots starving fresh REST-only peers: rejected observation barriers are now
+separate from full financial snapshot authority/freshness. That two-walk test is
+red/green, with native/strict gates passing. Partial malformed/foreign payloads do
+not claim useful authenticated financial traffic. Metadata route-fence regression
+and final independent review remain before opening/marking this batch ready.

@@ -341,3 +341,175 @@ fn uta_close_side_stays_execution_direction_and_virtual_refresh_keeps_strategies
     assert!(h.engine.store().order("strategy__stop_loss").is_some());
     assert!(h.engine.store().order("strategy__take_profit").is_some());
 }
+
+fn row_engine(unified: bool) -> Harness {
+    if unified {
+        uta(r#"{"code":"00000","data":[]}"#)
+    } else {
+        Harness::classic()
+    }
+}
+fn position_message(rows: serde_json::Value) -> String {
+    serde_json::json!({"arg":{"channel":"positions","topic":"position"},"action":"snapshot","data":rows}).to_string()
+}
+fn hedge_row(side: &str, size: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"symbol":"BTCUSDT","marginCoin":"USDT","holdSide":side,"total":size,"openPriceAvg":"90","leverage":"20","posMode":"hedge_mode","marginMode":"crossed","uTime":"200"})
+}
+#[test]
+fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta() {
+    for unified in [false, true] {
+        for malformed in [serde_json::json!({"bad":1}), serde_json::json!("-1")] {
+            let mut h = row_engine(unified);
+            h.private_message(&position_message(serde_json::json!([
+                hedge_row("long", serde_json::json!("2")),
+                hedge_row("short", serde_json::json!("3"))
+            ])));
+            h.private_message(&position_message(serde_json::json!([
+                hedge_row("long", malformed),
+                hedge_row("short", serde_json::json!("5"))
+            ])));
+            let positions = h.engine.store().positions();
+            assert_eq!(
+                positions
+                    .iter()
+                    .find(|p| p.side == safe_cex_engine::model::PositionSide::Short)
+                    .unwrap()
+                    .contracts,
+                5.0,
+                "healthy position starved"
+            );
+            assert_eq!(
+                positions
+                    .iter()
+                    .find(|p| p.side == safe_cex_engine::model::PositionSide::Long)
+                    .expect("malformed cached leg erased")
+                    .contracts,
+                2.0
+            );
+            assert!(
+                h.logs
+                    .iter()
+                    .any(|m| m.contains("skipped Bitget position stream record"))
+            );
+            h.private_message(&position_message(serde_json::json!([])));
+            assert!(
+                h.engine.store().positions().is_empty(),
+                "authoritative empty follow-up clears retained leg"
+            );
+        }
+    }
+}
+#[test]
+fn unidentified_ws_position_row_holds_absence_while_known_peer_updates() {
+    let mut h = row_engine(false);
+    h.private_message(&position_message(serde_json::json!([
+        hedge_row("long", serde_json::json!("2")),
+        hedge_row("short", serde_json::json!("3"))
+    ])));
+    h.private_message(&position_message(serde_json::json!([
+        {},
+        hedge_row("short", serde_json::json!("5"))
+    ])));
+    assert_eq!(h.engine.store().positions().len(), 2);
+    assert_eq!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.side == safe_cex_engine::model::PositionSide::Short)
+            .unwrap()
+            .contracts,
+        5.0
+    );
+}
+fn ordinary_row(id: &str) -> serde_json::Value {
+    serde_json::json!({"category":"usdt-futures","orderId":id,"symbol":"BTCUSDT","qty":"2","size":"2","price":"90","side":"buy","orderType":"limit","status":"live","orderStatus":"new"})
+}
+#[test]
+fn malformed_ws_order_admits_healthy_peer_for_classic_and_uta() {
+    for unified in [false, true] {
+        let mut h = row_engine(unified);
+        h.private_message(&serde_json::json!({"arg":{"channel":"orders","topic":"order"},"data":[ordinary_row("cached")]}).to_string());
+        let mut bad = ordinary_row("cached");
+        bad["size"] = serde_json::json!({"bad":1});
+        bad["qty"] = serde_json::json!({"bad":1});
+        h.private_message(&serde_json::json!({"arg":{"channel":"orders","topic":"order"},"data":[bad,ordinary_row("healthy")]}).to_string());
+        assert!(
+            h.engine.store().order("healthy").is_some(),
+            "healthy order starved"
+        );
+        assert!(h.engine.store().order("cached").is_some());
+        assert!(
+            h.logs
+                .iter()
+                .any(|m| m.contains("Bitget order stream record"))
+        );
+    }
+}
+#[test]
+fn rejected_ws_order_protects_cached_identity_from_older_rest_omission() {
+    let mut h = Harness::classic();
+    let mut bad = ordinary_row("1");
+    bad["size"] = serde_json::json!({"bad":1});
+    h.private_message(&serde_json::json!({"arg":{"channel":"orders"},"data":[bad]}).to_string());
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    assert!(
+        h.engine.store().order("1").is_some(),
+        "older clean REST erased rejected WS identity"
+    );
+    h.timer_after(500.0);
+    assert!(
+        h.requests.iter().any(|r| r.url.contains("/orders-pending")),
+        "bounded repair missing"
+    );
+}
+
+#[test]
+fn repeated_malformed_ws_snapshot_cannot_starve_fresh_rest_only_position_peer() {
+    let mut h = Harness::classic();
+    let seed = hedge_row("long", serde_json::json!("2"));
+    h.private_message(&position_message(serde_json::json!([seed])));
+    h.respond(
+        "/all-position",
+        200,
+        &serde_json::json!({"code":"00000","data":[seed]}).to_string(),
+    );
+    h.timer_after(500.0);
+    h.respond(
+        "/all-position",
+        200,
+        &serde_json::json!({"code":"00000","data":[seed]}).to_string(),
+    );
+    h.now += 6_000.0;
+    for size in [3, 4] {
+        let bad = hedge_row("long", serde_json::json!({"bad":1}));
+        h.private_message(&position_message(serde_json::json!([bad])));
+        h.timer_after(500.0);
+        let read = h.take("/all-position");
+        h.now += 1.0;
+        h.private_message(&position_message(serde_json::json!([bad])));
+        let mut peer = hedge_row("short", serde_json::json!(size.to_string()));
+        peer.as_object_mut().unwrap().remove("uTime");
+        h.reply(read.id,200,&serde_json::json!({"code":"00000","data":[hedge_row("long",serde_json::json!("9")),peer]}).to_string());
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.side == safe_cex_engine::model::PositionSide::Short)
+                .expect("REST-only peer starved by fake WS full-snapshot authority")
+                .contracts,
+            size as f64
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.side == safe_cex_engine::model::PositionSide::Long)
+                .unwrap()
+                .contracts,
+            2.0
+        );
+    }
+}
