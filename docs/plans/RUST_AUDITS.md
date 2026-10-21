@@ -744,7 +744,10 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
   (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX uses
+  fresh reads plus selected metadata refresh via `onReadAndMetadata`; WEEX keeps
+  fresh `onRead` rails; MEXC reads a symbol its metadata refresh
+  has not covered yet); command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
   `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base

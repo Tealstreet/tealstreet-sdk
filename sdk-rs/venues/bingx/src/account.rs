@@ -294,7 +294,7 @@ impl Account {
             cx,
             credentials,
             Method::Get,
-            "/openApi/swap/v2/trade/leverage",
+            crate::paths::LEVERAGE,
             Params::new().str("symbol", &native),
             Request::Metadata {
                 command,

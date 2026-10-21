@@ -104,7 +104,8 @@ describe('Rust bridge routes from the engine capability record', () => {
   it('answers a client order lookup from open orders before an engine exists', async () => {
     const { exchange, commands } = fixture({ clientOrderLookup: true });
     await expect(exchange.findOrderByClientOrderId('BTC', 'id-1')).resolves.toEqual({ found: false, definitive: false });
-    expect(commands).toEqual([]);
+    // The native open-order read may start the engine; no lookup command is sent.
+    expect(commands.filter((command) => command.op !== 'setPollScale')).toEqual([]);
   });
 
   it('keeps reported history axes as engine queries', async () => {
@@ -129,7 +130,19 @@ describe('Rust bridge routes from the engine capability record', () => {
 
     const perSymbol = fixture({ cancelAll: 'eachOpenSymbol' });
     await perSymbol.exchange.start();
-    perSymbol.exchange.store.update({ orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')] });
+    // Cancel-all reads the native open orders; the fixture's native state mirrors the store.
+    perSymbol.exchange.store.update({
+      markets: ['BTC', 'ETH'].map((symbol) => ({
+        id: symbol,
+        symbol,
+        base: symbol,
+        quote: 'USDT',
+        active: true,
+        precision: { amount: 0.1, price: 0.1 },
+        limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
+      })),
+      orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
+    });
     await perSymbol.exchange.cancelAllOrders();
     expect(perSymbol.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual([
       'BTC',
@@ -179,6 +192,23 @@ describe('Rust bridge routes from the engine capability record', () => {
     await settings.exchange.start();
     await expect(settings.exchange.fetchLeverageForSymbol('BTC')).resolves.toBeNull();
     expect(settings.commands.map((c) => c.op)).not.toContain('fetchLeverage');
+
+    // A metadata-refreshed venue reads a flat symbol it has not refreshed yet,
+    // then serves the published rails without another venue read.
+    const onMetadata = fixture({ leverageQuery: 'onMetadata' });
+    await onMetadata.exchange.start();
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toEqual({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
+    await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toMatchObject({
+      buyLeverage: 20,
+      sellLeverage: 50,
+    });
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(1);
+    await onMetadata.exchange.updateSymbolMetadata('BTC');
+    expect(onMetadata.commands.filter((c) => c.op === 'fetchLeverage')).toHaveLength(2);
   });
 
   it('reads BingX settings for a flat symbol during metadata refresh', async () => {
@@ -189,6 +219,31 @@ describe('Rust bridge routes from the engine capability record', () => {
       expect.objectContaining({ symbol: 'BTCUSDT' }),
     ]);
     expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 20, sellLeverage: 50 });
+  });
+
+  it('keeps combined metadata refreshes and explicit reads fresh even with cached rails', async () => {
+    // The generic record controls dispatch; no BingX-name branch is involved.
+    const { exchange, commands } = fixture({ leverageQuery: 'onReadAndMetadata' });
+    await exchange.start();
+    for (let read = 0; read < 2; read++) {
+      await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toEqual({
+        buyLeverage: 20,
+        sellLeverage: 50,
+      });
+    }
+    expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(2);
+    await exchange.updateSymbolMetadata('BTCUSDT');
+    expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(3);
+  });
+
+  it('keeps existing onRead venues fresh only on explicit reads, without new metadata dispatch', async () => {
+    const { exchange, commands } = fixture({}, 'weex');
+    await exchange.start();
+    await exchange.updateSymbolMetadata('BTCUSDT');
+    expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(0);
+    await exchange.fetchLeverageForSymbol('BTCUSDT');
+    await exchange.fetchLeverageForSymbol('BTCUSDT');
+    expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(2);
   });
 
   it('takes maximum leverage from the reported source', async () => {

@@ -61,6 +61,12 @@ struct TestVenue {
     poll_timer: Option<TimerId>,
 }
 impl Venue for TestVenue {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         self.started.set(self.started.get() + 1);

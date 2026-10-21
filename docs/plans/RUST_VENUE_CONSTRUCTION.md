@@ -45,3 +45,12 @@ Paradex signing transport intact. Hyperliquid's old spot refusal is already gone
 Verify raw config forwarding, native selection and precedence, structured
 startup/validateAccount refusal before I/O, public and Paradex bypasses, and the
 existing factory/spot/polling regressions. Run focused Rust/TS checks and CI.
+
+## Payload-signer guidance follow-up
+
+Clarify that private non-Paradex Rust accounts must remove `payloadSigner`
+before using local signing credentials; adding credentials alone still refuses.
+Update the native message and mocked/compiled error assertions, preserving
+Unsupported/NotSent. Verify focused registry and bridge tests, typecheck/lint,
+and green CI; review and run the separate landing guard before merge. Notify
+the construction docs owner if the pending refresh quotes the old message.

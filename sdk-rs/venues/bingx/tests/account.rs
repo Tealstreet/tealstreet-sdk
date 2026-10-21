@@ -33,6 +33,7 @@ struct Harness {
     closed: Vec<SocketId>,
     logs: Vec<String>,
     done: Vec<(u32, Result<String, String>)>,
+    command_errors: Vec<(u32, String)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -57,6 +58,7 @@ impl Harness {
             closed: Vec::new(),
             logs: Vec::new(),
             done: Vec::new(),
+            command_errors: Vec::new(),
         };
         h.engine.start(h.now);
         h.collect();
@@ -71,13 +73,16 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.message)))
+                    self.done.push((command, Err(error.legacy_text())))
                 }
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::CommandError { command, message }) => {
+                    self.command_errors.push((command, message))
+                }
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
             }
@@ -1417,6 +1422,139 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         assert!(h.engine.store().hedged(), "stale step {step}");
         read = h.take(MODE);
     }
+}
+
+const LEVERAGE: &str = "/openApi/swap/v2/trade/leverage";
+const FRESH_RAILS: &str = r#"{"code":0,"msg":"","data":{"longLeverage":8,"shortLeverage":"12","maxLongLeverage":125,"maxShortLeverage":125}}"#;
+
+fn assert_fresh_rails(h: &Harness, command: u32, buy: f64, sell: f64) {
+    assert_eq!(h.done.len(), 1);
+    let (id, result) = &h.done[0];
+    assert_eq!(*id, command);
+    let json: serde_json::Value =
+        serde_json::from_str(result.as_ref().expect("successful read")).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"buyLeverage":buy,"sellLeverage":sell})
+    );
+}
+
+fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) {
+    h.event(Event::Command(Command::FetchLeverage {
+        command,
+        symbol: symbol.into(),
+    }));
+}
+
+#[test]
+fn leverage_read_is_a_fresh_signed_get_returning_both_rails() {
+    let mut h = Harness::ready();
+    fetch_leverage(&mut h, 7, "BTCUSDT");
+    let r = h.take(LEVERAGE);
+    assert_eq!(r.method, Method::Get);
+    assert!(r.url.contains("symbol=BTC-USDT"), "{}", r.url);
+    assert!(r.url.contains("signature="), "{}", r.url);
+    h.reply(r.id, 200, FRESH_RAILS);
+    assert!(
+        h.done.is_empty(),
+        "rails alone cannot commit partial metadata"
+    );
+    let margin = h.take("/trade/marginType");
+    assert_eq!(margin.method, Method::Get);
+    h.reply(margin.id, 200, ISOLATED);
+    assert_fresh_rails(&h, 7, 8.0, 12.0);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(8.0));
+    assert_eq!(setting.sell_leverage, Some(12.0));
+    assert!(h.command_errors.is_empty());
+}
+
+#[test]
+fn leverage_read_failures_report_once_and_keep_settings() {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    for (command, status, body) in [
+        (8, 200, r#"{"code":109400,"msg":"symbol not exist"}"#),
+        (
+            9,
+            200,
+            r#"{"code":0,"data":{"longLeverage":0,"shortLeverage":5}}"#,
+        ),
+        (10, 200, r#"{"code":0,"data":{}}"#),
+        (11, 503, "unavailable"),
+    ] {
+        fetch_leverage(&mut h, command, "BTCUSDT");
+        let r = h.take(LEVERAGE);
+        h.reply(r.id, status, body);
+        let (done, result) = h.done.pop().expect("completed");
+        assert_eq!(done, command);
+        let error = result.expect_err(body);
+        assert!(!error.is_empty());
+        assert!(h.command_errors.is_empty());
+    }
+    assert!(h.done.is_empty() && h.command_errors.is_empty());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn a_config_update_during_the_read_wins_over_its_snapshot() {
+    let mut h = Harness::ready();
+    fetch_leverage(&mut h, 12, "BTCUSDT");
+    let r = h.take(LEVERAGE);
+    h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":30,"S":25}}"#);
+    h.reply(r.id, 200, FRESH_RAILS);
+    // The atomic pair rejects the stale generation; no stale rails reach the caller.
+    failed_metadata(&h, 12);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("/trade/marginType"))
+    );
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(30.0));
+    assert_eq!(setting.sell_leverage, Some(25.0));
+}
+
+#[test]
+fn leverage_read_needs_a_known_market() {
+    let mut h = Harness::ready();
+    fetch_leverage(&mut h, 13, "ETHUSDT");
+    assert_eq!(h.done, [(13, Err("Unknown BingX market".into()))]);
+    assert!(!h.requests.iter().any(|r| r.url.contains(LEVERAGE)));
+}
+
+#[test]
+fn unrelated_position_activity_during_the_read_does_not_drop_it() {
+    let mut h = Harness::ready();
+    fetch_leverage(&mut h, 14, "BTCUSDT");
+    let r = h.take(LEVERAGE);
+    h.message(r#"{"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","pa":"0.2","ep":"60000","up":"1","ps":"BOTH","mt":"cross"}]}}"#);
+    h.reply(r.id, 200, FRESH_RAILS);
+    let margin = h.take("/trade/marginType");
+    h.reply(margin.id, 200, ISOLATED);
+    assert_fresh_rails(&h, 14, 8.0, 12.0);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(8.0));
+    assert_eq!(setting.sell_leverage, Some(12.0));
+}
+
+#[test]
+fn repeated_explicit_leverage_reads_request_a_new_atomic_pair_despite_cached_rails() {
+    let mut h = Harness::ready();
+    for command in [21, 22] {
+        fetch_leverage(&mut h, command, "BTCUSDT");
+        let leverage = h.take(LEVERAGE);
+        assert_eq!(leverage.method, Method::Get);
+        h.reply(leverage.id, 200, FRESH_RAILS);
+        let margin = h.take("/trade/marginType");
+        h.reply(margin.id, 200, ISOLATED);
+        assert_fresh_rails(&h, command, 8.0, 12.0);
+        h.done.clear();
+    }
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
 }
 
 #[test]

@@ -693,3 +693,9 @@ invalidates the result; callers can refresh again. Failed reads retain settings.
 ACCOUNT_UPDATE position rows decode independently: valid peers apply, malformed
 rows retain prior state and produce a coded warning plus bounded REST repair.
 Balance-only records remain balance records; source precedence stays P, B, p.
+
+BingX reports `leverageQuery: onReadAndMetadata`: explicit
+`fetchLeverageForSymbol` calls always read fresh data even when rails are cached,
+and `updateSymbolMetadata` refreshes the selected symbol. Both use the same signed
+leverage-then-margin pair and its revision/query-generation fences. A failed margin
+read leaves the prior complete settings intact; no partial rails are published.

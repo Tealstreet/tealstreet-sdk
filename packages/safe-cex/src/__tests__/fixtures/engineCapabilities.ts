@@ -15,7 +15,11 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
   const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
   const noOrdersOrIncome = noHistory || is('apexomni', 'bitrue', 'kucoinspot');
   const record: EngineCapabilities = {
-    account: is('apexomni', 'kucoinspot', 'asterdex', 'polymarket')
+    account: is(
+      'apexomni', 'asterdex', 'backpack', 'binance', 'binancepm', 'bingx', 'bitget', 'bitgetinverse', 'bitgetusdc',
+      'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'cryptocom', 'grvt', 'kucoin', 'kucoinspot', 'lighter',
+      'lighter-robinhood', 'mexc', 'paradex', 'phemex', 'polymarket', 'weex', 'woo',
+    )
       ? 'query'
       : is('coinbase', 'coinbasespot', ...ORDERLY)
         ? 'afterLoad'
@@ -30,11 +34,13 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
         ? 'eachPlacedSymbol'
         : 'eachOpenSymbol',
-    leverageQuery: is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
-      ? 'onRead'
-      : is('mexc', 'woo', 'kraken', 'bingx')
-        ? 'onMetadata'
-        : 'settings',
+    leverageQuery: is('bingx')
+      ? 'onReadAndMetadata'
+      : is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'weex', ...OKX, ...ORDERLY)
+        ? 'onRead'
+        : is('mexc', 'woo', 'kraken')
+          ? 'onMetadata'
+          : 'settings',
     maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : is('breakoutprop') ? 'unsupported' : 'market',
     accountLeverage: is(...ORDERLY),
     accountMarginType: is('blofin', 'kucoinspot'),
