@@ -2,7 +2,9 @@
 use crate::wire::*;
 use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{CommandId, Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
+use safe_cex_engine::{
+    CommandId, Cx, ErrorKind, Fill, LogLevel, Method, Response, TimerId, VenueError, json, num,
+};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
@@ -104,6 +106,7 @@ pub struct AccountState {
     pub mode_version: u64,
     pub leverage_versions: HashMap<String, u64>,
     skipped_instruments_logged: HashSet<String>,
+    unlisted_logged: HashSet<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -123,6 +126,11 @@ pub struct AccountState {
     fills: HashMap<String, f64>,
     tick: Option<TimerId>,
     retry: Option<TimerId>,
+    /// Backs off the config read that gates startup; transient failures never end it.
+    startup: safe_cex_engine::startup::Backoff<()>,
+    /// Consecutive 50113 answers to the config read; two in a row reject the key.
+    signature_rejections: u8,
+    pub startup_rejected: bool,
 }
 impl AccountState {
     pub(crate) fn order_final(&self, id: &str) -> bool {
@@ -149,7 +157,10 @@ impl Okx {
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() || self.account.config_in_flight {
+        if self.credentials.is_none()
+            || self.account.config_in_flight
+            || self.account.startup_rejected
+        {
             return;
         }
         self.account.config_in_flight = true;
@@ -429,31 +440,31 @@ impl Okx {
                 rows,
                 invalid,
                 ..
-            } => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(p) => {
-                        if !self.account_scope(*product, p.inst_id, p.inst_type) {
-                            *invalid = true;
-                            return;
-                        }
-                        if cx.store.market_by_id(p.inst_id).is_none()
-                            && p.pos.parse::<f64>().ok() != Some(0.0)
-                        {
-                            *invalid = true;
-                            self.unlisted_exposure(cx, p.inst_id);
-                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
-                            return;
-                        }
-                        if let Some(row) = self.position(cx, &p) {
-                            rows.push(row);
-                        } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some()
-                        {
-                            *invalid = true;
-                        }
+            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(p) => {
+                    if !self.account_scope(*product, p.inst_id, p.inst_type) {
+                        *invalid = true;
+                        return;
                     }
-                    Err(_) => *invalid = true,
+                    if cx.store.market_by_id(p.inst_id).is_none()
+                        && p.pos.parse::<f64>().ok() != Some(0.0)
+                    {
+                        if self.unlisted_exposure(cx, p.inst_id) {
+                            *invalid = true;
+                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
+                        } else {
+                            self.unlisted_skipped(cx, p.inst_id);
+                        }
+                        return;
+                    }
+                    if let Some(row) = self.position(cx, &p) {
+                        rows.push(row);
+                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                        *invalid = true;
+                    }
                 }
-            }
+                Err(_) => *invalid = true,
+            },
             Request::Orders {
                 product,
                 rows,
@@ -483,12 +494,15 @@ impl Okx {
                             "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
                         )
                     {
-                        *invalid = true;
-                        self.unlisted_exposure(cx, o.inst_id);
-                        cx.log(
-                            LogLevel::Warning,
-                            "OKX working order market unavailable; preserving order snapshot",
-                        );
+                        if self.unlisted_exposure(cx, o.inst_id) {
+                            *invalid = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "OKX working order market unavailable; preserving order snapshot",
+                            );
+                        } else {
+                            self.unlisted_skipped(cx, o.inst_id);
+                        }
                         return;
                     }
                     for order in self.orders(cx, &o) {
@@ -553,6 +567,7 @@ impl Okx {
                     return;
                 };
                 self.account.config_read_at = cx.now;
+                self.account.startup.succeeded(cx, &());
                 let hedged = config.pos_mode == "long_short_mode";
                 let level = config.acct_lv.parse().ok();
                 if self.account.configured {
@@ -807,14 +822,17 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            // Clearing the in-flight flag lets the retry timer re-enter account_start.
+            // Clearing the in-flight flag lets the backoff timer re-enter account_start.
             Request::Config { .. } => {
                 self.account.config_in_flight = false;
                 if self.account.configured {
                     self.account.config_read_at = cx.now;
                     cx.log(LogLevel::Warning, error);
-                    return;
+                } else {
+                    cx.log(LogLevel::Error, error);
+                    self.account.startup.failed(cx, ());
                 }
+                return;
             }
             Request::Leverage { command, .. } => {
                 cx.done(command, Err(error.to_owned()));
@@ -824,6 +842,95 @@ impl Okx {
         cx.log(LogLevel::Error, error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
+        }
+    }
+
+    /// A refused key can never pass the config read, so startup fails instead
+    /// of polling. Only documented key codes count; 50113 only twice in a row,
+    /// i.e. after one re-signed resend. Any other answer ends the run.
+    pub(crate) fn config_rejected(&mut self, cx: &mut Cx<'_, Pending>, body: &str) -> bool {
+        let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
+        if envelope.as_ref().is_some_and(|e| e.code == "50113") {
+            self.account.signature_rejections += 1;
+        } else {
+            self.account.signature_rejections = 0;
+        }
+        if self.account.configured {
+            return false;
+        }
+        let Some(envelope) = envelope else {
+            return false;
+        };
+        let Some(kind) = rest_key_rejection(envelope.code) else {
+            return false;
+        };
+        if envelope.code == "50113" && self.account.signature_rejections < 2 {
+            return false;
+        }
+        self.account.config_in_flight = false;
+        let read_key = self.options.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let error = rejection(which, envelope.code, envelope.msg, kind);
+        self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid && !read_key);
+        true
+    }
+
+    /// A config read lost in transport is not a 50113 answer, so it ends the run.
+    pub(crate) fn config_unanswered(&mut self) {
+        self.account.signature_rejections = 0;
+    }
+
+    /// Before the account is ready, a login the venue refuses cannot recover by
+    /// reconnecting; once ready, sockets keep their ordinary reconnect policy.
+    pub(crate) fn login_rejected(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        channel: usize,
+        code: &str,
+        msg: &str,
+    ) -> bool {
+        if self.account.ready || self.connections[channel].authenticated {
+            return false;
+        }
+        let Some(kind) = socket_key_rejection(code) else {
+            return false;
+        };
+        self.reject_startup(cx, rejection("API key login", code, msg, kind), true);
+        true
+    }
+
+    /// Fails startup once and retires every private retry, read or socket.
+    pub(crate) fn reject_startup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        error: VenueError,
+        trading_key_refused: bool,
+    ) {
+        if std::mem::replace(&mut self.account.startup_rejected, true) {
+            return;
+        }
+        self.account.startup.succeeded(cx, &());
+        if let Some(timer) = self.account.retry.take() {
+            cx.clear_timer(timer);
+        }
+        for channel in [PRIVATE, crate::BUSINESS] {
+            let c = &mut self.connections[channel];
+            c.supervisor.cancel(cx);
+            c.open = false;
+            c.authenticated = false;
+            if let Some(socket) = c.socket.take() {
+                cx.close(socket);
+            }
+        }
+        cx.log(LogLevel::Error, &error.message);
+        cx.startup_failed(error);
+        // As Bybit: a refused trading key also stops the host's login loop.
+        if trading_key_refused {
+            cx.deactivate();
         }
     }
 
@@ -838,6 +945,10 @@ impl Okx {
             self.account
                 .order_versions
                 .retain(|_, (_, at, terminal)| !*terminal || cx.now - *at < 600_000.0);
+            return true;
+        }
+        if self.account.startup.on_timer(timer).is_some() {
+            self.account_start(cx);
             return true;
         }
         if self.account.retry == Some(timer) {
@@ -907,17 +1018,32 @@ impl Okx {
         .map_err(|e| e.to_string())
     }
 
-    // Exposure on an instrument whose catalog row was malformed cannot be shown.
-    fn unlisted_exposure(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
-        if self.skipped_instruments.contains(inst_id)
-            && self
-                .account
-                .skipped_instruments_logged
-                .insert(inst_id.into())
+    /// Exposure on an instrument whose catalog row was malformed holds the snapshot;
+    /// any other unlisted instrument was filtered or delisted and is skipped.
+    fn unlisted_exposure(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) -> bool {
+        if !self.skipped_instruments.contains(inst_id) {
+            return false;
+        }
+        if self
+            .account
+            .skipped_instruments_logged
+            .insert(inst_id.into())
         {
             cx.log(
                 LogLevel::Error,
                 format!("OKX {inst_id} has open exposure but its instrument row was malformed; it is not shown"),
+            );
+        }
+        true
+    }
+
+    fn unlisted_skipped(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
+        if self.account.unlisted_logged.insert(inst_id.into()) {
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "OKX {inst_id} is not a listed market; its positions and orders are skipped"
+                ),
             );
         }
     }
@@ -1228,6 +1354,9 @@ impl Okx {
                     self.account_refresh(cx);
                 }
             } else {
+                if self.login_rejected(cx, channel, message.code, message.msg) {
+                    return;
+                }
                 if let Some(socket) = self.connections[channel].socket {
                     cx.close(socket);
                     safe_cex_engine::Venue::on_close(self, cx, socket, 1008);
@@ -1768,4 +1897,32 @@ fn valid_order(o: &OrderRow<'_>) -> bool {
             || o.acc_fill_sz
                 .parse::<f64>()
                 .is_ok_and(|n| n.is_finite() && n >= 0.0))
+}
+
+/// OKX REST authentication codes that no retry can fix (docs-v5 "Error Code",
+/// 501xx). Timestamp codes 50102/50112 and every other code stay transient.
+fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
+    match code {
+        "50100" | "50110" | "50120" => Some(ErrorKind::AuthPermission),
+        "50101" | "50103" | "50104" | "50105" | "50111" | "50113" | "50114" | "50119" => {
+            Some(ErrorKind::AuthInvalid)
+        }
+        _ => None,
+    }
+}
+
+/// OKX WebSocket login codes for a missing or refused key or passphrase (60xxx).
+fn socket_key_rejection(code: &str) -> Option<ErrorKind> {
+    matches!(code, "60001" | "60003" | "60005" | "60024" | "60032")
+        .then_some(ErrorKind::AuthInvalid)
+}
+
+fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
+    let mut error = VenueError::new(format!("OKX rejected the {which} ({code}): {msg}"))
+        .kind(kind)
+        .venue_code(code);
+    if !msg.is_empty() {
+        error = error.venue_message(msg);
+    }
+    error
 }

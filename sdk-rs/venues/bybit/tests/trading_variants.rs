@@ -1421,6 +1421,14 @@ fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
         200,
         r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
     );
+    // An explicit retCode before any create landed is a refusal.
+    assert_eq!(
+        h.outcomes,
+        [
+            (91, Some(safe_cex_engine::Outcome::Rejected)),
+            (92, Some(safe_cex_engine::Outcome::Rejected))
+        ]
+    );
     assert_eq!(h.command_errors.len(), 2);
     assert_eq!(h.command_errors[0].0, 91);
     assert_eq!(h.command_errors[1].0, 92);
@@ -1907,4 +1915,77 @@ fn demo_reduce_only_partial_or_failed_check_never_proves_a_fill() {
         "an incomplete page proved a full fill"
     );
     assert!(h.has_request("/v5/order/realtime"));
+}
+
+// Private reads now start before the ticker seed. A spot TP/SL with no
+// trigger direction was labelled against a zero price and never relabelled.
+#[test]
+fn spot_tpsl_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
+    let mut h = Harness::started(options(Variant::Spot));
+    for (path, body) in [
+        ("/v5/account/info", support::ACCOUNT_INFO),
+        ("/v5/account/fee-rate", EMPTY),
+        ("status=PreLaunch", EMPTY),
+    ] {
+        if h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "orders read before tickers"
+    );
+    h.respond(
+        "/v5/order/realtime",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"category":"spot","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"tpslOrder","side":"Sell","price":"0","triggerPrice":"60000","qty":"0.1","cumExecQty":"0","leavesQty":"0.1"}],"nextPageCursor":""}}"#,
+    );
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    if let Some(order) = h.engine.store().order("stop") {
+        assert_eq!(
+            order.kind,
+            OrderType::TakeProfit,
+            "labelled against no price"
+        );
+    }
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    let order = h.engine.store().order("stop").expect("spot stop stored");
+    assert_eq!(order.kind, OrderType::StopLoss);
+}
+
+// The same row streamed in before the seed but committed after it.
+#[test]
+fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
+    let mut h = Harness::started(options(Variant::Spot));
+    for (path, body) in [
+        ("/v5/account/info", support::ACCOUNT_INFO),
+        ("/v5/account/fee-rate", EMPTY),
+        ("status=PreLaunch", EMPTY),
+    ] {
+        if h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    let read = h.take("/v5/order/realtime");
+    let body = r#"{"retCode":0,"result":{"list":[{"category":"spot","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"tpslOrder","side":"Sell","price":"0","triggerPrice":"60000","qty":"0.1","cumExecQty":"0","leavesQty":"0.1"}],"nextPageCursor":""}}"#;
+    h.event(Event::HttpStart {
+        request: read.id,
+        status: 200,
+        headers: "",
+    });
+    h.event(Event::HttpChunk {
+        request: read.id,
+        data: body.as_bytes(),
+    });
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    h.event(Event::HttpEnd { request: read.id });
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    let order = h.engine.store().order("stop").expect("spot stop stored");
+    assert_eq!(order.kind, OrderType::StopLoss);
 }
