@@ -61,7 +61,7 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("account/margin-mode")))
     );
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     let ticker = out
         .iter()
         .find_map(|a| match a {

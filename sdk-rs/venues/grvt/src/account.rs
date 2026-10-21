@@ -2,6 +2,7 @@
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -22,6 +23,7 @@ const ORDERS: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/get_all_initial_leverage";
 const BUILDERS: &str = "/full/v1/get_authorized_builders";
 const RECENT_LIMIT: usize = 1000;
+const SKIP_LOG_LIMIT: usize = 4_096;
 pub(crate) const BUILDER_MAINNET: &str = "0xee8f3559f298fffa79b8253437969d15b5dccff3";
 pub(crate) const BUILDER_TESTNET: &str = "0xb0108ae4c07218ce320e5e22dd911a01c2042162";
 
@@ -95,6 +97,8 @@ pub(crate) struct Account {
     placement_created: HashMap<String, u64>,
     pending_placements: HashSet<String>,
     prior_lifecycle: HashMap<String, (u64, Option<String>)>,
+    /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
+    skip_logged: HashSet<String>,
 }
 impl Account {
     pub(crate) fn cancellation_evidence(&self) -> HashMap<String, (Option<String>, Option<u64>)> {
@@ -169,36 +173,37 @@ impl Account {
         }
     }
 }
-/// Snapshot rows that could not be mapped; known ids among them keep their stored copy.
-/// A row whose identity is unreadable could be any known record, so it retains the list.
-#[derive(Default)]
-pub(crate) struct Skipped {
-    count: usize,
-    first: String,
-    keep: Vec<String>,
-    opaque: bool,
-}
-impl Skipped {
-    fn add(&mut self, error: String, keep: Result<Option<String>, ()>) {
-        if self.count == 0 {
-            self.first = error;
-        }
-        self.count += 1;
-        match keep {
-            Ok(keep) => self.keep.extend(keep),
-            Err(()) => self.opaque = true,
-        }
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: Level,
+    message: String,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
     }
-    fn log(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
-        if self.count > 0 {
-            cx.notice(
-                Level::Warn,
-                code::ROW_SKIPPED,
-                format!(
-                    "Skipped {} malformed GRVT {kind} row(s), retaining known copies: {}",
-                    self.count, self.first
-                ),
-            );
+    if logged.insert(key) {
+        cx.notice(level, code::ROW_SKIPPED, message);
+    }
+}
+/// A rejected row with no stored copy kept is an error: it commits as absent.
+fn skip_level(stored: bool) -> Level {
+    if stored { Level::Warn } else { Level::Error }
+}
+/// Re-arms the skip logs of `prefix`: all of them after a clean read, else those `ids` mapped.
+fn rearm_skips<'a>(
+    logged: &mut HashSet<String>,
+    prefix: &str,
+    clean: bool,
+    ids: impl IntoIterator<Item = &'a str>,
+) {
+    if clean {
+        logged.retain(|key| !key.starts_with(prefix));
+    } else {
+        for id in ids {
+            logged.remove(&format!("{prefix}{id}"));
         }
     }
 }
@@ -222,13 +227,15 @@ pub(crate) enum Request {
         revision: u64,
         issued_at: f64,
         rows: Vec<PositionRecord>,
-        skipped: Skipped,
+        /// Rejections only; accepted rows are pushed once the response passes its fence.
+        positions: SnapshotBuilder<String, Position>,
     },
     Orders {
         revision: u64,
         issued_at: f64,
         rows: Vec<DecodedOrder>,
-        skipped: Skipped,
+        /// Rejections by stored (canonical client) id; accepted rows are pushed on response.
+        orders: SnapshotBuilder<String, Order>,
     },
     Leverage {
         revision: u64,
@@ -255,13 +262,15 @@ impl Request {
     }
     pub(crate) fn reset(&mut self) {
         match self {
-            Self::Positions { rows, skipped, .. } => {
+            Self::Positions {
+                rows, positions, ..
+            } => {
                 rows.clear();
-                *skipped = Skipped::default();
+                *positions = SnapshotBuilder::default();
             }
-            Self::Orders { rows, skipped, .. } => {
+            Self::Orders { rows, orders, .. } => {
                 rows.clear();
-                *skipped = Skipped::default();
+                *orders = SnapshotBuilder::default();
             }
             Self::Leverage { rows, failed, .. } => {
                 rows.clear();
@@ -299,6 +308,11 @@ struct Summary<'a> {
     spot_balances: Option<&'a RawValue>,
 }
 #[derive(Deserialize)]
+struct SpotCurrency<'a> {
+    #[serde(borrow, rename = "c", alias = "currency")]
+    currency: Text<'a>,
+}
+#[derive(Deserialize)]
 struct SpotBalance<'a> {
     #[serde(borrow, rename = "c", alias = "currency")]
     currency: Text<'a>,
@@ -306,33 +320,53 @@ struct SpotBalance<'a> {
     balance: Number,
 }
 impl Summary<'_> {
-    /// Spot rows are summed per currency and parsed apart from the summary, so a bad row is
-    /// dropped without costing the aggregate; `None` (unreadable list) keeps the previous coins.
-    fn currencies(&self, cx: &mut Cx<'_, Pending>) -> Option<Vec<CurrencyBalance>> {
+    /// Spot rows are summed per currency and parsed apart from the summary, so a bad row never
+    /// costs the aggregate; its currency keeps the stored coin rather than a partial sum, and
+    /// one without a currency keeps every stored coin that no summed row replaces. `None` (unreadable list)
+    /// keeps the previous coins.
+    fn currencies(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        logged: &mut HashSet<String>,
+    ) -> Option<Vec<CurrencyBalance>> {
         let mut totals = BTreeMap::<String, f64>::new();
-        let mut skipped = 0usize;
+        let mut coins = SnapshotBuilder::default();
+        let mut rejected = HashSet::new();
         if let Some(raw) = self.spot_balances.filter(|raw| raw.get() != "null") {
             json::each::<&RawValue>(raw.get(), |item| {
                 match serde_json::from_str::<SpotBalance>(item.get()) {
                     Ok(row) if !row.currency.is_empty() => {
                         *totals.entry(row.currency.to_string()).or_default() += row.balance.0;
                     }
-                    _ => skipped += 1,
+                    _ => {
+                        let currency = serde_json::from_str::<SpotCurrency>(item.get())
+                            .ok()
+                            .map(|row| row.currency.to_string())
+                            .filter(|currency| !currency.is_empty());
+                        let message = match &currency {
+                            Some(c) => format!("Skipped malformed GRVT spot balance row {c}"),
+                            None => {
+                                "Skipped malformed GRVT spot balance row without a currency".into()
+                            }
+                        };
+                        let key = format!("coin:{}", currency.as_deref().unwrap_or_default());
+                        log_skip(cx, logged, key, Level::Warn, message);
+                        rejected.extend(currency.clone());
+                        coins.reject(currency);
+                    }
                 }
             })
             .ok()?;
         }
-        if skipped > 0 {
-            cx.notice(
-                Level::Warn,
-                code::ROW_SKIPPED,
-                format!("Skipped {skipped} malformed GRVT spot balance row(s)"),
-            );
-        }
-        Some(
-            totals
-                .into_iter()
-                .map(|(currency, total)| CurrencyBalance {
+        rearm_skips(
+            logged,
+            "coin:",
+            coins.rejected() == 0,
+            totals.keys().map(String::as_str),
+        );
+        for (currency, total) in totals {
+            if !rejected.contains(&currency) {
+                coins.push(CurrencyBalance {
                     currency,
                     balance: Balance {
                         total,
@@ -340,9 +374,11 @@ impl Summary<'_> {
                         used: 0.,
                         upnl: 0.,
                     },
-                })
-                .collect(),
-        )
+                });
+            }
+        }
+        let current = cx.store.currency_balances().unwrap_or_default().to_vec();
+        Some(coins.commit(current, |c| c.currency.clone()))
     }
 }
 #[derive(Deserialize)]
@@ -443,6 +479,20 @@ struct RowIdentity<'a> {
     id: Text<'a>,
     #[serde(borrow, rename = "m", alias = "metadata", default)]
     metadata: Option<RowClient<'a>>,
+}
+/// The client id, else the native id, of an order row that failed to map; empty when unreadable.
+fn order_label(item: &str) -> String {
+    serde_json::from_str::<RowIdentity<'_>>(item)
+        .ok()
+        .map(|row| {
+            let client = row.metadata.map(|m| m.client_id).unwrap_or_default();
+            if client.is_empty() {
+                row.id.to_string()
+            } else {
+                client.to_string()
+            }
+        })
+        .unwrap_or_default()
 }
 #[derive(Deserialize)]
 struct RowClient<'a> {
@@ -1012,7 +1062,7 @@ impl Grvt {
                 revision: self.account.orders_revision,
                 issued_at: cx.now,
                 rows: vec![],
-                skipped: Skipped::default(),
+                orders: SnapshotBuilder::default(),
             }),
         );
     }
@@ -1034,7 +1084,7 @@ impl Grvt {
                 revision: self.account.positions_revision,
                 issued_at: cx.now,
                 rows: vec![],
-                skipped: Skipped::default(),
+                positions: SnapshotBuilder::default(),
             }),
         );
     }
@@ -1095,24 +1145,56 @@ impl Grvt {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, skipped, .. } => match position(item, cx.store, cx.now) {
+            Request::Positions {
+                rows, positions, ..
+            } => match position(item, cx.store, cx.now) {
                 Ok(p) => rows.push(p),
-                Err(error) => {
-                    let keep = serde_json::from_str::<RowInstrument<'_>>(item)
-                        .map(|row| {
-                            market(cx.store, &row.instrument)
-                                .map(|m| m.symbol.clone())
-                                .filter(|symbol| cx.store.position(symbol).is_some())
-                        })
-                        .map_err(|_| ());
-                    skipped.add(error, keep);
+                Err(_) => {
+                    let listed = serde_json::from_str::<RowInstrument<'_>>(item)
+                        .ok()
+                        .map(|row| match market(cx.store, &row.instrument) {
+                            Some(m) => (m.symbol.clone(), true),
+                            None => (row.instrument.to_string(), false),
+                        });
+                    let symbol = listed.as_ref().map(|(symbol, _)| symbol.clone());
+                    let message = match &symbol {
+                        Some(symbol) => format!("Skipped malformed GRVT position row {symbol}"),
+                        None => "Skipped malformed GRVT position row without an instrument".into(),
+                    };
+                    let key = format!("position:{}", symbol.as_deref().unwrap_or_default());
+                    // An unlisted instrument hides no position the store could show.
+                    let stored = match &listed {
+                        Some((symbol, true)) => cx.store.position(symbol).is_some(),
+                        Some((_, false)) => true,
+                        None => !cx.store.positions().is_empty(),
+                    };
+                    let level = skip_level(stored);
+                    log_skip(cx, &mut self.account.skip_logged, key, level, message);
+                    positions.reject(symbol);
                 }
             },
-            Request::Orders { rows, skipped, .. } => match decode_order(item, cx.store, cx.now) {
+            Request::Orders { rows, orders, .. } => match decode_order(item, cx.store, cx.now) {
                 Ok(o) => rows.push(o),
-                Err(error) => {
-                    let keep = self.stored_order_id(cx.store, item);
-                    skipped.add(error, keep);
+                Err(_) => {
+                    let label = order_label(item);
+                    match self.stored_order_id(cx.store, item) {
+                        Ok(Some(id)) => orders.reject(Some(id)),
+                        // A foreign row's own id matches no stored order.
+                        Ok(None) => orders.reject(Some(label.clone())),
+                        Err(()) => orders.reject(None),
+                    }
+                    let message = if label.is_empty() {
+                        "Skipped malformed GRVT order row without an id".into()
+                    } else {
+                        format!("Skipped malformed GRVT order row {label}")
+                    };
+                    log_skip(
+                        cx,
+                        &mut self.account.skip_logged,
+                        format!("order:{label}"),
+                        Level::Warn,
+                        message,
+                    );
                 }
             },
             Request::Leverage { rows, failed, .. } => {
@@ -1402,7 +1484,9 @@ impl Grvt {
                             used: summary.equity.0 - free,
                             upnl,
                         });
-                        if let Some(currencies) = summary.currencies(cx) {
+                        if let Some(currencies) =
+                            summary.currencies(cx, &mut self.account.skip_logged)
+                        {
                             cx.store.set_currency_balances(currencies);
                         }
                     }
@@ -1427,20 +1511,19 @@ impl Grvt {
                 revision,
                 issued_at,
                 rows,
-                skipped,
+                mut positions,
             } => {
                 self.account.positions_pending = false;
-                skipped.log(cx, "position");
-                if !skipped.opaque && revision == self.account.positions_revision {
+                if revision == self.account.positions_revision {
                     let mut seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
-                    let mut accepted = Vec::with_capacity(rows.len());
-                    for id in skipped.keep {
-                        if seen.insert(id.clone())
-                            && let Some(previous) = cx.store.position(&id)
-                        {
-                            accepted.push(previous.clone());
-                        }
-                    }
+                    rearm_skips(
+                        &mut self.account.skip_logged,
+                        "position:",
+                        positions.rejected() == 0,
+                        rows.iter()
+                            .map(|p| p.position.symbol.as_str())
+                            .filter(|symbol| positions.allows_absence(&symbol.to_string())),
+                    );
                     for record in rows {
                         let time = record.time;
                         let position = record.position;
@@ -1451,7 +1534,7 @@ impl Grvt {
                             .is_some_and(|old| *old > time)
                         {
                             if let Some(previous) = cx.store.position(&position.id) {
-                                accepted.push(previous.clone());
+                                positions.push(previous.clone());
                             }
                         } else {
                             self.account
@@ -1477,10 +1560,13 @@ impl Grvt {
                                 });
                             }
                             if position.contracts > 0. {
-                                accepted.push(position);
+                                positions.push(position);
                             }
                         }
                     }
+                    let accepted =
+                        positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
+                    seen.extend(accepted.iter().map(|p| p.id.clone()));
                     for previous in cx.store.positions() {
                         if !seen.contains(&previous.id) {
                             let time = self
@@ -1495,9 +1581,7 @@ impl Grvt {
                     self.sync_balance_upnl(cx);
                 } else {
                     cx.store.set_positions(cx.store.positions().to_vec());
-                    if revision != self.account.positions_revision
-                        && self.account.positions_timer.is_none()
-                    {
+                    if self.account.positions_timer.is_none() {
                         self.account.positions_timer = Some(cx.set_timer(500.));
                     }
                 }
@@ -1506,30 +1590,31 @@ impl Grvt {
                 revision,
                 issued_at,
                 rows,
-                skipped,
+                orders: mut snapshot,
             } => {
                 self.account.orders_pending = false;
-                skipped.log(cx, "order");
-                if !skipped.opaque && revision == self.account.orders_revision {
-                    let mut orders = Vec::with_capacity(rows.len());
-                    for id in skipped.keep {
-                        if !orders.iter().any(|o: &Order| o.id == id)
-                            && let Some(previous) = cx.store.order(&id)
-                        {
-                            orders.push(previous.clone());
-                        }
-                    }
+                if revision == self.account.orders_revision {
+                    rearm_skips(
+                        &mut self.account.skip_logged,
+                        "order:",
+                        snapshot.rejected() == 0,
+                        rows.iter()
+                            .map(|d| d.order.id.as_str())
+                            .filter(|id| snapshot.allows_absence(&id.to_string())),
+                    );
                     for mut decoded in rows {
                         self.preserve_local_order_fields(cx.store, &mut decoded);
                         if !self.accept_order(cx.store, &decoded) {
                             if let Some(previous) = cx.store.order(&decoded.order.id) {
-                                orders.push(previous.clone());
+                                snapshot.push(previous.clone());
                             }
                         } else if decoded.order.status == OrderStatus::Open {
                             self.remember_identity(&decoded);
-                            orders.push(decoded.order);
+                            snapshot.push(decoded.order);
                         }
                     }
+                    let orders =
+                        snapshot.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     for previous in cx.store.orders() {
                         if !orders.iter().any(|order| order.id == previous.id) {
                             self.remember_terminal(
@@ -1542,9 +1627,7 @@ impl Grvt {
                     cx.store.set_orders(orders);
                 } else {
                     cx.store.set_orders(cx.store.orders().to_vec());
-                    if revision != self.account.orders_revision
-                        && self.account.orders_timer.is_none()
-                    {
+                    if self.account.orders_timer.is_none() {
                         self.account.orders_timer = Some(cx.set_timer(1_000.));
                     }
                 }
@@ -2034,6 +2117,7 @@ impl Grvt {
                                 .map_or_else(|| fill.native_id.to_string(), |(id, _)| id.clone())
                         };
                         cx.fill(Fill {
+                            id: None,
                             order_id: id,
                             symbol: market.symbol.clone(),
                             side: if fill.buyer {

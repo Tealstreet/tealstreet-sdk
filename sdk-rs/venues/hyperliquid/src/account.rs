@@ -2027,6 +2027,7 @@ impl Hyperliquid {
                     self.account.notify_fills.remove(&id);
                 }
                 let event = Fill {
+                    id: Some(fill.tid.to_string()),
                     order_id: fill.oid.to_string(),
                     symbol: symbol.clone(),
                     side: side(&fill.side),

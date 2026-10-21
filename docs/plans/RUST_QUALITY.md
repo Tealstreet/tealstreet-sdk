@@ -111,10 +111,10 @@ Hosts forward events and write Warn+ to stderr/console with no client.
 PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
 HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`,
 `logLevel` engine option, `EngineHost.health()`/`onEvent`, native `event` notices,
-DO `log` notices with `code` and `fields`); ~~(2) redaction sweep with a test that fails on
+DO coded event notices); ~~(2) redaction sweep with a test that fails on
 secrets in any notice~~ (every private replay checks every notice); ~~(3) engine-level ws and auth counting~~ (reconnects per socket role, engine-initiated closes, `deactivate` and auth-kind failures, last private frame); ~~(4) venue batches assigning codes and fixing levels (keep message text stable)~~ (every venue emits coded events; retried reads use `Cx::retried_failure`: a repeat of the same failure is a warning, re-raised as an Error every 90 s and whenever the text changes; optional child-leg failures are Errors); (5) ~~SDK health monitor on codes and getHealth()~~ (structured event/legacy
 metadata bridge; authoritative counters separate from observed reports);
-tealstreet-next callers remain cutover items in RUST_CUTOVER_CALLERS.md; (6) delete the shim.
+tealstreet-next callers remain cutover items in RUST_CUTOVER_CALLERS.md; ~~(6) delete the shim~~ (engine/startup codes; one Level/Event path across hosts).
 
 tealstreet-next: `exchangeAccountController.ts:180-383`,
 `apps/cli/src/exchange-manager.ts:203`, `apps/cli/src/error-classifier.ts`,
@@ -141,9 +141,14 @@ Low risk, do first:
    month arithmetic and ISO formatting shared; venue text grammars stay local.
 
 Medium:
-5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
+5. ~~`SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected
    row keeps the store's copy. Structurally ends the one-bad-row-discards-the-
-   snapshot class (~50 hand-rolled `invalid` flags).
+   snapshot class (~50 hand-rolled `invalid` flags).~~ Done:
+   `engine::coverage::SnapshotBuilder` (#1459, #1493, #1517, #1524) isolates
+   private snapshot rows per identity across venues. A rejected row keeps its
+   stored copy and logs once (Error when none is kept); snapshots still hold
+   while discovery or the catalogue is incomplete, and structural failures stay
+   fatal. Skips are coded `row.skipped` notices.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every

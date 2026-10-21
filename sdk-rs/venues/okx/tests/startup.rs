@@ -23,7 +23,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
     assert_eq!(engine.store().markets().len(), 1);
     let out = actions(&mut engine);
     assert!(out.iter().any(|a| is_get(a, "/api/v5/account/config")));
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     let ticker = out
         .iter()
         .find(|a| matches!(a, Action::Http(r) if r.url.contains("market/tickers")))
@@ -189,7 +189,7 @@ fn nonfinite_or_nonpositive_instrument_rails_are_isolated_from_valid_peers() {
             );
             assert_eq!(e.store().markets().len(), 1, "{field}={bad}");
             assert_eq!(e.store().markets()[0].id, "BTC-USDT-SWAP");
-            assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+            assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
         }
     }
 }

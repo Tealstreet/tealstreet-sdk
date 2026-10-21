@@ -78,7 +78,6 @@ fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
                     e.handle(1000.0, Event::WsOpened { socket: s });
                 }
                 Action::WsSend { text, .. } => sends.push(text),
-                Action::Notice(Notice::Log { message, .. }) => logs.push(message),
                 Action::Notice(Notice::Event(event)) => logs.push(event.message),
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}

@@ -1031,7 +1031,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
     assert_eq!(subscription_topics(&out, sockets[0]).len(), 97);
     assert!(
         out.iter().any(
-            |a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("100-topic limit"))
+            |a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("100-topic limit"))
         )
     );
     e.handle(

@@ -2,8 +2,8 @@
 //! swap-ws-account and swap-trade. No credentials or live writes are used.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode, PositionSide};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Level, LogLevel, Method, Notice, RequestId,
-    Response, SocketId, TimerId, wire,
+    Action, Command, Engine, Event, HttpRequest, Level, Method, Notice, RequestId, Response,
+    SocketId, TimerId, wire,
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
@@ -75,12 +75,6 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::Log { level, message }) => {
-                    if matches!(level, LogLevel::Error) {
-                        self.errors.push(message.clone());
-                    }
-                    self.logs.push(message);
-                }
                 Action::Notice(Notice::Event(event)) => {
                     if event.level == Level::Error {
                         self.errors.push(event.message.clone());

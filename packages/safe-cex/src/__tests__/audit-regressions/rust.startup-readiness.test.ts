@@ -104,7 +104,7 @@ class ScriptedEngine implements WasmEngineLike {
   start = () => {
     this.emit(this.state);
     return ScriptedEngine.startupLog ? JSON.stringify([{
-      op: 'log', level: ScriptedEngine.startupLog,
+      op: 'event', code: 'test.diagnostic', level: ScriptedEngine.startupLog === 'warning' ? 'warn' : ScriptedEngine.startupLog,
       message: ScriptedEngine.startupLog === 'warning' ? 'Public ticker read failed; retry scheduled' : 'Private account credentials rejected',
     }]) : '';
   };

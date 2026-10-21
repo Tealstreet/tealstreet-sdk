@@ -1,6 +1,6 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
-use safe_cex_engine::{Action, Engine, Event, Notice, Response};
+use safe_cex_engine::{Action, Engine, Event, Response};
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":0,"result":{"data":[{"symbol":"BROKENUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true},{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"###;
@@ -68,7 +68,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
     assert!(engine.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("skipped 1 unmappable instrument rows (first: BROKENUSD-PERP)"))));
+        Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("skipped 1 unmappable instrument rows (first: BROKENUSD-PERP)"))));
 }
 
 #[test]
