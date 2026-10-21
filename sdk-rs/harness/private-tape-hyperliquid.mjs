@@ -28,27 +28,35 @@ const records = [{
   options: { key: USER, secret: KEY, applicationId: USER, ...(SPOT ? { enableSpotMarkets: true } : {}) },
 }];
 let clock = 0;
+let commandIndex = 0;
 const at = () => (clock += 400); // Beyond the TS write client's 3 RPS guard.
 const http = (path, requestBody, body, status = 200) => records.push({
   t: 0, type: 'http', method: 'POST', url: `${REST}${path}`,
   requestBody: JSON.stringify(requestBody), status, body: JSON.stringify(body),
 });
 const info = (type, body, extra = {}) => http('/info', { type, ...extra }, body);
-// Reconciliation reads see the state at their request time, including the
-// interval between placement and cancellation. A permanent [] would erase a
-// live order before its queued cancel command can find it.
+// Reconciliation reads require both their recorded time and the command ACK.
+// Timer pumping may advance beyond a future snapshot before its command runs;
+// stage both reads and writes so Tape.readStage keeps that future state hidden.
 const frontendOrders = (rows, dex = '', availableAt = clock) => {
   info('frontendOpenOrders', rows.map((row) => ({
     children: [], isPositionTpsl: row.isTrigger && row.origSz === '0',
     triggerCondition: 'N/A', triggerPx: '0', ...row,
   })), { user: USER, ...(dex ? { dex } : {}) });
   records.at(-1).availableAt = availableAt;
+  records.at(-1).afterCommand = commandIndex;
 };
 const ws = (channel, data) => records.push({ t: at(), type: 'ws', url: SOCKET, text: JSON.stringify({ channel, data }) });
-const command = (body) => records.push({ t: at(), type: 'command', ...body });
-const reply = (action, statuses) => http('/exchange', {
-  action, nonce: EPOCH, signature: { r: '0x00', s: '0x00', v: 27 },
-}, { status: 'ok', response: { type: action.type, data: { statuses } } });
+const command = (body) => {
+  commandIndex++;
+  records.push({ t: at(), type: 'command', ...body });
+};
+const reply = (action, statuses) => {
+  http('/exchange', {
+    action, nonce: EPOCH, signature: { r: '0x00', s: '0x00', v: 27 },
+  }, { status: 'ok', response: { type: action.type, data: { statuses } } });
+  records.at(-1).afterCommand = commandIndex;
+};
 
 const ctx = (price) => ({
   midPx: String(price), markPx: String(price), oraclePx: String(price),
