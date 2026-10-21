@@ -1056,3 +1056,13 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
     assert!(e.store().order("702345678901234600").is_none());
     assert_eq!(e.store().orders().len(), 3);
 }
+#[test]
+fn plain_limit_order_events_carry_no_trigger_type() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    complete(&mut e, &actions, "[]", "[]");
+    // WEEX order events put CONTRACT_PRICE with triggerPrice 0 on plain limit rows.
+    e.handle(NOW, Event::WsMessage { socket, text: r#"{"e":"orders","d":[{"id":"702345678901234601","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"0.02","price":"69500","triggerPrice":"0","triggerPriceType":"CONTRACT_PRICE","updatedTime":"1773295701000"}]}"# });
+    let order = e.store().order("702345678901234601").unwrap();
+    assert_eq!(order.trigger_type, None);
+}
