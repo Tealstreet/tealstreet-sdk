@@ -16,6 +16,7 @@ struct H {
     opened: bool,
     sends: Vec<String>,
     logs: Vec<String>,
+    errors: Vec<String>,
     timers: Vec<(TimerId, f64)>,
 }
 impl H {
@@ -35,6 +36,7 @@ impl H {
             opened: false,
             sends: vec![],
             logs: vec![],
+            errors: vec![],
             timers: vec![],
         };
         h.e.start(h.now);
@@ -72,7 +74,10 @@ impl H {
                     ..
                 } => self.public = Some(socket),
                 Action::WsSend { text, .. } => self.sends.push(text),
-                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                Action::Notice(safe_cex_engine::Notice::Log { level, message }) => {
+                    if level == safe_cex_engine::LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
                     self.logs.push(message)
                 }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -447,6 +452,90 @@ fn one_malformed_order_and_holding_keep_their_stored_copies_while_peers_commit()
     assert_eq!(store.orders().len(), 1);
 }
 #[test]
+fn upnl_sums_committed_holdings_and_an_unstored_rejected_holding_is_an_error() {
+    let mut h = H::new();
+    h.initial();
+    assert_eq!(h.e.store().balance().upnl, -5.0);
+    let held = |pnl: i32| {
+        format!(r#"{{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0.5,"cashPnl":{pnl}}}"#)
+    };
+    let balance = |h: &mut H| {
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+    };
+    let orders = |h: &mut H| {
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+        );
+    };
+
+    // A new holding with an unreadable size has no stored copy: skipped as an error,
+    // and only its unknown PnL leaves the sum.
+    h.poll();
+    balance(&mut h);
+    orders(&mut h);
+    h.response(
+        "/positions",
+        200,
+        &format!(
+            r#"[{},{{"asset":"2","size":"NaN","avgPrice":0.4}}]"#,
+            held(-3)
+        ),
+    );
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().balance().upnl, -3.0);
+    assert!(
+        h.errors
+            .iter()
+            .any(|m| m == "Polymarket skipped malformed holding 2")
+    );
+
+    // The next balance read and a clean snapshot keep deriving from committed rows.
+    h.poll();
+    balance(&mut h);
+    assert_eq!(h.e.store().balance().upnl, -3.0);
+    orders(&mut h);
+    h.response("/positions", 200, &format!("[{}]", held(-1)));
+    assert_eq!(h.e.store().balance().upnl, -1.0);
+}
+#[test]
+fn a_repeated_holding_skip_logs_once() {
+    let mut h = H::new();
+    h.initial();
+    let snapshot = |h: &mut H| {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+        );
+        h.response(
+            "/positions",
+            200,
+            r#"[{"asset":"2","size":"NaN","avgPrice":0.4}]"#,
+        );
+    };
+    snapshot(&mut h);
+    snapshot(&mut h);
+    let skipped = |h: &H| {
+        h.logs
+            .iter()
+            .filter(|m| *m == "Polymarket skipped malformed holding 2")
+            .count()
+    };
+    assert_eq!(skipped(&h), 1);
+}
+#[test]
 fn unusable_current_price_still_commits_the_fresh_holding_size() {
     for cur in ["7", r#""bogus""#, "null", r#"{"x":1}"#] {
         let mut h = H::new();
@@ -758,11 +847,10 @@ fn unknown_owned_token_is_visible_failure_and_retains_previous_holdings() {
         h.poll();
         h.response("/positions", 200, &owned);
         assert_eq!(h.e.store().positions(), before, "{unknown}");
-        // With nothing stored, the snapshot commits its (empty) valid rows.
+        // With nothing stored, an unfinished catalogue cannot prove the account flat.
         let mut h = skipped_catalogue();
         h.response("/positions", 200, &owned);
-        assert!(h.e.store().loaded().positions, "{unknown}");
-        assert!(h.e.store().positions().is_empty(), "{unknown}");
+        assert!(!h.e.store().loaded().positions, "{unknown}");
         assert!(
             h.logs
                 .iter()
@@ -838,11 +926,23 @@ fn bbo_only_peer_never_uses_placeholder_zero_to_value_funded_holdings() {
             r#"[{"asset":"2","size":10,"avgPrice":0.5}]"#,
         );
         assert!(h.e.store().positions().is_empty());
-        assert!(
-            h.logs
-                .iter()
-                .any(|message| message.contains("owned holding price unavailable"))
-        );
+        if partial_seed {
+            // The seed settled without a price: the holding is skipped, visibly.
+            assert!(h.e.store().loaded().positions);
+            assert!(
+                h.errors
+                    .iter()
+                    .any(|m| m == "Polymarket skipped owned holding 2: price unavailable")
+            );
+        } else {
+            // The seed is still loading, so the snapshot holds.
+            assert!(!h.e.store().loaded().positions);
+            assert!(
+                h.logs
+                    .iter()
+                    .any(|message| message.contains("owned holding price unavailable"))
+            );
+        }
     }
 }
 

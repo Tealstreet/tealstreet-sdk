@@ -3,6 +3,7 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
@@ -17,8 +18,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
-const LISTEN_KEY_RETRY_MIN_MS: f64 = 5_000.0;
 const LISTEN_KEY_RETRY_MAX_MS: f64 = 60_000.0;
+/// 5 s doubling to the 60 s keepalive interval.
+const LISTEN_KEY_RETRY: Backoff = Backoff::new(5_000.0, 4, LISTEN_KEY_RETRY_MAX_MS);
 const HEALTH_CHECK_MS: f64 = 3_000.0;
 const ACCOUNT_INTERVAL_MS: f64 = 25_000.0;
 const DEGRADED_ACCOUNT_INTERVAL_MS: f64 = 3_000.0;
@@ -115,7 +117,7 @@ struct SpotDelivery {
 #[derive(Default)]
 pub struct AccountState {
     started: bool,
-    listen_key_retry_ms: f64,
+    listen_key_failures: u32,
     listen_key_timer: Option<TimerId>,
     keepalive_timer: Option<TimerId>,
     keepalive_failing: bool,
@@ -289,7 +291,7 @@ impl BinanceFutures {
         if std::mem::replace(&mut self.account.started, true) {
             return;
         }
-        self.account.listen_key_retry_ms = LISTEN_KEY_RETRY_MIN_MS;
+        self.account.listen_key_failures = 0;
         self.request_listen_key(cx);
         if !self.is_spot() {
             self.signed(
@@ -561,18 +563,15 @@ impl BinanceFutures {
             Request::ListenKey => {
                 let message = format!("Binance user data stream unavailable: {message}");
                 // One toast per failure streak; later attempts only log.
-                let level = if self.account.listen_key_retry_ms <= LISTEN_KEY_RETRY_MIN_MS {
+                let level = if self.account.listen_key_failures == 0 {
                     LogLevel::Error
                 } else {
                     LogLevel::Warning
                 };
                 cx.log(level, message);
                 self.account.resync_orders_on_open = true;
-                let delay = self
-                    .account
-                    .listen_key_retry_ms
-                    .max(LISTEN_KEY_RETRY_MIN_MS);
-                self.account.listen_key_retry_ms = (delay * 2.0).min(LISTEN_KEY_RETRY_MAX_MS);
+                let delay = LISTEN_KEY_RETRY.delay(self.account.listen_key_failures);
+                self.account.listen_key_failures += 1;
                 self.account.listen_key_timer = Some(cx.set_timer(delay));
             }
             Request::Keepalive => {
@@ -824,7 +823,7 @@ impl BinanceFutures {
             }
             Request::ListenKey => match serde_json::from_str::<ListenKey>(body) {
                 Ok(key) => {
-                    self.account.listen_key_retry_ms = LISTEN_KEY_RETRY_MIN_MS;
+                    self.account.listen_key_failures = 0;
                     if let Some(timer) = self.account.keepalive_timer.take() {
                         cx.clear_timer(timer);
                     }

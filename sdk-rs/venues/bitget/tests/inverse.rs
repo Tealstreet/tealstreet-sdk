@@ -374,13 +374,16 @@ fn inverse_late_uta_error_never_promotes_or_calls_v3_private_routes() {
 
 #[test]
 fn inverse_uta_probe_success_reports_scoped_unsupported_before_private_routing() {
-    let mut h = Harness::started(Options {
-        product: Product::Inverse,
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::started_expecting(
+        Options {
+            product: Product::Inverse,
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("pass".into()),
+            ..Options::default()
+        },
+        true,
+    );
     h.respond("/contracts", 200, CONTRACTS);
     h.respond("/tickers", 200, TICKERS);
     let probe = h.take("/account/settings");
@@ -401,6 +404,15 @@ fn inverse_uta_probe_success_reports_scoped_unsupported_before_private_routing()
     assert!(!h.sockets.iter().any(|(_, url)| url.contains("/private")));
     let loaded = h.engine.store().loaded();
     assert!(!loaded.balance && !loaded.positions && !loaded.orders);
+    assert_eq!(
+        h.startup_failures.len(),
+        1,
+        "fails startup instead of stalling"
+    );
+    assert_eq!(
+        h.startup_failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::Unsupported)
+    );
 }
 
 #[test]

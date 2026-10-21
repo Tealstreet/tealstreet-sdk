@@ -65,6 +65,30 @@ pub struct Pair<'a> {
     pub ordermin: f64,
 }
 #[derive(Deserialize)]
+pub struct PairName<'a> {
+    #[serde(default, borrow)]
+    pub wsname: Cow<'a, str>,
+}
+/// The base a rejected pair would have valued in USD, read from its key or wsname.
+pub fn rejected_usd_route(key: &str, wsname: &str) -> Vec<String> {
+    let usd = |q: &str| matches!(asset(q), "USD" | "USDT" | "USDC");
+    let mut bases = vec![];
+    if let Some(base) = ["ZUSD", "USDT", "USDC", "USD"]
+        .iter()
+        .find_map(|q| key.strip_suffix(q))
+        .filter(|b| !b.is_empty())
+    {
+        bases.push(asset(base).to_owned());
+    }
+    if let Some((base, quote)) = wsname.split_once('/') {
+        let (base, quote) = (base.trim(), quote.trim().trim_start_matches('/'));
+        if !base.is_empty() && usd(quote) {
+            bases.push(asset(base).to_owned());
+        }
+    }
+    bases
+}
+#[derive(Deserialize)]
 pub struct RestTicker {
     pub a: Vec<String>,
     pub b: Vec<String>,

@@ -1137,3 +1137,29 @@ fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit
     assert!(e.store().position("BTCUSDT:short").is_none());
     assert_eq!(e.store().positions().len(), 1);
 }
+#[test]
+fn plain_limit_order_events_carry_no_trigger_type() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    complete(&mut e, &actions, "[]", "[]");
+    // WEEX order events put CONTRACT_PRICE with triggerPrice 0 on plain limit rows.
+    e.handle(NOW, Event::WsMessage { socket, text: r#"{"e":"orders","d":[{"id":"702345678901234601","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"0.02","price":"69500","triggerPrice":"0","triggerPriceType":"CONTRACT_PRICE","updatedTime":"1773295701000"}]}"# });
+    let order = e.store().order("702345678901234601").unwrap();
+    assert_eq!(order.trigger_type, None);
+}
+#[test]
+fn protective_algo_row_typed_market_keeps_its_working_type() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234502,"symbol":"BTCUSDT","side":"SELL","type":"MARKET","planType":"STOP_LOSS","reduceOnly":true,"algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"68000","workingType":"MARK_PRICE","updateTime":1773295700000}]"#,
+    );
+    let order = e.store().order("812345678901234502").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(
+        order.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
+}

@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const PAGE: usize = 500;
 const FILL_CAP: usize = 100_000;
+const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -36,6 +37,35 @@ pub struct AccountState {
     fills_exhausted: bool,
     settings: HashMap<String, MarketSetting>,
     pub(crate) order_ids: HashMap<String, String>,
+    /// Leg ids, `asset N` or empty (unidentified) whose skipped position was already logged.
+    skip_logged: HashSet<String>,
+}
+enum Skipped {
+    Unidentified,
+    Unlisted { asset: u32, owned: bool },
+    Legs { keys: Vec<String>, owned: bool },
+}
+fn skip_level(harmless: bool) -> LogLevel {
+    if harmless {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    }
+}
+/// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: String,
+    level: LogLevel,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key) {
+        cx.log(level, message);
+    }
 }
 #[derive(Clone, Copy)]
 pub struct Fence {
@@ -48,6 +78,8 @@ pub enum Request {
         // A newer asset setting owns account mode even if exposure can reconcile.
         mode_revision: u64,
         positions: SnapshotBuilder<String, Position>,
+        /// An owned row sits on an asset a catalogue still loading may list.
+        hold: bool,
     },
     Orders {
         fence: Fence,
@@ -346,6 +378,7 @@ impl TxFlow {
                 },
                 mode_revision: self.account.settings_revision,
                 positions: SnapshotBuilder::default(),
+                hold: false,
             };
             self.info(
                 cx,
@@ -596,9 +629,10 @@ impl TxFlow {
             }),
         })
     }
-    /// The store ids a malformed position row may cover: its leg when the size is
-    /// readable, else both legs; an unlisted asset matches no stored row.
-    fn skipped_position_keys(&self, item: &str) -> Option<Vec<String>> {
+    /// What a malformed position row may cover: its leg when the size is readable,
+    /// else both legs; an unlisted asset matches no stored row. `owned` is false only
+    /// for a readable zero size.
+    fn skipped_position(&self, item: &str) -> Skipped {
         #[derive(Deserialize)]
         struct Identity<'a> {
             #[serde(borrow)]
@@ -610,22 +644,28 @@ impl TxFlow {
             #[serde(default, borrow)]
             szi: Option<&'a RawValue>,
         }
-        let row = serde_json::from_str::<Identity<'_>>(item).ok()?;
-        let asset = row.position.asset.parse::<u32>().ok()?;
-        let Some(symbol) = self.symbol(asset) else {
-            return Some(vec![format!("asset {asset}")]);
+        let Ok(row) = serde_json::from_str::<Identity<'_>>(item) else {
+            return Skipped::Unidentified;
+        };
+        let Ok(asset) = row.position.asset.parse::<u32>() else {
+            return Skipped::Unidentified;
         };
         let size = row
             .position
             .szi
             .and_then(|raw| serde_json::from_str::<N>(raw.get()).ok())
             .map(|n| n.0)
-            .filter(|n| n.is_finite() && *n != 0.0);
-        Some(match size {
+            .filter(|n| n.is_finite());
+        let owned = size != Some(0.0);
+        let Some(symbol) = self.symbol(asset) else {
+            return Skipped::Unlisted { asset, owned };
+        };
+        let keys = match size.filter(|n| *n != 0.0) {
             Some(size) if size > 0.0 => vec![format!("{symbol}:long")],
             Some(_) => vec![format!("{symbol}:short")],
             None => vec![format!("{symbol}:long"), format!("{symbol}:short")],
-        })
+        };
+        Skipped::Legs { keys, owned }
     }
     pub(crate) fn account_item(
         &mut self,
@@ -634,28 +674,57 @@ impl TxFlow {
         item: &str,
     ) {
         match request {
-            Request::State { positions, .. } => match serde_json::from_str::<AssetPosition>(item)
+            Request::State {
+                positions, hold, ..
+            } => match serde_json::from_str::<AssetPosition>(item)
                 .map_err(|_| "Malformed TxFlow position")
                 .and_then(|p| self.position_row(p))
             {
                 Ok(p) => {
                     if let Some(p) = p {
+                        self.account.skip_logged.remove(&p.id);
                         positions.push(p);
                     }
                 }
-                Err(_) => match self.skipped_position_keys(item) {
-                    Some(keys) => {
+                // A skipped row with nothing stored to keep commits as flat: an error.
+                Err(_) => match self.skipped_position(item) {
+                    Skipped::Unlisted { owned: true, .. } if !self.discovery_settled() => {
                         cx.log(
                             LogLevel::Warning,
+                            "TxFlow owned position asset unavailable; preserving previous account state",
+                        );
+                        *hold = true;
+                    }
+                    Skipped::Unlisted { asset, owned } => {
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            format!("asset {asset}"),
+                            skip_level(!owned),
+                            format!("TxFlow skipped position on unlisted asset {asset}"),
+                        );
+                        positions.reject(Some(format!("asset {asset}")));
+                    }
+                    Skipped::Legs { keys, owned } => {
+                        let stored = keys.iter().any(|key| cx.store.position(key).is_some());
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            keys.join(", "),
+                            skip_level(stored || !owned),
                             format!("TxFlow skipped malformed position {}", keys.join(", ")),
                         );
                         for key in keys {
                             positions.reject(Some(key));
                         }
                     }
-                    None => {
-                        cx.log(
-                            LogLevel::Warning,
+                    Skipped::Unidentified => {
+                        let level = skip_level(!cx.store.positions().is_empty());
+                        log_skip(
+                            cx,
+                            &mut self.account.skip_logged,
+                            String::new(),
+                            level,
                             "TxFlow skipped malformed position without an asset",
                         );
                         positions.reject(None);
@@ -743,6 +812,7 @@ impl TxFlow {
                 fence,
                 mode_revision,
                 positions,
+                hold,
             } => {
                 if fence.generation != self.account.generation {
                     return;
@@ -758,7 +828,8 @@ impl TxFlow {
                     );
                     return;
                 };
-                if fence.revision != self.account.state_revision
+                if hold
+                    || fence.revision != self.account.state_revision
                     || state.time.is_some_and(|t| t.0 < self.account.state_time)
                     || state
                         .user
@@ -969,6 +1040,9 @@ impl TxFlow {
         if apply_mode && let Some(p) = positions.rows().first() {
             cx.store
                 .set_hedged(p.position_mode == Some(PositionMode::Hedged));
+        }
+        if positions.rejected() == 0 {
+            self.account.skip_logged.clear();
         }
         let positions = positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
         cx.store.set_positions(positions);

@@ -16,6 +16,7 @@ struct H {
     timers: Vec<(TimerId, f64)>,
     done: Vec<(u32, Result<String, String>)>,
     logs: Vec<String>,
+    errors: Vec<String>,
     closed: Vec<SocketId>,
 }
 impl H {
@@ -37,6 +38,7 @@ impl H {
             timers: vec![],
             done: vec![],
             logs: vec![],
+            errors: vec![],
             closed: vec![],
         };
         h.engine.start(h.now);
@@ -76,7 +78,12 @@ impl H {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Log { level, message }) => {
+                    if level == safe_cex_engine::LogLevel::Error {
+                        self.errors.push(message.clone());
+                    }
+                    self.logs.push(message)
+                }
                 _ => {}
             }
         }
@@ -908,4 +915,64 @@ fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
     assert_eq!(store.positions().len(), 1);
     assert!(store.order("123").is_none());
     assert_eq!(store.orders().len(), 1);
+}
+#[test]
+fn rejected_position_row_with_no_stored_copy_is_reported_as_an_error() {
+    let read = |h: &mut H, positions: &str| {
+        h.fire_after(75_000.0);
+        h.reply("/positionRisk", positions);
+        h.reply("/openOrders", "[]");
+    };
+    let mut h = H::new();
+    // With a stored copy to keep, a skipped row is only a warning.
+    read(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#,
+    );
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert!(h.errors.is_empty());
+    read(&mut h, "[]");
+    assert!(h.engine.store().positions().is_empty());
+
+    // With nothing stored, the snapshot commits as flat, so each skip is an error.
+    read(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"},{"positionAmt":"1"}]"#,
+    );
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.errors,
+        [
+            "Aster skipped malformed position row BTCUSDT",
+            "Aster skipped malformed position row without a symbol",
+        ]
+    );
+}
+#[test]
+fn a_repeated_position_skip_logs_once_until_the_row_maps_again() {
+    let read = |h: &mut H, positions: &str| {
+        h.fire_after(75_000.0);
+        // The periodic clock re-sync gates signed reads.
+        if h.requests.iter().any(|r| r.url.contains("/time")) {
+            let time = format!(r#"{{"serverTime":{}}}"#, h.now);
+            h.reply("/time", &time);
+        }
+        h.reply("/positionRisk", positions);
+        h.reply("/openOrders", "[]");
+    };
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#;
+    let mut h = H::new();
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors, ["Aster skipped malformed position row BTCUSDT"]);
+    // The same skip on the next poll is not reported again.
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 1);
+
+    // Once the row maps, a recurrence is reported again.
+    read(&mut h, POSITION);
+    assert_eq!(h.engine.store().positions().len(), 1);
+    read(&mut h, "[]");
+    read(&mut h, bad);
+    assert_eq!(h.errors.len(), 2);
 }

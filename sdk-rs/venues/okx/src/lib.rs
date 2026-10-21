@@ -155,6 +155,9 @@ pub struct Okx {
     ticker_refresh_pending: bool,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     skipped_instruments: HashSet<String>,
+    /// Instruments skipped as malformed by the catalogue read in flight.
+    skipping_instruments: HashSet<String>,
+    catalogue_partial: bool,
 }
 
 impl Okx {
@@ -197,6 +200,8 @@ impl Okx {
             ticker_refresh_pending: false,
             live_tickers: Default::default(),
             skipped_instruments: HashSet::new(),
+            skipping_instruments: HashSet::new(),
+            catalogue_partial: false,
         }
     }
 
@@ -362,6 +367,12 @@ impl Okx {
         );
     }
 
+    fn load_catalogue(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.skipping_instruments.clear();
+        self.catalogue_partial = false;
+        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
+    }
+
     fn load_tickers(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -397,6 +408,9 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if channel != PUBLIC && self.account.startup_rejected {
+            return;
+        }
         // Suppressed public feeds get a placeholder socket that never opens.
         if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.connections[channel].supervisor.connecting(cx);
@@ -706,6 +720,28 @@ impl Okx {
         });
         self.account_prices(cx);
     }
+
+    fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Account(request) = pending {
+            self.account_failed(cx, request, error);
+        } else if let Pending::Trade(request) = pending {
+            self.trade_lost(cx, request, error);
+        } else if let Pending::History(request) = pending {
+            self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
+        } else if let Pending::Candles { command, .. } = pending {
+            cx.command_error(command, error);
+            cx.done(command, Ok("[]".into()));
+        } else {
+            let markets = matches!(pending, Pending::Markets { .. });
+            if !markets {
+                self.ticker_reading = false;
+                self.ticker_refresh_pending = false;
+            }
+            self.startup.failed(cx, markets);
+        }
+    }
 }
 
 impl Venue for Okx {
@@ -739,9 +775,14 @@ impl Venue for Okx {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
-        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
+        self.load_catalogue(cx);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -771,6 +812,9 @@ impl Venue for Okx {
             return;
         };
         if message.event == "error" {
+            if channel != PUBLIC && self.login_rejected(cx, channel, message.code, message.msg) {
+                return;
+            }
             if channel != PUBLIC && !self.connections[channel].authenticated {
                 cx.close(socket);
                 self.on_close(cx, socket, 1008);
@@ -845,7 +889,7 @@ impl Venue for Okx {
                     {
                         *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -901,7 +945,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -924,7 +968,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -937,7 +981,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(
@@ -994,7 +1038,7 @@ impl Venue for Okx {
                     if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
                         && !row.inst_id.is_empty()
                     {
-                        self.skipped_instruments.insert(row.inst_id.into());
+                        self.skipping_instruments.insert(row.inst_id.into());
                     }
                 }
             },
@@ -1062,6 +1106,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(account::Request::Config { .. }) = &pending
+            && self.config_rejected(cx, response.body)
+        {
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
@@ -1079,7 +1128,7 @@ impl Venue for Okx {
             Err(format!("OKX HTTP {}: {}", response.status, response.body))
         };
         if let Err(error) = result {
-            self.on_request_failed(cx, pending, &error);
+            self.request_failed(cx, pending, &error);
             return;
         }
         match pending {
@@ -1095,12 +1144,14 @@ impl Venue for Okx {
                 incomplete,
             } => {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
+                self.catalogue_partial |= invalid;
                 if let Some(next) = self.next_instrument_type(kind) {
                     self.load_markets(cx, next, rows, incomplete);
                     return;
                 }
                 self.catalogue_incomplete = incomplete;
-                if incomplete {
+                // A partial catalogue commits so private reads start, and is re-read.
+                if incomplete || self.catalogue_partial {
                     self.startup.failed(cx, true);
                 } else {
                     self.startup.succeeded(cx, &true);
@@ -1110,14 +1161,19 @@ impl Venue for Okx {
                 }
                 let was_loaded = cx.store.loaded().markets;
                 let mut merged = cx.store.markets().to_vec();
+                let mut added = false;
                 for row in rows {
                     if let Some(old) = merged.iter_mut().find(|old| old.id == row.id) {
                         *old = row;
                     } else {
                         merged.push(row);
+                        added = true;
                     }
                 }
                 cx.store.set_markets(merged);
+                let mut skipped = std::mem::take(&mut self.skipping_instruments);
+                skipped.retain(|id| cx.store.market_by_id(id).is_none());
+                self.skipped_instruments = skipped;
                 self.products
                     .retain(|id, _| cx.store.market_by_id(id).is_some());
                 self.price_tickers = price_ticker_indexes(cx.store);
@@ -1130,10 +1186,11 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                self.ticker_seed(cx, was_loaded);
                 if !was_loaded {
+                    self.ticker_seed(cx, false);
                     self.account_start(cx);
-                } else {
+                } else if added {
+                    self.ticker_seed(cx, true);
                     if self.connections[PUBLIC].open {
                         self.subscribe(cx, PUBLIC);
                     }
@@ -1231,30 +1288,17 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Account(request) = pending {
-            self.account_failed(cx, request, error);
-        } else if let Pending::Trade(request) = pending {
-            self.trade_lost(cx, request, error);
-        } else if let Pending::History(request) = pending {
-            self.history_failed(cx, request, error);
-        } else if let Pending::Closed(request) = pending {
-            Self::closed_failed(cx, request, error);
-        } else if let Pending::Candles { command, .. } = pending {
-            cx.command_error(command, error);
-            cx.done(command, Ok("[]".into()));
-        } else {
-            let markets = matches!(pending, Pending::Markets { .. });
-            if !markets {
-                self.ticker_reading = false;
-                self.ticker_refresh_pending = false;
-            }
-            self.startup.failed(cx, markets);
+        if let Pending::Account(account::Request::Config { .. }) = &pending {
+            self.config_unanswered();
         }
+        self.request_failed(cx, pending, error);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(markets) = self.startup.on_timer(timer) {
-            if markets {
+            if markets && cx.store.loaded().markets {
+                self.load_catalogue(cx);
+            } else if markets {
                 self.start(cx);
             } else {
                 self.ticker_seed(cx, false);

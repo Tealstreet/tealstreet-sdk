@@ -14,16 +14,22 @@ pub struct Harness {
 }
 impl Harness {
     pub fn new() -> Self {
-        Self::with_policy(
-            Options {
-                key: Some("replay-key".into()),
-                secret: Some("replay-secret".into()),
-                ..Default::default()
-            },
-            PublicFeedPolicy::Direct,
-        )
+        Self::with_instruments(INSTRUMENTS)
+    }
+    pub fn with_instruments(instruments: &str) -> Self {
+        Self::start(Self::options(), PublicFeedPolicy::Direct, instruments)
     }
     pub fn with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
+        Self::start(options, policy, INSTRUMENTS)
+    }
+    fn options() -> Options {
+        Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Default::default()
+        }
+    }
+    fn start(options: Options, policy: PublicFeedPolicy, instruments: &str) -> Self {
         let mut h = Self {
             engine: Engine::new(Cryptocom::new(options)),
             actions: vec![],
@@ -33,7 +39,7 @@ impl Harness {
         h.engine.set_public_feed_policy(policy).unwrap();
         h.engine.start(h.now);
         h.collect();
-        h.reply("public/get-instruments", INSTRUMENTS);
+        h.reply("public/get-instruments", instruments);
         h.reply("public/get-tickers", TICKERS);
         h
     }

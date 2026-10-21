@@ -146,6 +146,8 @@ pub struct Backpack {
     seed: Seed,
     /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
     skipped_markets: HashMap<String, bool>,
+    unlisted_logged: std::collections::HashSet<String>,
+    reread_stalls: u8,
     account: account::Account,
     trading: trading::Trading,
     generation: u64,
@@ -209,6 +211,8 @@ impl Backpack {
             candles: HashMap::new(),
             seed: Seed::default(),
             skipped_markets: Default::default(),
+            unlisted_logged: Default::default(),
+            reread_stalls: 0,
             account: account::Account::default(),
             trading: trading::Trading::default(),
             generation: 0,
@@ -273,11 +277,12 @@ impl Backpack {
         if let MarkSeed::Loaded(marks) = std::mem::take(&mut self.seed.marks) {
             Self::apply_marks(cx, marks);
         }
+        self.relabel_unpriced_triggers(cx);
         self.connect_public(cx);
     }
 
-    /// Account rows on a market skipped at load are dropped; say so once per symbol.
-    /// False means the market was never in the catalogue at all.
+    /// Account rows on a market skipped as malformed hold their snapshot; say so once
+    /// per symbol. False means the market was filtered or never listed.
     pub(crate) fn report_skipped_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
         let Some(reported) = self.skipped_markets.get_mut(symbol) else {
             return false;
@@ -285,12 +290,20 @@ impl Backpack {
         if !std::mem::replace(reported, true) {
             cx.log(
                 LogLevel::Error,
-                format!(
-                    "Backpack account data for {symbol} is hidden: its market row was malformed"
-                ),
+                format!("Backpack account data for {symbol} is held: its market row was malformed"),
             );
         }
         true
+    }
+
+    /// Account rows on a filtered or delisted market are skipped; say so once per symbol.
+    pub(crate) fn report_unlisted_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if self.unlisted_logged.insert(symbol.into()) {
+            cx.log(
+                LogLevel::Warning,
+                format!("Backpack {symbol} is not a listed market; its account rows are skipped"),
+            );
+        }
     }
 
     fn apply_marks(cx: &mut Cx<'_, Pending>, marks: Vec<(String, [f64; 4])>) {
@@ -773,13 +786,32 @@ impl Venue for Backpack {
                     self.seed.backoff.failed(cx, SeedRead::Markets);
                     return;
                 }
-                self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
+                cx.store.set_markets(rows);
+                let previous = std::mem::take(&mut self.skipped_markets);
                 self.skipped_markets = skipped
                     .into_iter()
-                    .filter(|s| s.ends_with("_PERP"))
-                    .map(|s| (s, false))
+                    .filter(|s| s.ends_with("_PERP") && cx.store.market(s).is_none())
+                    .map(|s| {
+                        let reported = previous.get(&s).copied().unwrap_or(false);
+                        (s, reported)
+                    })
                     .collect();
-                cx.store.set_markets(rows);
+                let after = self.skipped_markets.len();
+                // Only named malformed perps make a catalogue partial and re-read it.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, previous.len(), after) {
+                    self.seed.backoff.failed(cx, SeedRead::Markets);
+                } else {
+                    self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                }
+                if refresh {
+                    return;
+                }
                 self.seed.live.begin();
                 self.connect_public(cx);
                 self.account_start(cx);
@@ -1078,6 +1110,58 @@ impl Venue for Backpack {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("Backpack stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]
