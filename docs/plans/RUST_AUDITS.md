@@ -673,8 +673,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   network errors, live candle volume units.
 
 ### BloFin
-- High: a failed or malformed ticker read at startup means the private side
-  never starts, no retry (`blofin/src/lib.rs:617,651`); ~~`brokerId` never sent,
+- High: ~~a failed or malformed ticker read at startup means the private side
+  never starts, no retry (`blofin/src/lib.rs:617,651`)~~ (private startup begins
+  after usable markets; public retries now report degradation and recovery); ~~`brokerId` never sent,
   losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`)~~
   ([attribution audit](RUST_BROKER_ATTRIBUTION.md));
   ~~per-symbol margin mode stays stale after a position closes, so orders go out
@@ -684,8 +685,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   nulls and row-local WS recovery covered; captured public tape has no nulls;
   invalid required private REST quantities still preserve the snapshot);
   ~~WS login timestamp serialized as float (`account.rs:284`)~~;
-  one odd instrument row aborts startup
-  (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
+  ~~one odd instrument row aborts startup
+  (`lib.rs:505`)~~ (valid peers commit and catalogue repair retries); ~~cancel of an id the store lacks resolves OK with no request
   (`trading.rs:671`)~~ (explicit error).
 - Low: ~~strict leverage fetch~~ (no user impact: the bridge turns a refused
   read into `null` plus a warning, as TS returns `null`); ~~trigger TP/SL not
@@ -698,8 +699,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   filters; boolean reduceOnly.
 
 ### Cross-venue patterns from the port reviews
-- Startup is fail-closed with no retry on OKX and BloFin where TS continues on
-  partial data; check every venue and set one engine policy.
+- ~~Startup is fail-closed with no retry on OKX and BloFin where TS continues on
+  partial data; check every venue and set one engine policy.~~ Public retries
+  already landed. OKX/BloFin/Bitget now share recoverable degradation reporting
+  on that schedule; see [the policy](RUST_STARTUP_RETRY.md).
 - ~~Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
   tag against TS.~~ All registered names audited; payload/partner/header fixes
   and preserved gates are tabled in [the attribution audit](RUST_BROKER_ATTRIBUTION.md).
@@ -716,8 +719,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   families; BreakoutProp has no implemented TS leverage setter.
 - Medium: ~~Classic fills/order history fail outright on liquidation/ADL/reduce
   fills (`history.rs:984,867`).~~ Forced-close suffixes and absent profit now map.
-  One bad market row or a transient error halts startup with no retry
-  (`lib.rs:552,684`) — left to the startup/broker lane.
+  ~~One bad market row or a transient error halts startup with no retry
+  (`lib.rs:552,684`).~~ Public discovery keeps usable peers and retries; shared
+  degradation/recovery receipts expose a prolonged startup outage.
   One unmappable REST row still prevents good-peer positions/orders refresh
   (`account.rs::account_item`). Public-startup integration restores the prior
   whole scope because the incoming all-unmappable-only guard could delete owned

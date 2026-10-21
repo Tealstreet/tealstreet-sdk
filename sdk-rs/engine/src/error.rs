@@ -20,6 +20,24 @@ pub enum ErrorKind {
     Internal,
 }
 
+impl ErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rejected => "rejected",
+            Self::InvalidInput => "invalidInput",
+            Self::AuthInvalid => "authInvalid",
+            Self::AuthExpired => "authExpired",
+            Self::AuthPermission => "authPermission",
+            Self::RateLimited => "rateLimited",
+            Self::Network => "network",
+            Self::Timeout => "timeout",
+            Self::VenueUnavailable => "venueUnavailable",
+            Self::Unsupported => "unsupported",
+            Self::Internal => "internal",
+        }
+    }
+}
+
 /// Whether a write reached the venue. `None` on [`VenueError`] means the site
 /// has not classified it, never that it is safe to resend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

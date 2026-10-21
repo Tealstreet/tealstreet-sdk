@@ -1688,6 +1688,18 @@ pub trait Venue {
             ),
         );
     }
+    /// The streamed envelope itself was malformed. Kept distinct from transport
+    /// failures so public startup reporting need not expose a raw body preview.
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        _status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        self.on_request_failed(cx, pending, error);
+    }
     fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -2465,8 +2477,13 @@ impl<V: Venue> Engine<V> {
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
-                self.venue
-                    .on_request_failed(&mut cx, pending.value, &message);
+                self.venue.on_stream_malformed(
+                    &mut cx,
+                    pending.value,
+                    incoming.status,
+                    &incoming.headers,
+                    &message,
+                );
                 return;
             }
             // Every selector retains the fully validated envelope, with its array emptied.
@@ -5371,6 +5388,172 @@ mod startup_tests {
         assert_eq!(number_or_zero("-2.5"), Some(-2.5));
         for bad in ["NaN", "inf", "oops", "1x"] {
             assert_eq!(number_or_zero(bad), None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod public_retry_tests {
+    use super::*;
+    use crate::startup::{DiscoveryRead, PublicRetries, public_response_error};
+
+    fn count(out: &[Action], code: &str) -> usize {
+        out.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == code))
+            .count()
+    }
+    fn last_timer(out: &[Action]) -> (TimerId, f64) {
+        out.iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .unwrap()
+    }
+    fn cause() -> VenueError {
+        VenueError::new("latest outage cause").kind(ErrorKind::Network)
+    }
+
+    #[test]
+    fn public_retry_deduplicates_ban_extensions_recovers_and_keeps_repairs_running() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = PublicRetries::default();
+        let mut waiting = None;
+        for attempt in 1..=6 {
+            retry.failed_after(&mut cx, DiscoveryRead::Markets, 0.0, cause());
+            let out = std::mem::take(&mut cx.io.actions);
+            assert_eq!(count(&out, log_code::REQUEST_FAILED), 1);
+            assert_eq!(
+                count(&out, log_code::STARTUP_DEGRADED),
+                usize::from(attempt == 6)
+            );
+            let (old, old_at) = last_timer(&out);
+            // Extending an armed timer must not spend another attempt or re-report.
+            retry.failed_after(&mut cx, DiscoveryRead::Markets, 120_000.0, cause());
+            let out = std::mem::take(&mut cx.io.actions);
+            assert_eq!(count(&out, log_code::REQUEST_FAILED), 0);
+            assert_eq!(count(&out, log_code::STARTUP_DEGRADED), 0);
+            assert!(
+                out.iter()
+                    .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == old))
+            );
+            let (timer, at) = last_timer(&out);
+            assert!(at >= old_at && at >= cx.now + 120_000.0);
+            assert_eq!(retry.on_timer(old), None);
+            if attempt < 6 {
+                cx.now = at;
+                assert_eq!(retry.on_timer(timer), Some(DiscoveryRead::Markets));
+            } else {
+                waiting = Some(timer);
+            }
+        }
+        cx.store
+            .set_markets(vec![super::streaming_tests::market("BTC")]);
+        retry.ready(&mut cx);
+        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 0);
+        cx.store.set_tickers(Vec::new());
+        retry.ready(&mut cx);
+        retry.ready(&mut cx);
+        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 1);
+        // Becoming ready must not retire an incomplete catalogue's repair timer.
+        assert_eq!(
+            retry.on_timer(waiting.unwrap()),
+            Some(DiscoveryRead::Markets)
+        );
+        cx.io.actions.clear();
+        for _ in 0..8 {
+            retry.failed_after(&mut cx, DiscoveryRead::Markets, 0.0, cause());
+            let out = std::mem::take(&mut cx.io.actions);
+            assert_eq!(count(&out, log_code::STARTUP_DEGRADED), 0);
+            assert_eq!(count(&out, log_code::REQUEST_FAILED), 1);
+            let (timer, at) = last_timer(&out);
+            cx.now = at;
+            assert_eq!(retry.on_timer(timer), Some(DiscoveryRead::Markets));
+        }
+    }
+
+    #[test]
+    fn public_retry_counts_reads_independently_and_reports_only_one_outage() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = PublicRetries::default();
+        for attempt in 1..=6 {
+            for read in [DiscoveryRead::Markets, DiscoveryRead::Tickers] {
+                let error = public_response_error(429, Some("busy"), Some("maintenance"));
+                retry.failed_after(&mut cx, read, 10_000.0, error);
+                let out = std::mem::take(&mut cx.io.actions);
+                assert_eq!(
+                    count(&out, log_code::STARTUP_DEGRADED),
+                    usize::from(attempt == 6 && read == DiscoveryRead::Markets)
+                );
+                if attempt == 6 && read == DiscoveryRead::Markets {
+                    let event = out
+                        .iter()
+                        .find_map(|a| match a {
+                            Action::Notice(Notice::Event(e))
+                                if e.code == log_code::STARTUP_DEGRADED =>
+                            {
+                                Some(e)
+                            }
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert!(event.fields.contains(&("kind", "rateLimited".into())));
+                    assert!(event.fields.contains(&("venueCode", "busy".into())));
+                    assert!(
+                        event
+                            .fields
+                            .contains(&("venueMessage", "maintenance".into()))
+                    );
+                    assert!(event.fields.contains(&("retryAfterMs", 10_000.0.into())));
+                }
+                let (timer, at) = last_timer(&out);
+                cx.now = at;
+                assert_eq!(retry.on_timer(timer), Some(read));
+            }
+        }
+        retry.succeeded(&mut cx, DiscoveryRead::Markets);
+        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 0);
+    }
+
+    #[test]
+    fn public_response_causes_are_typed_and_do_not_require_raw_bodies() {
+        assert_eq!(
+            public_response_error(429, None, None).kind,
+            Some(ErrorKind::RateLimited)
+        );
+        let malformed = public_response_error(200, None, None);
+        assert_eq!(malformed.kind, Some(ErrorKind::VenueUnavailable));
+        assert_eq!(malformed.message, "Malformed public discovery response");
+        for kind in [
+            ErrorKind::Rejected,
+            ErrorKind::InvalidInput,
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+            ErrorKind::RateLimited,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+            ErrorKind::VenueUnavailable,
+            ErrorKind::Unsupported,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(
+                serde_json::to_string(&kind).unwrap(),
+                format!("\"{}\"", kind.as_str())
+            );
         }
     }
 }
