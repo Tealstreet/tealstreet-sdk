@@ -478,7 +478,10 @@ Remaining resilience and completeness findings are independent of request parity
   in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
   events do not update positions; under steady activity positions never commit.
 - Medium: history failures return success with empty or partial rows
-  (`history.rs:526,554`); TS surfaces an error. Partial income ledgers look complete.
+  (`history.rs:526,554`). TS historical fills warn and return empty rows; orders
+  toast and return empty rows, and income toasts and returns collected rows.
+  Neither comparison establishes completeness: Rust partial income ledgers look
+  complete without an owned semantic marker.
 - Medium: ~~one failed `batch_order` chunk drops IDs already placed by earlier
   chunks~~. #1589 (`ef362708305`) preserves acknowledged IDs and effective legs
   in one classified failure, with Unknown sticky across later refusals. Native
@@ -506,7 +509,8 @@ Remaining resilience and completeness findings are independent of request parity
   one payload; caller ids on TP/SL rejected rather than dropped; stop-limit no longer
   sent as a resting limit; recreate after cancel/amend uses remaining size and keeps
   TIF; cancel errors checked; stale snapshots cannot reopen terminal orders and
-  failed order reads no longer wipe orders; fills dedupe by `tradeId`; history
+  failed order reads no longer wipe orders; historical fills dedupe by `tradeId`
+  (live cumulative events use execution watermarks, without a fabricated ID); history
   respects from/to; funding time from `nft`; decimal depth precision in topics;
   unsubscribes actually sent.
 
