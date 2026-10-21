@@ -918,3 +918,24 @@ errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
 account timers and retires the private socket; a refused trading key also emits
 `Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
 and the probe retry waits out that window; transport failures keep plain backoff.
+
+
+## Rust private WS row recovery
+
+Ordinary order/position arrays decode rows independently. Valid Classic/UTA peers
+advance while rejected cached identities retain exposure, protection and native
+routing metadata. Unknown identity holds absence. Rejection observers protect
+older pending REST reads without replacing or renewing actual WS financial
+freshness; fresh admitted reads can heal. Partial snapshots preserve an earlier
+clean snapshot's older-read fence without claiming new global financial authority.
+All-rejected initial snapshots never establish loaded-empty readiness; valid empty
+snapshots still load and clear positions.
+
+Position mode is account/product-wide: partial or contradictory rows, including
+incremental deltas, cannot flip global routing while retaining exposure in another
+mode. A complete consistent snapshot can change mode. Retained cached positions
+do not republish stale settings. Native plans and trailing metadata use the same
+revision/terminal/opened fence as retained order rows, preserving cancel routes.
+Read-only recovery uses the existing coalesced timers and busy/pause handling;
+malformed-only or foreign-only traffic does not claim useful financial liveness.
+The financial fill channel, auth, signing and write-retry policy are unchanged.

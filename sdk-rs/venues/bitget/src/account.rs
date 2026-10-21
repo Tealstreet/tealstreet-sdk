@@ -77,10 +77,10 @@ pub struct Amounts {
 }
 
 struct WsPosition {
-    at: f64,
+    at: Option<f64>,
     update: Option<f64>,
-    /// Rejected identity protects only reads already in flight, not financial freshness.
-    rejected: bool,
+    /// Observation only: never replaces or renews valid financial timestamps.
+    rejected_at: Option<f64>,
 }
 
 #[derive(Default)]
@@ -110,6 +110,8 @@ pub struct Account {
     inverse_assets: Vec<InverseAsset>,
     inverse_unpriced_warned: bool,
     full_positions_at: Option<f64>,
+    /// After partial traffic, a prior clean snapshot only fences older reads.
+    full_positions_fence_only: bool,
     full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
     terminal: HashMap<String, f64>,
@@ -672,7 +674,7 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
-                skipped,
+                mut skipped,
                 mut coins,
                 started,
             } => {
@@ -697,8 +699,16 @@ impl BitgetFutures {
                 }
                 self.account.positions_in_flight = false;
                 let mut rows = self.merge_positions(cx, rows, started);
+                self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
                 for p in &rows {
-                    self.position_setting(cx, p);
+                    if !self
+                        .account
+                        .ws_positions
+                        .get(&p.id)
+                        .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                    {
+                        self.position_setting(cx, p);
+                    }
                 }
                 for current in cx.store.positions() {
                     if !rows.iter().any(|p| p.id == current.id)
@@ -808,27 +818,24 @@ impl BitgetFutures {
                 } else {
                     self.account.orders_in_flight = false;
                     for (id, state) in snapshot.trailing {
-                        let newer = self.order_revision(&id) > snapshot.stream_revision
-                            || self
-                                .account
-                                .opened
-                                .get(&id)
-                                .is_some_and(|until| *until >= snapshot.started + 5_000.0);
-                        let terminal = self.account.terminal.contains_key(&id)
-                            || cx.store.order(&id).is_some_and(|o| {
-                                matches!(
-                                    o.status,
-                                    OrderStatus::Canceled
-                                        | OrderStatus::Closed
-                                        | OrderStatus::Canceling
-                                )
-                            });
-                        if !newer && !terminal {
+                        if self.order_metadata_current(
+                            cx,
+                            &id,
+                            snapshot.started,
+                            snapshot.stream_revision,
+                        ) {
                             self.account.trailing.insert(id, state);
                         }
                     }
                     for (id, plan) in snapshot.plans {
-                        self.account.plans.insert(id, plan);
+                        if self.order_metadata_current(
+                            cx,
+                            &id,
+                            snapshot.started,
+                            snapshot.stream_revision,
+                        ) {
+                            self.account.plans.insert(id, plan);
+                        }
                     }
                     self.commit_orders(
                         cx,
@@ -1101,16 +1108,58 @@ impl BitgetFutures {
         });
     }
 
+    fn coherent_position_modes(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        positions: &mut Vec<Position>,
+        skipped: &mut SnapshotCoverage<PositionKey>,
+        snapshot: bool,
+    ) -> HashSet<String> {
+        let mut conflicts = HashSet::new();
+        let Some(first) = positions.first().map(|p| p.position_mode) else {
+            return conflicts;
+        };
+        let mixed = positions.iter().any(|p| p.position_mode != first);
+        if snapshot && !mixed && skipped.rejected() == 0 {
+            return conflicts;
+        }
+        let held_conflict = cx.store.positions().iter().any(|old| {
+            old.position_mode != first
+                && !positions.iter().any(|p| p.id == old.id)
+                && (!snapshot
+                    || [Some(old.side), None]
+                        .into_iter()
+                        .any(|side| !skipped.allows_absence(&(old.symbol.clone(), side))))
+        });
+        if mixed || held_conflict {
+            conflicts.extend(
+                positions
+                    .iter()
+                    .filter(|p| {
+                        (p.position_mode == Some(PositionMode::Hedged)) != cx.store.hedged()
+                    })
+                    .map(|p| p.symbol.clone()),
+            );
+            for symbol in &conflicts {
+                skipped.reject(Some((symbol.clone(), None)));
+            }
+            positions.retain(|p| !conflicts.contains(&p.symbol));
+            if !conflicts.is_empty() {
+                cx.notice(Level::Warn, code::ROW_SKIPPED, "skipped Bitget position stream record: conflicting account position modes; cached exposure retained");
+            }
+        }
+        conflicts
+    }
+
     fn merge_positions(
         &self,
         cx: &Cx<'_, Pending>,
         rows: Vec<Position>,
         started: f64,
     ) -> Vec<Position> {
-        let full_fresh = self
-            .account
-            .full_positions_at
-            .is_some_and(|at| started - at <= 5_000.0);
+        let full_fresh = self.account.full_positions_at.is_some_and(|at| {
+            at >= started || (!self.account.full_positions_fence_only && started - at <= 5_000.0)
+        });
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1143,24 +1192,32 @@ impl BitgetFutures {
                         PositionMode::Oneway
                     });
                 }
+                if cx.store.positions().iter().any(|old| {
+                    old.symbol == p.symbol
+                        && old.position_mode != p.position_mode
+                        && self
+                            .account
+                            .ws_positions
+                            .get(&old.id)
+                            .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                }) {
+                    return None;
+                }
                 if full_fresh && !self.account.full_position_ids.contains(&p.id) {
                     return None;
                 }
-                if let Some(mark) = self.account.ws_positions.get(&p.id)
-                    && (if mark.rejected {
-                        mark.at >= started
-                    } else {
-                        started - mark.at <= 5_000.0
-                    })
-                {
-                    let current = cx.store.position(&p.id);
-                    if mark.at >= started
-                        || p.last_update.is_none()
-                        || mark
-                            .update
-                            .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
-                    {
-                        return current.cloned();
+                if let Some(mark) = self.account.ws_positions.get(&p.id) {
+                    let rejection = mark.rejected_at.is_some_and(|at| at >= started);
+                    let financial = mark.at.is_some_and(|at| {
+                        started - at <= 5_000.0
+                            && (at >= started
+                                || p.last_update.is_none()
+                                || mark
+                                    .update
+                                    .is_some_and(|t| p.last_update.is_some_and(|r| t > r)))
+                    });
+                    if rejection || financial {
+                        return cx.store.position(&p.id).cloned();
                     }
                 }
                 Some(p)
@@ -1169,17 +1226,37 @@ impl BitgetFutures {
         for current in cx.store.positions() {
             if !rows.iter().any(|p| p.id == current.id)
                 && self.account.ws_positions.get(&current.id).is_some_and(|m| {
-                    if m.rejected {
-                        m.at >= started
-                    } else {
-                        started - m.at <= 5_000.0
-                    }
+                    m.rejected_at.is_some_and(|at| at >= started)
+                        || m.at.is_some_and(|at| started - at <= 5_000.0)
                 })
             {
                 rows.push(current.clone());
             }
         }
         rows
+    }
+
+    fn order_metadata_current(
+        &self,
+        cx: &Cx<'_, Pending>,
+        id: &str,
+        started: f64,
+        stream_revision: u64,
+    ) -> bool {
+        let newer = self.order_revision(id) > stream_revision
+            || self
+                .account
+                .opened
+                .get(id)
+                .is_some_and(|until| *until >= started + 5_000.0);
+        let terminal = self.account.terminal.contains_key(id)
+            || cx.store.order(id).is_some_and(|o| {
+                matches!(
+                    o.status,
+                    OrderStatus::Canceled | OrderStatus::Closed | OrderStatus::Canceling
+                )
+            });
+        !newer && !terminal
     }
 
     fn commit_orders(
@@ -1496,24 +1573,15 @@ impl BitgetFutures {
                 if positions.is_empty() && skipped.rejected() != 0 {
                     skipped.reject(None);
                 }
-                let conflicts: HashSet<_> = positions
-                    .iter()
-                    .filter(|p| {
-                        cx.store.positions().iter().any(|old| {
-                            old.symbol == p.symbol
-                                && old.position_mode != p.position_mode
-                                && [Some(old.side), None].into_iter().any(|side| {
-                                    !skipped.allows_absence(&(old.symbol.clone(), side))
-                                })
-                        })
-                    })
-                    .map(|p| p.symbol.clone())
-                    .collect();
-                for symbol in &conflicts {
-                    skipped.reject(Some((symbol.clone(), None)));
-                    rejected.reject(Some((symbol.clone(), None)));
+                let conflicts = self.coherent_position_modes(
+                    cx,
+                    &mut positions,
+                    &mut skipped,
+                    message.action == "snapshot",
+                );
+                for symbol in conflicts {
+                    rejected.reject(Some((symbol, None)));
                 }
-                positions.retain(|p| !conflicts.contains(&p.symbol));
                 let useful = !positions.is_empty() || empty;
                 for p in &positions {
                     self.position_setting(cx, p);
@@ -1537,14 +1605,15 @@ impl BitgetFutures {
                         .into_iter()
                         .any(|side| !rejected.allows_absence(&(p.symbol.clone(), side)))
                     {
-                        self.account.ws_positions.insert(
-                            p.id.clone(),
-                            WsPosition {
-                                at: cx.now,
+                        self.account
+                            .ws_positions
+                            .entry(p.id.clone())
+                            .and_modify(|mark| mark.rejected_at = Some(cx.now))
+                            .or_insert(WsPosition {
+                                at: None,
                                 update: None,
-                                rejected: true,
-                            },
-                        );
+                                rejected_at: Some(cx.now),
+                            });
                     }
                 }
                 if message.action == "snapshot" {
@@ -1556,44 +1625,44 @@ impl BitgetFutures {
                             self.account.ws_positions.insert(
                                 old.id.clone(),
                                 WsPosition {
-                                    at: cx.now,
+                                    at: Some(cx.now),
                                     update: None,
-                                    rejected: false,
+                                    rejected_at: None,
                                 },
                             );
                         }
                     }
                     if skipped.rejected() == 0 {
                         self.account.full_positions_at = Some(cx.now);
+                        self.account.full_positions_fence_only = false;
                         self.account.full_position_ids = positions
                             .iter()
                             .filter(|p| p.contracts > 0.0)
                             .map(|p| p.id.clone())
                             .collect();
                     } else {
-                        self.account.full_positions_at = None;
-                        self.account.full_position_ids.clear();
+                        self.account.full_positions_fence_only = true;
                     }
                 }
                 for p in &positions {
                     self.account.ws_positions.insert(
                         p.id.clone(),
                         WsPosition {
-                            at: cx.now,
+                            at: Some(cx.now),
                             update: p.last_update,
-                            rejected: false,
+                            rejected_at: None,
                         },
                     );
                 }
                 positions.extend(held);
-                if message.action == "snapshot" {
+                if message.action == "snapshot" && useful {
                     cx.store.set_positions(
                         positions
                             .into_iter()
                             .filter(|p| p.contracts > 0.0)
                             .collect(),
                     );
-                } else {
+                } else if useful {
                     for p in positions {
                         cx.store.upsert_position(p);
                     }
@@ -1951,9 +2020,10 @@ impl BitgetFutures {
             self.account.poll = None;
             // Keep stream updates and closures until every collateral read completes.
             if !self.account.positions_in_flight {
-                self.account
-                    .ws_positions
-                    .retain(|_, m| cx.now - m.at < 10_000.0);
+                self.account.ws_positions.retain(|_, m| {
+                    m.at.is_some_and(|at| cx.now - at < 10_000.0)
+                        || m.rejected_at.is_some_and(|at| cx.now - at < 10_000.0)
+                });
             }
             if self.account.degraded {
                 self.refresh_balance(cx);
@@ -2055,7 +2125,11 @@ impl BitgetFutures {
                 .ws_order_revisions
                 .insert(id, self.account.ws_order_clock);
         }
-        cx.notice(Level::Warn, code::ROW_SKIPPED, "invalid Bitget order stream record; cached identity/protection retained for reconciliation");
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "invalid Bitget order stream record",
+        );
         if self.account.orders_timer.is_none() {
             self.account.orders_timer = Some(cx.set_timer(500.0));
         }
