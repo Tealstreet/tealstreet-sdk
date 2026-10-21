@@ -77,7 +77,7 @@ fn start_with_retry(
         })
         .unwrap();
     let retry = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == 1010.0 => Some(*timer),
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 10.0, 1000.0) => Some(*timer),
         _ => None,
     });
     let reads = actions

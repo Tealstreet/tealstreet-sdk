@@ -378,13 +378,7 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
         !out.iter()
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
     );
-    let timer = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1002.0 => Some(*timer),
-            _ => None,
-        })
-        .expect("startup retry timer");
+    let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1002.0, Event::TimerFired { timer });
     let a = actions(&mut e).remove(0);
     assert!(is_get(&a, "/api/v5/public/instruments?instType=SWAP"));
@@ -1580,11 +1574,7 @@ mod product_semantics {
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
         assert!(!e.store().loaded().markets);
-        assert!(
-            actions(&mut e)
-                .iter()
-                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1001.0))
-        );
+        assert!(retry_timer(&actions(&mut e), 1.0, 1_000.0).is_some());
     }
 
     #[test]

@@ -476,7 +476,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");
@@ -1556,7 +1556,7 @@ fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
 fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
     let (retry, at) = new_timer(&h.actions)
-        .filter(|(_, at)| *at == 1000.0)
+        .filter(|(_, at)| jittered(*at, 1000.0))
         .expect("partial catalogue retry");
     h.seed();
     h.ws(&format!(
@@ -1598,7 +1598,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
-    let mut retry = new_timer(&h.actions).filter(|(_, at)| *at == 1000.0);
+    let mut retry = new_timer(&h.actions).filter(|(_, at)| jittered(*at, 1000.0));
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
         h.e.handle(at, Event::TimerFired { timer });
@@ -1611,4 +1611,46 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     }
     assert_eq!(rereads, 5);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
+}
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
+#[test]
+fn auth_failure_ticks_are_jittered_while_healthy_ticks_keep_their_cadence() {
+    let mut h = Harness::new();
+    h.seed();
+    let mut now = 10_000.0;
+    let mut tick = h.tick;
+    let fire = |h: &mut Harness, timer, now: f64| {
+        h.actions.clear();
+        h.e.handle(now, Event::TimerFired { timer });
+        h.collect();
+        h.actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms - now >= 7_500.0 => {
+                    Some((*timer, *at_ms - now))
+                }
+                _ => None,
+            })
+            .expect("next tick")
+    };
+    let (next, delay) = fire(&mut h, tick, now);
+    assert_eq!(delay, 10_000.0, "healthy polling cadence is exact");
+    h.reply(
+        "orders-pending",
+        r#"{"code":"152401","msg":"Access key does not exist","data":[]}"#,
+    );
+    let mut delays = Vec::new();
+    (tick, now) = (next, now + delay);
+    for _ in 0..6 {
+        let (next, delay) = fire(&mut h, tick, now);
+        delays.push(delay);
+        (tick, now) = (next, now + delay);
+    }
+    assert!(delays.iter().all(|d| jittered(*d, 20_000.0)), "{delays:?}");
+    assert!(delays.iter().any(|d| *d < 20_000.0), "{delays:?}");
 }

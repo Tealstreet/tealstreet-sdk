@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_mexc::{MexcFutures, Options};
+use support::jittered;
 const CATALOGUE: &str = r###"{"success":true,"code":0,"data":[{"broken":true},{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true,"contractSize":0.0001,"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500,"makerFeeRate":0,"takerFeeRate":0.0002}]}"###;
 fn public_engine() -> Engine<MexcFutures> {
     Engine::new(MexcFutures::new(Options {
@@ -38,7 +40,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -213,10 +215,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -296,10 +295,7 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             let timer = engine
                 .drain_actions()
                 .find_map(|action| match action {
-                    Action::SetTimer {
-                        timer,
-                        at_ms: 1000.0,
-                    } => Some(timer),
+                    Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");

@@ -164,20 +164,15 @@ fn owned_position_on_uncatalogued_contract_is_skipped_and_the_snapshot_commits()
 fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
     let mut h = Harness::with_markets(PARTIAL_MARKETS);
     assert!(h.engine.store().market("E-BAD-USDT").is_none());
-    let i = h
-        .timers
-        .iter()
-        .position(|(_, at)| *at == 1000.0)
-        .expect("partial catalogue retry");
-    let (retry, _) = h.timers.remove(i);
+    let (retry, due) = take_retry(&mut h, 1000.0);
     h.engine
         .store_mut()
         .update_ticker("E-BTC-USDT", |t| t.last = 110.0);
     h.reply("/account", &account("BUY", 2.0));
     h.reply("/openOrders", r#"{"code":"0","data":[]}"#);
     h.requests.clear();
-    h.now = 1000.0;
-    h.engine.handle(1000.0, Event::TimerFired { timer: retry });
+    h.now = due;
+    h.engine.handle(due, Event::TimerFired { timer: retry });
     h.collect();
     let before = h.timers.len();
     h.reply(
@@ -234,6 +229,19 @@ fn empty_groups_for_uncatalogued_contracts_do_not_block_the_snapshot() {
     }
 }
 const ORDER: &str = r#"{"code":"0","data":[{"orderId":2334151155877155281,"clientOrderId":"caller","type":"LIMIT","side":"BUY","status":"NEW","action":"OPEN","price":100,"origQty":100,"executedQty":0,"transactTime":1}]}"#;
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+/// Takes the startup retry jittered from `nominal` after now, with its due time.
+fn take_retry(h: &mut Harness, nominal: f64) -> (TimerId, f64) {
+    let i = h
+        .timers
+        .iter()
+        .position(|(_, at)| jittered(*at - h.now, nominal))
+        .unwrap_or_else(|| panic!("no retry jittered from {nominal}: {:?}", h.timers));
+    h.timers.remove(i)
+}
 fn take_timer(h: &mut Harness, at: f64) -> TimerId {
     let i = h
         .timers
@@ -245,7 +253,7 @@ fn take_timer(h: &mut Harness, at: f64) -> TimerId {
 #[test]
 fn refresh_that_omits_a_held_contract_keeps_it_with_its_position_and_order() {
     let mut h = Harness::with_markets(PARTIAL_MARKETS);
-    let retry = take_timer(&mut h, 1000.0);
+    let (retry, due) = take_retry(&mut h, 1000.0);
     h.engine
         .store_mut()
         .update_ticker("E-BTC-USDT", |t| t.last = 110.0);
@@ -253,8 +261,8 @@ fn refresh_that_omits_a_held_contract_keeps_it_with_its_position_and_order() {
     h.reply("/openOrders", ORDER);
     assert!(h.engine.store().order("2334151155877155281").is_some());
     let listed = h.engine.store().market("E-BTC-USDT").cloned().unwrap();
-    h.now = 1000.0;
-    h.engine.handle(1000.0, Event::TimerFired { timer: retry });
+    h.now = due;
+    h.engine.handle(due, Event::TimerFired { timer: retry });
     h.collect();
     // E-BTC-USDT drops out of the list while E-BAD-USDT stays malformed.
     h.reply(
@@ -277,7 +285,7 @@ fn refresh_that_omits_a_held_contract_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut h = Harness::with_markets(PARTIAL_MARKETS);
-    let mut retry = Some((take_timer(&mut h, 1000.0), 1000.0));
+    let mut retry = Some(take_retry(&mut h, 1000.0));
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
         h.now = at;

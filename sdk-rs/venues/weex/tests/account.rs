@@ -540,7 +540,12 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 26_000.0 => Some(*timer),
+            // The first failure's 4 s backoff, jittered into [3 s, 4 s].
+            Action::SetTimer { timer, at_ms }
+                if (NOW + 25_000.0..=NOW + 26_000.0).contains(at_ms) =>
+            {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("read-only retry after deadline");

@@ -1011,7 +1011,7 @@ fn partial_catalogue_is_reread_and_the_repaired_market_releases_its_rows() {
     let (mut e, s, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == NOW + 1000.0)
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -1070,7 +1070,7 @@ fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
     let listed = e.store().market("PF_XBTUSD").cloned().unwrap();
     let (timer, at) = *timers
         .iter()
-        .find(|(_, at)| *at == NOW + 1000.0)
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
     let reread = requests(&mut e);
@@ -1094,7 +1094,10 @@ fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
 #[test]
 fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let (mut e, _, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
-    let mut retry = timers.iter().find(|(_, at)| *at == NOW + 1000.0).copied();
+    let mut retry = timers
+        .iter()
+        .find(|(_, at)| jittered(*at - NOW, 1000.0))
+        .copied();
     let (mut rereads, mut warned) = (0, false);
     while let Some((timer, at)) = retry.take() {
         e.handle(at, Event::TimerFired { timer });
@@ -1117,4 +1120,56 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     }
     assert_eq!(rereads, 5);
     assert!(warned);
+}
+
+#[test]
+fn failed_reconciliation_heals_are_jittered_while_event_heals_keep_their_debounce() {
+    let (mut e, s) = ready();
+    message(&mut e, s, NOW, r#"{"feed":"fills","fills":[]}"#);
+    let debounce: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms > NOW && at_ms <= NOW + 1001.0 => {
+                Some((timer, at_ms - NOW))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(debounce.len(), 1);
+    assert_eq!(debounce[0].1, 1000.0, "event heal is a fixed debounce");
+    let mut now = NOW + 1000.0;
+    e.handle(
+        now,
+        Event::TimerFired {
+            timer: debounce[0].0,
+        },
+    );
+    let mut reads = requests(&mut e);
+    let (mut failures, mut delays) = (0u32, vec![]);
+    for _ in 0..6 {
+        assert!(!reads.is_empty());
+        // The first failure in a batch schedules the heal at its failure count.
+        let nominal = (1000.0 * 2f64.powi((failures + 1).min(5) as i32)).min(30_000.0);
+        for read in &reads {
+            reply_at(&mut e, now, read, 500, "{}");
+        }
+        failures += reads.len() as u32;
+        let (timer, at_ms) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if at_ms > now + 1001.0 => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("failed read schedules a heal");
+        assert!(
+            jittered(at_ms - now, nominal),
+            "{} vs {nominal}",
+            at_ms - now
+        );
+        delays.push((at_ms - now, nominal));
+        now = at_ms;
+        e.handle(now, Event::TimerFired { timer });
+        reads = requests(&mut e);
+    }
+    assert!(delays.iter().any(|(delay, nominal)| delay < nominal));
 }

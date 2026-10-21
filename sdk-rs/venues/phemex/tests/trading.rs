@@ -2471,7 +2471,11 @@ fn failed_read_retries_and_empty_code_reconciles() {
     let (read, now) = unproven_then_read(&mut e, 1000., 141, "unknown-caller");
     let a = reply(&mut e, now + 1., &read, 500, "{}");
     let (timer, wake) = latest_timer(&a).expect("failed read schedules a retry");
-    assert_eq!(wake, now + 2001.);
+    let delay = wake - (now + 1.);
+    assert!(
+        (0.75 * 2000. ..=2000.).contains(&delay),
+        "retry {delay} outside jittered [0.75, 1.0] x 2000"
+    );
     let a = at(&mut e, wake, Event::TimerFired { timer });
     let read = open_order_reads(&a).remove(0);
     reply(

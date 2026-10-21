@@ -1111,10 +1111,12 @@ fn listen_key_failures_back_off_from_5s_to_the_60s_cap() {
     h.advance(500.0);
     for delay in [5_000.0, 10_000.0, 20_000.0, 40_000.0, 60_000.0, 60_000.0] {
         h.respond("/fapi/v1/listenKey", 503, "unavailable");
-        let retry = h.now + delay;
+        let sent = h.now;
         assert!(
-            h.timers.iter().any(|(_, at)| *at == retry),
-            "next listen key retry after {delay} ms"
+            h.timers
+                .iter()
+                .any(|(_, at)| support::jittered(at - sent, delay)),
+            "next listen key retry after a jittered {delay} ms"
         );
         h.advance(delay);
         assert!(h.has_request("/fapi/v1/listenKey"));
