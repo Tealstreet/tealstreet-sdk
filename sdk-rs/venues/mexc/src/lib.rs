@@ -332,6 +332,8 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
+        // Book resync stays on its nominal schedule: its timing decides which buffered
+        // deltas apply to the snapshot, and it is per symbol, not a shared retry herd.
         state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {

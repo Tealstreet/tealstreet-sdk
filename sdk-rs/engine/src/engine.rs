@@ -663,6 +663,8 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
+const JITTER_GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+
 struct PollTimer {
     logical: TimerId,
     default_interval_ms: f64,
@@ -868,6 +870,8 @@ struct Io<P> {
     fills: Vec<(Fill, Option<FillFinancials>)>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
+    /// Retry-jitter state; advanced only by `Cx::jittered`, so replays repeat it.
+    jitter: u64,
     min_level: Level,
     health: Health,
     sockets: SocketRoles,
@@ -902,6 +906,7 @@ impl<P> Default for Io<P> {
             fills: Vec::new(),
             frame: Vec::new(),
             snapshot: Vec::new(),
+            jitter: JITTER_GOLDEN_GAMMA,
             min_level: Level::Info,
             health: Health::default(),
             sockets: SocketRoles::default(),
@@ -914,6 +919,17 @@ impl<P> Io<P> {
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
+    }
+    /// splitmix64 step salted by the event clock, as `socket::Supervisor` mixes.
+    fn mix(&mut self, salt: u64) -> u64 {
+        self.jitter = self
+            .jitter
+            .wrapping_add(salt)
+            .wrapping_add(JITTER_GOLDEN_GAMMA);
+        let mut z = self.jitter;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
     }
     fn next(&mut self) -> u32 {
         next_engine_id(&mut self.next_id)
@@ -1144,6 +1160,16 @@ impl<P> Cx<'_, P> {
         {
             request.timeout_ms = Some(timeout_ms.max(1));
         }
+    }
+
+    /// Spreads a failed-request retry delay into `[0.75, 1.0] * delay_ms` so
+    /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
+    /// Non-finite and non-positive delays pass through unchanged.
+    pub fn jittered(&mut self, delay_ms: f64) -> f64 {
+        if !(delay_ms.is_finite() && delay_ms > 0.0) {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, self.io.mix(self.now.to_bits()))
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
@@ -4848,9 +4874,102 @@ mod security_debug {
 }
 
 #[cfg(test)]
+mod jitter_tests {
+    use super::*;
+
+    fn draws(clocks: &[f64], delay: f64) -> Vec<f64> {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        clocks
+            .iter()
+            .map(|&now| {
+                Cx {
+                    now,
+                    store: &mut store,
+                    io: &mut io,
+                }
+                .jittered(delay)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn retry_jitter_stays_in_the_last_quarter_and_replays() {
+        let clocks: Vec<f64> = (0..64).map(|i| f64::from(i) * 250.0).collect();
+        let first = draws(&clocks, 4_000.0);
+        assert!(first.iter().all(|d| (3_000.0..=4_000.0).contains(d)));
+        assert_eq!(first, draws(&clocks, 4_000.0));
+        // Same clock, successive calls: the state advances, so draws differ.
+        let same_clock = draws(&[0.0; 8], 4_000.0);
+        assert!(same_clock.windows(2).all(|pair| pair[0] != pair[1]));
+        assert_ne!(first[..8], draws(&[1.0; 8], 4_000.0)[..]);
+    }
+
+    #[test]
+    fn retry_jitter_passes_through_unschedulable_delays() {
+        let draws = draws(&[0.0; 4], f64::INFINITY);
+        assert!(draws.iter().all(|d| *d == f64::INFINITY));
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(cx.jittered(0.0), 0.0);
+        assert_eq!(cx.jittered(-5.0), -5.0);
+        assert!(cx.jittered(f64::NAN).is_nan());
+        assert_eq!(
+            cx.io.jitter, JITTER_GOLDEN_GAMMA,
+            "pass-through draws nothing"
+        );
+    }
+}
+
+#[cfg(test)]
 mod startup_tests {
     use super::*;
     use crate::startup::{Backoff, number_or_zero};
+
+    fn assert_jittered(actual: f64, nominal: f64) {
+        assert!(
+            (0.75 * nominal..=nominal).contains(&actual),
+            "{actual} outside jittered [0.75, 1.0] x {nominal}"
+        );
+    }
+
+    #[test]
+    fn discovery_retry_jitters_but_never_undercuts_a_rate_limit_minimum() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = Backoff::default();
+        let keys = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        for key in keys {
+            retry.failed(&mut cx, key);
+        }
+        // A 1 s Retry-After equals the nominal first delay, so jitter cannot shorten it.
+        retry.failed_after(&mut cx, "limited", 1_000.0);
+        let delays: Vec<_> = cx
+            .io
+            .actions
+            .drain(..)
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        let (jittered, limited) = delays.split_at(keys.len());
+        for delay in jittered {
+            assert_jittered(*delay, 1_000.0);
+        }
+        assert!(jittered.iter().any(|delay| *delay < 1_000.0));
+        assert!(limited.iter().all(|delay| *delay == 1_000.0));
+    }
 
     #[test]
     fn discovery_retry_waits_out_a_rate_limit_window() {
@@ -4874,7 +4993,8 @@ mod startup_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(delays, [120_000.0, 1_000.0]);
+        assert_eq!(delays[0], 120_000.0);
+        assert_jittered(delays[1], 1_000.0);
         // A later ban pushes back a read that was already waiting on its own schedule.
         retry.failed_after(&mut cx, "premium", 90_000.0);
         let actions = std::mem::take(&mut cx.io.actions);
@@ -4934,7 +5054,7 @@ mod startup_tests {
                 })
                 .collect();
             assert_eq!(timers.len(), 1);
-            assert_eq!(timers[0].1, expected);
+            assert_jittered(timers[0].1, expected);
             assert_eq!(retry.on_timer(timers[0].0), Some("markets"));
             assert_eq!(retry.on_timer(timers[0].0), None);
         }
@@ -4951,7 +5071,9 @@ mod startup_tests {
             })
             .collect();
         assert_eq!(timers.len(), 2);
-        assert!(timers.iter().all(|(_, at)| *at == 1000.));
+        for (_, at) in &timers {
+            assert_jittered(*at, 1_000.0);
+        }
         retry.succeeded(&mut cx, &"tickers");
         assert_eq!(retry.on_timer(timers[0].0), None);
         assert!(

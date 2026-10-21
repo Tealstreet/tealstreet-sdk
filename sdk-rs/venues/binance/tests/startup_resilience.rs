@@ -3,6 +3,11 @@ mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_binance::{BinanceFutures, Options};
 use support::Harness;
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"###;
 fn public_engine() -> Engine<BinanceFutures> {
     Engine::new(BinanceFutures::new(Options {
@@ -40,7 +45,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         let timer = actions
             .into_iter()
             .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + delay => Some(timer),
+                Action::SetTimer { timer, at_ms } if jittered(at_ms - now, delay) => Some(timer),
                 _ => None,
             })
             .expect("shared exponential retry timer");
@@ -168,10 +173,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");
@@ -230,10 +232,7 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
         })
         .expect("failed public ticker read uses shared retry backoff");

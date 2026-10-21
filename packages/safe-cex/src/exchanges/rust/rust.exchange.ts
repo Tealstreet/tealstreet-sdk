@@ -64,7 +64,6 @@ import {
   hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -724,29 +723,11 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Factories route TS payload-signer venues to TS; elsewhere no implementation signs
-    // with it, so refuse rather than ignore it, even on venues exempt from the guard below.
+    // Factories route these to TS. A private engine account would otherwise ignore the
+    // signer and send unsigned requests, even on venues exempt from the Rust local-credential rule.
     if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
-    if (
-      ![
-        'hyperliquid',
-        'paradex',
-        'lighter',
-        'lighter-robinhood',
-        'txflow',
-        'coinbase',
-        'coinbasespot',
-        'polymarket',
-        'breakoutprop',
-      ].includes(this.name) &&
-      !this.isPublicDataOnly &&
-      (!this.options.key ||
-        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
-    ) {
-      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -802,6 +783,7 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
+        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,

@@ -939,3 +939,28 @@ fn malformed_position_row_holds_the_wallet_total() {
     assert_eq!(e.store().balance().total, 1000.0);
     assert_eq!(e.store().balance().used, 40.0);
 }
+
+#[test]
+fn unified_spot_state_publishes_spot_holdings_as_coins() {
+    let (mut e, s) = ready("unifiedAccount");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"110"}}}"#,
+    );
+    message(
+        &mut e,
+        s,
+        3000.0,
+        r#"{"channel":"spotState","data":{"user":"x","spotState":{"balances":[{"coin":"USDC","token":0,"hold":"0","total":"900"},{"coin":"BTC","token":1,"hold":"0","total":"0.5"},{"coin":"PURR","token":2,"hold":"0","total":"0"}],"tokenToAvailableAfterMaintenance":[[0,"800"]]}}}"#,
+    );
+    let coins = e.store().coin_balances().expect("coins published");
+    assert_eq!(coins.len(), 2, "zero holdings are left out");
+    let usdc = coins.iter().find(|c| c.base == "USDC").unwrap();
+    assert_eq!((usdc.amount, usdc.notional), (900.0, 900.0));
+    let btc = coins.iter().find(|c| c.base == "BTC").unwrap();
+    assert_eq!(btc.amount, 0.5);
+    // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
+    assert_eq!(btc.notional, 50.0);
+}

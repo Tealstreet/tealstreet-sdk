@@ -1061,7 +1061,8 @@ impl BinanceFutures {
         state.failures += 1;
         let backoff = Backoff::new(1_000.0, u32::MAX, MAX_SNAPSHOT_BACKOFF_MS)
             .delay(state.failures.saturating_sub(1));
-        state.sync = Sync::Cooldown(cx.set_timer(backoff.max(min_delay_ms)));
+        let delay = cx.jittered(backoff).max(min_delay_ms);
+        state.sync = Sync::Cooldown(cx.set_timer(delay));
     }
 
     fn on_depth_snapshot(
