@@ -927,9 +927,6 @@ impl<P> Cx<'_, P> {
             self.io.active_commands.remove(&command);
         }
         self.io
-            .placement_acks
-            .finished(command, result.as_deref().ok(), self.now);
-        self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
     }
@@ -968,7 +965,6 @@ impl<P> Cx<'_, P> {
             self.io.order_locks.finish(command, true);
             self.io.active_commands.remove(&command);
         }
-        self.io.placement_acks.finished(command, None, self.now);
         self.io.actions.push(Action::Notice(Notice::CommandFailed {
             command,
             error: error.into(),
@@ -1010,7 +1006,6 @@ impl<P> Cx<'_, P> {
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.placement_acks.filled(&fill.order_id, self.now);
         self.io.fills.push(fill);
     }
 }
@@ -1432,6 +1427,24 @@ impl<V: Venue> Engine<V> {
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
     /// whose wait expired, then re-arm the wake-up for the remaining ones.
     fn release_held(&mut self, now: f64) {
+        // Bookkeeping reads this event's outcomes here rather than in `Cx`, so
+        // venues that do not opt in compile none of it.
+        for action in &self.io.actions {
+            match action {
+                Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.io
+                        .placement_acks
+                        .finished(*command, result.as_deref().ok(), now);
+                }
+                Action::Notice(Notice::CommandFailed { command, .. }) => {
+                    self.io.placement_acks.finished(*command, None, now);
+                }
+                _ => {}
+            }
+        }
+        for fill in &self.io.fills {
+            self.io.placement_acks.filled(&fill.order_id, now);
+        }
         let released = self.io.placement_acks.release(&self.store, now);
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
@@ -1455,6 +1468,9 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    // Out of line: `handle` and `release_held` both dispatch through it, and
+    // inlining the venue's whole dispatch twice grows every venue wasm.
+    #[inline(never)]
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
         if self.venue.cancel_needs_stored_order()
             && !self.releasing
