@@ -772,98 +772,63 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
-        ...(this.name !== 'asterdex' && this.options.secondary_key
+        ...(this.options.secondary_key
           ? { readCredentials: {
               key: this.options.secondary_key,
               secret: this.options.secondary_secret,
               passphrase: this.options.secondary_passphrase ?? passphrase,
             } }
           : {}),
-        ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
+        omniKeySeed,
         testnet: Boolean(testnet),
-        ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
+        brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy),
         publicDataOnly: Boolean(publicDataOnly),
         remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
-        ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
-        extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
+        extra: { kucoinBroker: this.options.extra?.kucoinBroker },
         endpoints,
-        ...([
-          'backpack',
-          'bitrue',
-          'breakoutprop',
-          'binance',
-          'binancepm',
-          'binancespot',
-          'binanceinverse',
-          'bybit',
-          'bybitinverse',
-          'bybitspot',
-          'bybitdemo',
-          'hyrotrader',
-          'mexc',
-        ].includes(this.name)
-          ? { recvWindow: this.options.extra?.recvWindow }
-          : {}),
+        recvWindow: this.options.extra?.recvWindow,
         applicationId,
-        ...(this.name === 'breakoutprop'
-          ? {
-              subaccount: this.options.subaccount,
-            }
-          : {}),
-        ...(['lighter', 'lighter-robinhood'].includes(this.name)
-          ? {
-              apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
-              lighterRemoteSigner: Boolean(this.options.remoteSigner),
-              lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
-                ?.lighterSignerProvider,
-              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
-              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
-            }
-          : {}),
+        subaccount: this.options.subaccount,
+        apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+        lighterRemoteSigner: Boolean(this.options.remoteSigner),
+        lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
+          ?.lighterSignerProvider,
+        lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+        lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
-        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)
-          ? {
-              enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
-              enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
-            }
-          : {}),
-        ...(this.name === 'grvt'
-          ? {
-              grvtTradingAccountId: this.options.grvtTradingAccountId,
-              grvtSignerAddress: this.options.grvtSignerAddress,
-            }
-          : {}),
-        ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
-        ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress, payloadSigner: Boolean(this.options.payloadSigner) } : {}),
-        ...(this.name === 'asterdex'
-          ? {
-              asterdex: {
-                apiVersion: resolveAsterDEXApiVersion(this.options),
-                userAddress: this.options.auth?.userAddress,
-                signerAddress: this.options.auth?.signerAddress,
-                privateKey: this.options.auth?.privateKey,
-                builderAddress: this.options.extra?.asterBuilderAddress,
-                builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
-                builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
-                readKey: this.options.secondary_key,
-                readSecret: this.options.secondary_secret,
-              },
-            }
-          : {}),
+        enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
+        enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
+        grvtTradingAccountId: this.options.grvtTradingAccountId,
+        grvtSignerAddress: this.options.grvtSignerAddress,
+        polymarket: this.options.polymarket,
+        paradexAddress,
+        subkeyAddress,
+        payloadSigner: Boolean(this.options.payloadSigner),
+        asterdex: {
+          apiVersion: resolveAsterDEXApiVersion(this.options),
+          userAddress: this.options.auth?.userAddress,
+          signerAddress: this.options.auth?.signerAddress,
+          privateKey: this.options.auth?.privateKey,
+          builderAddress: this.options.extra?.asterBuilderAddress,
+          builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
+          builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
+          readKey: this.options.secondary_key,
+          readSecret: this.options.secondary_secret,
+        },
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },
         // The engine reports account sections missing at startup only when untilLoaded waits for them.
         accountStartup: !this.isPublicDataOnly,
-        ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
+    // Set from the engine's record before startup: venues that take the host clock as-is get the synced one.
+    let hostClock = false;
     const host = new EngineHost(
       engine,
-      ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
-        ? { ...transport, now: virtualClock.getCurrentTimeMs }
-        : transport,
+      { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
@@ -886,7 +851,9 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptEngineCapabilities(host.capabilities());
+      const capabilities = host.capabilities();
+      hostClock = capabilities.hostClock;
+      this.adoptEngineCapabilities(capabilities);
     } catch (error) {
       host.dispose();
       throw error;

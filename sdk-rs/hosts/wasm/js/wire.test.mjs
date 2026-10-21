@@ -1014,7 +1014,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
       view.setUint32(at, flags, true);
       view.setUint32(at + 4, enums, true);
     } }]).capabilities();
-  assert.deepEqual(capabilities(1 | (1 << 10) | (1 << 12), 2 | (1 << 4) | (2 << 8) | (3 << 12) | (4 << 16)), {
+  assert.deepEqual(capabilities(1 | (1 << 10) | (1 << 12) | (1 << 14), 2 | (1 << 4) | (2 << 8) | (3 << 12) | (4 << 16)), {
     clientOrderLookup: true,
     fillHistory: false,
     orderHistory: false,
@@ -1029,6 +1029,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     accountTier: false,
     closedPositions: true,
     balanceInfo: false,
+    hostClock: true,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',

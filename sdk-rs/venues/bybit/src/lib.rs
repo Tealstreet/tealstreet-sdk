@@ -1510,9 +1510,13 @@ impl BybitLinear {
             .str("category", self.paths.category)
             .str("symbol", symbol)
             .str("interval", code)
-            .opt_num("start", from_ms)
+            // Like TS, a limit asks for the newest bars up to `to`; `from` only bounds an unlimited read.
+            .opt_num("start", from_ms.filter(|_| limit.is_none_or(|n| n == 0)))
             .opt_num("end", to_ms)
-            .num("limit", f64::from(limit.unwrap_or(500).min(1000)));
+            .num(
+                "limit",
+                f64::from(limit.filter(|n| *n > 0).unwrap_or(500).min(1000)),
+            );
         let candles = Vec::new();
         self.send(
             cx,
