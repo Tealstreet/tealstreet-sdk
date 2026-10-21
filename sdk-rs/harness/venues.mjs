@@ -1138,6 +1138,7 @@ export const VENUES = {
   coinbase: coinbase('coinbase'),
   coinbasespot: coinbase('coinbasespot'),
   phemex: {
+    virtualPrivateClock: true,
     rust: 'phemex',
     phemexProtocol: true,
     tsReplaySettled: (exchange, count) =>
