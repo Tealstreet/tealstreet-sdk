@@ -353,6 +353,7 @@ pub fn wasm_memory_bytes() -> f64 {
 
 #[wasm_bindgen]
 pub struct WasmEngine {
+    construction: String,
     inner: Box<dyn AnyEngine>,
 }
 
@@ -392,9 +393,18 @@ impl WasmEngine {
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| JsError::new("Invalid engine options"))?;
+        let construction = serde_json::to_string(&options.construction(venue))?;
         let inner = safe_cex_venues::build(venue, options, Boxed)
             .map_err(|error| JsError::new(&error.message))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            construction,
+        })
+    }
+
+    /// Resolved account choices; contains no credentials.
+    pub fn construction(&self) -> String {
+        self.construction.clone()
     }
 
     fn flush(&mut self) -> String {
@@ -1038,6 +1048,7 @@ mod tests {
         let events = Rc::new(RefCell::new(Vec::new()));
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
+            construction: "{}".into(),
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
                 drains: Rc::clone(&drains),
@@ -1319,6 +1330,7 @@ mod tests {
         }
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
+                construction: "{}".into(),
                 inner: Box::new(Counted),
             }
             .health(),
@@ -1336,6 +1348,7 @@ mod tests {
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut legacy = engine();
@@ -1359,9 +1372,11 @@ mod tests {
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
+            construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         // A rejected byte message must neither handle an event nor drain existing actions.
