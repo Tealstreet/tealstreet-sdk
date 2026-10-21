@@ -56,3 +56,8 @@ pub fn ready() -> (Driver, SocketId) {
 pub fn message(e: &mut Driver, socket: SocketId, text: &str) {
     e.handle(2000., Event::WsMessage { socket, text });
 }
+
+/// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
+pub fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}

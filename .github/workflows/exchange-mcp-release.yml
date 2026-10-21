@@ -108,7 +108,12 @@ jobs:
       - name: Test
         run: yarn --cwd "$PACKAGE_DIR" test-ci
 
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
+
       - name: Build the Rust engine included in the package
+        env:
+          SAFE_CEX_WASM_OPT: required
         run: |
           (cd sdk-rs && rustup show)
           cargo install wasm-bindgen-cli --version 0.2.129 --locked

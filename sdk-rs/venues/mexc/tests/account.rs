@@ -861,7 +861,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
     let retry = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1100.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - 100.0, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");

@@ -715,6 +715,9 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
             Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
                 logs.push(message.clone())
             }
+            Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                logs.push(event.message.clone())
+            }
             _ => {}
         }
     }
@@ -815,8 +818,8 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
     let out = actions(&mut e);
     assert!(out.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
-            if message.contains("ETH-USDT-SWAP has open exposure")
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("ETH-USDT-SWAP has open exposure")
     )));
     reply(
         &mut e,
@@ -853,13 +856,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
             .count(),
         1
     );
-    let retry = out
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1001.0 => Some(*timer),
-            _ => None,
-        })
-        .expect("partial catalogue schedules a re-read");
+    let retry = retry_timer(&out, 1.0, 1_000.0).expect("partial catalogue schedules a re-read");
     e.handle(1001.0, Event::TimerFired { timer: retry });
     let reread = actions(&mut e)
         .into_iter()
@@ -875,10 +872,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| is_get(a, "/api/v5/account/config")));
     // The complete re-read clears the retry instead of scheduling another.
-    assert!(
-        !out.iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 3002.0))
-    );
+    assert!(retry_timer(&out, 1002.0, 2_000.0).is_none());
 }
 
 #[test]
@@ -985,6 +979,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
                     pending.extend(actions(&mut e));
                 }
                 Action::Notice(Notice::Log { message, .. }) => logs.push(message.clone()),
+                Action::Notice(Notice::Event(event)) => logs.push(event.message.clone()),
                 _ => {}
             }
         }

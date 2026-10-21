@@ -80,7 +80,7 @@ fn start_with_retry(
         })
         .unwrap();
     let retry = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == 1010.0 => Some(*timer),
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 10.0, 1000.0) => Some(*timer),
         _ => None,
     });
     let reads = actions
@@ -940,7 +940,7 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.02);
     assert!(e.drain_actions().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO positions: skipped 1")
     )));
 }
@@ -994,7 +994,7 @@ fn invalid_known_position_row_keeps_its_stored_copy() {
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.01);
     assert!(e.drain_actions().any(|a| matches!(a,
-        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("BTCUSDT")
     )));
 }
@@ -1117,7 +1117,12 @@ fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
         response(&mut e, &p, at + 5.0, &body);
         let actions: Vec<_> = e.drain_actions().collect();
         for a in &actions {
-            if let Action::Notice(Notice::Log { message, .. }) = a {
+            if let Action::Notice(Notice::Log { message, .. })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                message,
+                ..
+            })) = a
+            {
                 skipped += usize::from(message.contains("WOO positions: skipped"));
                 hidden += usize::from(message.contains("PERP_ETH_USDT cannot be shown"));
             }
@@ -1167,7 +1172,7 @@ fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapsh
         } else {
             assert_eq!(e.store().orders(), before);
             assert!(e.drain_actions().any(|action| matches!(action,
-                Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+                Action::Notice(Notice::Log { message, .. }) | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
         }
     }
 }

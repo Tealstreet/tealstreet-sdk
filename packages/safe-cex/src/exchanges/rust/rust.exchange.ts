@@ -63,7 +63,6 @@ import {
   hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -636,6 +635,17 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   }
 
+  private authFailureNoted = false;
+  /** One engine dispatch often reports a rejection twice (`auth.rejected` and `deactivate`). */
+  private noteAuthFailure = () => {
+    if (this.authFailureNoted) return;
+    this.authFailureNoted = true;
+    queueMicrotask(() => {
+      this.authFailureNoted = false;
+    });
+    this.recordAuthFailure();
+  };
+
   override recordAuthSuccess(): void {
     super.recordAuthSuccess();
     this.updatePollingPolicy();
@@ -709,29 +719,11 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
-    // Factories route TS payload-signer venues to TS; elsewhere no implementation signs
-    // with it, so refuse rather than ignore it, even on venues exempt from the guard below.
+    // Factories route these to TS. A private engine account would otherwise ignore the
+    // signer and send unsigned requests, even on venues exempt from the Rust local-credential rule.
     if (this.options.payloadSigner && this.name !== 'paradex' && !this.isPublicDataOnly) {
       const message = `Rust ${this.name} does not support payloadSigner; remote signing is unsupported, so private requests would go unsigned. Use the TS venue or a local API secret.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-    }
-    if (
-      ![
-        'hyperliquid',
-        'paradex',
-        'lighter',
-        'lighter-robinhood',
-        'txflow',
-        'coinbase',
-        'coinbasespot',
-        'polymarket',
-        'breakoutprop',
-      ].includes(this.name) &&
-      !this.isPublicDataOnly &&
-      (!this.options.key ||
-        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
-    ) {
-      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -787,6 +779,7 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
+        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
@@ -875,7 +868,7 @@ export class RustEngineExchange extends BaseExchange {
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
-          this.recordAuthFailure();
+          this.noteAuthFailure();
           this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
@@ -1316,7 +1309,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
-    if (event.code === 'auth.rejected') this.recordAuthFailure();
+    if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
   };
 

@@ -16,7 +16,7 @@ fn private_auth_is_delayed_and_subscriptions_wait_for_ack() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -545,7 +545,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if jittered(*at_ms - h.now, 1000.0) => Some(*timer),
             _ => None,
         })
         .expect("partial catalogue retry");

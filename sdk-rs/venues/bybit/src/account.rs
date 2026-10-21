@@ -4,13 +4,15 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus,
     OrderType, Position, PositionGreeks, PositionMode, PositionSide, RejectReason, StopTriggerType,
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketId, Store, TimerId, num};
+use safe_cex_engine::{Cx, Fill, Response, SocketId, Store, TimerId, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Positions and the wallet are re-read this often; the stream carries
@@ -1099,7 +1101,11 @@ impl BybitLinear {
             && self.account.hyro_transient_streak < 3
         {
             self.account.hyro_transient_streak += 1;
-            cx.log(LogLevel::Warning, format!("HyroTrader {message}; retrying"));
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("HyroTrader {message}; retrying"),
+            );
             // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
             self.account.snapshot_guard = Default::default();
@@ -1117,7 +1123,11 @@ impl BybitLinear {
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
         self.account.hyro_transient = false;
         self.account.hyro_transient_streak = 0;
-        cx.log(LogLevel::Error, format!("HyroTrader {message}"));
+        cx.notice(
+            Level::Error,
+            code::STREAM_UNAVAILABLE,
+            format!("HyroTrader {message}"),
+        );
         if let Some(socket) = self.private.socket {
             cx.close(socket);
             self.on_socket_closed(cx, Channel::Private, 4001);
@@ -1198,8 +1208,7 @@ impl BybitLinear {
         // admits the third overtaken read; the next tick (not an immediate re-read,
         // which steady frames would turn into continuous polling) corrects it.
         if moved {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(Level::Warn, code::REQUEST_FAILED,
                 "HyroTrader private stream kept moving during reconciliation; using the latest snapshot",
             );
         }
@@ -1783,7 +1792,15 @@ impl BybitLinear {
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.log(LogLevel::Error, format!("[WS]{op}:{message}"));
+                cx.notice(
+                    Level::Error,
+                    if op == "auth" {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::SUBSCRIPTION_REJECTED
+                    },
+                    format!("[WS]{op}:{message}"),
+                );
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
                     && let Some(socket) = self.private.socket
@@ -1830,7 +1847,7 @@ impl BybitLinear {
                     && status != "Filled"
                     && !QUIET_REJECT_REASONS.contains(&reason)
                 {
-                    cx.log(LogLevel::Error, reason.to_owned());
+                    cx.notice(Level::Error, code::ORDER_REJECTED, reason.to_owned());
                 }
                 let final_status = if status == "Filled" {
                     OrderStatus::Closed
@@ -2104,8 +2121,9 @@ impl BybitLinear {
                         cx, order_id, symbol, placed_at, cursor, filled, pages, body,
                     ),
                     Err(message) => {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::REQUEST_FAILED,
                             format!("Bybit fill check for order {order_id} failed: {message}"),
                         );
                         // After the grace a failed check still lets open orders correct the row.
@@ -2132,8 +2150,7 @@ impl BybitLinear {
                         }
                     }
                     // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.log(
-                        LogLevel::Warning,
+                    Err(message) => cx.notice(Level::Warn, code::REQUEST_FAILED,
                         format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"),
                     ),
                 }
@@ -2196,7 +2213,11 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit orders: {message}"));
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            format!("Bybit orders: {message}"),
+                        );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
@@ -2245,7 +2266,11 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit positions: {message}"));
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            format!("Bybit positions: {message}"),
+                        );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
@@ -2263,8 +2288,9 @@ impl BybitLinear {
                         .as_ref()
                         .is_err_and(|m| m.contains("accountType only support UNIFIED"));
                 if retired {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
                         "Bybit wallet refused CONTRACT; reading the UNIFIED wallet",
                     );
                     self.account.classic = false;
@@ -2313,7 +2339,11 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, format!("Bybit balance: {message}"));
+                        cx.notice(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            format!("Bybit balance: {message}"),
+                        );
                         if self.variant.is_hyro() {
                             self.hyro_read_failed(cx, "wallet reconciliation failed");
                         }
@@ -2405,8 +2435,9 @@ impl BybitLinear {
                 merged.push(order.clone());
             }
             if self.account.unsupported_logged.insert(id.clone()) {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::ROW_SKIPPED,
                     if known.is_some() {
                         format!(
                             "Bybit order {id} has an unsupported type; its last known state is kept"

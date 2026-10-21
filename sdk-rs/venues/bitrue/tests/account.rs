@@ -134,20 +134,24 @@ impl Harness {
     fn private_retry(&mut self, nominal: f64) {
         // Follow the supervisor's actual jittered retry rather than the retired
         // fixed listen-key retry schedule. Account polling timers stay separate.
+        self.fire_retry(nominal);
+    }
+    /// Fires the newest timer jittered from `nominal` after now; returns its delay.
+    fn fire_retry(&mut self, nominal: f64) -> f64 {
         let at = self
             .actions
             .iter()
             .rev()
             .find_map(|action| match action {
-                Action::SetTimer { at_ms, .. }
-                    if (nominal * 0.75..=nominal).contains(&(*at_ms - self.now)) =>
-                {
+                Action::SetTimer { at_ms, .. } if jittered(*at_ms - self.now, nominal) => {
                     Some(*at_ms)
                 }
                 _ => None,
             })
-            .expect("private supervisor scheduled its bounded retry");
+            .unwrap_or_else(|| panic!("no retry jittered from {nominal}: {:?}", self.actions));
+        let delay = at - self.now;
         self.fire_at(at);
+        delay
     }
     fn fills(&mut self) -> Vec<(f64, f64)> {
         let Some(frame) = self.e.take_frame(self.now) else {
@@ -169,6 +173,12 @@ impl Harness {
             .collect()
     }
 }
+
+/// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+fn jittered(actual: f64, nominal: f64) -> bool {
+    (0.75 * nominal..=nominal).contains(&actual)
+}
+
 #[test]
 fn futures_listen_key_subscriptions_ping_timestamp_and_keepalive() {
     let mut h = Harness::new();
@@ -844,7 +854,7 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
             ..
         })
     )));
-    h.fire_at(700.0);
+    h.fire_retry(500.0);
     assert!(
         h.pending
             .iter()
@@ -865,12 +875,10 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(200.0);
     h.reply(ETH, FAILED);
-    let mut at = 200.0;
     for delay in [
         500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0, 30_000.0, 30_000.0,
     ] {
-        at += delay;
-        h.fire_at(at);
+        h.fire_retry(delay);
         h.reply(ETH, FAILED);
     }
     assert_eq!(h.e.store().orders().len(), 1);
@@ -889,8 +897,7 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     assert!(!h.pending.iter().any(|r| r.url.contains(ETH)));
 
-    at += 30_000.0;
-    h.fire_at(at);
+    h.fire_retry(30_000.0);
     h.reply(ETH, r#"{"code":"0","data":[]}"#);
     assert!(h.actions.iter().any(|a| matches!(
         a,
@@ -904,9 +911,35 @@ fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
     h.reply(BTC, ORDER);
     h.fire_at(h.now + 200.0);
     h.reply(ETH, FAILED);
-    h.fire_at(h.now + 500.0);
+    h.fire_retry(500.0);
     assert!(h.pending.iter().any(|r| r.url.contains(ETH)));
     assert_eq!(errors(&h), 2);
+}
+
+#[test]
+fn failed_symbol_order_read_retries_are_jittered() {
+    const ETH: &str = "/openOrders?contractName=E-ETH-USDT";
+    const FAILED: &str = r#"{"code":"-1","msg":"symbol unavailable"}"#;
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let mut h = Harness::with_market(&markets);
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders?contractName=E-BTC-USDT", ORDER);
+    h.fire_at(200.0);
+    h.reply(ETH, FAILED);
+    let nominal = [500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0];
+    let mut delays = Vec::new();
+    for nominal in nominal {
+        delays.push(h.fire_retry(nominal));
+        h.reply(ETH, FAILED);
+    }
+    assert!(
+        delays
+            .iter()
+            .zip(nominal)
+            .any(|(delay, nominal)| *delay < nominal),
+        "failed order reads must not retry in lockstep: {delays:?}"
+    );
 }
 
 #[test]

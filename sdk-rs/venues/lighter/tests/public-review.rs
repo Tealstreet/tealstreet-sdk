@@ -1,4 +1,5 @@
 //! Regressions from the independent public-phase audit.
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_lighter::{Lighter, Options};
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp"},{"market_id":1,"symbol":"BTC","status":"active","market_type":"perp"}]}"#;
@@ -297,7 +298,11 @@ fn wholly_unusable_ticker_seed_retains_live_quotes_and_retries_with_backoff() {
             let timer = actions
                 .iter()
                 .find_map(|a| match a {
-                    Action::SetTimer { timer, at_ms } if *at_ms == retry_at => Some(*timer),
+                    Action::SetTimer { timer, at_ms }
+                        if support::jittered(*at_ms - at, retry_at - at) =>
+                    {
+                        Some(*timer)
+                    }
                     _ => None,
                 })
                 .expect("bad ticker source must back off even while live quotes exist");

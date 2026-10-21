@@ -1,8 +1,11 @@
 use crate::wire::{Envelope, Number};
 use crate::{Kucoin, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::LogLevel;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Store, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Store, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -670,10 +673,11 @@ impl Kucoin {
                         request.positions.push(row.position(cx.store));
                     } else if self.malformed_markets.contains(&unified) {
                         request.invalid = true;
-                        cx.log(LogLevel::Warning, "KuCoin owned position market unavailable; preserving previous snapshot");
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "KuCoin owned position market unavailable; preserving previous snapshot");
                     } else {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!(
                                 "Skipping KuCoin position on uncatalogued market {}",
                                 row.symbol
@@ -716,10 +720,11 @@ impl Kucoin {
                         // snapshot; one on a filtered market is skipped but still counted.
                         if self.malformed_markets.contains(&symbol) {
                             request.invalid = true;
-                            cx.log(LogLevel::Warning, "KuCoin working order market unavailable; preserving previous orders");
+                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "KuCoin working order market unavailable; preserving previous orders");
                         } else {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Skipping KuCoin order on uncatalogued market {symbol}"),
                             );
                         }
@@ -730,8 +735,9 @@ impl Kucoin {
                 Err(error) => match row_identity(item, "id") {
                     // Still counted toward the page census so the snapshot can commit.
                     Some(id) if request.native_ids.insert(id.clone()) => {
-                        cx.log(
-                            LogLevel::Warning,
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
                             format!("KuCoin skipped unmappable order {id}: {error}"),
                         );
                         // The row also carried any attached TP/SL legs; keep them too.
@@ -798,8 +804,9 @@ impl Kucoin {
                 self.account_issue(cx, request);
                 return;
             }
-            cx.log(
-                LogLevel::Error,
+            cx.notice(
+                Level::Error,
+                code::REQUEST_FAILED,
                 format!("KuCoin private read failed: {}", request.path(cx.store)),
             );
             if let Read::Margin(symbol) | Read::Leverage(symbol) = &request.read {
@@ -905,18 +912,30 @@ impl Kucoin {
                     .data
                     .and_then(|r| serde_json::from_str::<Page>(r.get()).ok());
                 let Some(page) = page else {
-                    cx.log(LogLevel::Error, "KuCoin order page missing metadata");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "KuCoin order page missing metadata",
+                    );
                     self.account_finished(cx);
                     return;
                 };
                 if page.current_page != request.page {
-                    cx.log(LogLevel::Error, "KuCoin order page mismatch");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "KuCoin order page mismatch",
+                    );
                     self.account_finished(cx);
                     return;
                 }
                 if request.page < page.total_page {
                     if request.page >= 10000 {
-                        cx.log(LogLevel::Error, "KuCoin order page limit");
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
+                            "KuCoin order page limit",
+                        );
                         self.account_finished(cx);
                         return;
                     }
@@ -928,7 +947,11 @@ impl Kucoin {
                 if page.total_num as usize != request.native_ids.len()
                     || page.total_page == 0 && !request.orders.is_empty()
                 {
-                    cx.log(LogLevel::Error, "KuCoin incomplete order snapshot");
+                    cx.notice(
+                        Level::Error,
+                        code::SNAPSHOT_DISCARDED,
+                        "KuCoin incomplete order snapshot",
+                    );
                     self.account_finished(cx);
                     return;
                 }
@@ -1155,8 +1178,9 @@ impl Kucoin {
                 return;
             };
             if cx.store.market(&symbol(cx.store, row.symbol)).is_none() {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SNAPSHOT_DISCARDED,
                     "KuCoin working order market unavailable; preserving previous orders",
                 );
                 return;
@@ -1308,8 +1332,9 @@ impl Kucoin {
             if row.current_qty.get() != 0.0
                 && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
             {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::SNAPSHOT_DISCARDED,
                     "KuCoin owned position market unavailable; preserving previous snapshot",
                 );
                 return;
