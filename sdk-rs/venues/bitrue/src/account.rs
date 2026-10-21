@@ -604,6 +604,7 @@ impl Bitrue {
                     .or_default();
                 backoff.failures += 1;
                 if backoff.error != error {
+                    // Already reported once per distinct error and reset on recovery.
                     cx.notice(
                         Level::Error,
                         code::REQUEST_FAILED,
@@ -1398,7 +1399,7 @@ impl Bitrue {
     fn report_leverage_error(&self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
         let message = message.into();
         if self.account.leverage_queries.is_empty() {
-            cx.notice(Level::Error, code::REQUEST_FAILED, message);
+            cx.retried_failure("bitrue.account:1401", message);
         } else {
             for (command, _) in &self.account.leverage_queries {
                 cx.command_error(*command, message.clone());
