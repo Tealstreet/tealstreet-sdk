@@ -38,6 +38,17 @@ pub struct Options {
     pub passphrase: Option<String>,
     pub product: Product,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 pub enum Pending {
     History(Box<history::Request>),
@@ -86,7 +97,7 @@ impl Default for Connection {
 }
 
 pub struct BitgetFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     account: account::Account,
     trading: trading::Trading,
@@ -100,6 +111,7 @@ pub struct BitgetFutures {
 
 impl BitgetFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             discovery: Default::default(),
@@ -197,7 +209,7 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3 && self.account.supervisor.is_waiting() {
+        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
             return;
         }
         let url = if index == 3 {
@@ -215,16 +227,20 @@ impl BitgetFutures {
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        connection.socket = Some(cx.connect_feed(
-            url,
-            if index == 3 {
-                safe_cex_engine::SocketChannel::Private
-            } else {
-                safe_cex_engine::SocketChannel::Public
-            },
-            ["primary", "secondary-1", "secondary-2", "private"][index],
-            recover,
-        ));
+        connection.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(if index == 3 {
+                        safe_cex_engine::SocketChannel::Private
+                    } else {
+                        safe_cex_engine::SocketChannel::Public
+                    })
+                    .feed(
+                        ["primary", "secondary-1", "secondary-2", "private"][index],
+                        recover,
+                    ),
+            ),
+        );
         connection.open = false;
         if index == 3 {
             self.account.authenticated = false;
@@ -542,6 +558,11 @@ impl Venue for BitgetFutures {
                 .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
         {
             cx.log(LogLevel::Error, error);
+            self.account.startup_rejected = true;
+            cx.startup_failed(
+                safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         self.discovery_read(cx, false);

@@ -524,3 +524,108 @@ fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
     assert_eq!(e.store().position("XYZ|BTC-PERP").unwrap().contracts, 1.0);
     assert!(e.store().position("XYZ|OLD-PERP").is_none());
 }
+
+fn order_ids(e: &Engine<Hyperliquid>) -> Vec<&str> {
+    e.store().orders().iter().map(|o| o.id.as_str()).collect()
+}
+
+#[test]
+fn perp_order_snapshot_skips_spot_rows_and_commits_perp_orders() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"[{"coin":"@107","oid":99,"side":"B","limitPx":"1","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(!notice(&actions, "skipped"));
+    assert!(e.store().loaded().orders);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn spot_order_snapshot_skips_perp_rows_and_commits_spot_orders() {
+    let mut e = connect(true, true);
+    let req = http(
+        &e.drain_actions().collect::<Vec<_>>(),
+        "spotMetaAndAssetCtxs",
+    );
+    reply(&mut e, &req, 1000.0, &tuple(SPOT_META, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"[{"coin":"BTC","oid":99,"side":"B","limitPx":"90","origSz":"1","sz":"1"},{"coin":"@4","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(!notice(&actions, "skipped"));
+    assert!(e.store().loaded().orders);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn settled_discovery_skips_unknown_market_rows_and_commits_the_rest() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let state = http(&actions, "clearinghouseState");
+    let orders = http(&actions, "frontendOpenOrders");
+    reply(
+        &mut e,
+        &state,
+        1000.0,
+        r#"{"assetPositions":[{"position":{"coin":"SOL","szi":"3","entryPx":"20","positionValue":"60","unrealizedPnl":"0","marginUsed":"6","leverage":{"type":"cross","value":10}}},{"position":{"coin":"BTC","szi":"1","entryPx":"100","positionValue":"100","unrealizedPnl":"0","marginUsed":"10","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"16"},"time":1000}"#,
+    );
+    reply(
+        &mut e,
+        &orders,
+        1000.0,
+        r#"[{"coin":"SOL","oid":99,"side":"B","limitPx":"20","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(notice(
+        &actions,
+        "Hyperliquid skipped position sol on an unknown market"
+    ));
+    assert!(notice(
+        &actions,
+        "Hyperliquid skipped order 99 on an unknown market"
+    ));
+    assert!(!notice(&actions, "unavailable market metadata"));
+    assert!(e.store().loaded().positions);
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().position("BTC-PERP").unwrap().contracts, 1.0);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(order_ids(&e), ["100"]);
+}
+
+#[test]
+fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let timer = retry(&actions, 2000.0);
+    let req = http(&actions, "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    assert!(e.store().setting("BTC-PERP").is_some());
+    assert!(e.store().setting("ETH-PERP").is_none());
+    e.handle(2000.0, Event::TimerFired { timer });
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, GOOD));
+    let setting = e.store().setting("ETH-PERP").expect("seeded setting");
+    assert_eq!(setting.leverage, 20.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+}

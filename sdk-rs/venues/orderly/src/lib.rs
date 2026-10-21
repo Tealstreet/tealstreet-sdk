@@ -47,6 +47,18 @@ pub struct Options {
     pub application_id: Option<String>,
     pub tick_interval: Option<f64>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
+/// Whether `key` and `secret` are base58 Ed25519 keys this venue can sign with.
+pub fn signing_keys_valid(key: &str, secret: &str) -> bool {
+    sign::Credentials::new(key, secret, "account").is_ok()
+}
 
 pub enum Pending {
     History(history::Request),
@@ -117,7 +129,7 @@ enum Seed {
 }
 
 pub struct Orderly {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -131,6 +143,7 @@ pub struct Orderly {
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             public: Connection::new(None),
@@ -193,12 +206,13 @@ impl Orderly {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
         }
-        self.public.socket = Some(cx.connect_feed(
-            self.public_url(),
-            safe_cex_engine::SocketChannel::Public,
-            "market",
-            self.public.recover,
-        ));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.public_url())
+                    .channel(safe_cex_engine::SocketChannel::Public)
+                    .feed("market", self.public.recover),
+            ),
+        );
     }
     fn drop_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(socket) = self.public.socket {
@@ -583,6 +597,9 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
+        self.account_tick_interval(cx, interval_ms);
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -888,7 +905,19 @@ impl Venue for Orderly {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_lost(cx, request, error),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network);
+                if request.is_read() {
+                    self.trade_failed(cx, request, error)
+                } else {
+                    self.trade_lost(
+                        cx,
+                        request,
+                        error.outcome(safe_cex_engine::Outcome::Unknown),
+                    )
+                }
+            }
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),

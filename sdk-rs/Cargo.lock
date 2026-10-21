@@ -3589,6 +3589,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -3602,6 +3603,7 @@ dependencies = [
  "rustls",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "tokio",
@@ -3638,6 +3640,7 @@ dependencies = [
  "safe-cex-engine",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -3843,6 +3846,7 @@ dependencies = [
  "serde",
  "serde_json",
  "starknet-crypto",
+ "zeroize",
 ]
 
 [[package]]
@@ -3902,10 +3906,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "safe-cex-wasm"
+name = "safe-cex-venues"
 version = "0.1.0"
 dependencies = [
- "js-sys",
  "safe-cex-engine",
  "safe-cex-venue-apexomni",
  "safe-cex-venue-asterdex",
@@ -3933,6 +3936,18 @@ dependencies = [
  "safe-cex-venue-txflow",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
+name = "safe-cex-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "wasm-bindgen",

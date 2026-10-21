@@ -15,7 +15,7 @@ use safe_cex_engine::{
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -25,6 +25,14 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone)]
 pub struct InstrumentInfo {
     pub hash: String,
@@ -46,6 +54,8 @@ pub(crate) enum Job {
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
+        /// Instrument ids whose rows were skipped as malformed.
+        malformed: Vec<String>,
         failed: bool,
     },
     Candles {
@@ -102,7 +112,7 @@ struct TickerState {
     subscriptions: u8,
 }
 pub struct Grvt {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
@@ -153,6 +163,7 @@ fn interval(i: Interval) -> Option<&'static str> {
 }
 impl Grvt {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
@@ -297,6 +308,7 @@ impl Grvt {
             Job::Markets {
                 rows: vec![],
                 metadata: HashMap::new(),
+                malformed: vec![],
                 failed: false,
             },
         );
@@ -305,7 +317,9 @@ impl Grvt {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
+        self.public.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(self.public_url()).channel(SocketChannel::Public),
+        ));
         self.public.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -416,7 +430,13 @@ impl Grvt {
             Interval::W1 => "candles-1w",
             _ => return,
         };
-        c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(SocketChannel::Public)
+                    .feed(feed, false),
+            ),
+        );
         c.last_received = cx.now;
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -760,10 +780,14 @@ impl Venue for Grvt {
             Job::Markets {
                 rows,
                 metadata,
+                malformed,
                 failed: _,
             } => {
                 let Ok(i) = serde_json::from_str::<wire::Instrument<'_>>(item) else {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if let Some(id) = instrument_id(item) {
+                        malformed.push(id);
+                    }
                     return;
                 };
                 if i.kind != "PERPETUAL" {
@@ -771,6 +795,9 @@ impl Venue for Grvt {
                 }
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
                     safe_cex_engine::startup::skipped_row(cx);
+                    if !i.id.is_empty() {
+                        malformed.push(i.id.to_string());
+                    }
                     return;
                 }
                 metadata.insert(
@@ -864,8 +891,9 @@ impl Venue for Grvt {
             Job::Trade(request) => self.trade_response(cx, request, response),
             Job::History(request) => self.history_response(cx, *request, response),
             Job::Markets {
-                rows,
-                metadata,
+                mut rows,
+                mut metadata,
+                malformed,
                 failed,
             } => {
                 if failed || rows.is_empty() {
@@ -876,10 +904,22 @@ impl Venue for Grvt {
                     self.startup_retry.failed(cx, ());
                     return;
                 }
+                // A held market whose row is briefly malformed keeps its previous row,
+                // so its positions and orders stay mapped across the refresh.
+                for id in malformed {
+                    if rows.iter().any(|market| market.id == id) {
+                        continue;
+                    }
+                    if let Some(previous) = cx.store.market_by_id(&id)
+                        && let Some(info) = self.metadata.get(&id)
+                    {
+                        rows.push(previous.clone());
+                        metadata.insert(id, info.clone());
+                    }
+                }
                 // The public instrument catalog has no authenticated leverage
                 // rails. Retain those already fetched from the trading API;
                 // replacing signing metadata must not restore the 1..100 defaults.
-                let mut rows = rows;
                 let has_new_markets = rows
                     .iter()
                     .any(|market| cx.store.market_by_id(&market.id).is_none());
@@ -977,10 +1017,12 @@ impl Venue for Grvt {
                 Job::Markets {
                     rows,
                     metadata,
+                    malformed,
                     failed,
                 } => {
                     rows.clear();
                     metadata.clear();
+                    malformed.clear();
                     *failed = false;
                 }
                 Job::Candles { rows, failed, .. } => {
@@ -1250,4 +1292,15 @@ impl Venue for Grvt {
                 .map(|(s, d)| (s.as_str(), &d.book)),
         )
     }
+}
+
+/// The native id of an instrument row that failed to decode, when it has one.
+fn instrument_id(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow, rename = "i", alias = "instrument")]
+        id: std::borrow::Cow<'a, str>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (!row.id.is_empty()).then(|| row.id.into_owned())
 }

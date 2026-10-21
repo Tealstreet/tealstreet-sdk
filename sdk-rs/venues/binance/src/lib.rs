@@ -7,6 +7,7 @@ mod sign;
 mod trading;
 pub mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -39,7 +40,7 @@ pub enum Variant {
     Spot,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -51,6 +52,16 @@ pub struct Options {
     pub recv_window: Option<f64>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 struct Urls {
@@ -204,7 +215,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     urls: Urls,
     paths: &'static paths::Paths,
     credentials: Option<Credentials>,
@@ -233,7 +244,8 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
-    pub fn new(mut options: Options) -> Self {
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         if options.variant == Variant::UsdM && options.portfolio_margin {
             options.variant = Variant::PortfolioMargin;
         }
@@ -425,9 +437,13 @@ impl BinanceFutures {
                 Channel::SpotTicker(index) => format!("spot-ticker-{index}"),
                 _ => "spot-books".to_owned(),
             };
-            cx.connect_feed(url, role, feed, false)
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(url)
+                    .channel(role)
+                    .feed(feed, false),
+            )
         } else {
-            cx.connect_channel(url, role)
+            cx.connect(safe_cex_engine::SocketSpec::new(url).channel(role))
         };
         let connection = self.connection(channel);
         connection.socket = Some(socket);
@@ -635,7 +651,8 @@ impl BinanceFutures {
                     response.status
                 ),
             );
-            self.discovery.failed(cx, 0);
+            self.discovery
+                .failed_after(cx, 0, self.background_paused_until - cx.now);
             return;
         }
         let was_loaded = cx.store.loaded().markets;
@@ -664,7 +681,8 @@ impl BinanceFutures {
         }
         self.catalogue_partial = rejected;
         if rejected {
-            self.discovery.failed(cx, 0);
+            self.discovery
+                .failed_after(cx, 0, self.background_paused_until - cx.now);
         } else {
             self.discovery.succeeded(cx, &0);
         }
@@ -775,7 +793,8 @@ impl BinanceFutures {
                 *reported &= !from;
             }
             self.ticker_seed.finished &= !from;
-            self.discovery.failed(cx, from);
+            self.discovery
+                .failed_after(cx, from, self.background_paused_until - cx.now);
             return;
         }
         self.discovery.succeeded(cx, &from);
@@ -1019,7 +1038,8 @@ impl BinanceFutures {
     fn snapshot_failed(cx: &mut Cx<'_, Pending>, state: &mut BookState, min_delay_ms: f64) {
         state.book.clear();
         state.failures += 1;
-        let backoff = (1_000.0 * 2f64.powi(state.failures as i32 - 1)).min(MAX_SNAPSHOT_BACKOFF_MS);
+        let backoff = Backoff::new(1_000.0, u32::MAX, MAX_SNAPSHOT_BACKOFF_MS)
+            .delay(state.failures.saturating_sub(1));
         state.sync = Sync::Cooldown(cx.set_timer(backoff.max(min_delay_ms)));
     }
 
@@ -1524,7 +1544,10 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::Account(request) => self.on_account_failed(cx, request, error),
-            Pending::ExchangeInfo { .. } => self.discovery.failed(cx, 0),
+            Pending::ExchangeInfo { .. } => {
+                self.discovery
+                    .failed_after(cx, 0, self.background_paused_until - cx.now)
+            }
             Pending::Daily => self.source_finished(cx, source::DAILY, Err(error)),
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),

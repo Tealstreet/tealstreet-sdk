@@ -734,16 +734,68 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
 }
 
+// ETH-USDT is a malformed contract row (identity only); MISSING-USDT is not listed at all.
+const PARTIAL_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125},{"symbol":"ETH-USDT","asset":"ETH"}]}"#;
+const BOTH_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#;
+
+fn with_markets(markets: &str) -> Harness {
+    let mut h = Harness::unstarted();
+    h.respond("/quote/contracts", 200, markets);
+    h.respond("/quote/ticker", 200, DAILY);
+    h.respond("/quote/premiumIndex", 200, PREMIUM);
+    h
+}
+// Prepends a copy of the body's only row on another market.
+fn two_rows(body: &str, symbol: &str, id: &str) -> String {
+    let open = body.find('[').unwrap() + 1;
+    let close = body.rfind(']').unwrap();
+    let extra = body[open..close]
+        .replace("BTC-USDT", symbol)
+        .replace(ORDER_ID, id)
+        .replace("\"client\"", "\"other\"");
+    body.replacen('[', &format!("[{extra},"), 1)
+}
+
 #[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+fn owned_position_and_order_on_uncatalogued_market_are_skipped_and_the_snapshot_commits() {
     let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
     h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
     h.respond(
         POSITIONS,
         200,
-        &POSITION.replace("BTC-USDT", "MISSING-USDT"),
+        &two_rows(POSITION, "MISSING-USDT", ORDER_ID),
     );
-    assert!(!h.engine.store().loaded().positions);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, &two_rows(OPEN, "MISSING-USDT", "77"));
+    let store = h.engine.store();
+    let loaded = store.loaded();
+    assert!(loaded.positions && loaded.balance && loaded.orders);
+    assert_eq!(store.balance().total, 1000.0);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, ORDER_ID);
+    for kind in ["position", "order"] {
+        let needle = format!("Skipping BingX {kind} on uncatalogued market MISSINGUSDT");
+        assert!(h.logs.iter().any(|log| log.contains(&needle)), "{kind}");
+    }
+}
+
+#[test]
+fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    h.fire_at(3000.0);
+    let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
+    h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
     assert!(
         h.logs
             .iter()
@@ -752,19 +804,61 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
 }
 
 #[test]
-fn unknown_working_order_rejects_snapshot_but_terminal_rows_do_not() {
-    for (status, loaded) in [("NEW", false), ("FILLED", true)] {
-        let mut h = Harness::new();
+fn working_order_on_malformed_market_rejects_snapshot_but_other_missing_rows_do_not() {
+    for (symbol, status, loaded) in [
+        ("ETH-USDT", "NEW", false),
+        ("ETH-USDT", "FILLED", true),
+        ("MISSING-USDT", "NEW", true),
+    ] {
+        let mut h = with_markets(PARTIAL_MARKETS);
         h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
         h.respond(
             ORDERS,
             200,
-            &OPEN
-                .replace("BTC-USDT", "MISSING-USDT")
-                .replace("NEW", status),
+            &OPEN.replace("BTC-USDT", symbol).replace("NEW", status),
         );
-        assert_eq!(h.engine.store().loaded().orders, loaded);
+        assert_eq!(
+            h.engine.store().loaded().orders,
+            loaded,
+            "{symbol} {status}"
+        );
     }
+}
+
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+    assert!(h.engine.store().market("ETHUSDT").is_none());
+    h.take(KEY);
+    h.take(MODE);
+    h.requests.clear();
+    let sockets = h.sockets.len();
+    h.fire_at(2000.0);
+    h.respond("/quote/contracts", 200, BOTH_MARKETS);
+    assert!(
+        h.engine.store().market("ETHUSDT").is_some(),
+        "repaired market"
+    );
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+    assert!(
+        h.requests.is_empty(),
+        "no ticker reseed or account restart: {:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert_eq!(h.sockets.len(), sockets);
+    // BTC moved from market row 0 to 1; live ticks must still reach its seeded ticker.
+    let public = h
+        .sockets
+        .iter()
+        .find(|(_, url)| !url.contains("listenKey="))
+        .unwrap()
+        .0;
+    h.event(Event::WsMessage {
+        socket: public,
+        text: r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"61000","fairPrice":"61001","indexPrice":"61002","fundingRate":"0.01"}]}}"#,
+    });
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 61000.0);
 }
 
 #[test]
@@ -1044,6 +1138,51 @@ fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
     assert!(!h.requests.iter().any(|r| r.url.contains(KEY)));
     h.fire_recovery();
     assert_eq!(h.take(KEY).method, Method::Post);
+}
+
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    let listed = h.engine.store().market("BTCUSDT").cloned().unwrap();
+    h.fire_at(2000.0);
+    // BTC-USDT drops out of the list while ETH-USDT stays malformed.
+    h.respond(
+        "/quote/contracts",
+        200,
+        r#"{"code":0,"data":[{"symbol":"SOL-USDT","asset":"SOL","currency":"USDT","status":1,"quantityPrecision":0,"pricePrecision":2,"tradeMinLimit":"1","maxLongLeverage":50},{"symbol":"ETH-USDT","asset":"ETH"}]}"#,
+    );
+    assert_eq!(h.engine.store().market("BTCUSDT"), Some(&listed));
+    assert!(h.engine.store().market("SOLUSDT").is_some());
+    h.fire_at(3000.0);
+    h.respond(POSITIONS, 200, POSITION);
+    if h.requests.iter().any(|r| r.url.contains(ORDERS)) {
+        h.respond(ORDERS, 200, OPEN);
+    }
+    let store = h.engine.store();
+    assert!(store.loaded().positions && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert!(store.order(ORDER_ID).is_some());
+}
+
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    let (mut at, mut delay) = (2000.0, 1000.0);
+    for _ in 0..5 {
+        h.fire_at(at);
+        h.respond("/quote/contracts", 200, PARTIAL_MARKETS);
+        delay *= 2.0;
+        at += delay;
+    }
+    assert!(!h.timers.iter().any(|(_, t)| *t == at), "no sixth re-read");
+    assert!(h.logs.iter().any(|log| log.contains("stops re-reading")));
+    assert!(h.engine.store().market("BTCUSDT").is_some());
 }
 
 #[test]

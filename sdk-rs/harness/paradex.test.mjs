@@ -18,6 +18,18 @@ for (const c of vectors.cases) {
       'PARADEX-TIMESTAMP': String(timestamp), 'PARADEX-SIGNATURE-EXPIRATION': String(timestamp + 86400),
     } };
     assert.equal(venue.verifyRequest(request), true);
+    assert.doesNotThrow(() => venue.createRequestAudit('ts').validate(request));
+    assert.throws(() => venue.createRequestAudit('rust').validate(request), /auth lifetime/);
+    const short = { ...request, headers: { ...request.headers,
+      'PARADEX-STARKNET-SIGNATURE': c.shortAuth.signature,
+      'PARADEX-SIGNATURE-EXPIRATION': String(timestamp + 300),
+    } };
+    assert.equal(venue.verifyRequest(short), true);
+    assert.doesNotThrow(() => venue.createRequestAudit('rust').validate(short));
+    assert.throws(() => venue.createRequestAudit('ts').validate(short), /auth lifetime/);
+    assert.equal(venue.verifyRequest({ ...short, headers: { ...short.headers,
+      'PARADEX-SIGNATURE-EXPIRATION': String(timestamp + 301),
+    } }), false);
     assert.equal(venue.verifyRequest({ ...request, url: `${root}/auth/0x457` }), false);
     assert.equal(venue.verifyRequest({ ...request, body: '{}' }), false);
     assert.equal(venue.verifyRequest({ ...request, headers: { ...request.headers, 'PARADEX-STARKNET-ACCOUNT': '0x999' } }), false);

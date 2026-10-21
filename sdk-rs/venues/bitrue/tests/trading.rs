@@ -1550,7 +1550,13 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
     let error = h
         .notices
         .iter()
-        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message.contains("census transport failed")));
+        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message == "Bitrue order read for E-BTC-USDT failed"));
+    // Transport text stays behind the private diagnostic boundary.
+    assert!(
+        !format!("{:?}", h.notices).contains("census transport failed"),
+        "{:?}",
+        h.notices
+    );
     let done = h.notices.iter().position(|n| {
         matches!(
             n,

@@ -23,6 +23,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 pub enum Pending {
     Markets(Vec<Market>, bool),
     Tickers(Vec<Ticker>, bool),
@@ -73,7 +84,7 @@ impl BookState {
     }
 }
 pub struct PhemexPerpetuals {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     read_credentials: Option<sign::Credentials>,
     public: Connection,
@@ -83,6 +94,8 @@ pub struct PhemexPerpetuals {
     native_symbols: HashMap<String, String>,
     startup_retry: Option<TimerId>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    /// The last product read skipped a malformed row, so an unknown symbol may be listed.
+    catalogue_partial: bool,
     paused_until: f64,
     account: account::State,
     trading: trading::State,
@@ -91,12 +104,16 @@ pub struct PhemexPerpetuals {
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = options
             .key
-            .clone()
-            .zip(options.secret.clone())
+            .as_ref()
+            .zip(options.secret.as_ref())
             .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-            .map(|(key, secret)| sign::Credentials { key, secret });
+            .map(|(key, secret)| sign::Credentials {
+                key: key.clone(),
+                secret: secret.clone(),
+            });
         let read_credentials = options
             .read_credentials
             .as_ref()
@@ -122,6 +139,7 @@ impl PhemexPerpetuals {
             native_symbols: HashMap::new(),
             startup_retry: None,
             discovery: Default::default(),
+            catalogue_partial: false,
             paused_until: 0.,
             account: account::State::new(),
             trading: trading::State::default(),
@@ -139,6 +157,10 @@ impl PhemexPerpetuals {
             Pending::Tickers(vec![], false),
             Some(ArrayAt::Field("result")),
         );
+    }
+    /// The catalogue is complete and no discovery read awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && self.discovery.idle()
     }
     fn native_symbol<'a>(&'a self, symbol: &'a str) -> &'a str {
         self.native_symbols
@@ -204,8 +226,12 @@ impl PhemexPerpetuals {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
-        self.public.socket =
-            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(self.ws())
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -380,6 +406,7 @@ impl Venue for PhemexPerpetuals {
             self.startup_retry = Some(cx.set_timer(self.paused_until - cx.now));
             return;
         }
+        self.catalogue_partial = false;
         self.request(
             cx,
             Method::Get,
@@ -541,6 +568,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Markets(rows, _) => {
                 if let Ok(r) = serde_json::from_str::<Product<'_>>(item) {
                     if r.supported() && !r.valid() {
+                        self.catalogue_partial = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
@@ -550,6 +578,7 @@ impl Venue for PhemexPerpetuals {
                         rows.push(m)
                     }
                 } else {
+                    self.catalogue_partial = true;
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             }
@@ -864,5 +893,22 @@ impl Venue for PhemexPerpetuals {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
+    }
+}
+
+#[cfg(test)]
+mod security_constructor {
+    use super::*;
+    #[test]
+    fn incomplete_credentials_are_retained_only_in_a_scrubbing_owner() {
+        for key in [None, Some(String::new())] {
+            let venue = PhemexPerpetuals::new(Options {
+                key,
+                secret: Some("private-secret".into()),
+                ..Options::default()
+            });
+            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+            assert!(venue.credentials.is_none());
+        }
     }
 }

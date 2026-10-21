@@ -1050,7 +1050,9 @@ fn import_orders_with_socket(
     let req = writes(&actions).pop().unwrap();
     let actions = response(e, &req, json!({"code":"200"}));
     let socket = actions.iter().find_map(|action| match action {
-        Action::WsConnectWithHeaders { socket, .. } => Some(*socket),
+        Action::WsConnect {
+            socket, headers, ..
+        } if !headers.is_empty() => Some(*socket),
         _ => None,
     });
     let requests: Vec<_> = actions

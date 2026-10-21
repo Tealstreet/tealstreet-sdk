@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
@@ -278,6 +279,8 @@ export type ExchangeOptions = {
 export interface ValidateAccountResult {
   error: string;
   balance?: Balance;
+  /** Typed reason when the engine classified the failure (Rust venues), e.g. 'authInvalid'. */
+  kind?: ExchangeErrorKind;
 }
 
 export interface ExchangeAccountConfig {

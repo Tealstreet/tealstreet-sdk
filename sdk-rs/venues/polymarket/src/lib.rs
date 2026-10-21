@@ -29,7 +29,7 @@ const SOCKETS: [&str; 2] = [
     "wss://ws-subscriptions-clob.polymarket.com/ws/user",
 ];
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PolymarketOptions {
     pub api_key: Option<String>,
@@ -40,12 +40,30 @@ pub struct PolymarketOptions {
     pub funder_address: Option<String>,
     pub market_slugs: Option<Vec<String>>,
 }
-#[derive(Clone, Debug, Default)]
+safe_cex_crypto::redacted_debug!(PolymarketOptions);
+impl safe_cex_crypto::secrets::EraseSecrets for PolymarketOptions {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.api_key);
+        safe_cex_crypto::secrets::erase(&mut self.api_secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_passphrase);
+    }
+}
+#[derive(Clone, Default)]
 pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub polymarket: Option<PolymarketOptions>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        if let Some(options) = self.polymarket.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(options);
+        }
+    }
+}
+
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
@@ -105,7 +123,7 @@ struct CandleSubscription {
     last: f64,
 }
 pub struct Polymarket {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
     pub(crate) credentials: Option<sign::Credentials>,
@@ -149,6 +167,7 @@ fn tick_supported(tick: f64) -> bool {
 }
 impl Polymarket {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let address = options
             .key
             .as_deref()
@@ -234,6 +253,13 @@ impl Polymarket {
         self.skipped_slugs.contains(slug)
             || self.skipped_slugs.contains("unknown")
             || (slug.is_empty() && !self.skipped_slugs.is_empty())
+    }
+    /// Every catalogue and midpoint seed read has succeeded and none awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        self.public_retry.idle()
+            && self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty()
     }
     fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
         let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
@@ -326,16 +352,17 @@ impl Polymarket {
         if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
-        c.socket = Some(cx.connect_feed(
-            SOCKETS[index],
-            if index == 0 {
-                SocketChannel::Public
-            } else {
-                SocketChannel::Private
-            },
-            if index == 0 { "market" } else { "user" },
-            true,
-        ));
+        c.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(SOCKETS[index])
+                    .channel(if index == 0 {
+                        SocketChannel::Public
+                    } else {
+                        SocketChannel::Private
+                    })
+                    .feed(if index == 0 { "market" } else { "user" }, true),
+            ),
+        );
     }
     fn subscription(&self, cx: &mut Cx<'_, Pending>, ids: Vec<String>, operation: Option<&str>) {
         if ids.is_empty() {

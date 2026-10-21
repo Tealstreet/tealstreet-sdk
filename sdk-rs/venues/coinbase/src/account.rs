@@ -1,4 +1,5 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -791,9 +792,13 @@ impl Coinbase {
             && *attempt < 3
         {
             *attempt += 1;
-            *timer = Some(cx.set_timer(
-                (1000.0 * 2f64.powi(i32::from(*attempt))).max(self.account.backoff_until - cx.now),
-            ));
+            *timer = Some(
+                cx.set_timer(
+                    Backoff::new(1_000.0, 3, f64::INFINITY)
+                        .delay(u32::from(*attempt))
+                        .max(self.account.backoff_until - cx.now),
+                ),
+            );
             return;
         }
         let rows = self.take_deferred(id);
@@ -976,10 +981,12 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect_channel(
-            "wss://advanced-trade-ws-user.coinbase.com",
-            SocketChannel::Private,
-        ));
+        self.account.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
+                    .channel(SocketChannel::Private),
+            ),
+        );
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -1933,7 +1940,8 @@ impl Coinbase {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 5 {
                     self.account.startup_failures += 1;
                     let t = cx.set_timer(
-                        (1000.0 * 2f64.powi(i32::from(self.account.startup_failures)))
+                        Backoff::new(1_000.0, 5, f64::INFINITY)
+                            .delay(u32::from(self.account.startup_failures))
                             .max(self.account.backoff_until - cx.now),
                     );
                     self.account.startup_retry = Some((t, req));
@@ -1953,7 +1961,8 @@ impl Coinbase {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 3 {
                     self.account.startup_failures += 1;
                     let t = cx.set_timer(
-                        (1000.0 * 2f64.powi(i32::from(self.account.startup_failures)))
+                        Backoff::new(1_000.0, 5, f64::INFINITY)
+                            .delay(u32::from(self.account.startup_failures))
                             .max(self.account.backoff_until - cx.now),
                     );
                     self.account.startup_retry = Some((t, req));

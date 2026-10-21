@@ -17,22 +17,35 @@ struct Feeds {
 }
 impl Feeds {
     fn connect(cx: &mut Cx<'_, ()>) {
-        let socket = cx.connect_channel("wss://same.test/feed", SocketChannel::Public);
+        let socket = cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://same.test/feed").channel(SocketChannel::Public),
+        );
         cx.send(socket, "public");
         cx.close(socket);
-        cx.connect_binary_channel("wss://binary.test/feed", SocketChannel::Public);
-        cx.connect_with_headers_channel(
-            "wss://same.test/feed",
-            vec![("Authorization", "public".into())],
-            SocketChannel::Public,
+        cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://binary.test/feed")
+                .channel(SocketChannel::Public)
+                .binary(),
         );
-        cx.connect_feed("wss://same.test/feed", SocketChannel::Public, "books", true);
+        cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://same.test/feed")
+                .headers(vec![("Authorization", "public".into())])
+                .channel(SocketChannel::Public),
+        );
+        cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://same.test/feed")
+                .channel(SocketChannel::Public)
+                .feed("books", true),
+        );
         cx.set_timer(1000.);
-        cx.connect_channel("wss://same.test/feed", SocketChannel::Private);
-        cx.connect_with_headers_channel(
-            "wss://same.test/feed",
-            vec![("Authorization", "private".into())],
-            SocketChannel::Business,
+        cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://same.test/feed")
+                .channel(SocketChannel::Private),
+        );
+        cx.connect(
+            safe_cex_engine::SocketSpec::new("wss://same.test/feed")
+                .headers(vec![("Authorization", "private".into())])
+                .channel(SocketChannel::Business),
         );
     }
 }
@@ -198,9 +211,6 @@ fn socket_policy_suppresses_public_roles_on_every_attempt_preserves_same_url_aut
                 .iter()
                 .filter_map(|action| match action {
                     Action::WsConnect {
-                        channel, socket, ..
-                    }
-                    | Action::WsConnectWithHeaders {
                         channel, socket, ..
                     } => {
                         assert_ne!(socket.0, 0);

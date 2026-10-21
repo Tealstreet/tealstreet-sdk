@@ -10,6 +10,7 @@ import type { Store } from '../../store/store.interface';
 import type {
   Candle,
   AccountGreeks,
+  ClosedPnlEntry,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
@@ -17,8 +18,10 @@ import type {
   ExecutionsOptions,
   FetchedLeverage,
   HistoricalOrder,
+  HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
+  Market,
   OHLCVOptions,
   OptionChainQuery,
   OptionChainRow,
@@ -35,25 +38,25 @@ import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
-import bs58 from 'bs58';
-
-import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
+import type { ExchangeErrorKind } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
+import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
+import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
+import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import {
-  ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
   hasAsterDEXV3AuthContext,
-  isAsterDEXAddress,
   isAsterDEXStpMode,
-  isAsterDEXV3PrivateKey,
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
@@ -66,7 +69,10 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
+import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
+import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -80,6 +86,7 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
@@ -147,12 +154,44 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
+/**
+ * A hosted account: no local secret, signed by the browser through `remoteSigner`.
+ * Paradex and Polymarket keep their signing key in `key`, and Lighter runs read-only
+ * without one, as TS does, so none of them is keyless here.
+ */
+export const isKeylessRemoteSigned = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  Boolean(options.remoteSigner) &&
+  !options.secret &&
+  !(name === 'asterdex' && options.auth?.privateKey) &&
+  !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
+
+/**
+ * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
+ * account stays on the TS venue, which merges spot markets into the perp account; the
+ * engine's perp venue does not, and refuses the option when constructed directly. A
+ * keyless remote-signed account stays on TS too, which signs through the browser.
+ */
+export const runsOnRustEngine = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  options.engine === 'rust' &&
+  isRustVenue(name) &&
+  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
+  !isKeylessRemoteSigned(name, options);
+
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
+const BALANCE_INFO_SYNC_MS = 2_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
@@ -420,6 +459,7 @@ export class RustEngineExchange extends BaseExchange {
         return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
       };
     }
+    if (capabilities.closedPositions) this.fetchClosedPnl = this.fetchReportedClosedPnl;
   }
 
   private fetchFilledQuantities = async (ids: string[]) => {
@@ -459,6 +499,18 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.name === 'binance') {
       // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
+    // Journal paths as the TS venues declare them; bybitinverse declares none and keeps the base refusal.
+    if (['bybit', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
+      this.fetchHistoricalPositions = this.bybitJournal;
+    }
+    if (okxNames.has(this.name)) this.fetchHistoricalPositions = this.okxJournal;
+    if (this.name === 'blofin') this.fetchHistoricalPositions = this.blofinJournal;
+    if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(this.name)) {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
+    if (['hyperliquid', 'paradex'].includes(this.name)) {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
     }
     if (this.name === 'woo') {
@@ -544,27 +596,18 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(this.options, this.name);
-    if (this.name === 'breakoutprop' && (!this.options.key || !this.options.secret)) {
-      throw new Error('BreakoutProp market data requires a legacy DXtrade username and password');
-    }
     if (this.name === 'paradex') {
       if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
         throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
       }
     }
-    if (this.name === 'asterdex' && !this.options.publicDataOnly) {
-      const auth = resolveAsterDEXV3AuthContext(this.options);
-      if (
-        resolveAsterDEXApiVersion(this.options) === 'v1' &&
-        isAsterDEXAddress(this.options.key) &&
-        isAsterDEXV3PrivateKey(this.options.secret) &&
-        !auth.userAddress
-      ) {
-        throw new Error(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
-      }
-    }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error('Rust Hyperliquid currently supports perpetual markets only');
+      throw new Error(
+        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
+      );
+    }
+    if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
+      throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     if (
       ![
@@ -576,42 +619,13 @@ export class RustEngineExchange extends BaseExchange {
         'coinbase',
         'coinbasespot',
         'polymarket',
+        'breakoutprop',
       ].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
-    }
-    if (this.name === 'polymarket' && !this.isPublicDataOnly) {
-      if (!/^(?:0x)?[a-fA-F0-9]{64}$/.test(this.options.key)) {
-        throw new Error('Polymarket requires a local 32-byte wallet private key');
-      }
-      const { apiKey, apiSecret, apiPassphrase, signerType = 0, funderAddress } = this.options.polymarket ?? {};
-      const credentials = [apiKey, apiSecret, apiPassphrase];
-      if (
-        credentials.some((value) => value !== undefined) &&
-        !credentials.every((value) => typeof value === 'string' && value.trim())
-      ) {
-        throw new Error('Polymarket requires all three L2 API credentials together');
-      }
-      if (![0, 1, 2, 3].includes(signerType)) throw new Error('Invalid Polymarket signature type');
-      if ((signerType !== 0 || funderAddress !== undefined) && !/^0x[a-fA-F0-9]{40}$/.test(funderAddress ?? '')) {
-        throw new Error('Polymarket requires a valid funder address for non-EOA signing');
-      }
-    }
-    if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
-      if (!this.options.applicationId || !/^[A-Za-z0-9_-]+$/.test(this.options.applicationId)) {
-        throw new Error('Orderly private applicationId is required');
-      }
-      for (const key of [this.options.key, this.options.secret]) {
-        const encoded = key?.replace(/^ed25519:/, '') ?? '';
-        try {
-          if (bs58.decode(encoded).length !== 32) throw new Error();
-        } catch {
-          throw new Error('Orderly requires base58-encoded 32-byte key and secret');
-        }
-      }
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -670,7 +684,21 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
+        ...([
+          'backpack',
+          'bitrue',
+          'breakoutprop',
+          'binance',
+          'binancepm',
+          'binancespot',
+          'binanceinverse',
+          'bybit',
+          'bybitinverse',
+          'bybitspot',
+          'bybitdemo',
+          'hyrotrader',
+          'mexc',
+        ].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -728,6 +756,8 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },
+        // The engine reports account sections missing at startup only when untilLoaded waits for them.
+        accountStartup: !this.isPublicDataOnly,
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
@@ -747,7 +777,8 @@ export class RustEngineExchange extends BaseExchange {
           this.emitter.emit('deactivate');
         },
         onStartupFailed: (detail) => {
-          this.startupFailure ??= new Error(detail.message);
+          // Keeps kind/venueCode so start() and validateAccount can branch on them.
+          this.startupFailure ??= new ExchangeError(detail.message, detail);
           for (const wake of this.startupWaiters) wake();
         },
       },
@@ -921,6 +952,29 @@ export class RustEngineExchange extends BaseExchange {
     if (this.fetchAccountTier && !this.isPublicDataOnly) {
       void this.syncLighterTier();
       this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+    // Interval only: a background read never interleaves with the caller's first commands.
+    if (this.capabilityRecord?.balanceInfo && !this.isPublicDataOnly) {
+      this.flushTimers.push(setInterval(() => void this.syncBalanceInfo(), BALANCE_INFO_SYNC_MS));
+    }
+  };
+
+  private balanceInfoJson?: string;
+
+  /**
+   * The venue's raw account payload as TS stores it in `balance.info` (Bybit: the wallet
+   * account with `accountType` and the `coin` collateral array), read by the web margin UI.
+   */
+  private syncBalanceInfo = async () => {
+    try {
+      const info = await this.command<Record<string, unknown> | null>({ op: 'fetchBalanceInfo' }, { report: false });
+      if (!info || this.isDisposed) return;
+      const json = JSON.stringify(info);
+      if (json === this.balanceInfoJson) return;
+      this.balanceInfoJson = json;
+      this.store.update({ balance: { ...this.store.balance, info } });
+    } catch {
+      // The engine reports wallet-read failures itself; the last payload stays.
     }
   };
 
@@ -1186,10 +1240,17 @@ export class RustEngineExchange extends BaseExchange {
         clearTimeout(timeout);
         resolve(result);
       };
+      // Venues log the reason just before StartupFailed in the same batch; let the typed failure win.
       const onError = (message: unknown) =>
-        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        queueMicrotask(() => {
+          if (this.startupFailure) return loaded();
+          finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        });
       const loaded = () => {
-        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.startupFailure) {
+          const { kind } = this.startupFailure as { kind?: ExchangeErrorKind };
+          return finish(kind ? { error: this.startupFailure.message, kind } : { error: this.startupFailure.message });
+        }
         if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
         if (
           started &&
@@ -1644,6 +1705,115 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchIncomeHistoryRange = (startTime: number, endTime: number, incomeType?: string) =>
     this.command<IncomeRecord[]>({ op: 'fetchIncome', incomeType, from: startTime, to: endTime });
+
+  /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
+  private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }, report = true) =>
+    this.command<Array<Record<string, any>>>(
+      { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
+      { report },
+    );
+
+  /**
+   * Journal paths read the reported closed axis and THROW on a failed read, as TS does: an
+   * under-counted history presented as complete is the failure the journal refuses.
+   */
+  private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from, to }, false);
+    // Closed-PnL rows carry no hedge leg; the order axis does (see bybit.exchange.ts).
+    const legs = new Map<string, PositionSide | 'both'>();
+    try {
+      for (const order of await this.fetchHistoricalOrders({ from, to })) {
+        if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
+      }
+    } catch {
+      throw new Error('bybit: could not read the order axis to resolve hedge legs');
+    }
+    return aggregateBybitClosedPnl(rows, {
+      account: opts.account,
+      resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+    });
+  };
+
+  private okxJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const market = this.store.marketsById[String(row.instId ?? '')];
+      // As TS: inverse rows need a reference price the adapter lacks, so they are skipped.
+      if (!market || market.isInverse) continue;
+      const record = mapOkxPositionHistory(row, {
+        account: opts.account,
+        toBase: (contracts: number, instId: string) =>
+          this.okxContractsToBase(contracts, this.store.marketsById[instId] ?? market),
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
+  private blofinJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBlofinPositionHistory(row, {
+        account: opts.account,
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
+  /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
+  private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) return [];
+    let rows: Array<Record<string, any>>;
+    try {
+      // TS okx/blofin treat an empty symbol as account-wide; bybit sends it as given.
+      const symbol = okxNames.has(this.name) || this.name === 'blofin' ? opts.symbol || undefined : opts.symbol;
+      rows = await this.fetchClosedPositionRows({ ...opts, symbol });
+    } catch {
+      return [];
+    }
+    const account = opts.accountName || '';
+    const entries: ClosedPnlEntry[] = [];
+    for (const row of rows) {
+      let entry: ClosedPnlEntry | null;
+      if (okxNames.has(this.name)) {
+        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
+        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
+      } else if (this.name === 'blofin') {
+        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
+      } else {
+        entry = mapBybitClosedPnl(row, account, this.name === 'bybitinverse' || isBybitInverseSymbol(row.symbol));
+      }
+      if (entry) entries.push(entry);
+    }
+    return entries.sort((a, b) => b.closedTime - a.closedTime);
+  };
+
+  /**
+   * OKX `contractsToBase`. Engine markets carry no `ctValCcy`; an OKX inverse swap's
+   * contract value is always quote-denominated, which is the case TS converts by price.
+   */
+  private okxContractsToBase = (contractsNative: number, market: Market, referencePrice?: number) => {
+    const contractSize = market.contractSize || 1;
+    if (!market.isInverse) return multiply(contractsNative, contractSize);
+    const ticker = this.store.tickersById[market.id] ?? this.store.tickersBySymbol[market.symbol];
+    const price = [referencePrice, ticker?.mark, ticker?.last].find(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
+    );
+    return price ? (contractsNative * contractSize) / price : 0;
+  };
 
   fetchPublicTrades = (symbol: string, limit?: number) =>
     this.command<PublicTrade[]>({ op: 'fetchPublicTrades', symbol, limit });

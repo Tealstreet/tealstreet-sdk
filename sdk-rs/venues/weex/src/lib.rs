@@ -8,6 +8,7 @@ mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::ErrorKind;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
@@ -27,6 +28,17 @@ pub struct Options {
     pub passphrase: Option<String>,
     /// Only a host able to attach authenticated upgrade headers may enable it.
     pub private_ws_headers: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub struct Pending {
@@ -155,17 +167,18 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let supplied = [&options.key, &options.secret, &options.passphrase]
             .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
         let incomplete_credentials =
             !options.public_data_only && supplied.contains(&true) && supplied.contains(&false);
-        let read_credentials = options.read_credentials.map(|mut read| {
+        let read_credentials = options.read_credentials.clone().map(|mut read| {
             if read.passphrase.is_none() {
                 read.passphrase = options.passphrase.clone();
             }
             read
         });
-        let credentials = match (options.key, options.secret, options.passphrase) {
+        let credentials = match (&options.key, &options.secret, &options.passphrase) {
             (Some(key), Some(secret), Some(passphrase))
                 if !options.public_data_only
                     && !key.is_empty()
@@ -173,9 +186,9 @@ impl WeexFutures {
                     && !passphrase.is_empty() =>
             {
                 Some(sign::Credentials {
-                    key,
-                    secret,
-                    passphrase,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    passphrase: passphrase.clone(),
                 })
             }
             _ => None,
@@ -389,8 +402,12 @@ impl WeexFutures {
         true
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket =
-            Some(cx.connect_channel(paths::PUBLIC_WS, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(
+            cx.connect(
+                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS)
+                    .channel(safe_cex_engine::SocketChannel::Public),
+            ),
+        );
         // Suppressed public feeds never open; supervising them would only churn retries.
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.supervisor.connecting(cx);
@@ -537,8 +554,8 @@ impl WeexFutures {
             b.last = None;
             b.buffer.clear();
             b.failures += 1;
-            let delay = (1000.0 * 2f64.powi(b.failures.min(6) as i32 - 1))
-                .min(60_000.0)
+            let delay = Backoff::new(1_000.0, 5, 60_000.0)
+                .delay(b.failures.saturating_sub(1))
                 .max(self.paused_until - cx.now);
             b.retry = Some(cx.set_timer(delay));
         }
@@ -1187,3 +1204,11 @@ impl Venue for WeexFutures {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for WeexFutures {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

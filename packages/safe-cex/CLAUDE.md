@@ -170,6 +170,12 @@ Shared-feed accounts require a fresh provider attachment and account init;
 their closed transferred port cannot be reused. Module-wide WASM initialization
 and sibling accounts remain independent of one account's terminal state.
 
+A terminal `StartupFailed` rejects `start()` with an `ExchangeError` that keeps
+the engine's `kind` and `venueCode`; `validateAccount` returns the same `kind`
+beside `error` (the typed failure wins over the error log venues emit just
+before it), so callers can branch on `authInvalid`/`authPermission` instead of
+matching text. A bare deactivation carries no `kind`.
+
 Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
 positive integer deadline up to 2147482647 ms; long paginated queries may need
 a larger value. The Rust worker RPC allows one additional second for delivery;
@@ -361,6 +367,15 @@ part of the venue contract. Never turn a transport/auth/rate-limit failure into
 documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
+
+The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
+for typed engine errors (`classifiedError`), and
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
+specific kinds (auth, rate limit, venue unavailable, network/timeout) win over
+text; catch-all kinds (`rejected`, `invalidInput`, `internal`, `unsupported`)
+only replace the `unknown` fallback, because text patterns know venue auth codes
+the engine leaves generic. Hosts must pass `opts.classified` from their `'error'`
+listener into `processMessage` for this to apply.
 
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
@@ -659,7 +674,11 @@ is how a host opts in; the web main thread registers one in
 `hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
 import a telemetry client or POST to a Tealstreet route from this package** —
 call `reportException` / `reportEvent` and let the host decide. Workers still
-ship errors through the `sendToSentry` op, not the sink.
+ship errors through the `sendToSentry` op, not the sink. `emitAndLogError` (the path every command rejection takes,
+in the worker, main thread and exchange-server) and `ExchangeWorker.logError`
+tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
+and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
+the kind rather than venue text.
 
 ## Proxy & Tunnel Architecture
 
