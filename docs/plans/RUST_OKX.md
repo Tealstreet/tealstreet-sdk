@@ -251,3 +251,7 @@ Validation: 443 OKX/Binance native tests, 15 TS transport tests, 162 focused
 harness tests, package typecheck, touched ESLint, Rust fmt/strict Clippy/bans
 pass. The transport regression failed against the old URLs before the fix.
 
+
+CI exposed the shared native routing golden fixture retaining six old relay
+URLs; corrected only those ports. Its TS generator comparison and native
+selector-consumer regression both pass.
