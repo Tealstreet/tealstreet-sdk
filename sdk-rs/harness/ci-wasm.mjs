@@ -15,6 +15,7 @@ const INPUTS = Object.freeze([
   'sdk-rs/harness/install-binaryen.sh', 'sdk-rs/harness/ci-wasm.mjs',
   '.github/workflows/rust.yml', 'package.json', '.cargo', 'rust-toolchain', 'rust-toolchain.toml',
   'sdk-rs/rust-toolchain',
+  'packages/safe-cex/src/exchanges/rust/construction-rules.json',
 ]);
 const FILES = Object.freeze(['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'package.json']);
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');

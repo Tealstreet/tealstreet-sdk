@@ -166,7 +166,10 @@ never from venue names, and adopts it once the engine exists (`ensureHost` or
 `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
 published rails, and `onMetadata` answers from those rails once a metadata
 refresh has loaded them but asks the venue for a symbol not yet refreshed (the
-worker only asks when the active symbol has no rails). Missing history axes
+worker only asks when the active symbol has no rails). `onReadAndMetadata`
+keeps explicit reads fresh and also refreshes a selected symbol through
+`updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
+venues. Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
 once the engine exists. `account` also gates the engine: `FetchAccount` to a
 venue whose record says `unsupported` is refused before the venue runs, so a
