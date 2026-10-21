@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_engine::{Action, Command, Event, Notice};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -297,15 +297,15 @@ fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
 
 #[test]
 fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_mexc::MexcFutures::new(
-        safe_cex_venue_mexc::Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_mexc::MexcFutures::new(safe_cex_venue_mexc::Options {
             recv_window: None,
             read_credentials: None,
             key: Some("key".into()),
             secret: Some("secret".into()),
             public_data_only: false,
-        },
-    ));
+        }),
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, MARKETS);
@@ -840,7 +840,7 @@ fn bad_asset_row_keeps_its_stored_balance_while_peers_update() {
 
 #[test]
 fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
-    let mut e = Engine::new(MexcFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         read_credentials: None,
         public_data_only: false,
         key: Some("replay-key".into()),
@@ -1281,7 +1281,7 @@ fn missing_order_identity_protects_known_orders_and_commits_its_peers() {
 }
 
 fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
-    let mut e = Engine::new(MexcFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         read_credentials: None,
         public_data_only: false,
         recv_window: None,

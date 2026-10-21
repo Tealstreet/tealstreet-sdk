@@ -27,7 +27,7 @@ fn request(e: &mut Engine<PhemexPerpetuals>, path: &str) -> RequestId {
         .unwrap()
 }
 fn started() -> (Engine<PhemexPerpetuals>, SocketId) {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -346,7 +346,7 @@ fn incomplete_book_snapshot_is_not_committed() {
 }
 #[test]
 fn invalid_supported_product_rejects_the_entire_seed() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -410,7 +410,7 @@ fn malformed_full_ws_snapshot_heals_without_publishing_an_empty_book() {
 
 #[test]
 fn startup_retry_waits_for_the_complete_rate_limit_pause() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -462,7 +462,7 @@ fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

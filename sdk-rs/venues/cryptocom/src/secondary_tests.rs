@@ -1,6 +1,6 @@
 use super::*;
+use safe_cex_engine::ReadCredentials;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Engine, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -35,7 +35,7 @@ fn probe(
 }
 #[test]
 fn posted_read_keeps_primary_identity_with_secondary_configured() {
-    let mut engine = Engine::new(probe(Cryptocom::new(options())));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Cryptocom::new(options())));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine);
     assert_eq!(requests.len(), 1);

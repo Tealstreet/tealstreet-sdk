@@ -36,7 +36,7 @@ fn retry(e: &mut Engine<Blofin>) -> RequestId {
 }
 #[test]
 fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
-    let mut e = Engine::new(Blofin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
@@ -94,7 +94,7 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
 }
 #[test]
 fn catalogue_transport_failure_retries_without_partial_rows() {
-    let mut e = Engine::new(Blofin::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
     let request = e
         .drain_actions()
@@ -121,7 +121,7 @@ fn catalogue_transport_failure_retries_without_partial_rows() {
 }
 #[test]
 fn unknown_ticker_source_retains_previous_quotes_retries_and_accepts_valid_neighbors() {
-    let mut e = Engine::new(Blofin::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
     let request = e
         .drain_actions()
@@ -171,7 +171,7 @@ fn unknown_ticker_source_retains_previous_quotes_retries_and_accepts_valid_neigh
 }
 #[test]
 fn late_ticker_seed_preserves_live_fields_missing_peers_and_funding_only_updates() {
-    let mut e = Engine::new(Blofin::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
     let request = e
         .drain_actions()
@@ -235,7 +235,7 @@ fn late_ticker_seed_preserves_live_fields_missing_peers_and_funding_only_updates
 }
 #[test]
 fn empty_successful_catalogue_is_retried_not_committed() {
-    let mut e = Engine::new(Blofin::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

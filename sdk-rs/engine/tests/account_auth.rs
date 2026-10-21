@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{
@@ -114,7 +115,7 @@ impl Venue for AccountReads {
 }
 
 fn engine(streamed: bool, tagged: bool, delegated: bool) -> Engine<AccountReads> {
-    let mut engine = Engine::new(AccountReads {
+    let mut engine = support::seeded_engine(AccountReads {
         streamed,
         tagged,
         delegated,
@@ -325,7 +326,7 @@ fn invalid_utf8_buffer_cannot_report_http_status_auth() {
 #[test]
 fn response_event_time_preserves_time_sensitive_classifier_admission() {
     for (now, accepted) in [(1.999, true), (2., false), (3., false)] {
-        let mut engine = Engine::new(AccountReads {
+        let mut engine = support::seeded_engine(AccountReads {
             streamed: false,
             tagged: true,
             delegated: false,

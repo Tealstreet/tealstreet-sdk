@@ -29,7 +29,7 @@ pub fn reply(e: &mut Driver, r: &HttpRequest, status: u16, body: &str) {
     );
 }
 pub fn ready() -> (Driver, SocketId) {
-    let mut e = Engine::new(
+    let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
             ..Options::default()

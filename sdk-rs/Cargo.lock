@@ -3569,7 +3569,6 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "franklin-crypto",
- "getrandom 0.2.17",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
  "goldilocks-crypto",
@@ -3599,6 +3598,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "futures-util",
+ "getrandom 0.2.17",
  "reqwest",
  "rustls",
  "safe-cex-engine",
@@ -3767,7 +3767,6 @@ version = "0.1.0"
 dependencies = [
  "alloy-dyn-abi",
  "base64 0.22.1",
- "getrandom 0.2.17",
  "miniz_oxide 0.8.9",
  "rmp-serde",
  "safe-cex-crypto",
@@ -3781,7 +3780,6 @@ name = "safe-cex-venue-kraken"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "getrandom 0.2.17",
  "hmac 0.12.1",
  "safe-cex-crypto",
  "safe-cex-engine",
@@ -3805,7 +3803,6 @@ dependencies = [
 name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
- "getrandom 0.2.17",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
@@ -3876,7 +3873,6 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-primitives",
  "base64 0.22.1",
- "getrandom 0.2.17",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
@@ -3956,6 +3952,7 @@ dependencies = [
 name = "safe-cex-wasm"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "js-sys",
  "safe-cex-engine",
  "safe-cex-venues",

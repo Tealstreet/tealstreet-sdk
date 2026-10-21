@@ -12,7 +12,7 @@ struct Client {
 impl Client {
     fn new(options: Options) -> Self {
         let mut client = Self {
-            engine: Engine::new(Lighter::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
             timers: vec![],
         };
         client.engine.start(NOW);

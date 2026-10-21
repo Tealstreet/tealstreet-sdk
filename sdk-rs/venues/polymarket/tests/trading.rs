@@ -1,7 +1,6 @@
+use safe_cex_engine::Engine;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
 use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions};
 use serde_json::{Value, json};
 
@@ -23,7 +22,7 @@ impl H {
     }
     fn configured(signer_type: u8, funder: Option<&str>) -> Self {
         let mut h = Self {
-            e: Engine::new(Polymarket::new(Options {
+            e: safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
                 key: Some(KEY.into()),
                 polymarket: Some(PolymarketOptions {
                     api_key: Some("api-test".into()),

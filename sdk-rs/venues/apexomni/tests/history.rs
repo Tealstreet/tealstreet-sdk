@@ -1,10 +1,10 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query};
+use safe_cex_engine::{Action, Command, Event, Notice, Query};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use serde::Deserialize;
 use support::*;
 fn seeded_socket() -> (TestEngine, safe_cex_engine::SocketId) {
-    let mut e = Engine::new(ApexOmni::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),

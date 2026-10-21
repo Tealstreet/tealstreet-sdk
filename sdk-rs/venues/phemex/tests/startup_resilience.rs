@@ -8,7 +8,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":0,"data":{"perpProductsV2":[{"broken":true},{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"###;
 fn public_engine() -> Engine<PhemexPerpetuals> {
-    Engine::new(PhemexPerpetuals::new(Options {
+    safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -76,7 +76,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(PhemexPerpetuals::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

@@ -102,6 +102,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 
 [lints]

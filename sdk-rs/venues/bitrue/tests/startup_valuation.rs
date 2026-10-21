@@ -23,7 +23,7 @@ impl Harness {
     }
     fn with_markets(markets: &str) -> Self {
         let mut h = Self {
-            engine: Engine::new(Bitrue::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()

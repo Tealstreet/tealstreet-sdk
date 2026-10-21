@@ -1,6 +1,6 @@
 //! Deployment oracles: TS LIGHTER_DEPLOYMENT_PROFILES and builder-fee defaults.
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event};
+use safe_cex_engine::{Action, Command, Event};
 use safe_cex_venue_lighter::Lighter;
 use serde_json::json;
 use support::*;
@@ -40,7 +40,7 @@ fn every_deployment_uses_its_rest_websocket_and_quote_profile() {
         let mut opts = options();
         opts.robinhood = robinhood;
         opts.testnet = testnet;
-        let mut engine = Engine::new(Lighter::new(opts));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(opts));
         engine.start(NOW);
         let mut sockets = 0;
         let mut request_paths = Vec::new();

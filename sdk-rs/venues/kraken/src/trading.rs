@@ -312,7 +312,10 @@ impl Kraken {
             OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
         );
         let reduce_only = protective || opts.reduce_only == Some(true);
-        let client = format!("ts_{}", safe_cex_crypto::uuid::uuid()?);
+        let client = format!(
+            "ts_{}",
+            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+        );
         let mut params = vec![
             ("broker", "AA73 N84G 7YOF J26Y".to_owned()),
             ("cliOrdId", client.clone()),

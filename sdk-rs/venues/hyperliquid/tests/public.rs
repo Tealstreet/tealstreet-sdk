@@ -29,7 +29,7 @@ fn request(engine: &mut Engine<Hyperliquid>) -> RequestId {
         .unwrap()
 }
 fn start() -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = Engine::new(Hyperliquid::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -66,7 +66,7 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
         (false, false, false),
         (false, true, true),
     ] {
-        let mut e = Engine::new(Hyperliquid::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
             public_data_only,
             application_id: identity.then(|| "0x0000000000000000000000000000000000000001".into()),
             ..Options::default()
@@ -233,7 +233,8 @@ fn incomplete_metadata_never_commits_and_schedules_a_read_retry() {
         r#"[[],{"universe":[]}]"#,
         r#"[{"universe":[{"name":"BTC","szDecimals":5}]},[]]"#,
     ] {
-        let mut e = Engine::new(Hyperliquid::new(Options::default()));
+        let mut e =
+            safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
         e.start(0.0);
         let id = request(&mut e);
         response(&mut e, id, body);
@@ -298,7 +299,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
 
 #[test]
 fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() {
-    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
     e.start(0.);
     let id = request(&mut e);
     response(
@@ -314,7 +315,7 @@ fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() 
 
 #[test]
 fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
-    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
     e.start(0.);
     for delay in [1000., 2000., 4000., 8000., 16000., 30000., 30000.] {
         let id = request(&mut e);
@@ -351,7 +352,8 @@ fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
 #[test]
 fn a_market_without_a_positive_step_is_skipped_as_malformed() {
     for sz in ["400", "-2147483648"] {
-        let mut e = Engine::new(Hyperliquid::new(Options::default()));
+        let mut e =
+            safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
         e.start(0.);
         let id = request(&mut e);
         response(

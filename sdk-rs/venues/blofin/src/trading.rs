@@ -220,11 +220,14 @@ struct OrderDetail<'a> {
     #[serde(borrow)]
     filled_size: Str<'a>,
 }
-fn minted() -> Result<String, String> {
-    Ok(format!("{BROKER}{}", safe_cex_crypto::uuid::uuid()?)
-        .chars()
-        .take(32)
-        .collect())
+fn minted(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    Ok(format!(
+        "{BROKER}{}",
+        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+    )
+    .chars()
+    .take(32)
+    .collect())
 }
 fn trigger(value: Option<StopTriggerType>) -> &'static str {
     match value {
@@ -411,7 +414,7 @@ impl Blofin {
                 .client_order_id
                 .clone()
                 .map(Ok)
-                .unwrap_or_else(minted)?,
+                .unwrap_or_else(|| minted(cx))?,
             order_type: if protective {
                 None
             } else if conditional {
@@ -576,7 +579,7 @@ impl Blofin {
         for quantity in quantities {
             let mut p = payload.clone();
             if !result.is_empty() {
-                p.client_order_id = minted()?;
+                p.client_order_id = minted(cx)?;
             }
             p.size = num::format(if protective && quantity == 0.0 {
                 -1.0
@@ -1206,7 +1209,13 @@ impl Blofin {
         if matches!(&job.commit, Commit::Leverage { .. }) && job.steps.len() == 2 {
             let mut prepared = Vec::new();
             while let Some(step) = job.steps.pop_front() {
-                match self.headers(step.path, Method::Post, cx.now, &step.body) {
+                match self.headers(
+                    |bytes| cx.fill_signing_entropy(bytes),
+                    step.path,
+                    Method::Post,
+                    cx.now,
+                    &step.body,
+                ) {
                     Ok(headers) => prepared.push((step, headers)),
                     Err(e) => {
                         self.trade_failed(
@@ -1326,7 +1335,13 @@ impl Blofin {
         } else {
             (Method::Post, step.path.to_owned())
         };
-        let headers = match self.headers(&path, method, cx.now, &step.body) {
+        let headers = match self.headers(
+            |bytes| cx.fill_signing_entropy(bytes),
+            &path,
+            method,
+            cx.now,
+            &step.body,
+        ) {
             Ok(h) => h,
             Err(e) => {
                 self.trade_failed(

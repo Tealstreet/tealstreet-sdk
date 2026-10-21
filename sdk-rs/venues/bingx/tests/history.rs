@@ -17,7 +17,7 @@ struct Harness {
 impl Harness {
     fn new(private: bool) -> Self {
         Self {
-            engine: Engine::new(Bingx::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
                 read_credentials: None,
                 public_data_only: !private,
                 key: private.then(|| "key".into()),

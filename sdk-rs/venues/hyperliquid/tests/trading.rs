@@ -558,12 +558,14 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
 #[test]
 fn signing_failure_restores_cancel_status_without_sending_a_request() {
     let wallet = "0x14791697260e4c9a71f18484c9f997b308e59325";
-    let mut e = Engine::new(Hyperliquid::new(safe_cex_venue_hyperliquid::Options {
-        key: Some(wallet.into()),
-        application_id: Some(wallet.into()),
-        secret: Some("0x00".into()),
-        ..Default::default()
-    }));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(
+        safe_cex_venue_hyperliquid::Options {
+            key: Some(wallet.into()),
+            application_id: Some(wallet.into()),
+            secret: Some("0x00".into()),
+            ..Default::default()
+        },
+    ));
     e.start(1000.0);
     for _ in 0..20 {
         let requests = e

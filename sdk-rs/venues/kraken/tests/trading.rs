@@ -681,7 +681,7 @@ fn queued_protective_amend_rejects_changed_order_before_cancelling() {
 }
 #[test]
 fn fetch_leverage_missing_preferences_is_a_failure() {
-    let mut e = Engine::new(Kraken::new(options()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(options()));
     e.start(NOW);
     let r = http(&mut e, "instruments");
     reply(&mut e, &r, 200, META);

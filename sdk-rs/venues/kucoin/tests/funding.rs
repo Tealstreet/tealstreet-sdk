@@ -12,7 +12,7 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut engine = Engine::new(Kucoin::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
             key: Some("fixture-key".into()),
             secret: Some("fixture-secret".into()),
             passphrase: Some("fixture-passphrase".into()),

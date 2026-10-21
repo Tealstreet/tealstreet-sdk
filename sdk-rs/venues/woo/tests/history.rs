@@ -1,12 +1,12 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
+use safe_cex_engine::{Action, Command, Event, Notice, Query, Response};
 use safe_cex_venue_woo::{Options, Woo};
 use serde::Deserialize;
 use support::*;
 
 const NOW: f64 = 1_786_603_865_910.0;
 fn ready() -> TestEngine {
-    let mut e = Engine::new(Woo::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
         public_data_only: false,
         key: Some("fixture-key".into()),
         secret: Some("fixture-secret".into()),

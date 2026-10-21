@@ -1,6 +1,6 @@
 use super::*;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, Engine, ReadCredentials};
+use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -34,7 +34,8 @@ fn probe(
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(probe(WeexFutures::new(options())));
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(probe(WeexFutures::new(options())));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()
@@ -85,7 +86,7 @@ fn secondary_get_keeps_primary_mutations() {
 fn invalid_secondary_identity_stops_startup_before_io() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = Engine::new(WeexFutures::new(opts));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(opts));
     engine.start(1700000000000.0);
     assert!(
         !engine
@@ -106,7 +107,7 @@ fn public_only_native_account_inherits_primary_passphrase_for_read_validation() 
         }),
         ..Options::default()
     };
-    let mut engine = Engine::new(WeexFutures::new(opts));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(opts));
     engine.start(1700000000000.0);
     assert!(engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
 }

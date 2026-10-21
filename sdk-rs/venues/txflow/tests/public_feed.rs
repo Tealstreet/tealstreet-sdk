@@ -19,7 +19,7 @@ struct Rig {
 }
 impl Rig {
     fn new(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(TxFlow::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
             testnet: true,
             application_id: Some(WALLET.into()),
             secret: Some(format!("0x{:064x}", 1)),

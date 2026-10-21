@@ -34,7 +34,7 @@ fn options(spot: bool) -> Options {
 
 /// Answers every read; `spot_meta` is the body for spotMetaAndAssetCtxs (`None`: HTTP 500).
 fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
-    let mut e = Engine::new(Hyperliquid::new(options(spot)));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(options(spot)));
     e.start(1000.0);
     let (mut socket, mut reads, mut sends) = (None, Vec::new(), Vec::new());
     let (mut logs, mut timers) = (Vec::new(), Vec::new());
