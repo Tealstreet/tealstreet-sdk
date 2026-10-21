@@ -450,3 +450,13 @@ SDK82, host/socket/wire52 and mock Workers9 pass, with SDK typecheck/lint;
 independent SDK/host review is clear. The selected WASM is990638bytes.
 Rebuilt public/all8private replays, combined
 controls and exact-head CI rerun; final measurements/results are posted on PR1325.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify spot total/free/used and explicit OHLCV lower bounds against native
+   mappings and documented fields. Preserve correct behavior where TS differs.
+2. Keep CFM summary unrealized-PnL/equity aggregation unchanged without verified
+   portfolio/spot accounting evidence; record the unresolved risk precisely.
+3. Update audit/caller notes and independent review. Re-run relevant existing
+   regressions; avoid runtime changes where current behavior is already correct.
+   A documentation-only family PR is exempt from the code merge hold.
