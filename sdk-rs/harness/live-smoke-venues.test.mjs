@@ -5,6 +5,21 @@ import { liveSmokeProfile, LIVE_SMOKE_VENUES } from './live-smoke-venues.mjs';
 const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
   key.endsWith('API_VERSION') ? 'v3' : 'fake-credential' });
 
+test('OKX smoke profiles use default TLS on the exact live/demo entity host', () => {
+  for (const [name, mode, host] of [
+    ['okx', 'mainnet', 'ws.okx.com'], ['okx', 'demo', 'wspap.okx.com'],
+    ['okxeu', 'mainnet', 'wseea.okx.com'], ['okxeu', 'demo', 'wseeapap.okx.com'],
+    ['okxdemo', 'demo', 'wspap.okx.com'], ['okxeudemo', 'demo', 'wseeapap.okx.com'],
+  ]) {
+    const profile = liveSmokeProfile(name, mode, env);
+    for (const channel of ['public', 'private', 'business']) {
+      assert.doesNotThrow(() => profile.validateSocket(`wss://${host}/ws/v5/${channel}`));
+      assert.throws(() => profile.validateSocket(`wss://${host}:8443/ws/v5/${channel}`), /outside/);
+      assert.throws(() => profile.validateSocket(`wss://${host}.evil/ws/v5/${channel}`), /outside/);
+    }
+  }
+});
+
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
