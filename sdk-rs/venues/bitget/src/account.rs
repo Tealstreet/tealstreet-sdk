@@ -1410,7 +1410,7 @@ impl BitgetFutures {
             } else {
                 if !self.account.authenticated
                     && !self.startup_ready(cx)
-                    && let Some(code) = code.filter(|c| matches!(*c as i64, 30011 | 30012))
+                    && let Some(code) = socket_key_rejection(text)
                 {
                     let error =
                         rejection("API key login", code, &header.msg, ErrorKind::AuthInvalid);
@@ -2428,6 +2428,28 @@ fn key_rejection(code: f64, msg: &str) -> Option<ErrorKind> {
         {
             Some(ErrorKind::AuthInvalid)
         }
+        _ => None,
+    }
+}
+
+/// Terminal WS login refusals require an exact integer code before f64 decoding:
+/// nearby fractions may otherwise round to 30011 or 30012.
+fn socket_key_rejection(text: &str) -> Option<f64> {
+    #[derive(Deserialize)]
+    struct Header<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+    }
+    let header: Header<'_> = serde_json::from_str(text).ok()?;
+    let raw = header.code?.get();
+    let code: std::borrow::Cow<'_, str> = if raw.starts_with('"') {
+        serde_json::from_str(raw).ok()?
+    } else {
+        std::borrow::Cow::Borrowed(raw)
+    };
+    match code.as_ref() {
+        "30011" => Some(30011.0),
+        "30012" => Some(30012.0),
         _ => None,
     }
 }

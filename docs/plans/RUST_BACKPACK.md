@@ -374,3 +374,43 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   (2.82x), memory 4.3/2.4 MB (1.77x), private14. Secret scan clean. Pushing the
   reviewed candidate while auxiliary replays finish; all twenty-one CI gates
   and repository jobs must pass before merging PR #1299 into feat/rust-rewrite.
+
+### Port-review lows plan (Codex, 2026-10-21)
+
+1. Make REST order quantity nullable/missing with strict present-value decoding.
+   Permit omission only when positive triggerPrice and triggerQuantity prove size;
+   reject blank/malformed numbers and unproven ordinary orders. This deliberately
+   tightens the prior missing ordinary quantity default of zero.
+2. Share that admission rule across account/history/trigger repair/replacement
+   ACK mapping. Preserve present-quantity precedence and the separate WS q/Y
+   schema, child/trigger identity, cancellation provenance and terminal guards.
+3. Validate before staging a repair cancellation or removing the old order on
+   replacement. Reproduce null-trigger failure; test valid mixed reads, malformed
+   fallback/no-write, history and replacement already filled before ACK.
+4. Focused Backpack/Binance tests, touched fmt/strict Clippy/bans, independent
+   review, audit/spec/caller notes, exact-head CI and separate final merge guard.
+
+- Reproduced explicit-null trigger quantity blocking the entire open-order read
+  before the existing native triggerQuantity fallback could run. REST quantity
+  now decodes as optional with strict present numbers; blank, bad, boolean and
+  nonfinite values still reject. Absence/null needs positive triggerPrice and
+  triggerQuantity with executedQuantity in [0, amount]. The shared guard applies
+  to account mapping, order history, trigger repair and replacement ACK mapping.
+- Missing ordinary quantity deliberately tightens prior default0 admission to
+  explicit rejection. Present quantity precedence is unchanged: account selects
+  trigger quantity only with a trigger price; history/repair retain their existing
+  trigger-field precedence. WS q/Y remains separate and unchanged. No native
+  identity or quantity is guessed from cached state.
+- Invalid reads preserve known orders and cannot queue a repair cancellation.
+  Replacement ACK validation precedes old identity removal; a replacement already
+  filled on WS is never reopened by its later ACK. Limit price, TIF, post-only,
+  reduce-only and default-trigger repair contracts stay intact.
+- Primary field meanings: https://docs.backpack.exchange/ (triggerPrice and
+  triggerQuantity describe conditional trigger size). This guarded tolerance is
+  not a claim of live validation for every nullable response schema.
+- Validation:343 focused Backpack/Binance tests pass, touched formatting, strict
+  all-target Clippy and bans pass. Independent read-only review found no blocker.
+  Valid mixed null/missing reads, history and terminal-before-ACK repairs are
+  covered along with unproven/no-write and malformed replacement identity cases.
+  Local disk exhaustion was resolved by cleaning9.6GiB of generated artifacts
+  for already-merged venues in this worktree; source files were not removed.

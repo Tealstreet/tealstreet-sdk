@@ -987,3 +987,47 @@ fn write_failures_are_classified_without_changing_their_text() {
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
 }
+
+#[test]
+fn accepted_leverage_write_reports_unconfirmed_readback_without_resending() {
+    let mut e = engine();
+    e.store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    e.handle(
+        1000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        }),
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+    let mut a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+    for attempt in 0..3 {
+        let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+        a = reply(
+            &mut e,
+            &read,
+            1020.0 + attempt as f64 * 300.0,
+            r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","margin_mode":"CROSS","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"10"}]}}"#,
+        );
+        if attempt < 2 {
+            a = tick(&mut e, &a);
+        }
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a,Action::Http(r) if r.method==Method::Post))
+        );
+    }
+    let error = failure(&a);
+    assert!(
+        error.message.contains("write was accepted"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("unconfirmed"));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+}

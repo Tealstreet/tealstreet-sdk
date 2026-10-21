@@ -17,8 +17,8 @@ pub fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error>
     }
 }
 
-use safe_cex_engine::de::number_or_zero;
 pub use safe_cex_engine::de::{Number, number};
+use safe_cex_engine::de::{number_or_zero, optional_number};
 
 /// Names a row that failed to decode, for the skip log; never echoes the raw row.
 pub fn row_symbol(item: &str) -> String {
@@ -365,8 +365,8 @@ pub struct OrderRow<'a> {
     pub trigger_price: Option<Number>,
     #[serde(borrow, default)]
     pub trigger_by: Option<Str<'a>>,
-    #[serde(default, deserialize_with = "number")]
-    pub quantity: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub quantity: Option<f64>,
     pub trigger_quantity: Option<Number>,
     #[serde(default, deserialize_with = "number")]
     pub executed_quantity: f64,
@@ -380,6 +380,25 @@ pub struct OrderRow<'a> {
     #[serde(deserialize_with = "datetime")]
     pub created_at: f64,
     pub reduce_only: Option<bool>,
+}
+impl OrderRow<'_> {
+    /// Missing base quantity needs a positive amount proven by native trigger
+    /// fields. Mappers retain their existing present-value precedence.
+    pub fn base_quantity(&self) -> Result<f64, &'static str> {
+        if let Some(quantity) = self.quantity {
+            return Ok(quantity);
+        }
+        self.trigger_quantity
+            .as_ref()
+            .map(|n| n.0)
+            .filter(|amount| {
+                *amount > 0.0
+                    && self.trigger_price.as_ref().is_some_and(|p| p.0 > 0.0)
+                    && self.executed_quantity >= 0.0
+                    && self.executed_quantity <= *amount
+            })
+            .ok_or("Backpack order quantity is missing without a proven trigger amount")
+    }
 }
 #[derive(Deserialize)]
 pub struct OrderEvent<'a> {

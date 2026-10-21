@@ -91,6 +91,31 @@ TS infers fills from cumulative order updates and waits for REST wallet reads.
 The declared exception adds those two required topics to the TS oracle; it does
 not copy Rust subscriptions or hide missing native topics.
 
+## Demo-key diagnostic (2026-10-21)
+
+On a startup fee-read 10003 for built-in live linear/demo, diagnose the opposite
+environment with one signed `/v5/user/query-api` GET using the same rejected
+credential, including a secondary read key. Only HTTP success and a native integer
+code zero add the TS environment-mismatch hint. Fractional, underflowed, floating
+zero and quoted codes retain the original rejection. Preserve the native failure,
+credential role and deactivation policy; bound the probe to two seconds and
+retire timeout/late-response races before the terminal notice.
+
+Exclude regional/site, custom endpoints, testnet, Hyro, inverse, spot, public-only
+and remote signing. Forward eligibility markers through the SDK and registry.
+Test both directions, signatures/credential roles, negative probes, coalescing,
+timeouts and exclusions. Run focused Bybit/Binance/registry/TS gates, independent
+review and current-head CI, then land with the lane's separate merge guard.
+
+Implemented the bounded diagnostic with explicit role/signature, timeout/late
+response, coalescing and exclusion regressions. The baseline smoke test failed
+because no opposite-host request was dispatched. Validation passes: 528
+Bybit/Binance native tests, the focused registry construction regression, two
+TS site-forwarding cases, package typecheck, touched ESLint, Rust fmt/strict
+Clippy and bans. Registry checks use the Bybit-only feature build and select
+the relevant construction test; unselected venue construction cases require
+the full feature matrix in CI.
+
 ## Explicit market refresh and Hyro supervision (2026-10-21)
 
 The native `refreshMarkets` command stages every enabled category before one

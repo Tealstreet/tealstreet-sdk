@@ -396,7 +396,7 @@ fn cancel_failure_restores_open_status_without_replacing_parent() {
     reply(
         &mut e,
         r.id,
-        r#"{"code":10001,"msg":"request too frequently"}"#,
+        r#"{"code":10006,"msg":"request too frequently"}"#,
     );
     assert!(done(&mut e, 6).is_err());
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
@@ -414,7 +414,7 @@ fn rejected_settings_write_never_changes_settings() {
         }),
     );
     let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, r#"{"code":10001,"msg":"rejected"}"#);
+    reply(&mut e, r.id, r#"{"code":20003,"msg":"rejected"}"#);
     assert!(done(&mut e, 7).is_err());
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
 }

@@ -415,3 +415,48 @@ fn rate_limited_config_read_waits_out_the_rate_limit_window() {
         assert!(rig.failures.is_empty());
     }
 }
+
+#[test]
+fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
+    for code in ["60005", "60024", "60032"] {
+        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut rig = Rig::default();
+        let private = to_private_login(&mut engine, &mut rig);
+        ws(
+            &mut engine,
+            private,
+            &format!(r#"{{"event":"error","code":"{code}","msg":"refused"}}"#),
+        );
+        rig.take(&mut engine);
+        assert_eq!(rig.failures.len(), 1, "{code}");
+        assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+        assert_eq!(rig.failures[0].venue_code.as_deref(), Some(code));
+        assert_eq!(rig.deactivated, 1);
+    }
+    // Generic login/signature, clock, rate, protocol and internal errors do not
+    // establish a permanently invalid credential. Retired undocumented codes
+    // must not inherit terminal meanings from obsolete API tables.
+    for code in [
+        "60001", "60003", "60004", "60006", "60007", "60009", "60014", "60023", "60031", "63999",
+    ] {
+        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut rig = Rig::default();
+        let private = to_private_login(&mut engine, &mut rig);
+        ws(
+            &mut engine,
+            private,
+            &format!(r#"{{"event":"error","code":"{code}","msg":"retryable or unknown"}}"#),
+        );
+        rig.take(&mut engine);
+        assert!(
+            rig.until(
+                &mut engine,
+                |a| matches!(a, Action::WsConnect { url, .. } if url.ends_with("/private"))
+            )
+            .is_some(),
+            "{code}"
+        );
+        assert!(rig.failures.is_empty(), "{code}");
+        assert_eq!(rig.deactivated, 0);
+    }
+}
