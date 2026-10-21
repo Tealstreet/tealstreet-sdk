@@ -289,10 +289,10 @@ describe('routing table / resolver (Epic 1 net)', () => {
     // okx's HOW egress is whatever egressRegion.ts says; the relay follows it.
     const okxTunnelHost = resolveExchangeRouting('okx', offProxy).howEgress === 'jp' ? 'jp' : 'asia';
     expect(resolveExchangeRouting('okx', offProxy).wsPrivate.relay).toBe(
-      `wss://fsjnpy143pbz.${okxTunnelHost}.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate`,
+      `wss://fsjnpy143pbz.${okxTunnelHost}.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate`,
     );
     expect(resolveExchangeRouting('okx', offProxy).wsBusiness.relay).toContain(
-      'ws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness',
+      'ws.okx.com%2Fws%2Fv5%2Fbusiness',
     );
 
     // Public channels never relay (the tunnel refuses public streams anyway).

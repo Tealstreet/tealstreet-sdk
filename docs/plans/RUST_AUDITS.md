@@ -971,8 +971,13 @@ Signing, integer scaling, tx encoding and nonces match TS.
   (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
   ~~account tier not exposed and `changeAccountTier` missing~~ (shared
   `Command::Venue` action; Lighter implements fetch/set tier).
-- Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
-  re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
+- Low: ~~thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
+  re-check races a fixed 2 s timer~~. Documented HTTP405/429 failures include
+  neutral guidance and retain native diagnostics/outcome; explicit 21613
+  placement rejection refreshes account plus orders without mode guessing or
+  resubmission. Missing reduce-only exposure waits for a matching account-read
+  completion (10 s deadline), including target size/absence evidence. Timed-out
+  reads cannot release later queued orders. ~~Shared with TS: amend re-places the full
   original size after a partial fill.~~ Rust now re-places the observed remaining
   size for price-only amendments; explicit replacement quantities are preserved.
 

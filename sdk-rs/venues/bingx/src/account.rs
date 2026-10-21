@@ -112,12 +112,12 @@ pub struct Account {
     // Markets whose contract rows were malformed; their rows are reported once.
     skipped_markets: HashSet<String>,
     reported_markets: HashSet<String>,
-    unidentified_positions: u32,
-    unidentified_orders: u32,
+    // Rejected private rows already logged, keyed `kind:id`; bounded by SKIP_LOG_LIMIT.
+    skip_logged: HashMap<String, bool>,
 }
 
-/// Consecutive snapshots carrying an unidentifiable row before it logs as an error.
-const UNIDENTIFIED_ESCALATION: u32 = 3;
+/// Bounds the once-per-identity skip log; clearing it only re-arms logs.
+const SKIP_LOG_LIMIT: usize = 4096;
 
 pub fn order_type(text: &str) -> Option<OrderType> {
     Some(match text {
@@ -164,26 +164,55 @@ fn position_identity(item: &str, mode: PositionMode) -> String {
         _ => symbol,
     }
 }
-/// Logs a committed snapshot's skipped rows; an unidentifiable row that persists
-/// keeps every known row, so it escalates to an error.
-fn log_snapshot_skips(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String], streak: &mut u32) {
-    *streak = if skipped.iter().any(String::is_empty) {
-        streak.saturating_add(1)
-    } else {
-        0
-    };
-    if *streak >= UNIDENTIFIED_ESCALATION {
-        crate::log_skipped_at(
-            cx,
-            Level::Error,
-            kind,
-            skipped,
-            &format!(
-                "; an unidentifiable row for {streak} consecutive snapshots is keeping every known {kind}"
-            ),
+/// Logs a rejected row once per identity until a committed snapshot no longer rejects
+/// it; polls would otherwise repeat it. Error only when no stored copy is kept, and a
+/// Warning still escalates once to Error when the copy is lost.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashMap<String, bool>,
+    kind: &str,
+    id: &str,
+    kept: bool,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    let key = format!("{kind}:{id}");
+    if logged.get(&key).is_some_and(|&errored| errored || kept) {
+        return;
+    }
+    logged.insert(key, !kept);
+    let level = if kept { Level::Warn } else { Level::Error };
+    if id.is_empty() {
+        cx.notice(
+            level,
+            code::ROW_SKIPPED,
+            format!("BingX skipped malformed {kind} row without an id"),
         );
     } else {
-        crate::log_skipped(cx, kind, skipped);
+        cx.notice(
+            level,
+            code::ROW_SKIPPED,
+            format!("BingX skipped malformed {kind} row {id}"),
+        );
+    }
+}
+/// Logs a committed snapshot's rejected rows and re-arms every row of its kind the
+/// snapshot no longer rejects, whether it mapped, went flat or disappeared.
+fn log_snapshot_skips(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashMap<String, bool>,
+    kind: &str,
+    skipped: &[String],
+    kept: impl Fn(&str) -> bool,
+) {
+    let prefix = format!("{kind}:");
+    logged.retain(|key, _| {
+        key.strip_prefix(&prefix)
+            .is_none_or(|id| skipped.iter().any(|s| s == id))
+    });
+    for id in skipped {
+        log_skip(cx, logged, kind, id, kept(id));
     }
 }
 /// A malformed order row's id; empty when even that is unreadable.
@@ -987,12 +1016,13 @@ impl Account {
             } => {
                 self.positions_in_flight = None;
                 if unavailable {
-                    crate::log_skipped(cx, "position", &skipped);
+                    for id in &skipped {
+                        log_skip(cx, &mut self.skip_logged, "position", id, true);
+                    }
                     return;
                 }
                 if revision == self.positions_revision {
                     let unidentified = skipped.iter().any(String::is_empty);
-                    log_snapshot_skips(cx, "position", &skipped, &mut self.unidentified_positions);
                     // A malformed row never closes the known position it names
                     // (by id, or by symbol when its side is unreadable).
                     let kept: Vec<_> = cx
@@ -1005,6 +1035,10 @@ impl Account {
                         })
                         .cloned()
                         .collect();
+                    log_snapshot_skips(cx, &mut self.skip_logged, "position", &skipped, |id| {
+                        kept.iter()
+                            .any(|p| id.is_empty() || p.id == id || p.symbol == id)
+                    });
                     rows.extend(kept);
                     cx.store.set_positions(rows);
                     if !settings.is_empty() {
@@ -1014,7 +1048,9 @@ impl Account {
                         cx.store.update_setting(&symbol, |s| *s = value);
                     }
                 } else {
-                    crate::log_skipped(cx, "position", &skipped);
+                    for id in &skipped {
+                        log_skip(cx, &mut self.skip_logged, "position", id, true);
+                    }
                     self.schedule_repair(cx);
                 }
             }
@@ -1031,10 +1067,11 @@ impl Account {
                     return;
                 }
                 if unavailable {
-                    crate::log_skipped(cx, "open order", &skipped);
+                    for id in &skipped {
+                        log_skip(cx, &mut self.skip_logged, "open order", id, true);
+                    }
                     return;
                 }
-                log_snapshot_skips(cx, "open order", &skipped, &mut self.unidentified_orders);
                 // Startup history is a baseline; later REST reads cannot consume live executions.
                 if !self.orders_seeded {
                     for order in &rows {
@@ -1062,6 +1099,9 @@ impl Account {
                     })
                     .cloned()
                     .collect();
+                log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
+                    kept.iter().any(|o| id.is_empty() || o.id == id)
+                });
                 rows.extend(kept);
                 cx.store.set_orders(rows);
             }

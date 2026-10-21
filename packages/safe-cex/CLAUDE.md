@@ -449,6 +449,19 @@ documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
 
+Rust diagnostics emit `engine-event` with the full `EngineEvent` (code, level,
+message, fields), forwarded by the worker as `{ op: 'engine-event', data: [event] }`.
+`ExchangeHealthMonitor.processEvent(event, classified?)` uses codes only;
+`processHealth(exchange.getHealth())` copies authoritative lifetime counters,
+including diagnostics hidden by minimum-level filtering. Category counts and
+recent errors count observed reports, separately from engine counters. Subscribe
+to the structured channel once; skip legacy notifications only when they
+carry `engineEvent`. Keep listeners for uncoded command/host errors.
+For compatibility, Errors still emit `error` with `opts.engineEvent` and Info/Warn
+still emit `log` with the event as the third argument. Telemetry has `event_code`.
+This preserves existing auth badge/reload delivery until downstream cutover;
+new Rust consumers use codes/typed errors, while legacy TS keeps text patterns.
+
 The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
 for typed engine errors (`classifiedError`), and
 `ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
