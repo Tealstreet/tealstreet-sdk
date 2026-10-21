@@ -697,3 +697,227 @@ fn lifetime_income_budget_marker_is_owned_before_retained_rows_finish() {
         }
     }
 }
+
+fn fill_identity_row(field: &str, id: &str, symbol: &str, time: f64) -> String {
+    format!(
+        r#"{{"{field}":"{id}","orderId":"order","symbol":"{symbol}","side":"BUY","price":"69000","qty":"0.01","commission":"-0.138","commissionAsset":"USDT","positionSide":"LONG","realizedPnl":"2","maker":false,"time":{time}}}"#
+    )
+}
+fn identity_fills(from: Option<f64>, to: Option<f64>) -> Query {
+    Query::Fills {
+        symbol: Some("BTCUSDT".into()),
+        order_id: Some("order".into()),
+        from_ms: from,
+        to_ms: to,
+        limit: None,
+    }
+}
+fn identity_marker_count(actions: &[Action], code: &str) -> usize {
+    actions
+        .iter()
+        .filter(|a| matches!(a,Action::Notice(Notice::Event(event))if event.code==code))
+        .count()
+}
+#[test]
+fn empty_fill_identity_aliases_keep_valid_financial_peers_and_mark_owned_incomplete_once() {
+    for field in ["id", "tradeId", "fillId"] {
+        let mut e = engine();
+        let actions = command(&mut e, identity_fills(None, None));
+        let r = request(&actions, "/userTrades");
+        let good = fill_identity_row("id", "good", "BTCUSDT", NOW);
+        let empty = fill_identity_row(field, "", "BTCUSDT", NOW);
+        let actions = response(&mut e, NOW, r.id, &format!("[{good},{empty},{empty}]"));
+        let rows: serde_json::Value = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["id"], "good");
+        assert_eq!(rows[0]["price"], 69000.0);
+        assert_eq!(rows[0]["qty"], 0.01);
+        assert_eq!(rows[0]["commission"], 0.138);
+        assert_eq!(rows[0]["realizedPnl"], 2.0);
+        owned_incomplete(&actions, 7);
+        assert_eq!(
+            identity_marker_count(&actions, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+            1
+        );
+        assert_eq!(
+            identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+            1
+        );
+        let skipped = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(skipped.level, safe_cex_engine::Level::Warn);
+        assert!(
+            skipped
+                .fields
+                .contains(&("field", safe_cex_engine::Value::Str("id".into())))
+        );
+        assert!(skipped.message.contains("id"));
+    }
+}
+#[test]
+fn missing_fill_identity_warning_is_per_query_across_windows_and_other_queries_stay_clean() {
+    let mut e = engine();
+    let actions = command(&mut e, identity_fills(Some(NOW), Some(NOW + 8.0 * DAY)));
+    let first = request(&actions, "/userTrades");
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 8,
+            query: identity_fills(None, None),
+        }),
+    );
+    let other: Vec<_> = e.drain_actions().collect();
+    let other = request(&other, "/userTrades");
+    let body = format!(
+        "[{},{}]",
+        fill_identity_row("id", "first", "BTCUSDT", NOW),
+        fill_identity_row("id", "", "BTCUSDT", NOW)
+    );
+    let mut all = response(&mut e, NOW, first.id, &body);
+    no_completion(&all);
+    let second = request(&all, "/userTrades");
+    let clean = response(
+        &mut e,
+        NOW,
+        other.id,
+        &format!("[{}]", fill_identity_row("id", "other", "BTCUSDT", NOW)),
+    );
+    assert_eq!(
+        identity_marker_count(&clean, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+        0
+    );
+    assert!(
+        clean
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. })))
+    );
+    let body = format!(
+        "[{},{}]",
+        fill_identity_row("id", "second", "BTCUSDT", NOW + 8.0 * DAY),
+        fill_identity_row("fillId", "", "BTCUSDT", NOW + 8.0 * DAY)
+    );
+    let final_actions = response(&mut e, NOW, second.id, &body);
+    let rows: serde_json::Value = serde_json::from_str(&result(&final_actions).unwrap()).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    all.extend(final_actions);
+    owned_incomplete(&all, 7);
+    assert_eq!(
+        identity_marker_count(&all, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+        1
+    );
+    assert_eq!(
+        identity_marker_count(&all, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+    // A new query owns a fresh warning budget, even when every row is skipped.
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "/userTrades");
+    let actions = response(
+        &mut e,
+        NOW,
+        r.id,
+        &format!("[{}]", fill_identity_row("id", "", "BTCUSDT", NOW)),
+    );
+    assert_eq!(result(&actions).unwrap(), "[]");
+    owned_incomplete(&actions, 7);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+}
+#[test]
+fn genuine_empty_or_filtered_identity_rows_do_not_mark_incomplete_and_malformed_fills_still_fail() {
+    for body in [
+        "[]".to_owned(),
+        format!("[{}]", fill_identity_row("id", "", "ETHUSDT", NOW)),
+        format!(
+            "[{}]",
+            fill_identity_row("id", "", "BTCUSDT", NOW)
+                .replace("\"orderId\":\"order\"", "\"orderId\":\"other\"")
+        ),
+        format!("[{}]", fill_identity_row("id", "", "BTCUSDT", NOW - 1.0)),
+        format!("[{}]", fill_identity_row("id", "", "BTCUSDT", NOW + 1.0)),
+    ] {
+        let mut e = engine();
+        let actions = command(&mut e, identity_fills(Some(NOW), Some(NOW)));
+        let r = request(&actions, "/userTrades");
+        let actions = response(&mut e, NOW, r.id, &body);
+        assert_eq!(result(&actions).unwrap(), "[]");
+        assert_eq!(
+            identity_marker_count(&actions, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+            0
+        );
+        assert_eq!(
+            identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+            0
+        );
+    }
+    let mut e = engine();
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "/userTrades");
+    let malformed =
+        fill_identity_row("id", "", "BTCUSDT", NOW).replace("\"69000\"", "\"malformed\"");
+    let actions = response(&mut e, NOW, r.id, &format!("[{malformed}]"));
+    assert!(
+        result(&actions).is_err(),
+        "typed malformed financial row retains strict failure"
+    );
+}
+#[test]
+fn empty_fill_identity_semantic_marker_survives_error_only_logging_before_success() {
+    let mut e = engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 1,
+            query: identity_fills(None, None),
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let r = request(&actions, "/userTrades");
+    let body = format!(
+        "[{},{}]",
+        fill_identity_row("id", "good", "BTCUSDT", NOW),
+        fill_identity_row("id", "", "BTCUSDT", NOW)
+    );
+    let actions = response(&mut e, NOW, r.id, &body);
+    owned_incomplete(&actions, 1);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        0
+    );
+    let event = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let [("command", safe_cex_engine::Value::Num(command))] = event.fields.as_slice() else {
+        panic!("exact native query owner")
+    };
+    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command}});
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/empty-fill-incomplete-query-event.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        actual, fixture,
+        "host/worker fixture must equal actual native marker"
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,result})if result.contains("good"))));
+}

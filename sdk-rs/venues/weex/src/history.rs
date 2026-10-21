@@ -26,6 +26,7 @@ enum Read {
         pending: VecDeque<Fetch>,
         rows: Rows,
         seen: HashSet<String>,
+        missing_fill_id: bool,
         order_id: Option<String>,
         symbol: Option<String>,
         delay: Option<TimerId>,
@@ -516,6 +517,7 @@ impl WeexFutures {
                 pending: requests,
                 rows: Rows::new(kind),
                 seen: HashSet::new(),
+                missing_fill_id: false,
                 order_id,
                 symbol,
                 delay: None,
@@ -678,9 +680,36 @@ impl WeexFutures {
             }
         }
     }
+    fn missing_fill_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(Read::List {
+            missing_fill_id, ..
+        }) = self.history.reads.get_mut(&command)
+        else {
+            return;
+        };
+        if *missing_fill_id {
+            return;
+        }
+        *missing_fill_id = true;
+        cx.event(
+            Level::Warn,
+            code::ROW_SKIPPED,
+            "WEEX fill history row skipped: missing id (id/tradeId/fillId)",
+            vec![
+                ("command", safe_cex_engine::Value::Num(f64::from(command))),
+                ("field", safe_cex_engine::Value::Str("id".into())),
+            ],
+        );
+        cx.event(
+            Level::Warn,
+            code::HISTORY_INCOMPLETE,
+            "WEEX fill history is INCOMPLETE: row missing native fill id",
+            vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
+        );
+    }
     pub(crate) fn history_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) -> bool {
@@ -695,8 +724,11 @@ impl WeexFutures {
                     {
                         return;
                     }
+                    if r.id.is_empty() {
+                        self.missing_fill_identity(cx, request.command);
+                        return;
+                    }
                     if let Some(side) = side(&r.side)
-                        && !r.id.is_empty()
                         && r.price > 0.0
                         && r.qty.abs() > 0.0
                         && t > 0.0

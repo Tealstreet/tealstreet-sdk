@@ -149,6 +149,13 @@ opaque cursors and chunk/lifetime budgets. The host routes coverage to the
 owning caller and marks successful partial arrays incomplete; non-range read
 failures still reject, while range failures retain the existing continuation.
 
+Rust fill queries also mark the owning result incomplete when an in-scope row
+has an empty `id`/`tradeId`/`fillId`. The unidentified row stays skipped and valid
+peers remain available. One coded Warn `row.skipped` names `id` per query, across
+all windows; the owned `history.incomplete` remains visible at Error-only logging.
+No execution identity is fabricated. Absent identity fields and malformed
+financial values retain the existing strict failure behavior.
+
 - Markets: `GET /capi/v3/market/exchangeInfo`
 - Tickers: `GET /capi/v3/market/ticker/24hr`,
   `GET /capi/v3/market/ticker/bookTicker`

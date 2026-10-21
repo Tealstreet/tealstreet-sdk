@@ -1,0 +1,7 @@
+{
+  "op": "event",
+  "level": "warn",
+  "code": "history.incomplete",
+  "message": "WEEX fill history is INCOMPLETE: row missing native fill id",
+  "fields": { "command": 1.0 }
+}
