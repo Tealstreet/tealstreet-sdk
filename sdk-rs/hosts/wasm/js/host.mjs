@@ -112,11 +112,27 @@ const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
 
+/** A closed, cloneable approval record. Never infer approval from an error message. */
+export const builderAuthorizationOf = (value) => {
+  if (!value || typeof value !== 'object' || value.code !== 'GRVT_BUILDER_UNAUTHORIZED') return undefined;
+  const uint32 = (n) => Number.isInteger(n) && n >= 0 && n <= 0xffff_ffff;
+  if (!uint32(value.requiredRaw) || value.requiredRaw === 0) return undefined;
+  if (value.reason === 'unauthorized' && value.authorizedRaw === undefined) {
+    return { code: value.code, reason: value.reason, requiredRaw: value.requiredRaw };
+  }
+  if (value.reason === 'cap-too-low' && uint32(value.authorizedRaw) && value.authorizedRaw < value.requiredRaw) {
+    return { code: value.code, reason: value.reason, requiredRaw: value.requiredRaw, authorizedRaw: value.authorizedRaw };
+  }
+  return undefined;
+};
+
 /** A classified venue failure (`engine/src/error.rs`). `message` is the text
  * hosts have always shown; `name` stays `Error` so displayed text is unchanged. */
 export class ExchangeError extends Error {
   constructor(message, detail = {}) {
     super(message);
+    const builder = builderAuthorizationOf(detail.builderAuthorization);
+    if (builder) Object.assign(this, builder);
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
     const venueCode = text(detail.venueCode);

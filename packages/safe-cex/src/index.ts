@@ -29,7 +29,8 @@ export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from '
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
 
-export { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+export { ExchangeError, builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
+export type { BuilderAuthorizationDetail } from '@tealstreet/safe-cex-wasm/host';
 
 export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
 export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';

@@ -5,7 +5,10 @@ use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::{
+    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
+    Response, VenueError,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -748,7 +751,7 @@ impl Grvt {
         parent: Option<&str>,
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
-    ) -> Result<Step, String> {
+    ) -> Result<Step, VenueError> {
         if opts.stp_mode.is_some() {
             return Err("Per-order self-trade prevention is unsupported on GRVT".into());
         }
@@ -781,16 +784,27 @@ impl Grvt {
         let signer = sign::signer_address(secret)?;
         match self.account.builder {
             BuilderState::Authorized => {}
-            BuilderState::CapTooLow(_) => {
-                return Err(
-                    "GRVT builder fee authorization cap is below 300; re-authorize builder".into(),
-                );
+            BuilderState::CapTooLow(raw) => {
+                return Err(VenueError::new(
+                    "GRVT builder fee authorization cap is below 300; re-authorize builder",
+                )
+                .builder_authorization(BuilderAuthorization {
+                    code: "GRVT_BUILDER_UNAUTHORIZED",
+                    reason: BuilderAuthorizationReason::CapTooLow,
+                    required_raw: 300,
+                    authorized_raw: Some(raw),
+                }));
             }
             BuilderState::Unauthorized => {
-                return Err(
-                    "GRVT builder is not authorized; authorize builder before placing orders"
-                        .into(),
-                );
+                return Err(VenueError::new(
+                    "GRVT builder is not authorized; authorize builder before placing orders",
+                )
+                .builder_authorization(BuilderAuthorization {
+                    code: "GRVT_BUILDER_UNAUTHORIZED",
+                    reason: BuilderAuthorizationReason::Unauthorized,
+                    required_raw: 300,
+                    authorized_raw: None,
+                }));
             }
             BuilderState::Unknown | BuilderState::Checking => {
                 return Err(format!(
@@ -799,7 +813,8 @@ impl Grvt {
                         .builder_error
                         .as_deref()
                         .unwrap_or("check pending")
-                ));
+                )
+                .into());
             }
         }
         let market = cx
@@ -1013,7 +1028,7 @@ impl Grvt {
             })),
         })
     }
-    fn trade_plan(&self, cx: &Cx<'_, Pending>, command: Command) -> Result<Plan, String> {
+    fn trade_plan(&self, cx: &Cx<'_, Pending>, command: Command) -> Result<Plan, VenueError> {
         let mut plan = Plan::new(command_id(&command).ok_or("Unsupported GRVT trading command")?);
         self.trade_account()?;
         match command {
@@ -1413,6 +1428,15 @@ impl Grvt {
         error: &str,
         outcome: Outcome,
     ) {
+        self.trade_failed_error(cx, request, VenueError::new(error), outcome);
+    }
+    fn trade_failed_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+        outcome: Outcome,
+    ) {
         let message = if let Effect::Place(order) = &request.step.effect
             && outcome == Outcome::Unknown
         {
@@ -1421,10 +1445,10 @@ impl Grvt {
                 order.id
             )
         } else {
-            error.to_owned()
+            error.message.clone()
         };
-        let error = VenueError::new(message).outcome(outcome);
-        self.trade_finish(cx, *request.plan, Some(error));
+        error.message = message;
+        self.trade_finish(cx, *request.plan, Some(error.outcome(outcome)));
     }
     pub(crate) fn trade_response(
         &mut self,
@@ -1437,7 +1461,7 @@ impl Grvt {
             self.trade_failed(cx, request, &error, outcome);
             return;
         }
-        let result = (|| -> Result<(), String> {
+        let result = (|| -> Result<(), VenueError> {
             match &request.step.effect {
                 Effect::ReadSymbol(read) => {
                     let (scope, steps, affected) = self.cancel_snapshot(read, &response)?;
@@ -1462,7 +1486,7 @@ impl Grvt {
                         {
                             cx.store.set_order_status(&target.id, OrderStatus::Open);
                         }
-                        return Err(error);
+                        return Err(error.into());
                     }
                     if let Some(scope) = &mut request.plan.scope {
                         scope.revision += 1;
@@ -1672,7 +1696,7 @@ impl Grvt {
                 }
                 self.trade_step(cx, *request.plan);
             }
-            Err(error) => self.trade_failed(cx, request, &error, Outcome::Unknown),
+            Err(error) => self.trade_failed_error(cx, request, error, Outcome::Unknown),
         }
     }
 }
@@ -1722,6 +1746,6 @@ fn ensure_identity(
 }
 
 /// Refused before any request was sent.
-fn not_sent(message: impl Into<String>) -> VenueError {
-    VenueError::new(message).outcome(Outcome::NotSent)
+fn not_sent(error: impl Into<VenueError>) -> VenueError {
+    error.into().outcome(Outcome::NotSent)
 }

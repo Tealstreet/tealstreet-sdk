@@ -191,3 +191,20 @@ test('a partial-success error listener throwing after display cannot trigger ano
   assert.equal(r.host.commands.size, 0);
   assert.equal(r.timers.size, 0);
 });
+
+for (const builderAuthorization of [
+  { code: 'GRVT_BUILDER_UNAUTHORIZED', reason: 'unauthorized', requiredRaw: 300 },
+  { code: 'GRVT_BUILDER_UNAUTHORIZED', reason: 'cap-too-low', requiredRaw: 300, authorizedRaw: 100 },
+]) {
+  test(`native builder ${builderAuthorization.reason} survives host command rejection`, async () => {
+    const detail = { message: 'Builder approval required', kind: 'invalidInput', outcome: 'notSent', builderAuthorization };
+    const r = rig(({ command }) => [done(command, { error: detail.message, detail })]);
+    await assert.rejects(r.host.command({ op: 'placeOrders' }), (error) => {
+      for (const [key, value] of Object.entries(builderAuthorization)) assert.equal(error[key], value);
+      assert.equal(error.kind, 'invalidInput');
+      assert.equal(error.outcome, 'notSent');
+      return true;
+    });
+    assert.deepEqual(r.logs, []);
+  });
+}
