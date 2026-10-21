@@ -45,6 +45,25 @@ fn secondary_read_credentials_need_a_key_and_secret() {
         ),
         "Secondary read credentials require a nonempty key and secret"
     );
+    // AsterDEX reads its agent from `asterdex.readKey`/`readSecret`, so the uniform blob's copy is inert.
+    construct(
+        "asterdex",
+        r#"{"publicDataOnly":true,"readCredentials":{"key":"read","secret":""}}"#,
+    )
+    .unwrap();
+    // The SDK omits an absent secondary secret, which must not fail to parse.
+    construct(
+        "asterdex",
+        r#"{"publicDataOnly":true,"readCredentials":{"key":"read"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        rejected(
+            "binance",
+            r#"{"key":"k","secret":"s","readCredentials":{"key":"read"}}"#
+        ),
+        "Secondary read credentials require a nonempty key and secret"
+    );
 }
 
 #[test]
