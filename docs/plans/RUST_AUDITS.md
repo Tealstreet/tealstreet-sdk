@@ -736,9 +736,15 @@ Futures matches TS on nearly every input; no high regression.
 - ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
   the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
   rejection names the unsupported take-profit/stop-loss legs before any write.
-- Low: income over 500 rows errors (TS partial); one bad row rejects
-  catalogue/tickers/open orders and blocks private start (startup lane);
-  missing funding field set to 0; raw error text; spot 3m candles.
+- Low: ~~income over 500 rows errors (TS partial)~~ (known limit: the newest
+  page returns with a `history.incomplete` warning, as TS; `account-log` honours
+  only `since`, so a complete walk awaits the cursor probe in
+  [RUST_LIVE_GATE.md](RUST_LIVE_GATE.md)); one bad row ~~rejects
+  catalogue/tickers~~ (skipped since the startup lane) and still rejects open
+  orders (row isolation: SnapshotBuilder batch 3, claude-nfncln); missing
+  funding field set to 0 (decided: Kraken omits a zero rate; b778fa3); ~~raw error
+  text~~ (non-2xx failures carry the body's error code); spot 3m candles
+  (decided: typed `Interval` refuses rather than serving 1m bars as 3m).
 - Confirm (TS bugs Rust fixed): index trigger signal; full_fill not canceled;
   live % change/volume/OI; stop amend racing a fill; spot fills over-reported
   and mislabelled XBT/BTC.
