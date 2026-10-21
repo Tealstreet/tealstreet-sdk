@@ -35,9 +35,64 @@ function fillFrame(financials?: [number, number]): ArrayBuffer {
   return buffer;
 }
 
+// Independent revision-1/2 fixture: no MARKETS needed because the symbol is explicit.
+function identifiedFillFrame(revision: 1 | 2, financials?: [number, number], id?: string): ArrayBuffer {
+  const texts = ['order-1', 'BTCUSDT', ...(id !== undefined ? [id] : [])].map((value) => new TextEncoder().encode(value));
+  const stringsSize = 4 + (texts.length + 1) * 4 + texts.reduce((n, value) => n + value.length, 0);
+  const fillSize = revision === 2 || financials ? 56 : 40;
+  const buffer = new ArrayBuffer(16 + 8 + fillSize + 8 + stringsSize);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 2, true);
+  view.setUint16(16, 11, true);
+  view.setUint16(18, revision, true);
+  view.setUint32(20, fillSize, true);
+  const at = 24;
+  [1, 0, 0xffffffff, 0].forEach((value, i) => view.setUint32(at + i * 4, value, true));
+  view.setFloat64(at + 16, 100, true);
+  view.setFloat64(at + 24, 0.3, true);
+  view.setUint32(at + 32, 1, true);
+  if (revision === 2) view.setUint32(at + 36, id === undefined ? 0xffffffff : 2, true);
+  if (fillSize === 56) {
+    view.setFloat64(at + 40, financials?.[0] ?? NaN, true);
+    view.setFloat64(at + 48, financials?.[1] ?? NaN, true);
+  }
+  const strings = at + fillSize;
+  view.setUint16(strings, 1, true);
+  view.setUint32(strings + 4, stringsSize, true);
+  view.setUint32(strings + 8, texts.length, true);
+  const data = strings + 12 + (texts.length + 1) * 4;
+  let offset = 0;
+  texts.forEach((bytes, i) => {
+    view.setUint32(strings + 12 + i * 4, offset, true);
+    new Uint8Array(buffer, data + offset, bytes.length).set(bytes);
+    offset += bytes.length;
+  });
+  view.setUint32(strings + 12 + texts.length * 4, offset, true);
+  return buffer;
+}
+
 afterEach(() => vi.useRealTimers());
 
 describe('native fill and trigger metadata at the SDK boundary', () => {
+  it.each([1, 2] as const)('decodes revision %s identities with and without financials after transfer', (revision) => {
+    for (const financials of [undefined, [0, -0.25] as [number, number]]) {
+      for (const id of [undefined, '9007199254740997']) {
+        const original = identifiedFillFrame(revision, financials, id);
+        const frame = new Frame(structuredClone(original, { transfer: [original] }));
+        const applier = new FrameApplier(new DefaultStore());
+        applier.apply(frame);
+        const fill = applier.fills(frame)[0];
+        expect(fill).toMatchObject({ id: revision === 2 ? id ?? 'order-1' : 'order-1', orderId: 'order-1', symbol: 'BTCUSDT' });
+        if (financials) expect(fill).toMatchObject({ realizedPnl: 0, fee: -0.25 });
+        else {
+          expect(fill).not.toHaveProperty('realizedPnl');
+          expect(fill).not.toHaveProperty('fee');
+        }
+      }
+    }
+  });
   it.each([false, true])('preserves fill identities and financial values after transfer=%s', (transfer) => {
     const original = fillFrame([-3.5, -0.25]);
     const buffer = transfer ? structuredClone(original, { transfer: [original] }) : original;
@@ -83,7 +138,8 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
     vi.useFakeTimers();
     const store = new DefaultStore();
     const applier = new FrameApplier(store);
-    const frame = new Frame(fillFrame([0, 0]));
+    const frame = new Frame(identifiedFillFrame(2, [0, 0], 'execution-7'));
+    applier.apply(new Frame(consumerFrame({ markets: [market] })));
     applier.apply(frame);
     store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 100, bid: 100, ask: 101 } as never] });
     const exchange = new BaseExchange('hyperliquid', { key: '', secret: '', publicDataOnly: true }, store);
