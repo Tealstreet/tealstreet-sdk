@@ -9,7 +9,7 @@
 //! unchanged, so an id that never appears still fails explicitly at the venue.
 
 use crate::{Command, CommandId, Store};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// How long an acknowledged id may wait for the store before a command naming
 /// it is dispatched anyway.
@@ -22,10 +22,12 @@ pub(crate) const FILL_GRACE_MS: f64 = 1_500.0;
 pub(crate) struct PlacementAcks {
     placing: HashSet<CommandId>,
     /// Acknowledged ids not yet seen in the store, with their expiry.
-    acked: Vec<(String, f64)>,
+    acked: HashMap<String, f64>,
     /// Held commands, each with a hard cap; the live deadline is computed from
     /// the acknowledgements it still awaits, so it never goes stale.
     held: Vec<(Command, f64)>,
+    /// Store order count at the last prune, to notice removals cheaply.
+    pruned_orders: usize,
 }
 
 /// Virtual protective legs share their parent's stored identity.
@@ -45,18 +47,27 @@ const LEG_SUFFIXES: [&str; 6] = [
     "_tp",
 ];
 
-/// Whether the store holds the order `id` names: the row itself, its parent
-/// for a virtual leg, its legs (`{id}_sl`), or children of a group `id`.
-fn stored(store: &Store, id: &str) -> bool {
-    let native = native(id);
-    store.orders().iter().any(|order| {
-        order.id == id
-            || order.id == native
-            || order.parent_id.as_deref() == Some(native)
-            || LEG_SUFFIXES
-                .iter()
-                .any(|suffix| order.id.strip_suffix(suffix) == Some(native))
-    })
+/// Every identity the store answers for, built once per pass: each row's id,
+/// the order its virtual leg belongs to (`{id}_sl` → `id`) and its group parent.
+struct Stored<'a>(HashSet<&'a str>);
+
+impl<'a> Stored<'a> {
+    fn of(store: &'a Store) -> Self {
+        let mut ids = HashSet::with_capacity(store.orders().len() * 2);
+        for order in store.orders() {
+            ids.insert(order.id.as_str());
+            ids.insert(native(&order.id));
+            if let Some(parent) = order.parent_id.as_deref() {
+                ids.insert(parent);
+            }
+        }
+        Self(ids)
+    }
+
+    /// Whether the store holds the order `id` names, its legs or its children.
+    fn has(&self, id: &str) -> bool {
+        self.0.contains(id) || self.0.contains(native(id))
+    }
 }
 
 fn named_ids(command: &Command) -> &[String] {
@@ -83,39 +94,31 @@ impl PlacementAcks {
         };
         let expiry = now + ACK_WAIT_MS;
         for id in ids.into_iter().filter(|id| !id.is_empty()) {
-            self.acked.push((id, expiry));
+            self.acked.insert(id, expiry);
         }
     }
 
     /// A fill shortens the wait to `FILL_GRACE_MS`: a venue may drop a filled
     /// order rather than store it, while a partial fill's row may still follow.
     pub fn filled(&mut self, order_id: &str, now: f64) {
-        let grace = now + FILL_GRACE_MS;
-        for (acked, expiry) in &mut self.acked {
-            if acked == order_id {
-                *expiry = expiry.min(grace);
-            }
+        if let Some(expiry) = self.acked.get_mut(order_id) {
+            *expiry = expiry.min(now + FILL_GRACE_MS);
         }
     }
 
     /// The latest expiry among the acknowledged, unstored ids `command` names.
-    fn awaited_until(&self, store: &Store, command: &Command, now: f64) -> Option<f64> {
+    fn awaited_until(&self, stored: &Stored<'_>, command: &Command, now: f64) -> Option<f64> {
         named_ids(command)
             .iter()
-            .filter(|id| !stored(store, id))
-            .flat_map(|id| {
-                self.acked
-                    .iter()
-                    .filter(move |(acked, expiry)| {
-                        *expiry > now && (acked == id || acked == native(id))
-                    })
-                    .map(|(_, expiry)| *expiry)
+            .filter(|id| !stored.has(id))
+            .filter_map(|id| {
+                [id.as_str(), native(id)]
+                    .into_iter()
+                    .filter_map(|key| self.acked.get(key).copied())
+                    .filter(|expiry| *expiry > now)
+                    .reduce(f64::max)
             })
             .reduce(f64::max)
-    }
-
-    fn awaited(&self, store: &Store, command: &Command, now: f64) -> bool {
-        self.awaited_until(store, command, now).is_some()
     }
 
     /// Whether to hold `command` until its acknowledged ids are stored. A
@@ -129,33 +132,50 @@ impl PlacementAcks {
                     .any(|other| native(other) == native(id))
             })
         });
-        if !behind && !self.awaited(store, command, now) {
+        if !behind
+            && (self.acked.is_empty()
+                || self
+                    .awaited_until(&Stored::of(store), command, now)
+                    .is_none())
+        {
             return false;
         }
         self.held.push((command.clone(), now + ACK_WAIT_MS));
         true
     }
 
+    fn prune(&mut self, stored: &Stored<'_>, now: f64) {
+        self.acked
+            .retain(|id, expiry| *expiry > now && !stored.has(id));
+    }
+
     /// Commands whose ids are now stored or whose wait expired, in arrival order.
+    /// Runs on every engine event, so with nothing held it scans the store only
+    /// when its order count moved (an acknowledged order stored, then removed).
     pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
         if self.held.is_empty() {
-            // Runs on every engine event: without held commands only expiry
-            // matters, and `hold` checks the store when a command arrives.
-            self.acked.retain(|(_, expiry)| *expiry > now);
+            self.acked.retain(|_, expiry| *expiry > now);
+            if !self.acked.is_empty() && store.orders().len() != self.pruned_orders {
+                self.pruned_orders = store.orders().len();
+                self.prune(&Stored::of(store), now);
+            }
             return Vec::new();
         }
-        self.acked
-            .retain(|(id, expiry)| *expiry > now && !stored(store, id));
+        let stored = Stored::of(store);
+        self.pruned_orders = store.orders().len();
+        self.prune(&stored, now);
         let mut ready = Vec::new();
         let mut index = 0;
         while index < self.held.len() {
             let (command, cap) = &self.held[index];
-            if !self.behind(index) && (now >= *cap || !self.awaited(store, command, now)) {
+            if !self.behind(index)
+                && (now >= *cap || self.awaited_until(&stored, command, now).is_none())
+            {
                 let (command, _) = self.held.remove(index);
                 // An expired wait must not hold the same id again on dispatch.
                 for id in named_ids(&command) {
-                    self.acked
-                        .retain(|(acked, _)| acked != id && acked != native(id));
+                    self.acked.remove(id.as_str());
+                    self.acked.remove(native(id));
                 }
                 ready.push(command);
             } else {
@@ -181,11 +201,15 @@ impl PlacementAcks {
     /// wake-up timer. Commands waiting behind another are released with it.
     /// Always later than `now` after `release`, so the timer cannot spin.
     pub fn next_deadline(&self, store: &Store, now: f64) -> Option<f64> {
+        if self.held.is_empty() {
+            return None;
+        }
+        let stored = Stored::of(store);
         (0..self.held.len())
             .filter(|&index| !self.behind(index))
             .map(|index| {
                 let (command, cap) = &self.held[index];
-                self.awaited_until(store, command, now)
+                self.awaited_until(&stored, command, now)
                     .map_or(*cap, |until| until.min(*cap))
             })
             .reduce(f64::min)

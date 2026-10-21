@@ -4251,7 +4251,9 @@ mod placement_ack_tests {
         /// The private stream reports the order named by the message, a group
         /// child (`child@group`), or a fill of an unstored order (`fill:id`).
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _socket: SocketId, text: &str) {
-            if let Some(id) = text.strip_prefix("fill:") {
+            if let Some(id) = text.strip_prefix("remove:") {
+                cx.store.remove_orders(&[id]);
+            } else if let Some(id) = text.strip_prefix("fill:") {
                 cx.fill(Fill {
                     order_id: id.into(),
                     symbol: "BTCUSDT".into(),
@@ -4621,6 +4623,18 @@ mod placement_ack_tests {
             .collect();
         assert_eq!(order, [2, 3]);
         assert!(own_timer(&mut engine).is_none(), "nothing left to wake for");
+    }
+
+    #[test]
+    fn an_order_stored_then_removed_does_not_hold_a_later_cancel() {
+        // Hyperliquid removes terminal orders from the store.
+        let mut engine = engine(true);
+        place(&mut engine, 0.);
+        stream(&mut engine, 1., "7");
+        stream(&mut engine, 2., "remove:7");
+        engine.drain_actions().for_each(drop);
+        cancel(&mut engine, 3., 2, "7");
+        assert_eq!(results(&mut engine), [(2, Err("Order 7 not found".into()))]);
     }
 
     fn engine_with_hold() -> Engine<StoredOnly> {
