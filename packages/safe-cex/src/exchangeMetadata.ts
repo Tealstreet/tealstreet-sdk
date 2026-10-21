@@ -887,11 +887,11 @@ const BitgetMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: true,
   supportsTunnel: true,
-  // No `supportsWsRoute`: bitget never reads `tealstreetWsRoute`. Its routing
-  // entry is `fallbackOnly`, which the resolver evaluates without consulting
-  // the flag, and all three ws classes hardcode `useFallbackUrl = false` and
-  // flip it themselves after failed connection attempts. Advertising it
-  // rendered a checkbox that saved a value nothing consumed. Contrast bitunix,
+  // No `supportsWsRoute`: bitget never reads `tealstreetWsRoute`. Its public
+  // routing is `fallbackOnly` (the two public ws classes flip `useFallbackUrl`
+  // themselves) and its private routing follows `tealstreetProxy`
+  // (`proxyConditional` + relay). Advertising it rendered a checkbox that saved
+  // a value nothing consumed. Contrast bitunix,
   // which initialises `useFallbackUrl` from the flag, and lighter, whose
   // routing is `wsRouteCandidates` — the flag is real for both.
   supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice],

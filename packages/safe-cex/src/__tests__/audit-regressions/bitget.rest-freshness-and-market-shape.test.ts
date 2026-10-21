@@ -293,7 +293,8 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
         expect.stringContaining('Bitget private WS is not receiving live order/position updates'),
         { forceToast: true },
       );
-      expect(privateWebsocket.useFallbackUrl).toBe(true);
+      // The watchdog no longer flips a fallback route (removed with useFallbackUrl in the
+      // bitget egress change); route changes now follow 40018 / closes before login.
       expect(reconnect).toHaveBeenCalled();
       expect(fetchOrders).toHaveBeenCalled();
       expect(exchange.store.orders).toEqual([expect.objectContaining({ id: 'tp-1', status: OrderStatus.Open })]);

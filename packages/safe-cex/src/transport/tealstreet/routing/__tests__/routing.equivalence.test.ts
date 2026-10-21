@@ -124,11 +124,28 @@ describe('routing table / resolver (Epic 1 net)', () => {
       'wss://fsjnpy143pbz.asia.tealstreet.io/apex/private',
     );
 
-    // fallbackOnly (bitget): direct primary, distinct fallback host per channel.
+    // bitget private moved from fallbackOnly to proxyConditional + a relay that
+    // also rides the tunnelled route (40018 IP-bound logins, 2026-10-21); public
+    // is still fallbackOnly. UTA accounts get the v3 equivalents.
+    // Literal on purpose: sdk-rs's routing.mjs loads this file with a fixed import map.
+    const bitgetRelay = (version: 'v2' | 'v3') =>
+      `wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2F${version}%2Fws%2Fprivate`;
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
       tunnelled: false,
       fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
+      relay: bitgetRelay('v2'),
     });
+    expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
+      tunnelled: true,
+      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
+      relay: bitgetRelay('v2'),
+    });
+    expect(resolveExchangeRouting('bitget', proxy).wsPrivateUta).toEqual({
+      tunnelled: true,
+      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private',
+      relay: bitgetRelay('v3'),
+    });
+    expect(resolveExchangeRouting('okx', proxy).wsPrivateUta).toBeUndefined();
     expect(resolveExchangeRouting('bitget', offProxy).wsPublic).toEqual({
       tunnelled: false,
       fallback: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',

@@ -30,8 +30,13 @@ const resolveRestPool = (declared: RestPool, proxyRegion?: string): RestPool =>
 const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions, egress: 'jp' | 'sg'): ResolvedWs => {
   if (!strategy) return { tunnelled: false };
   const resolved = resolveWsKind(strategy, o);
-  // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy).
-  if (resolved.tunnelled) return resolved;
+  // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy),
+  // except a relay the strategy explicitly offers to tunnelled sockets too.
+  if (resolved.tunnelled) {
+    return strategy.relayWhenTunnelled && strategy.relayUpstream
+      ? { ...resolved, relay: buildRelayUrl(egress, strategy.relayUpstream) }
+      : resolved;
+  }
   const out = { ...resolved };
   if (strategy.fallback && !out.fallback) out.fallback = strategy.fallback;
   if (strategy.relayUpstream) out.relay = buildRelayUrl(egress, strategy.relayUpstream);
@@ -71,5 +76,6 @@ export const resolveExchangeRouting = (exchange: ExchangeName, o: RoutingOptions
     wsPublic: resolveWs(spec.ws?.public, o, howEgress),
     wsPrivate: resolveWs(spec.ws?.private, o, howEgress),
     wsBusiness: resolveWs(spec.ws?.business, o, howEgress),
+    ...(spec.ws?.privateUta ? { wsPrivateUta: resolveWs(spec.ws.privateUta, o, howEgress) } : {}),
   };
 };
