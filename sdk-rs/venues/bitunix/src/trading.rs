@@ -1795,6 +1795,7 @@ impl BitunixFutures {
                 }
                 Call::Leverage { symbol, value } => {
                     self.account.generations[Axis::Positions.index()] += 1;
+                    self.account.position_write_revision += 1;
                     cx.store.update_setting(symbol, |s| s.leverage = *value);
                     cx.store.update_positions(|p| {
                         if p.symbol == *symbol {
@@ -1804,6 +1805,7 @@ impl BitunixFutures {
                 }
                 Call::Margin { symbol, isolated } => {
                     self.account.generations[Axis::Positions.index()] += 1;
+                    self.account.position_write_revision += 1;
                     let margin = if *isolated {
                         MarginType::Isolated
                     } else {
@@ -1820,6 +1822,7 @@ impl BitunixFutures {
                 Call::Mode { hedged } => {
                     self.account.generations[Axis::Balance.index()] += 1;
                     self.account.generations[Axis::Positions.index()] += 1;
+                    self.account.position_write_revision += 1;
                     cx.store.set_hedged(*hedged);
                     self.debounce(cx, Axis::Positions);
                 }

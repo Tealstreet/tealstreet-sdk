@@ -755,3 +755,44 @@ deadline. Pings run every 15 seconds without synthetic traffic. Retired socket
 epochs and queue/login timers cannot mutate a replacement. Futures retirement
 immediately invalidates depth and publishes consumer clearing, retaining interests
 for one replay of the current subscriptions at the replacement open.
+
+Rust construction retains validated secondary read credentials. Signed GETs
+(account axes, symbol settings and history) use that identity and the SDK's api-key
+GET discriminator sends them through secondary egress. Unsigned public GETs also
+use the configured secondary GET transport without adding authentication. POSTs,
+other mutations and private WS login retain primary identity/egress. Partial/empty
+secondary credentials fail before startup I/O, including public-only engines;
+primary-only configurations keep existing signatures. Account/settings request
+tags name the selected credential slot; history is never account-auth evidence.
+This signing/routing fix does not classify native account-auth outcomes.
+
+Rust ordinary position reconciliation treats private position-ID notifications
+as routing hints rather than newer financial snapshots. Reads retain latest-serial
+and accepted settings/mode write-revision fences, while command-owned preflight
+keeps full generation checks. Position notifications coalesce without postponing
+a read; an in-flight ordinary or owned serial is not superseded by background
+refresh before a 10-second lost-read bound. Only its matching completion/failure
+releases the token, and activity during a read schedules one follow-up. Existing
+REST/WS position-ID routing precedence and all financial mappers are unchanged.
+
+Rust position snapshots isolate typed malformed rows by the native symbol (exact
+existing aliases/case), retaining both cached hedge legs and REST routing metadata
+for a rejected symbol. Unknown row identities hold absence, while valid rows may
+replace their own IDs, including explicit zero closes. Known bad/valid duplicates
+quarantine the symbol in either order; bounded coverage overflow holds everything
+conservatively. A partial snapshot cannot mix held exposure with contradictory
+position modes, establish first readiness or qualify as a trading prerequisite.
+Only admitted rows update settings; WS routing hints and existing financial/side
+fallbacks stay unchanged. Order/TP-SL rows use a separate policy.
+
+Rust regular/TP-SL REST snapshots retain malformed native raw-ID families together
+with cached parent/virtual siblings and routing metadata; valid peers and safely
+absent raw families advance only after complete envelopes. Unknown identity holds
+absence within that endpoint scope, while an admitted raw parent supersedes its
+entire old family, including omitted brackets or changed standalone leg shapes.
+Known bad/valid duplicates quarantine the raw ID, and bounded coverage overflow
+holds conservatively. Only admitted groups advance execution baselines; pending
+execution and optimistic/terminal guards remain. Partial initial halves cannot
+establish readiness, both staged serials/generations must be current, and partial
+command-owned refreshes cannot qualify as trading prerequisites. WS generation
+fences and financial/side defaults remain separate unchanged policies.

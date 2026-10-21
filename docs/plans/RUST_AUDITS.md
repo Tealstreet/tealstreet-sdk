@@ -489,11 +489,28 @@ Remaining resilience and completeness findings are independent of request parity
   recovery never resets private settings/state. Shared capped discovery backoff
   preserves native/HTTP rate-limit floors and degradation/recovery; malformed
   streams/envelopes remain failures with sanitized public diagnostics.
-- Medium: one unmappable positions/orders row keeps the previous snapshot forever
-  (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
-- Medium: every WS position/order/tpsl event bumps the snapshot generation and the
-  in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
-  events do not update positions; under steady activity positions never commit.
+- Medium: ~~one unmappable position row holds all financial peers and absence
+  forever~~. Rejected native symbols retain their cached hedge legs, settings and
+  REST routing IDs; valid peers and explicitly closed zero rows advance after a
+  complete envelope. Unknown identities hold absence, known duplicate conflicts
+  quarantine their whole symbol, and partial mode mixes remain atomic. Partial
+  initial reads cannot establish readiness or prove trading prerequisites.
+- Medium: ~~one malformed regular/TP-SL order row holds every healthy order peer~~.
+  Request-local native raw-ID coverage retains rejected cached parents, attached
+  brackets or both standalone siblings together with routing metadata. Valid peers
+  and safely absent raw families advance; admitted parents remove old omitted
+  brackets despite an unknown neighbor. Unknown identities hold absence only in
+  their endpoint scope, and only admitted raw groups advance fill baselines.
+  Initial readiness requires both current serials without rejected rows, while
+  command-owned partial refreshes cannot prove a trading prerequisite.
+- Medium: ~~WS position-ID notifications invalidate in-flight financial snapshots
+  and postpone reconciliation indefinitely under steady activity~~. Ordinary
+  positions now retain their in-flight serial for a bounded read interval and
+  survive WS-only generation changes, with separate write-ACK revision fencing.
+  Command-owned preflight remains strict; notifications coalesce one follow-up
+  without moving deadlines, and lost reads recover without admitting old replies.
+  Order/TP-SL event generation still fences the entire order snapshot; keyed order
+  reconciliation remains a separate open finding.
 - Medium: ~~history failures return success with empty or partial rows~~.
   Rust now rejects failed first/later pages (transport, HTTP/native, malformed
   rows/envelopes), so a failed read cannot establish complete history. Full
@@ -519,7 +536,9 @@ Remaining resilience and completeness findings are independent of request parity
   only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; ~~book kept
   while disconnected~~ (futures retirement immediately invalidates subscribed
   books and publishes consumer clearing before retry; current interests replay
-  once on replacement); secondary read keys dropped; `data: null` envelopes treated as
+  once on replacement); ~~secondary read keys dropped~~ (validated native options
+  now reach the GET signer, with api-key secondary egress in SDK/native plans;
+  mutations/private login remain primary and public discovery stays unsigned); `data: null` envelopes treated as
   failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
   caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
   as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL
