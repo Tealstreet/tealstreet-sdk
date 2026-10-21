@@ -1433,10 +1433,8 @@ fn assert_fresh_rails(h: &Harness, command: u32, buy: f64, sell: f64) {
     assert_eq!(*id, command);
     let json: serde_json::Value =
         serde_json::from_str(result.as_ref().expect("successful read")).unwrap();
-    assert_eq!(
-        json,
-        serde_json::json!({"buyLeverage":buy,"sellLeverage":sell})
-    );
+    assert_eq!(json["buyLeverage"].as_f64(), Some(buy));
+    assert_eq!(json["sellLeverage"].as_f64(), Some(sell));
 }
 
 fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) {

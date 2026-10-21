@@ -414,3 +414,10 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   message classification; success returns plain JSON. Added one-failure/no-I/O
   preflight outcome coverage. Independent API-integration review clean;
   144BingX+246Binance,14host,13TS tests and typecheck/fmt/Clippy/bans pass.
+
+- Integrated landing90875b0968c, including native account identities and the
+  explicit fresh leverage-read contract from #1522. New combined query policy
+  keeps explicit reads fresh while selected metadata updates fetch the same
+  atomic leverage/margin pair. Other OnRead venues retain their policy. The
+  original fresh-read regressions now finish both stages; settings races fail
+  without publishing partial rails. Independent integration review is clear.
