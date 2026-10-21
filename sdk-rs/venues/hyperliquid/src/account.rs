@@ -285,6 +285,10 @@ impl Hyperliquid {
             }
         }
     }
+    /// TS synthesises no position (and so no leverage row) for a merged spot pair.
+    pub(crate) fn has_setting(&self, m: &Market) -> bool {
+        self.spot || m.is_spot != Some(true)
+    }
     pub(crate) fn seed_setting(&self, m: &Market) -> MarketSetting {
         // HIP-3 assets get no activeAssetData, so this seed is what writes start from;
         // TS writes every HIP-3 asset isolated.
@@ -337,6 +341,7 @@ impl Hyperliquid {
             .markets()
             .iter()
             .enumerate()
+            .filter(|(_, m)| self.has_setting(m))
             .map(|(i, m)| (i as u32, self.seed_setting(m)))
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
