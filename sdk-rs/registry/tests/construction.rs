@@ -110,11 +110,12 @@ fn kraken_refuses_a_secret_it_cannot_sign_with() {
 }
 
 #[test]
-fn hyperliquid_perpetuals_refuse_the_spot_toggle() {
-    assert_eq!(
-        rejected("hyperliquid", r#"{"enableSpotMarkets":true}"#),
-        "Rust Hyperliquid currently supports perpetual markets only"
-    );
+fn hyperliquid_perpetuals_accept_the_spot_toggle() {
+    construct(
+        "hyperliquid",
+        r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,
+    )
+    .unwrap();
     construct(
         "hyperliquidspot",
         r#"{"publicDataOnly":true,"enableSpotMarkets":true}"#,
