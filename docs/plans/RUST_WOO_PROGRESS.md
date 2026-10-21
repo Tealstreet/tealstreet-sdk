@@ -325,3 +325,16 @@ integration re-reviews PASS; original findings and follow-ups are resolved.
 
 Push the feature branch, refresh PR#1316 evidence/re-review comments, wait for
 all CI on that exact head, merge into feat/rust-rewrite, and cut a fresh branch.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify native algo reduce-only defaults, trigger fallback and missing-
+   reference row handling; preserve intentional native semantics and record
+   unverified changes as risks.
+2. Clarify leverage write-accepted/readback-unconfirmed failures without removing
+   bounded confirmation or reporting an unconfirmed setting as successful.
+3. Warn once per symbol when isolated exposure is observed while mutations are
+   unsupported, keeping the position visible. Cover REST and stream paths.
+4. Reproduce behavior gaps, run focused WOO/Binance tests and fmt/strict Clippy/
+   bans with CARGO_BUILD_JOBS=4; independently review, push for CI and merge only
+   after overseer's exclusive1567 slot ends.
