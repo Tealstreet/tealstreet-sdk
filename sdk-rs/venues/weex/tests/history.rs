@@ -54,6 +54,26 @@ fn result(actions: &[Action]) -> Result<String, String> {
         })
         .expect("query completion")
 }
+fn owned_incomplete(actions: &[Action], command: u32) {
+    let mut count = 0;
+    let completion = actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. } | Notice::CommandFailed { command: id, .. }) if *id == command));
+    for (index, action) in actions.iter().enumerate() {
+        if let Action::Notice(Notice::Event(event)) = action
+            && event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        {
+            assert_eq!(event.level, safe_cex_engine::Level::Warn);
+            assert_eq!(
+                event.fields,
+                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]
+            );
+            if let Some(completion) = completion {
+                assert!(index < completion, "coverage must precede its completion");
+            }
+            count += 1;
+        }
+    }
+    assert!(count > 0, "owned incomplete marker missing");
+}
 fn no_completion(actions: &[Action]) {
     assert!(!actions.iter().any(|a| matches!(
         a,
@@ -365,6 +385,7 @@ fn failed_income_chunk_continues_next_hundred_day_chunk_with_incomplete_warning(
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
+    owned_incomplete(&actions, 7);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE"))));
     let actions = advance(&mut e, &mut now, actions);
     let actions = advance(&mut e, &mut now, actions);
@@ -374,6 +395,7 @@ fn failed_income_chunk_continues_next_hundred_day_chunk_with_incomplete_warning(
     let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
     let actions = advance(&mut e, &mut now, actions);
     assert_eq!(result(&actions).unwrap(), "[]");
+    owned_incomplete(&actions, 7);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE")&&message.contains("1 chunk"))));
 }
 #[test]
@@ -420,6 +442,7 @@ fn income_page_budget_reports_incomplete_instead_of_silent_success() {
     }
     let rows: Vec<IncomeResult> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
     assert_eq!(rows.len(), 100);
+    owned_incomplete(&actions, 7);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE"))));
 }
 
@@ -589,4 +612,88 @@ fn non_null_income_cursor_warns_even_when_has_next_page_is_false() {
     );
     assert_eq!(result(&actions).unwrap(), "[]");
     assert!(actions.iter().any(|action|matches!(action,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("INCOMPLETE"))));
+    owned_incomplete(&actions, 7);
+}
+
+#[test]
+fn failed_nonrange_income_emits_native_owned_fixture_before_failure_at_error_only_level() {
+    let mut e = engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 1,
+            query: income(None, None),
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let request = request(&actions, "/account/income");
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: request.id,
+            error: "page reset",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    owned_incomplete(&actions, 1);
+    let event = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(e))
+                if e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(e)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let [("command", safe_cex_engine::Value::Num(command))] = event.fields.as_slice() else {
+        panic!("actual native ownership must be exact")
+    };
+    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command}});
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/incomplete-query-event.json")).unwrap();
+    assert_eq!(
+        actual, fixture,
+        "host/worker fixture must match the real venue event"
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:1,error}) if error.legacy_text().contains("page reset"))));
+}
+#[test]
+fn lifetime_income_budget_marker_is_owned_before_retained_rows_finish() {
+    let mut e = engine();
+    let mut now = NOW;
+    let mut actions = command(&mut e, income(Some(NOW), Some(NOW + 5001.0 * 100.0 * DAY)));
+    let mut requests = 0;
+    loop {
+        if actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+        {
+            assert_eq!(requests, 10_000);
+            owned_incomplete(&actions, 7);
+            assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(e)) if e.message.contains("lifetime request budget"))));
+            let rows: Vec<IncomeResult> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+            assert_eq!(rows.len(), 5000);
+            break;
+        }
+        if actions.iter().any(|a| matches!(a, Action::Http(_))) {
+            let req = request(&actions, "/account/income");
+            requests += 1;
+            assert!(requests <= 10_000);
+            let body: IncomeBody = serde_json::from_str(req.body.as_ref().unwrap()).unwrap();
+            let response_body = if requests % 2 == 1 {
+                format!(
+                    r#"{{"items":[{}]}}"#,
+                    bill(requests, body.end_time.unwrap() as f64 - 1.0)
+                )
+            } else {
+                r#"{"items":[]}"#.to_owned()
+            };
+            actions = response(&mut e, now, req.id, &response_body);
+        } else {
+            actions = advance(&mut e, &mut now, actions);
+        }
+    }
 }
