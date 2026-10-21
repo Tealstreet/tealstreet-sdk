@@ -17,3 +17,9 @@ Regress missing/null/empty/wrong-type result, explicit false, success cancellati
 coalesced deadline and close/replacement/late timers. Prove original failures.
 Run focused Bitunix/Binance native + strict Clippy/fmt/bans, independent reviews,
 CI and a separate exact guard. Merge only after preceding Bitunix source queue.
+
+Independent plan and implementation reviews CLEAR. All four regression families
+fail the original implementation and pass the correction: malformed-control
+visibility/retry, success cancellation, coalesced deadline and retired timer
+ownership. 382 combined Bitunix/Binance native tests and strict Clippy/fmt/bans
+pass. Actual #1639 integration remains mandatory before merge.

@@ -745,3 +745,11 @@ degradation/recovery. HTTP 418/429 honor `Retry-After` (60-second default); nati
 `10005`/`10006` wait 60 seconds even with missing/null data, while `10001` remains a network
 failure. Malformed public previews are not copied into diagnostics. Private,
 financial history and trading policies remain separate.
+
+Rust private-login controls are inspected even without `data`. An explicit false
+`data.result` keeps the existing rejection diagnostic; absent/null/malformed
+results warn as malformed stream data without claiming invalid credentials or
+copying the response. Failed controls share one two-second retry per socket
+without postponing its deadline. Success and socket retirement cancel that retry;
+a late timer cannot sign on a replacement. The existing first-pong compatibility,
+login timestamp units and write retry policy remain unchanged.
