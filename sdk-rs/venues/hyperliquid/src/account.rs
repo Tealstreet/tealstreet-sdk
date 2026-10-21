@@ -1405,9 +1405,16 @@ impl Hyperliquid {
             };
             let available = pending.available;
             let ws = pending.ws;
-            self.account.pending_spot = None;
+            let pending = self.account.pending_spot.take().expect("pending spot");
             self.warn_unvalued(cx, unvalued);
             self.commit_collateral(cx, equity, hold, available, ws);
+            self.publish_spot_coins(
+                cx,
+                pending
+                    .balances
+                    .iter()
+                    .map(|(coin, total, _)| (coin.as_str(), *total)),
+            );
         }
         if self.account.mode != Mode::Standard && self.account.spot.is_none() {
             return;
@@ -1575,15 +1582,23 @@ impl Hyperliquid {
         self.warn_unvalued(cx, unvalued);
         self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
-        // Spot holdings for the margin panel, as TS shows them; USD totals stay unified.
-        let coins = state
-            .balances
-            .iter()
-            .filter(|b| b.total != 0.0)
-            .map(|b| CoinBalance {
-                base: b.coin.to_string(),
-                amount: b.total,
-                notional: b.total * self.collateral_price(cx, &b.coin).unwrap_or(0.0),
+        self.publish_spot_coins(
+            cx,
+            state.balances.iter().map(|b| (b.coin.as_ref(), b.total)),
+        );
+    }
+    /// Spot holdings for the margin panel, as TS shows them; USD totals stay unified.
+    fn publish_spot_coins<'a>(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        balances: impl Iterator<Item = (&'a str, f64)>,
+    ) {
+        let coins = balances
+            .filter(|(_, total)| *total != 0.0)
+            .map(|(coin, total)| CoinBalance {
+                base: coin.to_string(),
+                amount: total,
+                notional: total * self.collateral_price(cx, coin).unwrap_or(0.0),
             })
             .collect();
         cx.store.set_coin_balances(coins);

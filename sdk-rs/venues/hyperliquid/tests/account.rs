@@ -890,5 +890,6 @@ fn unified_spot_state_publishes_spot_holdings_as_coins() {
     assert_eq!((usdc.amount, usdc.notional), (900.0, 900.0));
     let btc = coins.iter().find(|c| c.base == "BTC").unwrap();
     assert_eq!(btc.amount, 0.5);
-    assert!(btc.notional > 0.0);
+    // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
+    assert_eq!(btc.notional, 50.0);
 }
