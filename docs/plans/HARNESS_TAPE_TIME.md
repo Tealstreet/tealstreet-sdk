@@ -170,3 +170,20 @@ filled/remaining fields where TS REST replacement restores startup values
 after the WS update while Rust preserves the cumulative fill, and five
 retained cancelled-row paths. Declare only those exact paths on the existing
 tape SHA and remove two unobserved checkpoint-5 row keys; retain strict FAIL.
+
+## BingX phase
+
+Enable BingX's virtual private clock without changing wire records,
+protocol checks, generation-aware subscriptions or production behavior.
+The fixture currently lacks epoch metadata; change that only if complete
+raw evidence demonstrates a timestamp problem. Preserve signed request
+validation, listen-key roles, large native IDs, staged position snapshots,
+cumulative-fill deduplication and the 750 ms position repair.
+
+Use a fingerprint-matching CI engine for five focused private pairs.
+Compare complete nonmetric outputs, including IDs, timestamps and receipts;
+prune only exact unobserved tape-bound keys and inspect any new diagnostic
+before adding an exact key and specific cause. Require fresh mandatory
+public/private verification, independent reviews, five identical head CI
+pairs, full green CI, a separate BingX dependency guard and an audited
+merge receipt before reporting and moving to the Bybit family.
