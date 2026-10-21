@@ -475,3 +475,75 @@ test('a history.incomplete event naming the command marks its rows incomplete', 
   assert.equal(JSON.stringify(rows), '[{"id":"a"}]');
   assert.equal((await other).incomplete, undefined);
 });
+
+
+const coverageEvent = (command) => ({
+  op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },
+});
+
+test('per-command event observer is installed before synchronous dispatch and sees coverage before done', async () => {
+  const events = [];
+  const r = rig({}, { command(json) {
+    const { command, ...input } = JSON.parse(json);
+    assert.deepEqual(input, { op: 'fetchFills' }, 'observer stays outside native JSON');
+    return JSON.stringify([coverageEvent(command), { op: 'done', command, result: '[]' }]);
+  } });
+  const result = await r.host.command({ op: 'fetchFills' }, { onEvent(event) {
+    assert.equal(r.host.commands.size, 1);
+    events.push(event);
+  } });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].fields.command, 1);
+  assert.equal(result.incomplete, true);
+  assert.deepEqual(Object.keys(result), []);
+  assert.equal(r.host.commands.size, 0);
+  assert.equal(r.timers.size, 0);
+});
+
+test('per-command events stay with pending requests and malformed, unknown and timed-out IDs have no observer', async () => {
+  const firstEvents = [];
+  const secondEvents = [];
+  const r = rig({ commandTimeoutMs: 5 });
+  const first = r.host.command({ op: 'fetchFills' }, { onEvent: (event) => firstEvents.push(event) });
+  const second = r.host.command({ op: 'fetchFills' }, { onEvent: (event) => secondEvents.push(event) });
+  r.host.run(JSON.stringify([coverageEvent(2), ...['1', null, true, 1.5, -1, 0x1_0000_0000, 999].map(coverageEvent)]));
+  assert.equal(firstEvents.length, 0);
+  assert.equal(secondEvents.length, 1);
+  done(r.host, 2, '[]');
+  assert.equal((await second).incomplete, true);
+  const expired = assert.rejects(first, CommandTimeoutError);
+  r.advance(5);
+  await expired;
+  r.host.run(JSON.stringify([coverageEvent(1), coverageEvent(2)]));
+  assert.equal(firstEvents.length, 0);
+  assert.equal(secondEvents.length, 1);
+  assert.equal(r.host.commands.size, 0);
+});
+
+test('a throwing command event observer cannot replace completion or erase the incomplete flag', async () => {
+  const logs = [];
+  const r = rig({}, { command(json) {
+    const { command } = JSON.parse(json);
+    return JSON.stringify([coverageEvent(command), { op: 'done', command, result: '[]' }]);
+  } }, { onLog: (level, message) => logs.push({ level, message }) });
+  const result = await r.host.command({ op: 'fetchFills' }, { onEvent() { throw new Error('observer broke'); } });
+  assert.equal(result.incomplete, true);
+  assert.equal(r.host.commands.size, 0);
+  assert.equal(r.timers.size, 0);
+  assert.ok(logs.some(({ message }) => message === 'Command diagnostic callback failed'));
+});
+
+
+test('invalid command observers reject before native dispatch', async () => {
+  for (const onEvent of [null, true, 1, {}]) {
+    const r = rig();
+    await assert.rejects(r.host.command({ op: 'placeOrders' }, { onEvent }), TypeError);
+    assert.equal(r.calls.length, 0);
+    assert.equal(r.host.commands.size, 0);
+  }
+  const r = rig();
+  await assert.rejects(r.host.command({ op: 'placeOrders' }, {
+    get onEvent() { throw new Error('observer getter failed'); },
+  }), /observer getter failed/);
+  assert.equal(r.calls.length, 0);
+});
