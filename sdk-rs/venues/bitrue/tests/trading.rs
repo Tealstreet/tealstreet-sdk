@@ -1573,7 +1573,10 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
         Notice::Log {
             level: safe_cex_engine::LogLevel::Error,
             ..
-        }
+        } | Notice::Event(safe_cex_engine::LogEvent {
+            level: safe_cex_engine::Level::Error,
+            ..
+        })
     )));
 }
 

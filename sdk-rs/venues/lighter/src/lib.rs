@@ -7,12 +7,13 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -747,8 +748,9 @@ impl Venue for Lighter {
             return;
         }
         if let Some(error) = frame.error {
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
                 format!("Lighter WS {}: {}", error.code, error.message),
             );
             return;
@@ -1338,7 +1340,11 @@ impl Venue for Lighter {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
-                    cx.log(LogLevel::Error, "Lighter order book market not found");
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        "Lighter order book market not found",
+                    );
                     return;
                 }
                 let state = self.books.entry(symbol.clone()).or_default();
@@ -1367,7 +1373,11 @@ impl Venue for Lighter {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("Lighter"));
+                    cx.notice(
+                        safe_cex_engine::Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("Lighter"),
+                    );
                     return;
                 }
                 let Some(m) = cx.store.market(&symbol) else {

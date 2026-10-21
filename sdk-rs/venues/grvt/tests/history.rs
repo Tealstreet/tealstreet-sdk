@@ -48,6 +48,7 @@ impl Harness {
                     self.results.push((command, result))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
                 _ => {}
             }
         }

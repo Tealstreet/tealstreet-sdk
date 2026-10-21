@@ -6,13 +6,15 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue, json, num,
+    Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -679,7 +681,7 @@ impl Venue for AsterDex {
         if let Some(credentials) = &self.credentials
             && let Err(error) = credentials.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.start_requests(cx);
@@ -809,7 +811,11 @@ impl Venue for AsterDex {
             Pending::ExchangeInfo { rows, skipped } => {
                 log_skipped_rows(cx, "market", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.log(LogLevel::Error, "Aster market bootstrap failed");
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
+                        "Aster market bootstrap failed",
+                    );
                     self.startup.failed(cx, true);
                     return;
                 }
@@ -836,7 +842,11 @@ impl Venue for AsterDex {
             Pending::Daily { rows, skipped } => {
                 log_skipped_rows(cx, "ticker", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.log(LogLevel::Error, "Aster ticker bootstrap failed");
+                    cx.notice(
+                        Level::Error,
+                        code::REQUEST_FAILED,
+                        "Aster ticker bootstrap failed",
+                    );
                     self.startup.failed(cx, false);
                     return;
                 }
@@ -1057,7 +1067,11 @@ impl Venue for AsterDex {
             }
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
-                    cx.log(LogLevel::Error, interval.unsupported("AsterDEX"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        interval.unsupported("AsterDEX"),
+                    );
                     return;
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
@@ -1182,8 +1196,9 @@ fn row_symbol(item: &str) -> String {
 /// A malformed startup row is skipped, not fatal; one summary per read.
 fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
     if !skipped.is_empty() {
-        cx.log(
-            LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::ROW_SKIPPED,
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
