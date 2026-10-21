@@ -211,3 +211,22 @@ Require fresh ten-case suite verification, independent reviews, five head
 CI pairs per private identity, full green CI, a separate guard protecting
 the shared `bybit` crate and an audited merge receipt before reporting and
 moving to Crypto.com.
+
+## Crypto.com phase
+
+Enable the virtual private clock only in Crypto.com's harness config. Preserve
+the wire fixture, signed request checks, economic parameters, RPC/heartbeat
+identities and existing TS readiness/frame hooks. Its fixture has no epoch
+metadata; add an anchor only if complete raw evidence requires one. Keep the
+existing protocol/auth coverage diagnostics unless fresh exact-key evidence
+shows a declaration is unobserved; repeatability alone is not authenticated
+lifecycle parity.
+
+Use a fingerprint-matching CI engine for focused private iteration if available,
+or the matching sweep branch's five-pair CI proof. Compare complete nonmetric
+outputs, including IDs, timestamps, command receipts and reconciliation timers.
+Review new differences before declaring exact keys, tape SHA and a specific
+cause; prune only unobserved keys. Require focused harness tests, fresh public
+and private mandatory verification, independent current-head artifact review,
+full green CI, a separate Crypto.com dependency guard and an audited merge
+receipt before reporting and moving to GRVT.
