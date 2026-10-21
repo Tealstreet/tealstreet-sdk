@@ -2678,7 +2678,8 @@ fn push_event(
     if event.code != log_code::AUTH_REJECTED {
         health.count(event.code);
     }
-    if event.level < min_level {
+    // History coverage is part of the result contract, even when Warn logs are hidden.
+    if event.level < min_level && event.code != log_code::HISTORY_INCOMPLETE {
         return;
     }
     event.message = crate::log::cap(event.message);

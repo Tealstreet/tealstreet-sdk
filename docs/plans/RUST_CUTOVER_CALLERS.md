@@ -710,12 +710,12 @@ writes before retrying` instead of `Timeout callMethodInWorker`.
 
 ### Incomplete history (#1542, #1554)
 
-Host follow-up plan (2026-10-21): translate event command IDs through the
-existing pending owner in native sessions and Workers, target only that owner,
-and preserve history coverage markers at an Error minimum level. Regressions
-must cover overlapping IDs, disconnect/retirement, event-before-done ordering,
-and semantic markers surviving log filtering. Run focused engine/native/JS
-host gates and independent review before CI and merge.
+Native sessions and Workers now translate event command IDs through the pending
+owner and send those notices only to that client. Retired, disconnected, malformed
+and unknown owners cannot leak notices to another client. `history.incomplete`
+remains Warn but survives an Error minimum level as result metadata. The
+structured marker arrives before its command result; JSON clients must still
+track it to carry completeness onward.
 
 **Open cutover work (B11), not a completed caller migration.** In the JS WASM
 host, a `history.incomplete` event with a pending `fields.command` marks that
@@ -735,7 +735,7 @@ checked at `fdd2389a825`:
 | SDK `webworker/handlers/CallMethodHandler.ts` → `RustEngineExchange.forwardToWorker` (`WORKER_FORWARDED_METHODS`); NX `services/exchange-server` VWC → `apps/web/src/utils/shim/worker/ExchangeServerWorker.ts` | Carry completeness as an explicit serializable field beside the rows, and restore it at the receiving API boundary. The current `callMethod:done` sends the array directly: structured clone drops the non-enumerable property, as does the hosted JSON hop. Prove both worker and hosted round trips, including an unflagged concurrent request. Deploy the sender and receiver together. |
 | NX `apps/web/src/utils/historical/collectAccountAxes.ts` (`runAxis`, `enumerateTradedSymbols`, symbol-scoped fill aggregation) and derived-history adapters | Inspect the flag before `map`/`filter`/spread/folding/enumeration can drop it. A truncated income symbol list also makes the derived fill/position axis incomplete, even if each subsequent fill read succeeds. Preserve that state in `CollectedAxis`/`AxisOutcome`; do not return `status: 'ok'` for it. Any SDK fold that consumes a flagged result must likewise propagate incompleteness. |
 | NX `apps/web/src/utils/historical/runHistoricalWindow.ts` (`collectAccountAxis` → `postHistoricalRecords` → `completeWindow`) | Leave `historical_coverage` uncompleted for incomplete results. Currently only `status: 'ok'` reaches `completeWindow`, so the collection outcome must distinguish partial data from a successful empty/full window. Keep the available rows distinct from a claim of complete coverage; persisting partial rows must not complete that claim. Add a truncated-window regression. |
-| Native sessions / Durable Object clients, if adopted (`sdk-rs/hosts/native/src/server.rs`, `sdk-rs/hosts/wasm/js/workers.mjs`) | The array flag is attached by `EngineHost`, not encoded as a new frame or `done` field. A direct session client must correlate `history.incomplete` itself and carry completeness onward. These servers remap command IDs for `done`, but not the event's `fields.command`; translate that field with the same mapping before correlating it. No current NX `NativeFrameSession` caller was found. |
+| Native sessions / Durable Object clients, if adopted (`sdk-rs/hosts/native/src/server.rs`, `sdk-rs/hosts/wasm/js/workers.mjs`) | The array flag is attached by `EngineHost`, not encoded as a new frame or `done` field. A direct session client must correlate `history.incomplete` itself and carry completeness onward. Both hosts now remap the event's `fields.command` through the same pending owner as `done` and target the owning client; remote consumers must correlate the translated marker before consuming rows. No current NX `NativeFrameSession` caller was found. |
 
 The BloFin `historical_orders` base-unit backfill (#1529) is a separate
 owner-run data migration, described above. Neither this metadata propagation

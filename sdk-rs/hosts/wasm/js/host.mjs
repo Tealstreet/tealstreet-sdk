@@ -225,8 +225,12 @@ export class EngineHost {
   command(command, options) {
     if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
     let timeoutMs;
-    try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
-    catch (error) { return Promise.reject(error); }
+    let onEvent;
+    try {
+      timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs);
+      onEvent = options?.onEvent;
+      if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
+    } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
@@ -238,7 +242,7 @@ export class EngineHost {
       receiptKey: `${this.receiptSession ??= receiptSession()}:${reply}`, commandId: reply, orderIdentities: [] };
     const promise = reply === undefined
       ? Promise.resolve()
-      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity }));
+      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));
     try {
       const startedAt = this.transport.now();
       const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply });
@@ -738,13 +742,19 @@ export class EngineHost {
         break;
       case 'event': {
         const { level, code, message, fields = {} } = action;
-        // A history read that could not be walked completely names its command.
-        if (code === 'history.incomplete' && typeof fields.command === 'number') {
-          const pending = this.commands.get(fields.command);
-          if (pending) pending.incomplete = true;
-        }
-        if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
+        // Registering the per-call handler before dispatch also covers synchronous events.
+        const command = fields?.command;
+        const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
+          ? this.commands.get(command) : undefined;
+        if (code === 'history.incomplete' && pending) pending.incomplete = true;
+        const event = { level, code, message, fields };
+        let callbackFailure;
+        try { pending?.onEvent?.(event); }
+        catch (cause) { callbackFailure = new CommandDiagnosticCallbackError(cause); }
+        if (this.handlers.onEvent) this.handlers.onEvent(event);
         else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
+        // A broken per-command observer cannot skip a later native completion.
+        if (callbackFailure) throw callbackFailure;
         break;
       }
       case 'commandError': {

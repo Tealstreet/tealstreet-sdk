@@ -553,3 +553,95 @@ test('Workers forgets a startup failure once the engine stops or restarts', asyn
   third.socket.close();
   second.socket.close();
 });
+
+
+async function eventObject(synchronous = false) {
+  const EngineObject = createEngineObject({
+    accountToken: () => 'fixture-token',
+    flush: { store: 1e9, books: 1e9 },
+    loadEngine: async () => ({ WasmEngine: class {
+      start() { return '[]'; }
+      command(json) {
+        const { command } = JSON.parse(json);
+        const event = { op: 'event', level: 'warn', code: 'history.incomplete', message: `partial-${command}`, fields: { command } };
+        return JSON.stringify(synchronous ? [event, { op: 'done', command, result: '[]' }] : [event]);
+      }
+      free() {}
+    } }),
+  });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const messages = [[], []];
+  const clients = messages.map((messages) => ({ send(text) { messages.push(JSON.parse(text)); } }));
+  for (const client of clients) object.clients.add(client);
+  await object.receive(clients[0], '{"op":"start","venue":"fixture"}');
+  return { object, clients, messages };
+}
+
+const historyNotice = (command) => ({
+  op: 'event', level: 'warn', code: 'history.incomplete', message: 'private coverage', fields: { command },
+});
+
+test('Workers translates overlapping external IDs and delivers each marker before its own done', async () => {
+  const { object, clients, messages } = await eventObject();
+  try {
+    const first = object.receive(clients[0], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    const second = object.receive(clients[1], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    assert.equal(messages[0].length, 1, 'synchronous marker reaches only its owner');
+    assert.equal(messages[1].length, 1);
+    assert.equal(messages[0][0].fields.command, 77);
+    assert.equal(messages[1][0].fields.command, 77);
+    assert.equal(messages[0][0].message, 'partial-1');
+    assert.equal(messages[1][0].message, 'partial-2');
+    object.host.run(JSON.stringify([
+      { op: 'done', command: 2, result: '[]' },
+      { op: 'done', command: 1, result: '[]' },
+    ]));
+    await Promise.all([first, second]);
+    for (const rows of messages) assert.deepEqual(rows.map((row) => row.op), ['log', 'done']);
+    assert.equal(messages[0][1].id, 77);
+    assert.equal(messages[1][1].id, 77);
+    object.host.run(JSON.stringify([historyNotice(1), historyNotice(2), historyNotice(999)]));
+    assert.deepEqual(messages.map((rows) => rows.length), [2, 2], 'retired or unknown IDs never broadcast');
+  } finally { for (const client of clients) object.leave(client); }
+});
+
+test('Workers correlates a marker and done emitted in one synchronous native dispatch', async () => {
+  const { object, clients, messages } = await eventObject(true);
+  try {
+    await object.receive(clients[1], '{"op":"command","id":92,"command":{"op":"fetchFills"}}');
+    assert.deepEqual(messages[1].map((row) => row.op), ['log', 'done']);
+    assert.equal(messages[1][0].fields.command, 92);
+    assert.equal(messages[1][1].id, 92);
+    assert.equal(messages[0].length, 0);
+  } finally { for (const client of clients) object.leave(client); }
+});
+
+test('Workers suppresses departed owners, replaced hosts and malformed command event IDs', async () => {
+  for (const replace of [false, true]) {
+    const { object, clients, messages } = await eventObject();
+    const host = object.host;
+    try {
+      const pending = object.receive(clients[0], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+      messages[0].length = 0;
+      if (replace) object.host = { dispose() {} };
+      else object.leave(clients[0]);
+      host.run(JSON.stringify([
+        historyNotice(1), historyNotice(999),
+        { ...historyNotice(999), code: 'row.skipped' },
+        ...['1', null, true, 1.5, -1, 0x1_0000_0000].map(historyNotice),
+        { op: 'event', level: 'warn', code: 'history.incomplete', message: 'owner absent', fields: {} },
+        { op: 'done', command: 1, result: '[]' },
+      ]));
+      await pending;
+      assert.deepEqual(messages, [[], []]);
+      // Background notices retain their existing broadcast contract.
+      if (!replace) {
+        host.run(JSON.stringify([{ op: 'event', level: 'warn', code: 'row.skipped', message: 'background', fields: {} }]));
+        assert.equal(messages[1][0].code, 'row.skipped');
+      }
+    } finally {
+      host.dispose();
+      for (const client of clients) object.leave(client);
+    }
+  }
+});

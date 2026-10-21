@@ -460,7 +460,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         LogLevel::Warning => "warning",
                         LogLevel::Error => "error",
                     };
-                    self.broadcast_log(
+                    self.route_log(
+                        None,
                         level,
                         level != "info",
                         |message| encode_notice(ServerNotice::Log { level, message }),
@@ -468,9 +469,48 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         None,
                     );
                 }
-                Notice::Event(event) => {
+                Notice::Event(mut event) => {
+                    let owner = if let Some(index) =
+                        event.fields.iter().position(|(key, _)| *key == "command")
+                    {
+                        // Reject ambiguous fields and values that cannot name a native u32 command.
+                        if event.fields[index + 1..]
+                            .iter()
+                            .any(|(key, _)| *key == "command")
+                        {
+                            continue;
+                        }
+                        let Value::Num(command) = &event.fields[index].1 else {
+                            continue;
+                        };
+                        if !command.is_finite()
+                            || command.fract() != 0.0
+                            || *command < 0.0
+                            || *command > f64::from(u32::MAX)
+                        {
+                            continue;
+                        }
+                        let Some(pending) = self.pending.get(&(*command as u32)) else {
+                            continue;
+                        };
+                        let Some(client) = pending
+                            .client
+                            .filter(|client| self.peers.contains_key(client))
+                        else {
+                            continue;
+                        };
+                        event.fields[index].1 = Value::from(pending.original);
+                        Some(client)
+                    } else {
+                        // A coverage marker without an owner is not a background diagnostic.
+                        if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
+                            continue;
+                        }
+                        None
+                    };
                     let level = event.level.as_str();
-                    self.broadcast_log(
+                    self.route_log(
+                        owner,
                         level,
                         event.level >= Level::Warn,
                         |message| {
@@ -491,8 +531,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
     /// with no client attached Warn+ goes to stderr instead of being dropped.
-    fn broadcast_log(
+    fn route_log(
         &mut self,
+        owner: Option<u64>,
         level: &str,
         warn: bool,
         encode: impl Fn(&str) -> Arc<str>,
@@ -527,7 +568,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
             text = encode(&message[..fits]);
         }
         if text.len() <= limit {
-            self.broadcast(Outgoing::Text(text));
+            if let Some(client) = owner {
+                self.send(client, Outgoing::Text(text));
+            } else {
+                self.broadcast(Outgoing::Text(text));
+            }
         }
     }
 
@@ -1248,6 +1293,30 @@ mod tests {
             cx.done(socket.0, "[]".into());
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            if let Some(command) = text.strip_prefix("event:") {
+                let fields = match command {
+                    "missing" => Vec::new(),
+                    "string" => vec![("command", Value::from("2"))],
+                    "boolean" => vec![("command", Value::Bool(true))],
+                    "duplicate" => vec![("command", 2u32.into()), ("command", 2u32.into())],
+                    value => vec![("command", Value::Num(value.parse().expect("event command")))],
+                };
+                cx.event(
+                    Level::Warn,
+                    safe_cex_engine::log::code::HISTORY_INCOMPLETE,
+                    "\"é".repeat(400),
+                    fields,
+                );
+                return;
+            }
+            if text == "background" {
+                cx.notice(
+                    Level::Warn,
+                    safe_cex_engine::log::code::ROW_SKIPPED,
+                    "background warning",
+                );
+                return;
+            }
             if let Some(command) = text.strip_prefix("error:") {
                 let command = command.parse().expect("error command");
                 cx.command_error(command, "placement rejected");
@@ -1283,6 +1352,150 @@ mod tests {
             mpsc::unbounded_channel().0
         }
         fn request(&self, _: HttpRequest, _: Events) {}
+    }
+
+    fn event_actor(
+        max_frame_bytes: usize,
+    ) -> (Account<Stub, NoTransport>, Vec<mpsc::Receiver<Outgoing>>) {
+        let mut actor = Account::new(
+            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            ServerConfig {
+                max_frame_bytes,
+                ..ServerConfig::default()
+            },
+        );
+        let mut receivers = Vec::new();
+        for client in [1, 2] {
+            let (outgoing, receiver) = mpsc::channel(8);
+            let (cancel, _) = watch::channel(false);
+            actor.peers.insert(
+                client,
+                Peer {
+                    outgoing,
+                    cancel,
+                    books: HashSet::new(),
+                    candles: HashSet::new(),
+                    tickers: None,
+                },
+            );
+            receivers.push(receiver);
+            actor.command(
+                client,
+                Command::FetchLeverage {
+                    command: 77,
+                    symbol: "BTC-USD".into(),
+                },
+            );
+        }
+        (actor, receivers)
+    }
+
+    fn emit_event(actor: &mut Account<Stub, NoTransport>, text: &str) {
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text,
+            },
+        );
+        actor.execute();
+    }
+
+    fn receive_notice(receiver: &mut mpsc::Receiver<Outgoing>) -> serde_json::Value {
+        let Ok(Outgoing::Text(message)) = receiver.try_recv() else {
+            panic!("expected a text notice");
+        };
+        serde_json::from_str(&message).unwrap()
+    }
+
+    #[test]
+    fn command_events_translate_overlapping_external_ids_before_done_without_broadcasting() {
+        let (mut actor, mut receivers) = event_actor(4096);
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "event:1",
+            },
+        );
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        let event = receive_notice(&mut receivers[0]);
+        assert_eq!(event["code"], "history.incomplete");
+        assert_eq!(event["fields"]["command"].as_f64(), Some(77.0));
+        let done = receive_notice(&mut receivers[0]);
+        assert_eq!(done["type"], "done");
+        assert_eq!(done["command"], 77);
+        assert!(receivers[1].try_recv().is_err());
+        assert!(receivers[0].try_recv().is_err());
+        emit_event(&mut actor, "event:2");
+        assert_eq!(
+            receive_notice(&mut receivers[1])["fields"]["command"].as_f64(),
+            Some(77.0)
+        );
+        assert!(receivers[0].try_recv().is_err());
+    }
+
+    #[test]
+    fn command_events_suppress_malformed_unowned_and_disconnected_ids() {
+        let (mut actor, mut receivers) = event_actor(4096);
+        for text in [
+            "event:string",
+            "event:boolean",
+            "event:duplicate",
+            "event:missing",
+            "event:1.5",
+            "event:-1",
+            "event:4294967296",
+            "event:NaN",
+            "event:inf",
+            "event:999",
+        ] {
+            emit_event(&mut actor, text);
+            assert!(receivers[0].try_recv().is_err(), "{text}");
+            assert!(receivers[1].try_recv().is_err(), "{text}");
+        }
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        receive_notice(&mut receivers[0]);
+        emit_event(&mut actor, "event:1");
+        assert!(receivers[0].try_recv().is_err());
+        assert!(receivers[1].try_recv().is_err());
+        actor.leave(2);
+        emit_event(&mut actor, "event:2");
+        assert!(
+            receivers[0].try_recv().is_err(),
+            "departed diagnostics cannot migrate"
+        );
+        emit_event(&mut actor, "background");
+        assert_eq!(receive_notice(&mut receivers[0])["code"], "row.skipped");
+    }
+
+    #[test]
+    fn command_event_diagnostics_remain_bounded_without_disconnect_or_owner_leak() {
+        let (mut actor, mut receivers) = event_actor(180);
+        emit_event(&mut actor, "event:1");
+        let Ok(Outgoing::Text(message)) = receivers[0].try_recv() else {
+            panic!("bounded event");
+        };
+        assert!(message.len() <= 180);
+        let event: serde_json::Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(event["fields"]["command"].as_f64(), Some(77.0));
+        assert_eq!(event["code"], "history.incomplete");
+        assert!(event["message"].as_str().unwrap().starts_with("\"é"));
+        assert!(receivers[1].try_recv().is_err());
+        assert_eq!(actor.peers.len(), 2);
+        assert_eq!(actor.pending.len(), 2);
     }
 
     #[test]
