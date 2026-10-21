@@ -884,10 +884,12 @@ the standalone `spot` mode is unchanged. Every per-order decision reads
 - **Trading**: 8 - szDecimals price decimals; never reduce-only; base price
   last, mid, mark, index.
 
-- **Known gap**: engine markets carry no `info`, so the TS
-  `info.hlTokenName`/`hlTokenFullName` disclosure (the web Margin "Underlying
-  Token" row, e.g. `UBTC (Unit Bitcoin)` behind `BTC/USDC`) is absent on Rust.
-  `symbol` still names the venue token.
+- **Underlying token disclosure**: each merged spot pair publishes its venue
+  token name and full name in the typed `UNDERLYING_TOKENS` frame section; the
+  bridge applies them as TS's `info.hlTokenName`/`hlTokenFullName`, which the
+  web Margin "Underlying Token" row reads (e.g. `UBTC (Unit Bitcoin)` behind
+  `BTC/USDC`). This is a risk disclosure for a wrapped asset behind a familiar
+  name; keep it whenever the display alias exists.
 - Until the spot catalogue is committed, spot open-order rows are skipped
   rather than invalidating the snapshot, so a failing spot read never hides
   perp orders; standard accounts never value spot as collateral.
