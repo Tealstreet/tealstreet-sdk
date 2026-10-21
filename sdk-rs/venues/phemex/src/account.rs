@@ -38,12 +38,20 @@ pub struct Request {
     positions: SnapshotBuilder<String, Position>,
     contexts: HashMap<String, Context>,
     versions: HashMap<String, u64>,
-    /// A rejected open row has no counted stored copy, so the slice UPnL is unknown.
-    pnl_unknown: bool,
+    /// An owned row sits outside a catalogue still loading; the slice keeps its last snapshot.
+    hold: bool,
 }
 impl Request {
     /// Rejects every position id a row on `symbol` may carry; its legs keep their stored copies.
-    fn reject(&mut self, store: &safe_cex_engine::Store, symbol: &str, size: f64) {
+    /// An owned row with no stored copy is reported as an error: it commits as flat.
+    fn reject(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, size: f64, message: String) {
+        let stored = cx.store.positions().iter().any(|p| p.symbol == symbol);
+        let level = if size != 0. && !stored {
+            LogLevel::Error
+        } else {
+            LogLevel::Warning
+        };
+        cx.log(level, message);
         for id in [
             symbol.to_owned(),
             format!("{symbol}:long"),
@@ -51,7 +59,6 @@ impl Request {
         ] {
             self.positions.reject(Some(id));
         }
-        self.pnl_unknown |= size != 0. && !store.positions().iter().any(|p| p.symbol == symbol);
     }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
@@ -325,7 +332,7 @@ impl PhemexPerpetuals {
                 positions: SnapshotBuilder::default(),
                 contexts: HashMap::new(),
                 versions: HashMap::new(),
-                pnl_unknown: false,
+                hold: false,
             };
             self.request(
                 cx,
@@ -378,37 +385,45 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
-        // A bad row never blocks the slice's balance; its positions keep the store's copy.
+        // A bad row keeps its positions' stored copies and never blocks the slice's balance,
+        // unless it is owned on a market that unsettled discovery may still list.
         let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
+            let currency = CURRENCIES[request.currency];
+            let stored = cx.store.positions().iter().any(|p| {
+                cx.store
+                    .market(&p.symbol)
+                    .is_some_and(|m| m.quote == currency)
+            });
             cx.log(
-                LogLevel::Warning,
+                if stored {
+                    LogLevel::Warning
+                } else {
+                    LogLevel::Error
+                },
                 "Phemex skipped an unreadable position row",
             );
             request.positions.reject(None);
-            request.pnl_unknown = true;
             return;
         };
         let symbol = row.symbol.to_ascii_uppercase();
         let Some(market) = cx.store.market(&symbol) else {
-            if row.size != 0.0 {
+            if row.size != 0.0 && self.discovery_settled() {
+                let message = format!("Phemex skipped {symbol} position on an unavailable market");
+                request.reject(cx, &symbol, row.size, message);
+            } else if row.size != 0.0 {
                 cx.log(
                     LogLevel::Warning,
-                    format!("Phemex skipped {symbol} position on an unavailable market"),
+                    "Phemex owned position market unavailable; preserving previous snapshot",
                 );
-                request.reject(cx.store, &symbol, row.size);
-                // A stored copy off the market list is outside every slice's UPnL.
-                request.pnl_unknown = true;
+                request.hold = true;
             }
             return;
         };
         if market.quote != CURRENCIES[request.currency]
             || (!row.currency.is_empty() && row.currency != CURRENCIES[request.currency])
         {
-            cx.log(
-                LogLevel::Warning,
-                format!("Phemex skipped {symbol} position with mismatched settlement"),
-            );
-            request.reject(cx.store, &symbol, row.size);
+            let message = format!("Phemex skipped {symbol} position with mismatched settlement");
+            request.reject(cx, &symbol, row.size, message);
             return;
         }
         let prior = request
@@ -417,11 +432,8 @@ impl PhemexPerpetuals {
             .copied()
             .or_else(|| self.account.context(&row.symbol.to_ascii_uppercase()));
         let Some((context, position)) = row.map(cx.store, prior) else {
-            cx.log(
-                LogLevel::Warning,
-                format!("Phemex skipped unmappable {symbol} position row"),
-            );
-            request.reject(cx.store, &symbol, row.size);
+            let message = format!("Phemex skipped unmappable {symbol} position row");
+            request.reject(cx, &symbol, row.size, message);
             return;
         };
         request
@@ -450,6 +462,7 @@ impl PhemexPerpetuals {
         if !(200..300).contains(&response.status)
             || envelope.code != 0
             || envelope.data.account.currency != CURRENCIES[request.currency]
+            || request.hold
             || envelope.data.account.used < 0.
         {
             self.account_failed(cx, request, "invalid account-position snapshot");
@@ -514,12 +527,8 @@ impl PhemexPerpetuals {
             for (symbol, context) in request.contexts {
                 self.account.install_context(cx, &symbol, context, true);
             }
-            // Native fields always refresh; the derived UPnL holds while a row's is unknown.
-            let upnl = if request.pnl_unknown {
-                self.account.slices[currency].balance.upnl
-            } else {
-                currency_upnl(cx, currency)
-            };
+            // Derived over the committed slice, retained copies included, as WS pushes do.
+            let upnl = currency_upnl(cx, currency);
             self.account.slices[currency].balance = Balance {
                 // Account pushes use the same raw field and subtract this currency's UPnL.
                 total: envelope.data.account.total - upnl,

@@ -226,6 +226,7 @@ fn side(ps: &str, amount: f64) -> PositionSide {
     }
 }
 /// Rejects a malformed position row: its leg when the side is readable, else every leg.
+/// Every caller's row is owned or of unreadable size, so one with no stored copy is an error.
 fn reject_position(
     cx: &mut Cx<'_, Pending>,
     rows: &mut SnapshotBuilder<String, Position>,
@@ -241,8 +242,13 @@ fn reject_position(
             .collect(),
     };
     let label = if ids.len() == 1 { &ids[0] } else { symbol };
+    let stored = ids.iter().any(|id| cx.store.position(id).is_some());
     cx.log(
-        LogLevel::Warning,
+        if stored {
+            LogLevel::Warning
+        } else {
+            LogLevel::Error
+        },
         format!("Aster skipped malformed position row {label}"),
     );
     for id in ids {
@@ -545,7 +551,11 @@ impl AsterDex {
                         }
                         _ => {
                             cx.log(
-                                LogLevel::Warning,
+                                if cx.store.positions().is_empty() {
+                                    LogLevel::Error
+                                } else {
+                                    LogLevel::Warning
+                                },
                                 "Aster skipped malformed position row without a symbol",
                             );
                             rows.reject(None);

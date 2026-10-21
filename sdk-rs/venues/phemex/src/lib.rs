@@ -94,6 +94,8 @@ pub struct PhemexPerpetuals {
     native_symbols: HashMap<String, String>,
     startup_retry: Option<TimerId>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    /// The last product read skipped a malformed row, so an unknown symbol may be listed.
+    catalogue_partial: bool,
     paused_until: f64,
     account: account::State,
     trading: trading::State,
@@ -137,6 +139,7 @@ impl PhemexPerpetuals {
             native_symbols: HashMap::new(),
             startup_retry: None,
             discovery: Default::default(),
+            catalogue_partial: false,
             paused_until: 0.,
             account: account::State::new(),
             trading: trading::State::default(),
@@ -154,6 +157,10 @@ impl PhemexPerpetuals {
             Pending::Tickers(vec![], false),
             Some(ArrayAt::Field("result")),
         );
+    }
+    /// The catalogue is complete and no discovery read awaits a retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.catalogue_partial && self.discovery.idle()
     }
     fn native_symbol<'a>(&'a self, symbol: &'a str) -> &'a str {
         self.native_symbols
@@ -395,6 +402,7 @@ impl Venue for PhemexPerpetuals {
             self.startup_retry = Some(cx.set_timer(self.paused_until - cx.now));
             return;
         }
+        self.catalogue_partial = false;
         self.request(
             cx,
             Method::Get,
@@ -556,6 +564,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Markets(rows, _) => {
                 if let Ok(r) = serde_json::from_str::<Product<'_>>(item) {
                     if r.supported() && !r.valid() {
+                        self.catalogue_partial = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
@@ -565,6 +574,7 @@ impl Venue for PhemexPerpetuals {
                         rows.push(m)
                     }
                 } else {
+                    self.catalogue_partial = true;
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             }

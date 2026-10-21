@@ -730,3 +730,40 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
     assert!(e.store().order("43").is_none());
     assert_eq!(e.store().orders().len(), 1);
 }
+#[test]
+fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
+    use safe_cex_engine::{Action, LogLevel, Notice};
+    let unlisted = STATE.replace(r#""asset":"1""#, r#""asset":"7""#);
+    let read = |meta: &str| {
+        let (mut e, _, reads, _) = bootstrap_with_meta(WALLET, meta);
+        let (state, rest): (Vec<_>, Vec<_>) = reads
+            .into_iter()
+            .partition(|r| kind(r) == "clearinghouseState");
+        answer(&mut e, rest);
+        e.drain_actions().for_each(drop);
+        reply(&mut e, &state[0], &unlisted);
+        let logs = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (e, logs)
+    };
+
+    // The catalogue skipped a malformed row, so asset 7 may be listed: hold.
+    let (e, logs) = read(&META.replace("]}}", r#",{"index":7}]}}"#));
+    assert!(!e.store().loaded().positions);
+    assert!(
+        logs.iter().any(|(_, m)| m
+            == "TxFlow owned position asset unavailable; preserving previous account state")
+    );
+
+    // A complete catalogue settles it: the row is skipped, visibly.
+    let (e, logs) = read(META);
+    assert!(e.store().loaded().positions);
+    assert!(e.store().positions().is_empty());
+    assert!(logs.iter().any(|(level, m)| *level == LogLevel::Error
+        && m == "TxFlow skipped position on unlisted asset 7"));
+}

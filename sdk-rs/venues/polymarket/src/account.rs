@@ -48,8 +48,6 @@ pub struct PositionSnapshot {
     rows: SnapshotBuilder<String, Position>,
     holdings: Vec<PredictionHolding>,
     ids: HashSet<String>,
-    /// A rejected holding has no stored copy, so the aggregate UPnL is unknown.
-    pnl_unknown: bool,
     invalid: bool,
 }
 #[derive(Default)]
@@ -68,7 +66,6 @@ pub(crate) struct Account {
     executions: HashMap<String, HashMap<String, f64>>,
     coverage: HashMap<String, Vec<(f64, HashSet<String>)>>,
     unlisted: HashSet<String>,
-    upnl_unknown: bool,
 }
 
 #[derive(Deserialize)]
@@ -494,7 +491,6 @@ impl Polymarket {
                 rows: SnapshotBuilder::default(),
                 holdings: vec![],
                 ids: HashSet::new(),
-                pnl_unknown: false,
                 invalid: false,
             }),
         );
@@ -645,11 +641,9 @@ impl Polymarket {
                     // Only a holding that may sit on a skipped catalogue row is ambiguous;
                     // otherwise its market is unlisted (e.g. closed), as in TS.
                     if self.catalogue_may_hold(row.slug) {
-                        // It may be a stored holding whose catalogue row was skipped.
+                        snapshot.invalid = true;
                         cx.log(LogLevel::Warning,
                             "Polymarket owned holding has unavailable market metadata; preserving previous positions");
-                        snapshot.rows.reject(None);
-                        snapshot.pnl_unknown = true;
                     } else if self.account.unlisted.insert(row.asset.into()) {
                         cx.log(
                             LogLevel::Warning,
@@ -673,15 +667,28 @@ impl Polymarket {
                         })
                 });
                 let Some(price) = price else {
+                    // A seed still loading may price it; a settled one never will.
+                    if !self.discovery_settled() {
+                        snapshot.invalid = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "Polymarket owned holding price unavailable; preserving previous positions",
+                        );
+                        return;
+                    }
                     let symbol = market.symbol.clone();
+                    let level = if cx.store.position(&symbol).is_some() {
+                        LogLevel::Warning
+                    } else {
+                        LogLevel::Error
+                    };
                     cx.log(
-                        LogLevel::Warning,
+                        level,
                         format!(
-                            "Polymarket owned holding price unavailable for {}; keeping its last known state",
+                            "Polymarket skipped owned holding {}: price unavailable",
                             row.asset
                         ),
                     );
-                    snapshot.pnl_unknown |= cx.store.position(&symbol).is_none();
                     snapshot.rows.reject(Some(symbol));
                     return;
                 };
@@ -799,16 +806,11 @@ impl Polymarket {
                     && row.balance.0 >= 0.0
                 {
                     let total = row.balance.0 / 1e6;
-                    let upnl = if self.account.upnl_unknown {
-                        cx.store.balance().upnl
-                    } else {
-                        cx.store.positions().iter().map(|p| p.unrealized_pnl).sum()
-                    };
                     cx.store.set_balance(Balance {
                         total,
                         free: total,
                         used: 0.0,
-                        upnl,
+                        upnl: cx.store.positions().iter().map(|p| p.unrealized_pnl).sum(),
                     });
                 }
             }
@@ -957,8 +959,9 @@ impl Polymarket {
                         .rows
                         .commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     cx.store.set_positions(rows);
-                    self.account.upnl_unknown = snapshot.pnl_unknown;
-                    if cx.store.loaded().balance && !snapshot.pnl_unknown {
+                    // Committed rows include retained copies; a rejected row with none is
+                    // the only unknown PnL, and it is absent from the sum.
+                    if cx.store.loaded().balance {
                         let mut balance = cx.store.balance().clone();
                         balance.upnl = cx.store.positions().iter().map(|p| p.unrealized_pnl).sum();
                         cx.store.set_balance(balance);
@@ -1236,28 +1239,34 @@ impl Polymarket {
 }
 
 /// Rejects a holding row; a known market keys its stored copy, while an unknown
-/// one has no stored copy to keep and no value in the shown aggregate.
+/// one has no stored copy to keep. A row with nothing stored to keep is an error.
 fn reject_holding(cx: &mut Cx<'_, Pending>, snapshot: &mut PositionSnapshot, asset: Option<&str>) {
+    let level = |stored: bool| {
+        if stored {
+            LogLevel::Warning
+        } else {
+            LogLevel::Error
+        }
+    };
     let Some(asset) = asset else {
         cx.log(
-            LogLevel::Warning,
+            level(!cx.store.positions().is_empty()),
             "Polymarket skipped malformed holding without an asset",
         );
         snapshot.rows.reject(None);
-        snapshot.pnl_unknown = true;
         return;
     };
+    let symbol = cx.store.market_by_id(asset).map(|m| m.symbol.clone());
+    let stored = symbol
+        .as_ref()
+        .is_some_and(|symbol| cx.store.position(symbol).is_some());
     cx.log(
-        LogLevel::Warning,
+        level(stored),
         format!("Polymarket skipped malformed holding {asset}"),
     );
-    match cx.store.market_by_id(asset).map(|m| m.symbol.clone()) {
-        Some(symbol) => {
-            snapshot.pnl_unknown |= cx.store.position(&symbol).is_none();
-            snapshot.rows.reject(Some(symbol));
-        }
-        None => snapshot.rows.reject(Some(asset.to_owned())),
-    }
+    snapshot
+        .rows
+        .reject(Some(symbol.unwrap_or_else(|| asset.to_owned())));
 }
 
 #[cfg(test)]
