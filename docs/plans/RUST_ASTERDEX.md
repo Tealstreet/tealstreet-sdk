@@ -369,3 +369,32 @@ unchanged. Final post-integration gate chain and green exact-head PR CI follow.
 4. Reproduce safe gaps, test edge/page/PnL/failure cases, run focused Aster/Binance
    tests and touched fmt/strict Clippy/bans, independent review and exact-head CI.
    Update audit, package spec and affected callers, merge under lane guards.
+
+- Both safe gaps reproduced before repair. ACCOUNT_UPDATE now accepts absent ep
+  only when required pa parses exactly zero; malformed present ep, missing/bad pa,
+  and nonzero exposure still reject atomically before consuming event time. cr
+  was already optional zero. Hedge close removes only the reported leg.
+- Explicitly bounded fills now use RangeWalk with native millisecond timestamps,
+  seven-day inclusive windows, two-second inter-chunk pacing, 50-page per-chunk
+  and 1000-request total budgets. Boundary symbol:id duplicates are removed;
+  cumulative PnL is normalized once before invalid sizes and local order filters.
+  This also avoids V3 orderId overriding time bounds and fixes interleaved-order
+  baselines. Unbounded reads retain their existing native query behavior.
+  Equal bounds issue one exact request and fail if raw rows reach the page limit.
+  Malformed/out-of-window rows, later failures, dense ties and budget exhaustion
+  return an error without partial results. Stream retries discard only the current
+  page while retaining prior collected rows.
+- Primary API contract: https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md
+  Account Trade List documents maximum1000, maximumseven-day span, fromId/time
+  incompatibility and orderId search precedence. V1/V3 keepalive PUT has no
+  business parameters. Native transient retry/epoch ownership remains unchanged.
+- Retained risks: silently skipping malformed financial rows corrupts subsequent
+  cumulative deltas; balance rows need real wallet/free fields. Missing local
+  credentials select public mode, and formed private credentials use account
+  startup validation. No new zero defaults or auth path is introduced.
+- Validation: 380 focused Aster/Binance tests pass (full379 before the final
+  present-null guard, then all40 account tests including that guard). Touched
+  formatting, strict all-target Clippy and bans pass on pinnedb7f98eb24a8.
+  Independent review caught empty optional order ID filtering; normalized it to
+  omitted and added a regression. Root also tightened absent versus present-null
+  entry decoding; reviewer verified the correction and all remaining paths clear.

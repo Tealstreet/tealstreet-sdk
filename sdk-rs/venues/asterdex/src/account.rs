@@ -1229,9 +1229,13 @@ impl AsterDex {
         }
         if event.a.positions.iter().any(|p| {
             p.s.is_empty()
-                || [&*p.pa, &*p.ep, &*p.up, &*p.cr]
+                || [&*p.pa, &*p.up, &*p.cr]
                     .into_iter()
                     .any(|x| parse_decimal(x).is_none())
+                || match p.ep.as_deref() {
+                    Some(entry) => parse_decimal(entry).is_none(),
+                    None => parse_decimal(&p.pa) != Some(0.0),
+                }
         }) || event.a.balances.iter().any(|b| {
             b.a.is_empty()
                 || parse_decimal(&b.wb).is_none()
@@ -1284,7 +1288,7 @@ impl AsterDex {
             });
             if amount != 0.0 {
                 let setting = cx.store.setting(&p.s).unwrap_or_default();
-                let entry = num::parse(&p.ep);
+                let entry = p.ep.as_deref().map(num::parse).unwrap_or(0.0);
                 let mut next = previous.unwrap_or(Position {
                     id,
                     symbol: p.s.to_string(),
@@ -1427,14 +1431,21 @@ struct PositionDelta<'a> {
     s: Cow<'a, str>,
     #[serde(borrow)]
     pa: Cow<'a, str>,
-    #[serde(borrow)]
-    ep: Cow<'a, str>,
+    #[serde(borrow, default, deserialize_with = "present_entry")]
+    ep: Option<Cow<'a, str>>,
     #[serde(borrow)]
     up: Cow<'a, str>,
     #[serde(borrow)]
     ps: Cow<'a, str>,
     #[serde(borrow, default = "zero")]
     cr: Cow<'a, str>,
+}
+// Missing is permitted for a proven flat close; present null or a non-string
+// remains malformed, matching the prior strict wire contract.
+fn present_entry<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Cow<'de, str>>, D::Error> {
+    Cow::<'de, str>::deserialize(d).map(Some)
 }
 fn zero<'a>() -> Cow<'a, str> {
     Cow::Borrowed("0")

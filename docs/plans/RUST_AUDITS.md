@@ -981,9 +981,18 @@ No confirmed highs.
   row's `positionSide`).~~ Mode read retries and holds placement until known;
   unmapped order types keep their fills; bad rows are skipped keeping stored
   copies; hedge amend reuses the recorded `positionSide` (TS bug fixed).
-- Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
-  history fails on one row and refuses >7 day windows; listen-key keepalive
-  omits `listenKey` and tears down on failure; partial balance rows skipped.
+- Low: ~~no credential check at start~~ (missing local credentials intentionally
+  select public mode; formed credentials are checked by signed account startup);
+  ~~ACCOUNT_UPDATE strict on `ep`/`cr`~~ (`cr` already defaults to zero; absent
+  `ep` is now accepted only with an explicitly valid zero amount);
+  ~~fills refuse >7 day windows~~ (bounded symbol reads page seven-day windows,
+  deduplicate execution IDs and normalize cumulative PnL once across the range);
+  ~~listen-key keepalive omits `listenKey` and tears down on failure~~ (official
+  V1/V3 PUT has no business parameters; three transient retries precede an
+  epoch-guarded reconnect). Equal-time saturated fills fail visibly.
+  RISKY retained: skipping malformed financial fills can shift every later
+  cumulative-PnL delta; partial balance rows lack required wallet/free provenance
+  in TS too. Do not invent zero balances or silently return partial execution data.
 
 ### Crypto.com
 Mostly matches TS.

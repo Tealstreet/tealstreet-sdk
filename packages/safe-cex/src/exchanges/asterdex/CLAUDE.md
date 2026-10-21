@@ -722,3 +722,12 @@ contract. Native URLs carry socket roles; host transports apply account routing.
   are recorded in the harness known-fix notes.
 
 Port plan, phase reviews and gate evidence: `docs/plans/RUST_ASTERDEX.md`.
+
+Rust accepts absent ACCOUNT_UPDATE entry price only on an explicitly zero
+position amount; malformed present entry values and unproven exposure remain
+atomic rejections. Bounded fill history pages native seven-day windows and
+normalizes cumulative PnL once across deduplicated symbol/execution IDs before
+filtering order IDs or invalid sizes. V3's orderId overrides time search, so
+bounded order-specific queries filter locally after normalization. Saturated
+single-millisecond reads, incomplete walks and later-page failures return errors,
+never plausible partial histories. Unbounded query behavior is unchanged.
