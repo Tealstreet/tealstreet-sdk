@@ -122,15 +122,6 @@ pub(crate) fn signature_rejected(body: &str) -> bool {
 
 /// Logs a read's skipped rows once, by identity only.
 pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) {
-    log_skipped_at(cx, Level::Warn, kind, ids, "");
-}
-pub(crate) fn log_skipped_at(
-    cx: &mut Cx<'_, Pending>,
-    level: Level,
-    kind: &str,
-    ids: &[String],
-    note: &str,
-) {
     if ids.is_empty() {
         return;
     }
@@ -141,10 +132,10 @@ pub(crate) fn log_skipped_at(
         .collect::<Vec<_>>();
     let more = ids.len().saturating_sub(shown.len());
     cx.notice(
-        level,
+        Level::Warn,
         code::ROW_SKIPPED,
         format!(
-            "BingX skipped {} malformed {kind} row(s): {}{}{note}",
+            "BingX skipped {} malformed {kind} row(s): {}{}",
             ids.len(),
             shown.join(", "),
             if more > 0 {

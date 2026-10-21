@@ -10,6 +10,7 @@ import { isErrorReported, markErrorReported, serializeCommandError } from '../..
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { setTelemetrySink } from '../../telemetry';
 import { LogSeverity, OrderSide, OrderType } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
@@ -33,6 +34,7 @@ afterEach(() => {
   setRustEngineTransport(nativeTransport);
   vi.useRealTimers();
   vi.restoreAllMocks();
+  setTelemetrySink({});
 });
 
 async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOptions> = {}) {
@@ -341,4 +343,23 @@ it('reports command-local validation but does not wrap existing public preflight
     'Options are not enabled',
   );
   expect(r.errors).toHaveBeenCalledTimes(2);
+});
+
+it('exposes native codes and fields while preserving legacy Error and Warn delivery', async () => {
+  const r = await fixture();
+  const events = vi.fn();
+  const captureException = vi.fn();
+  setTelemetrySink({ captureException });
+  r.exchange.on('engine-event', events);
+  const auth = { level: 'error', code: 'auth.rejected', message: 'new refusal wording', fields: { source: 'private' } };
+  const retry = { level: 'warn', code: 'request.failed', message: 'retrying', fields: { attempt: 2 } };
+  const debug = { level: 'debug', code: 'ws.closed', message: 'closed', fields: {} };
+  r.deliver([auth, retry, debug].map(event => ({ op: 'event', ...event })));
+  expect(events.mock.calls).toEqual([[auth], [retry], [debug]]);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(captureException.mock.calls[0][1]).toMatchObject({ tags: { event_code: 'auth.rejected' }, extra: { engineEvent: auth } });
+  expect(captureException.mock.calls[0][1].tags.engineEvent).toBeUndefined();
+  expect(r.errors.mock.calls[0][0]).toContain(auth.message);
+  expect(r.errors.mock.calls[0][1]).toMatchObject({ engineEvent: auth });
+  expect(r.logs).toHaveBeenCalledExactlyOnceWith('[bybit] retrying', LogSeverity.Warning, retry);
 });

@@ -1305,7 +1305,10 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveEvent = (event: EngineEvent) => {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
-    if (event.level !== 'debug') this.receiveLog(event.level === 'warn' ? 'warning' : event.level, event.message);
+    this.emitter.emit('engine-event', event);
+    if (event.level === 'error') this.emitAndLogError(event.message, undefined, { engineEvent: event });
+    else if (event.level !== 'debug')
+      this.log(event.message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
   };
 
   get socketHost() {
