@@ -18,3 +18,17 @@ retry/reset. Run Bitunix/Binance tests, strict Clippy/fmt/bans, independent revi
 and full CI. Fresh source branch; integrate actual entropy1624 before merge with
 separate exact guard. Socket reconnect/book/clock/read-key/private-row repairs
 remain separate phases.
+
+Plan audit: all startup helpers must retain private actions emitted with the
+catalogue (shared helper, two account helpers and routing's real ticker seed).
+Empty/filtered-only seeds cannot load Store readiness and must retry; they are
+distinct from malformed rows. Private account valuation has no ticker dependency.
+Implementation review found streamed native errors/malformed previews bypassed
+on_response; public-only callbacks now preserve rate floors and sanitize previews
+while retaining default private/history behavior. Two callback regressions fail
+with overrides disabled; four primary regressions fail original source.
+
+Verification: 22 public tests and 370 combined Bitunix/Binance tests pass, with
+strict Bitunix Clippy/fmt/bans. Final independent correctness/adversarial review
+is CLEAR after the stream-callback corrections. Actual history1633 must merge
+and be integrated before this same-crate branch goes through final CI/merge.
