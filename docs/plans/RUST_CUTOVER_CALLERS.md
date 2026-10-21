@@ -167,6 +167,9 @@ The history-owner batch checks #1628 (`d659c18c3f5`), #1629 (`a3c4e827722`),
 failed reads reject as described below.
 Bitget ordinary private-row repair checks #1625 at `02a0db19f3c`. Focused NX
 query/result boundaries were rechecked read-only at `65e086a3c90`; B11 remains open.
+The bridge capability follow-up checks #1637 at `673565c2e61`; final runtime
+fields, construction metadata and pending-start behavior are recorded below.
+NX caller ordering was rechecked read-only at `65e086a3c90`.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -248,6 +251,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1632 / `41cd4914a` | Paradex bounded history page-budget marker carries its query command before partial completion. Unbounded page-cap and other stall failures stay unchanged. |
 | #1633 / `a29812d8e` | Bitunix history transport/HTTP/envelope/malformed-row failures now reject instead of resolving earlier rows as complete. Genuine remaining-page caps or stalled order/income paging retain rows with command-attributed `history.incomplete`; a completed final page does not get a false cap marker. Callers must preserve failure versus partial versus complete outcomes before coverage. |
 | #1627 / `9a4446203` | WEEX income lifetime-budget, truncated-chunk, advertised-cursor, failed-page and terminal-failure markers now carry their query command. Existing retained rows, chunk continuation, pacing and terminal rejection policy stay unchanged; a marker on a rejected query is not a successful partial array. |
+| #1637 / `673565c2e` | Runtime bridge policy now follows engine capability flags/enums; shared construction rules retain synchronous policy and expose optional `construction().bridge`. Capability-dependent public calls wait for an existing startup; no-start/failed-start calls reject with method-named `ExchangeError` `invalidInput`/`notSent`. Worker forwarding stays first. NX explicit readiness is recommended; typed rejection handling is required. See [Runtime capability readiness](#runtime-capability-readiness-1637). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -457,7 +461,7 @@ they do not replace the NX shipped-runtime checks above or B1's delivery choice.
 | `fetchMarketsAndTickers` (not on base), `fetchTickers`, `fetchPositions` via `as any` | web `exchangeAccountController.ts:668-669,687,750,863`, `components/customModules/frame/feedSources.ts:82-83`, `eagerExchangeWarmStart.ts:52,58` | REST reads | `fetchMarketsAndTickers` undefined on Rust; `fetchMarkets`/`fetchTickers` start the engine and wait ≤30 s for native data, else throw `Timed out waiting for native markets|tickers` (#1375). #1430 makes `fetchPositions` wait for its native sections and synchronize engine state; see below | RT |
 | Native account reads (#1430): `fetchOrders`, `fetchPositions`, `fetchBalance`, `fetchPositionMode` | MCP `tools.ts:62,82-83,144,152,160,322`; web warm-start `eagerExchangeWarmStart.ts:75,86` | cached JS store or venue REST | await native section readiness and synchronize current engine state; main-thread mirrors forward to their worker. No forced network refresh. Missing public-only private sections reject visibly | RT; same arguments/results |
 | Native identity `getAccount` (#1430) | no application exchange-identity calls found in web/CLI/MCP/server at `fdd2389a825` (CLI adapter `getAccount` is a different API) | limited native lookup support | query/after-load behavior follows `capabilities.account`; unsupported venues retain an explicit refusal. See identity boundary below | additive; no app edit found |
-| `fetchLeverageForSymbol` (#1522) | mirrored worker `UiStateHandler.ts:27-64`; web `hooks/margin/useMarginType.ts:27`, `usePositionMode.ts:27` consume `store.fetchedLeverage` | BingX/WEEX settings-only reads and uncached metadata rails could return `null`; WEEX native command had no handler | BingX/WEEX read fresh symbol rails; MEXC/WOO/Kraken `onMetadata` reads query only when no usable cached rails exist. UI still fetches only for a missing active-symbol entry. Failure keeps the SDK warning/`null` result contract | additive data; no app edit |
+| `fetchLeverageForSymbol` (#1522) | mirrored worker `UiStateHandler.ts:27-64`; web `hooks/margin/useMarginType.ts:27`, `usePositionMode.ts:27` consume `store.fetchedLeverage` | BingX/WEEX settings-only reads and uncached metadata rails could return `null`; WEEX native command had no handler | BingX/WEEX read fresh symbol rails; MEXC/WOO/Kraken `onMetadata` reads query only when no usable cached rails exist. UI still fetches only for a missing active-symbol entry. After capability readiness, read failures keep the SDK warning/`null` result contract; #1637 readiness errors reject before that fallback | RT for pre-start/failed-start handling; same ready read shape |
 | Native `nuke`/`nukePositions` (#1430) | web `hooks/trading/useNuke.ts:7`; mirrored CLI `commands/trading/NukeCommand.ts:32,42,51,60` | inherited store-based closes/retries | one native-state batch of reduce-only market closes; no automatic replay even if callers pass `3`. Observe/catch the promise and reconcile partial/unknown outcomes; CLI's max-retries text must not imply a guarantee | RT; caller error/retry handling |
 | `changeAccountTier`, `fetchAccountTier` (#1386/#1394) | web `components/settings/profile/PerExchangeSettingsBody.tsx:46-62,74-130` | TS LighterExchange | Rust provides both; `balance.info.lighterAccountLimits = { user_tier_name }` synced; the main-thread mirror forwards them (#1462) | none (B4) |
 | `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command; main-thread mirror forwards it (#1462) | RT (B4) |
@@ -1148,6 +1152,75 @@ engine host no longer has `accountId()` (`getAccount()` answers for every venue
 that reports an account lookup). No tealstreet-next file outside the mirrored
 packages uses either. #1411's market quantity units travel as frame flag bits
 and need no tealstreet-next edit.
+
+### Runtime capability readiness (#1637)
+
+Runtime bridge choices now come from the engine record: journal/closed-position
+formats, fill-history time handling, history filters, STP/execution validation
+and book isolation. There is no runtime venue-name or construction-policy
+fallback. Synchronous pre-engine choices still use the shared construction
+rules. Existing started behavior, FrameApplier sizing, `contractsNative` /
+`remainingNative` computations, native nuke and OKX contract conversion remain
+unchanged.
+
+| Host API | Landed fields / compatibility |
+| --- | --- |
+| `EngineCapabilities` enums | `positionHistory`, `closedPositionFormat`, `fillHistoryTime`. |
+| Runtime capability flags | `stpControls`, `bybitExecutionControls`, `rejectClientSlippage`, `finiteCommandNumbers`, `finiteHistoryBounds`, `rejectOrderHistoryFilters`, `publicCatalogueValidation`, `isolatedBookSubscriptions`, `inverseClosedPositions`. |
+| Optional `EngineConstruction.bridge` | `spot`, `demo`, `primaryCredentialsOnly`, `payloadSigning`, `apiKeyIndexRequired`, `isolatedBookSubscriptions`; TS derives these synchronously from the shared JSON, while native construction reports the same policies. This metadata is separate from the runtime record. |
+
+The CAPABILITIES payload remains eight bytes with existing flag/enum values
+preserved; new policies occupy previously unused bits/nibbles. Ship matching
+engine, decoder and SDK bridge so runtime policy is available on both worker
+and main-thread consumers. Custom hosts/test fixtures constructing raw
+`EngineCapabilities` must supply the added fields; construction metadata alone
+cannot answer runtime policy. No application/account option shape changes.
+
+Affected public methods include history fills/orders/positions, placement,
+STP reads/writes, cancel-all, order-book queries, leverage reads/max leverage
+and reported closed-PnL mapping. Their readiness behavior is now explicit:
+
+| State at a capability-dependent call | SDK behavior |
+| --- | --- |
+| Existing startup is pending | Wait for that same lifecycle, even if its capability record arrives before startup completes, then apply policy/dispatch. No second startup, mirror engine or new timeout knob is introduced. |
+| No runtime record and no startup in progress | Reject as `ExchangeError` with `kind: 'invalidInput'`, `outcome: 'notSent'` and a message naming `name.method` and asking for `start()` or `loadCapabilities()` first. The method does not silently start the exchange. An already-dead engine rethrows its stored terminal error. |
+| Startup failed, including an undispatched call queued during disposal/trap | Reject with the same typed classification and a method-named startup-failed/reconnect message. Available startup cause is retained; a queued write whose startup traps remains `notSent` with `cause.code: 'ENGINE_DEAD'`, since it was never dispatched. |
+| Ready runtime record | Existing immediate dispatch timing and venue policy remain; internal startup commands use their separate synchronous path and cannot await themselves. |
+
+**Required caller handling:** catch typed pre-start/failed-start rejections and
+handle them as unsent operations. Also handle an existing terminal engine error
+through the engine-death path, preserving its classification/outcome. Ordinary
+no-start errors use the existing
+classified SDK error notification and `errorReported`; honor that marker to
+avoid a duplicate toast in the promise catch. A terminal engine notification
+already reports a startup trap, so queued call rejections do not emit another
+terminal notification. Disposal also settles queued calls without dispatching
+writes. This adds no automatic write retry or new coded engine-event format.
+`fetchLeverageForSymbol` performs readiness checking before its warning/`null`
+read-failure fallback, so callers must now handle that readiness rejection too.
+
+**Recommended NX ordering:** acquire the record through worker-aware
+`loadCapabilities()` when needed; prefer explicit engine/worker startup
+readiness before history or local runtime-policy work to avoid queued calls
+during slow startup. SDK pending-start protection applies even
+when callers omit that extra wait; handling typed rejection remains required.
+`loadCapabilities()` acquires a record without starting streams and is not
+proof of successful account startup. On a main-thread mirror it asks the
+worker; never start a second mirror engine. Trading/history forwarding remains
+ahead of local runtime checks, so policy executes in the authoritative realm.
+
+| NX caller evidence at read-only `65e086a3c90` | Ordering implication |
+| --- | --- |
+| Web controller: creates exchange `exchangeAccountController.ts:1743`, optionally hydrates `:1747-1752`, wires `callMethod` to worker `:2838-2849`, posts init `:2855-2870`, returns mirror `:3004` and publishes it `:1722`. | Mirror/worker presence does not prove startup completed. Cached markets can arrive first; prefer worker-aware readiness for local runtime-policy work. |
+| History ingestion: `runHistoricalWindow.ts:44-45,62-69` checks only `store.loaded.markets`; `collectAccountAxes.ts:230` passes `{from,to}` to order history. | Cached market readiness is insufficient. Await record/readiness where appropriate and retain failed versus incomplete versus complete coverage outcomes (B11). |
+| Web order helpers: `createLimitOrder.ts:62-76,243,293`, `createMarketOrder.ts:87-101`, `createScaledOrder.ts:255-268`; `sendOrder.ts:16-26` mints an ID then places. | Market/exchange checks do not prove runtime readiness. Preserve forwarding first and handle the typed failure; pure synchronous construction/ID policy stays separate. |
+| Worker/hosted dispatch: NX SDK `ExchangeWorker.ts:316,324,330` creates/wires before awaiting start; `handlePayload:696-715` buffers only until an exchange exists; `store.webworker.ts:273-286,457-462` registers then dispatches. | Worker existence is not a startup barrier. The updated SDK waits a pending startup before runtime policy, including forwarded calls. |
+| Standalone CLI: `apps/cli/src/exchange-manager.ts:108-112` awaits `startExchange` before publishing; `platform-adapter.ts:245-263` awaits start with its existing timeout. | Normal enable already orders calls after start. Keep that order; custom/direct callers still handle typed rejections. |
+
+No explicit production `stpMode`, `loadCapabilities` or Orderly/TxFlow
+`orderId`/`status` history-filter call was found in the searched NX roots;
+external dynamic scripts are not bounded by this source audit. This is caller
+guidance and a read-only inventory, not a completed NX implementation.
 
 ### Bybit explicit catalogue refresh
 
