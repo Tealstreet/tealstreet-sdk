@@ -118,7 +118,7 @@
       "note": "Coinbase private replays (coinbase INTX/CFM/Spot and coinbasespot Spot, ES256 and EdDSA) run on a virtual tape clock that continues from frozen startup, with TS ES256 signed synchronously, and staged reads open only after their command's write is acknowledged. Both order censuses fire at fixed tape times, so the record-86 and checkpoint-12 census races are gone and each algorithm pair yields identical paths. Each entry is exactly the path set seen in 5 identical local runs per tape (Node 22). Race groups and paths no longer seen were removed; INTX checkpoints 5-10 and CFM checkpoints 13-14 carry specific causes (native one-census terminal retention, pending-cancel status, TS rejected-cancel and stale-census defects). Tape hashes unchanged. Follow-up: CFM checkpoints 6-12 and Spot checkpoints 6-10 moved out of the broad lifecycle group into cause-specific groups (native CFM census retention, TS Spot census retention, pending-cancel status, TS rejected-cancel defect); paths and tape hashes unchanged."
     },
     "weexTapeClock20261021": {
-      "note": "WEEX private replay runs on the virtual tape clock. The generator now (a) gives each open-order/algo snapshot and write the stage of its command, and snapshots are served only after that command's write is acknowledged; (b) adds the documented Order Channel events that production sends 100 ms after the t=4100 cancels (61, 63), the t=4500 TP placement (64) and the t=5300 symbol cancel (60, 64), plus the missing post-cancel empty algo snapshot; (c) moves every command 100 ms off the 2 s TS tick and native REST cycles, so no poll ties a command. Tape rehashed; checkpoints renumbered. Every path below is identical across 5 local runs at the PR head (Node 22) and carries its specific cause. Prior hash entry replaced (no generator can emit it). Follow-up: the conditional-65 placeOrders moved from t=6100 to t=6300, after native's t=6250 reconciliation and off the TS 2 s tick, so checkpoint 8 no longer compares native-retained canceled rows; it shows only the placement-acknowledgement lag. Native now keeps 65's generated client ID to the end of the tape. Tape rehashed."
+      "note": "WEEX private replay runs on the virtual tape clock. The generator now (a) gives each open-order/algo snapshot and write the stage of its command, and snapshots are served only after that command's write is acknowledged; (b) adds the documented Order Channel events that production sends 100 ms after the t=4100 cancels (61, 63), the t=4500 TP placement (64) and the t=5300 symbol cancel (60, 64), plus the missing post-cancel empty algo snapshot; (c) moves every command 100 ms off the 2 s TS tick and native REST cycles, so no poll ties a command. Tape rehashed; checkpoints renumbered. Every path below is identical across 5 local runs at the PR head (Node 22) and carries its specific cause. Prior hash entry replaced (no generator can emit it). Follow-up: the conditional-65 placeOrders moved from t=6100 to t=6300, after native's t=6250 reconciliation and off the TS 2 s tick, so its placement checkpoint no longer compares native-retained canceled rows; it shows only the placement-acknowledgement lag. Native now keeps 65's generated client ID to the end of the tape. Tape rehashed. Follow-up: TP 64's order event now arrives before its REST acknowledgement, and a new t=6700 post-only placement (66) is canceled by the venue with its CANCELED event before the acknowledgement (tape frames marked beforeAck reach the socket after the write is served, ahead of the client reading the acknowledgement). Native's insert-on-acknowledgement neither clobbers the newer event nor reopens the canceled order. Checkpoints renumbered; tape rehashed."
     },
     "paradexKucoinTapeTime20261022": {
       "note": "Paradex and KuCoin private replays now run on tape time (virtualPrivateClock). Their order refreshes are timer-driven (Paradex: a 1 s debounce after the last private order event; KuCoin: TS keeps canceled rows until its REST order poll), so at wall time a checkpoint raced them (Paradex canceled-row retention at checkpoints 5-7; KuCoin checkpoints 6-7). The Paradex generator now stages each write with its command, so a command's snapshot is served only after its acknowledgement; tape rehashed and the landing-hash entry replaced by the 51 deterministic paths, all one cause. KuCoin's tape and its 60 declared paths are unchanged: on tape time every run yields exactly that set. Both verified by 5 identical CI-equivalent strict runs locally (Node 22)."
@@ -47620,7 +47620,7 @@
     },
     {
       "venue": "weex",
-      "tapeSha256": "06949561e158132137671d7a3aad0b5bc3f5c91f4eb34832b501e5306258cf4e",
+      "tapeSha256": "67aed581084560e2945e51a80a3911090c8dbd1dbb003728d661d1876397520d",
       "tape": "sdk-rs/harness/tapes/weex-private.jsonl",
       "diagnostics": [
         {
@@ -47696,90 +47696,103 @@
         {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
-            "account orders[1].clientOrderId",
             "checkpoint 2 account.orders[1].clientOrderId",
+            "checkpoint 2 account.orders[2].clientOrderId",
             "checkpoint 3 account.orders[1].clientOrderId",
-            "checkpoint 3 account.orders[3].clientOrderId",
             "checkpoint 4 account.orders[1].clientOrderId",
             "checkpoint 4 account.orders[3].clientOrderId",
+            "checkpoint 5 account.orders[2].clientOrderId",
             "checkpoint 6 account.orders[2].clientOrderId",
-            "checkpoint 7 account.orders[2].clientOrderId",
-            "checkpoint 9 account.orders[1].clientOrderId"
+            "checkpoint 8 account.orders[1].clientOrderId",
+            "checkpoint 8 account.orders[2].clientOrderId"
           ]
         },
         {
           "divergence": "Native leaves time-in-force null on caller orders 61/62, whose rows come from their placement acknowledgement and order events; TS defaults them to GoodTillCancel.",
           "keys": [
             "checkpoint 2 account.orders[1].timeInForce",
+            "checkpoint 2 account.orders[2].timeInForce",
             "checkpoint 3 account.orders[1].timeInForce",
-            "checkpoint 3 account.orders[3].timeInForce",
+            "checkpoint 4 account.orders[1].timeInForce",
             "checkpoint 4 account.orders[3].timeInForce"
           ]
         },
         {
-          "divergence": "TS shows an order placed through placeOrders only after its next private order event or REST read; native inserts the acknowledged placement at once. At these placement checkpoints TS lacks 61/62 (t=2500, event at 2800), conditional 63 (t=3300, event at 3600), TP 64 (t=4500, event at 4600) and conditional 65 (t=6300, event at 6400), so the remaining rows sit at different indexes.",
+          "divergence": "TS shows an order placed through placeOrders only after its next private order event or REST read; native inserts the acknowledged placement at once. At these placement checkpoints TS lacks 61/62 (t=2500, event at 2800), conditional 63 (t=3300, event at 3600) and conditional 65 (t=6300, event at 6400), so the remaining rows sit at different indexes. TP 64's and post-only 66's events arrive before their acknowledgements, so TS already has those.",
           "keys": [
             "checkpoint 1 account.orders.length",
             "checkpoint 1 account.orders[1]",
             "checkpoint 1 account.orders[2]",
-            "checkpoint 2 account.orders.length",
-            "checkpoint 2 account.orders[2].amount",
-            "checkpoint 2 account.orders[2].clientOrderId",
-            "checkpoint 2 account.orders[2].id",
-            "checkpoint 2 account.orders[2].price",
-            "checkpoint 2 account.orders[2].remaining",
-            "checkpoint 2 account.orders[2].side",
-            "checkpoint 2 account.orders[2].symbol",
-            "checkpoint 2 account.orders[2].timeInForce",
-            "checkpoint 2 account.orders[2].type",
-            "checkpoint 2 account.orders[3]",
-            "checkpoint 5 account.orders.length",
-            "checkpoint 5 account.orders[1].amount",
-            "checkpoint 5 account.orders[1].clientOrderId",
-            "checkpoint 5 account.orders[1].id",
-            "checkpoint 5 account.orders[1].price",
-            "checkpoint 5 account.orders[1].reduceOnly",
-            "checkpoint 5 account.orders[1].remaining",
-            "checkpoint 5 account.orders[1].symbol",
-            "checkpoint 5 account.orders[1].takeProfitTrigger",
-            "checkpoint 5 account.orders[1].timeInForce",
-            "checkpoint 5 account.orders[1].trigger",
-            "checkpoint 5 account.orders[1].type",
-            "checkpoint 5 account.orders[2]",
-            "checkpoint 8 account.orders.length",
-            "checkpoint 8 account.orders[0].amount",
-            "checkpoint 8 account.orders[0].clientOrderId",
-            "checkpoint 8 account.orders[0].id",
-            "checkpoint 8 account.orders[0].price",
-            "checkpoint 8 account.orders[0].remaining",
-            "checkpoint 8 account.orders[0].side",
-            "checkpoint 8 account.orders[0].symbol",
-            "checkpoint 8 account.orders[0].timeInForce",
-            "checkpoint 8 account.orders[0].type",
-            "checkpoint 8 account.orders[1]"
+            "checkpoint 3 account.orders.length",
+            "checkpoint 3 account.orders[2].amount",
+            "checkpoint 3 account.orders[2].clientOrderId",
+            "checkpoint 3 account.orders[2].id",
+            "checkpoint 3 account.orders[2].price",
+            "checkpoint 3 account.orders[2].remaining",
+            "checkpoint 3 account.orders[2].side",
+            "checkpoint 3 account.orders[2].symbol",
+            "checkpoint 3 account.orders[2].timeInForce",
+            "checkpoint 3 account.orders[2].type",
+            "checkpoint 3 account.orders[3]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[0].amount",
+            "checkpoint 7 account.orders[0].clientOrderId",
+            "checkpoint 7 account.orders[0].id",
+            "checkpoint 7 account.orders[0].price",
+            "checkpoint 7 account.orders[0].remaining",
+            "checkpoint 7 account.orders[0].side",
+            "checkpoint 7 account.orders[0].symbol",
+            "checkpoint 7 account.orders[0].timeInForce",
+            "checkpoint 7 account.orders[0].type",
+            "checkpoint 7 account.orders[1]"
           ]
         },
         {
-          "divergence": "TS maps the opening STOP_MARKET order-channel row of conditional 63 as stop_market; native keeps it conditional. fixWeexConditionals corrects this TS defect only in the final state, and checkpoints compare raw output.",
-          "keys": [
-            "checkpoint 4 account.orders[2].type"
-          ]
-        },
-        {
-          "divergence": "For conditional 63 and TP 64 taken from order-channel rows (triggerPriceType CONTRACT_PRICE), native reports a last_price trigger; the TS stream mapper drops the trigger type.",
-          "keys": [
-            "checkpoint 4 account.orders[2].trigger",
-            "checkpoint 6 account.orders[1].takeProfitTrigger",
-            "checkpoint 6 account.orders[1].trigger",
-            "checkpoint 7 account.orders[1].takeProfitTrigger",
-            "checkpoint 7 account.orders[1].trigger"
-          ]
-        },
-        {
-          "divergence": "Native keeps the client ID it generated when placing conditional 65 at t=6300; the venue's order event and REST rows omit it, so TS, which reads those, shows null. Native would replace the row at its next REST reconciliation (t=8250), after the tape ends.",
+          "divergence": "Native keeps the client ID it generated when placing TP 64 and conditional 65; the venue's order events and REST rows omit it, so TS, which reads those, shows null. 65 is placed at t=6300, after native's t=6250 reconciliation, so its ID persists to the end of the tape.",
           "keys": [
             "account orders[0].clientOrderId",
+            "checkpoint 5 account.orders[1].clientOrderId",
+            "checkpoint 6 account.orders[1].clientOrderId",
+            "checkpoint 8 account.orders[0].clientOrderId",
             "checkpoint 9 account.orders[0].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "For TP 64 taken from order-channel rows (triggerPriceType CONTRACT_PRICE), native reports a last_price trigger; the TS stream mapper drops the trigger type.",
+          "keys": [
+            "checkpoint 5 account.orders[1].takeProfitTrigger",
+            "checkpoint 5 account.orders[1].trigger",
+            "checkpoint 6 account.orders[1].takeProfitTrigger",
+            "checkpoint 6 account.orders[1].trigger"
+          ]
+        },
+        {
+          "divergence": "Post-only order 66 (t=6700) is accepted and canceled at once; its CANCELED event arrives before the REST acknowledgement, and native's insert-on-acknowledgement keeps it canceled (checkpoint 8 matches). Native then keeps the canceled row until its next 2 s REST reconciliation (about t=8250, after the tape ends), while TS's REST read 250 ms after the event removes it; at checkpoint 9 and the final state native rows from 66 onward sit one index lower.",
+          "keys": [
+            "account orders.length",
+            "account orders[1].amount",
+            "account orders[1].clientOrderId",
+            "account orders[1].filled",
+            "account orders[1].id",
+            "account orders[1].price",
+            "account orders[1].remaining",
+            "account orders[1].side",
+            "account orders[1].status",
+            "account orders[1].symbol",
+            "account orders[1].timeInForce",
+            "account orders[2]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[1].amount",
+            "checkpoint 9 account.orders[1].clientOrderId",
+            "checkpoint 9 account.orders[1].filled",
+            "checkpoint 9 account.orders[1].id",
+            "checkpoint 9 account.orders[1].price",
+            "checkpoint 9 account.orders[1].remaining",
+            "checkpoint 9 account.orders[1].side",
+            "checkpoint 9 account.orders[1].status",
+            "checkpoint 9 account.orders[1].symbol",
+            "checkpoint 9 account.orders[1].timeInForce",
+            "checkpoint 9 account.orders[2]"
           ]
         }
       ]

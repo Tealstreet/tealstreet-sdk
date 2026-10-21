@@ -81,6 +81,11 @@ export interface EngineHandlers {
    * retain the same key after a deadline; consumers may merge receipt tuples.
    * Complete events are idempotent and may repeat for duplicate native done. */
   onCommandProgress?(event: CommandProgress): void;
+  /** Structured events at or above the engine's `logLevel` option; Info+ also
+   * reach `onLog` when this is absent. */
+  onEvent?(event: EngineEvent): void;
+  /** A socket opened, received its first frame, or closed; never per frame. */
+  onSocketChange?(): void;
 }
 
 export interface OrderIdentityReceipt {
@@ -102,6 +107,7 @@ export interface CommandProgress {
 export class EngineDeadError extends Error {
   constructor(cause: unknown, command?: CommandIdentity);
   readonly code: 'ENGINE_DEAD';
+  readonly kind: 'internal';
   readonly command?: string;
   /** An interrupted write may already have been accepted; reconcile before retrying. */
   readonly outcome?: 'unknown';
@@ -212,15 +218,60 @@ export interface CommandOptions {
   timeoutMs?: number;
 }
 
+export interface EngineEvent {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  /** Stable dotted identifier such as `ws.reconnect`; match on this, not the message. */
+  code: string;
+  message: string;
+  /** Redacted values arrive as `"[redacted]"`; non-finite numbers as `null`. */
+  fields: Record<string, string | number | boolean | null>;
+}
+
+/** One socket channel's state since host construction; times are `Date.now()`. */
+export interface EngineSocketStats {
+  /** Sockets currently open. */
+  open: number;
+  /** Open sockets that have received a frame since opening. */
+  initialized: number;
+  /** Newest frame on any socket of this channel; 0 before the first. */
+  lastReceived: number;
+  lastCloseCode?: number;
+  lastCloseAt: number;
+  /** Monotonic close count. */
+  closes: number;
+  /** Closes since a socket last received a frame. */
+  closeStreak: number;
+}
+
+export type EngineSocketChannel = 'public' | 'business' | 'private';
+
+/** Counters since engine construction. */
+export interface EngineHealth {
+  wsOpened: number;
+  wsClosed: number;
+  reconnects: number;
+  authFailures: number;
+  httpFailures: number;
+  rateLimited: number;
+  snapshotsDiscarded: number;
+  rowsSkipped: number;
+  /** Engine clock of the newest private-socket frame; null before the first. */
+  lastPrivateMessage: number | null;
+}
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
+  accountId?(): string | undefined;
+  /** JSON-encoded {@link EngineHealth}. */
+  health?(): string;
   /** JSON of the venue's capability record. */
   capabilities(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
+  /** Full private sections and unflushed catalog; absence is unsupported. */
+  accountSnapshotFrame?(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string | undefined;
   /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
@@ -251,6 +302,13 @@ export class EngineHost {
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  accountSnapshot(): ArrayBuffer;
+  socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
+  /** Abnormally close the open sockets of `channel` (all when omitted) so the
+   * venue reconnects; returns how many were closed. */
+  reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Undefined for an engine without `health()`. */
+  health(): EngineHealth | undefined;
   dispose(): void;
 }
 

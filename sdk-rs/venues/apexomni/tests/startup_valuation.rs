@@ -140,7 +140,7 @@ fn unmappable_owned_position_cannot_replace_a_funded_snapshot_with_empty() {
     assert!(
         h.logs
             .iter()
-            .any(|s| s.contains("skipped malformed position rows (UNKNOWN)"))
+            .any(|s| s.contains("skipped malformed position row UNKNOWN;"))
     );
 }
 
@@ -160,6 +160,6 @@ fn unmappable_owned_order_cannot_clear_the_existing_order_snapshot() {
     assert!(
         h.logs
             .iter()
-            .any(|s| s.contains("skipped malformed order rows (owned)"))
+            .any(|s| s.contains("skipped malformed order row owned;"))
     );
 }

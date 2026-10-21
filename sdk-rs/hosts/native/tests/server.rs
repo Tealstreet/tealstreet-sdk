@@ -56,7 +56,8 @@ struct TestVenue {
     pending: Vec<u32>,
     received: Rc<RefCell<Vec<String>>>,
     started: Rc<Cell<usize>>,
-    tick_intervals: Rc<RefCell<Vec<f64>>>,
+    poll_scales: Rc<RefCell<Vec<f64>>>,
+    poll_intervals: Rc<RefCell<Vec<f64>>>,
     poll_timer: Option<TimerId>,
 }
 impl Venue for TestVenue {
@@ -93,14 +94,13 @@ impl Venue for TestVenue {
         }]);
         cx.connect("test");
         cx.book_changed("BTCUSDT");
+        // A 1 s native cadence: a scale is the host's interval in seconds.
+        self.poll_timer = Some(cx.set_poll_timer(1_000.0));
     }
-    fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
-        self.tick_intervals.borrow_mut().push(interval_ms);
-        if let Some(timer) = self.poll_timer.take() {
-            cx.clear_timer(timer);
-        }
-        if interval_ms.is_finite() {
-            self.poll_timer = Some(cx.set_timer(interval_ms));
+    fn on_poll_scale(&mut self, cx: &mut Cx<'_, ()>, scale: f64) {
+        self.poll_scales.borrow_mut().push(scale);
+        if let Some(interval) = self.poll_timer.and_then(|timer| cx.poll_interval(timer)) {
+            self.poll_intervals.borrow_mut().push(interval);
         }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -155,7 +155,8 @@ struct Fixture {
     a: Tape,
     observed: Rc<RefCell<Vec<Command>>>,
     received: Rc<RefCell<Vec<String>>>,
-    tick_intervals: Rc<RefCell<Vec<f64>>>,
+    poll_scales: Rc<RefCell<Vec<f64>>>,
+    poll_intervals: Rc<RefCell<Vec<f64>>>,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<std::io::Result<()>>,
 }
@@ -168,7 +169,8 @@ impl Fixture {
         let a = Tape::default();
         let observed = Rc::new(RefCell::new(Vec::new()));
         let received = Rc::new(RefCell::new(Vec::new()));
-        let tick_intervals = Rc::new(RefCell::new(Vec::new()));
+        let poll_scales = Rc::new(RefCell::new(Vec::new()));
+        let poll_intervals = Rc::new(RefCell::new(Vec::new()));
         for (label, tape, commands) in [
             ("a", a.clone(), observed.clone()),
             ("b", Tape::default(), Rc::new(RefCell::new(Vec::new()))),
@@ -183,7 +185,8 @@ impl Fixture {
                 pending: Vec::new(),
                 received: received.clone(),
                 started: Rc::default(),
-                tick_intervals: tick_intervals.clone(),
+                poll_scales: poll_scales.clone(),
+                poll_intervals: poll_intervals.clone(),
                 poll_timer: None,
             });
             engine.set_public_feed_policy(policy).unwrap();
@@ -202,7 +205,8 @@ impl Fixture {
             a,
             observed,
             received,
-            tick_intervals,
+            poll_scales,
+            poll_intervals,
             shutdown,
             task,
         }
@@ -670,7 +674,8 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
                 pending: Vec::new(),
                 received: Rc::default(),
                 started: started.clone(),
-                tick_intervals: Rc::default(),
+                poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
                 poll_timer: None,
             };
             let transport_calls = Rc::new(Cell::new(0));
@@ -728,15 +733,15 @@ async fn websocket_polling_control_updates_and_pauses_without_using_command_ids(
             let fixture = Fixture::new(config()).await;
             let mut socket = fixture.connect("a").await;
             frame(&mut socket).await;
-            send(&mut socket, r#"{"op":"setTickInterval","interval":2500}"#).await;
-            send(&mut socket, r#"{"op":"setTickInterval","interval":null}"#).await;
+            send(&mut socket, r#"{"op":"setPollScale","scale":2.5}"#).await;
+            send(&mut socket, r#"{"op":"setPollScale","scale":null}"#).await;
             // The account command is an ordered barrier after both configuration events.
             send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
             assert!(matches!(
                 reply(&mut socket).await,
                 Reply::Done { command: 1, .. }
             ));
-            assert_eq!(*fixture.tick_intervals.borrow(), [2500., f64::INFINITY]);
+            assert_eq!(*fixture.poll_scales.borrow(), [2.5, f64::INFINITY]);
             assert_eq!(
                 fixture.observed.borrow().len(),
                 1,
@@ -754,17 +759,17 @@ async fn invalid_websocket_polling_controls_have_no_venue_effects() {
         let mut socket = fixture.connect("a").await;
         frame(&mut socket).await;
         for json in [
-            r#"{"op":"setTickInterval","interval":0}"#,
-            r#"{"op":"setTickInterval","interval":-1}"#,
-            r#"{"op":"setTickInterval"}"#,
-            r#"{"op":"setTickInterval","interval":"1000"}"#,
+            r#"{"op":"setPollScale","scale":0}"#,
+            r#"{"op":"setPollScale","scale":-1}"#,
+            r#"{"op":"setPollScale"}"#,
+            r#"{"op":"setPollScale","scale":"4"}"#,
         ] {
             send(&mut socket, json).await;
             assert!(matches!(reply(&mut socket).await, Reply::Error { error } if error == "invalid command"));
         }
         send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
         assert!(matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }));
-        assert!(fixture.tick_intervals.borrow().is_empty());
+        assert!(fixture.poll_scales.borrow().is_empty());
         assert_eq!(fixture.observed.borrow().len(), 1);
         fixture.stop().await;
     }).await;
@@ -777,25 +782,26 @@ async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
             let fixture = Fixture::new(config()).await;
             let mut socket = fixture.connect("a").await;
             frame(&mut socket).await;
-            send(&mut socket, r#"{"op":"setTickInterval","interval":1e308}"#).await;
+            // Scales of the venue's 1 s cadence: 1e308 ms, then 0.001 ms.
+            send(&mut socket, r#"{"op":"setPollScale","scale":1e305}"#).await;
             send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
             assert!(
                 matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }),
                 "host must continue serving commands around a huge deadline"
             );
-            assert_eq!(*fixture.tick_intervals.borrow(), [120_000.]);
-            send(&mut socket, r#"{"op":"setTickInterval","interval":0.001}"#).await;
+            assert_eq!(*fixture.poll_intervals.borrow(), [120_000.]);
+            send(&mut socket, r#"{"op":"setPollScale","scale":0.000001}"#).await;
             // Null emits ClearTimer for the bounded deadline, then a normal future
             // timer must still work. Account shutdown cancels that timer as usual.
-            send(&mut socket, r#"{"op":"setTickInterval","interval":null}"#).await;
-            send(&mut socket, r#"{"op":"setTickInterval","interval":2500}"#).await;
+            send(&mut socket, r#"{"op":"setPollScale","scale":null}"#).await;
+            send(&mut socket, r#"{"op":"setPollScale","scale":2.5}"#).await;
             send(&mut socket, r#"{"op":"fetchAccount","command":2}"#).await;
             assert!(matches!(
                 reply(&mut socket).await,
                 Reply::Done { command: 2, .. }
             ));
             assert_eq!(
-                *fixture.tick_intervals.borrow(),
+                *fixture.poll_intervals.borrow(),
                 [120_000., 1_000., f64::INFINITY, 2500.]
             );
             fixture.stop().await;

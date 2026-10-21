@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
 use safe_cex_venue_binance::{BinanceFutures, Options};
+use support::Harness;
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"###;
 fn public_engine() -> Engine<BinanceFutures> {
     Engine::new(BinanceFutures::new(Options {
@@ -246,4 +248,44 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
         })
         .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
+}
+
+fn public_harness() -> Harness {
+    Harness::started(Options {
+        public_data_only: true,
+        ..Default::default()
+    })
+}
+
+/// No retry of `path` until `wait_ms` has passed, then exactly on time.
+fn assert_retry_waits(h: &mut Harness, path: &str, wait_ms: f64) {
+    h.advance(wait_ms - 1.0);
+    assert!(!h.has_request(path), "{path} retried inside the ban window");
+    h.advance(1.0);
+    assert!(h.has_request(path), "{path} retried once the window passed");
+}
+
+#[test]
+fn catalogue_rate_limit_retry_waits_for_retry_after() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 429, "Retry-After: 120", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 120_000.0);
+}
+
+#[test]
+fn ticker_rate_limit_retry_waits_for_retry_after() {
+    let mut h = public_harness();
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    let request = h.take("/fapi/v1/ticker/24hr").id;
+    h.reply(request, 429, "Retry-After: 120", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/ticker/24hr", 120_000.0);
+}
+
+#[test]
+fn catalogue_ip_ban_without_retry_after_waits_the_weight_pause() {
+    let mut h = public_harness();
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.reply(request, 418, "", "{}");
+    assert_retry_waits(&mut h, "/fapi/v1/exchangeInfo", 60_000.0);
 }
