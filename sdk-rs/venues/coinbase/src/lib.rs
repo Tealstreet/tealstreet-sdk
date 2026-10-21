@@ -121,6 +121,7 @@ impl Venue for Coinbase {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            host_clock: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
