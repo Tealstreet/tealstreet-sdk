@@ -149,6 +149,9 @@ checks #1591 at `083dbb5121b`. Focused NX hook checks use `65e086a3c90`.
 The typed-error catch-up checks #1589 at `ef362708305`; the incoming venue
 read/display notes are retained, and #1607/#1610 only change harness proof.
 The envelope-only credential-evidence follow-up checks #1611 at `a07b6b35c87`.
+The Bybit environment hint checks #1590 at `15434894bf5`; explicit market
+refresh checks #1596 at `687fe0c1e08`. Shared public startup reporting checks
+#1615 at `c63acfc19c2`; its required caller visibility work remains open below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -215,6 +218,9 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1591 / `083dbb512` | Direct SDK journal folding rejects flagged fills and symbol-scoped income. With complete account-wide fills it discards flagged income enrichment and leaves funding unattributed. This guards direct folds; forwarding flags and NX historical coverage remain caller work (B11). |
 | #1589 / `ef3627083` | Bitunix command failures gain the existing classified-error/partial-detail contract while preserving native text/codes. Dispatched uncertain writes stay `unknown`; observed effective legs/IDs survive later batch failure, and only definitive rejections enter existing recovery writes. B9 callers must inspect fields and reconcile effects before retrying; no new API shape. |
 | #1611 / `a07b6b35c` | For eligible signed BingX/MEXC/WEEX list reads, a typed success response (BingX/MEXC envelope; WEEX root array) with its required list proves Accepted even when rows are skipped, uncatalogued or held. Malformed/missing required envelope data supplies no outcome before grouped auth state changes; typed credential rejection retains precedence. Row diagnostics/financial retention, classifier scope and caller shapes stay unchanged. |
+| #1590 / `15434894b` | A startup fee-read 10003 on eligible built-in live linear/demo Bybit can add an opposite-environment key hint after one bounded signed diagnostic GET using the rejected credential. Failure/timeout retains the original rejection; native code, credential role and deactivation policy stay intact. No automatic environment switch or trading retry. |
+| #1596 / `687fe0c1e` | Bybit `refreshMarkets()` stages enabled public categories atomically, shares concurrent discovery and returns added/removed membership after publication. `marketRefresh` capability uses wire bit15; unsupported engines keep cached behavior. Failed discovery retains the old catalogue; shared-feed consumers must refresh the source and restart provider/accounts. See [Bybit explicit catalogue refresh](#bybit-explicit-catalogue-refresh). |
+| #1615 / `c63acfc19` | OKX/BloFin/Bitget public startup emits one Warn `startup.degraded` after six failures of one required read, while capped retries continue; after a prior degraded report, Info `startup.recovered` follows usable markets and tickers. Typed cause fields use the existing Event wire, without terminal `StartupFailed`. Required NX event forwarding, per-exchange degraded/recovered state independent of reconnect-toast suppression, legacy deduplication and pre-start CLI listeners remain caller work. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -256,6 +262,10 @@ tealstreet-next edits, shipped with the cutover (listed in [tealstreet-next call
 5. Pass typed detail for ordinary errors (#1484); migrate coded diagnostics to `processEvent`/`processHealth` (#1583), forwarding `engine-event` and suppressing duplicate legacy delivery only by event metadata. See [Coded diagnostic callers](#coded-diagnostic-caller-cutover-pr5).
 6. Preserve/read history completeness through the worker/hosted response and
    journal collection; incomplete windows never call `completeWindow` (B11).
+7. **Required:** forward startup event codes, show per-exchange degraded state
+   independently of reconnect-toast suppression, clear it on recovery, deduplicate
+   legacy delivery and attach CLI listeners before starting. See
+   [Required startup degradation visibility](#required-startup-degradation-visibility).
 
 Cutover item, `collectAccountAxes`: #1554 supplies an incomplete-history flag,
 but its forwarding/coverage work is still open (B11). The exact transport and
@@ -580,6 +590,23 @@ before host creation; empty fields are ignored silently, and a proxy-only option
 without defined read fields keeps its policy. The caller's options object and
 saved configuration are not rewritten. Factory routing and TS venues retain
 their behavior; no application option shape changes.
+
+#### Bybit rejected-key environment hint (#1590)
+
+For built-in live linear/demo Bybit, a startup fee-read `10003` can trigger one
+signed `/v5/user/query-api` GET on the opposite environment using the same
+rejected credential, including a secondary read key. A 2 s bound and shared
+probe prevent concurrent fee failures or late replies from duplicating the
+terminal report. Only HTTP success with native integer `retCode: 0` adds the
+existing environment-mismatch hint; a negative, malformed or timed-out probe
+keeps the original rejection. Regional/site, custom endpoints, testnet, Hyro,
+inverse, spot, public-only and remote-signing contexts are excluded.
+
+Callers should retain the hint and native `10003` detail without treating the
+probe as account recovery or switching environments automatically. Credential
+role and deactivation policy stay unchanged. B9's code/field migration still
+applies to the existing NX CLI message-prefix check; no caller method or saved
+configuration shape changes.
 
 #### Bitunix classified failures and partial effects (#1589)
 
@@ -1883,6 +1910,43 @@ cached settings until authoritative confirmation. No write is replayed and no
 unconfirmed success is returned. Caller method signatures and quantities remain
 unchanged; native algo reduce-only defaults and protective trigger semantics stay
 as documented.
+
+## Required startup degradation visibility
+
+**Required cutover caller work; tealstreet-next remains read-only here.**
+#1615 (`c63acfc19c2`) reports OKX/BloFin/Bitget public startup
+`startup.degraded` at Warn once after six failures of one required read, while
+capped retries continue. Fields include `kind`, `read`, `attempts`, and parsed
+`venueCode`/`venueMessage` when available, plus `retryAfterMs` for a positive
+finite cooldown. After a prior degraded report, Info `startup.recovered` follows
+usable markets and tickers, including usable partial catalogues; repair timers
+continue. These use the existing Event wire and do not emit terminal
+`StartupFailed`. Warn preserves SDK `validateAccount` behavior by avoiding its
+Error listeners. Private reads, Bybit and post-loaded recovery keep their policy.
+
+The caller must key on the codes, regardless of level. Keep diagnostic delivery
+at an Info minimum so recovery is not filtered out; the engine defaults to Info.
+Required visible state is independent of a terminal startup failure.
+
+Read-only evidence at NX `65e086a3c90`, with the matching Rust SDK:
+
+| Boundary / file:line | Current behavior and required cutover change |
+| --- | --- |
+| SDK `exchanges/rust/rust.exchange.ts:1307-1312`; `webworker/ExchangeWorker.ts:1248-1277` | The SDK emits `engine-event` and legacy delivery: Error uses `error` with `opts.engineEvent`; Warn/Info use `log` with event metadata as the third argument. Forward and consume the structured event, including its code and fields. |
+| NX `apps/web/src/controllers/exchangeController/exchangeAccountController.ts:2705-2720,1977-2011,2046-2074` | The worker switch forwards legacy error/log but has no `engine-event` case; the error handler ignores `opts.engineEvent`, while log only logs/reports. Add `engine-event` forwarding and code-based consumption. With Warn/Info, the new startup receipts take the log path and do not reach `handleErrWarning` or its toast path at all. |
+| Same controller `:1770-1822,1838-1867,1895-1901`; `apps/web/src/atoms/settings.atoms.ts:466`; `utils/exchange/getExchangeAppearsConnected.tsx` | Error compatibility delivery logs before toast suppression, but the default `showErrorsWhileReconnecting: false` can hide a disconnected startup (and hidden-tab notices). A 30 s connectivity grace, never-initialised sockets and hosted mode can allow some toasts; they do not guarantee visibility. Maintain a visible per-exchange degraded state keyed on `startup.degraded`, independently of that setting, and clear only the corresponding exchange on `startup.recovered`. Never route recoverable degradation to the terminal startup-failure/reload latch. |
+| SDK `webworker/ExchangeWorker.ts:411-423`; NX controller `:193-225,1838-1867` | The existing `worker_error_phase: 'startup'` identifies a thrown `start()` error. A retrying startup event does not acquire that terminal meaning from its message or level. Preserve genuine thrown-start handling separately. |
+| NX `apps/cli/src/exchange-manager.ts:108-119`; `apps/cli/src/repl.ts:957-1002,1863-1864,2709-2733` | `enable` awaits `startExchange` before returning, and REPL installs error listeners afterward; early startup receipts can be missed. Attach structured/legacy listeners and their per-account state before awaiting startup on every connect/enable path. Print/update the degraded state and clear it on its recovery code. |
+| NX `services/exchange-server/src/virtual-worker-context.ts:179-205,320-325` | Hosted `log` messages go to server stdout and are dropped before client delivery. Structured startup state must reach the web client; server logs alone do not satisfy user visibility. |
+
+Deduplicate each structured receipt against its matching legacy report using
+`opts.engineEvent` or the log event metadata. Preserve unrelated errors and
+logs; do not suppress them globally by matching message text. Prove degradation
+is shown with reconnect toasts disabled, recovery clears only that exchange,
+repeated/legacy delivery does not duplicate the report, and a pre-start CLI
+listener observes the first receipt. The native/DO event deployment prerequisite
+below still applies. This records required caller changes, not proof they have
+shipped or that the current UI displays a persistent degraded state.
 
 ## Coded diagnostic caller cutover (PR5)
 
