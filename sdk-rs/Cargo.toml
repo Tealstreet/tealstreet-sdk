@@ -121,9 +121,10 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-paradex]
 opt-level = "z"
 
-# CI gates Bitget's CPU-bound streamed ticker decoder before retaining this profile.
+# Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized
+# for throughput while the aggregate WASM build optimizes other crates for size.
 [profile.release.package.safe-cex-venue-bitget]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-engine]
 opt-level = 3
@@ -158,9 +159,6 @@ opt-level = "z"
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-kraken]
-opt-level = "z"
-
-[profile.release.package.safe-cex-venue-kucoin]
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-lighter]
