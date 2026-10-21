@@ -131,6 +131,8 @@ protocol/deployment section above is retained as cutover work.
 The fill-identity follow-up checks #1592 at `389f42aa2e2`; focused live-fill
 callers were rechecked read-only at NX `65e086a3c90`. Earlier inventory pins
 still apply to the other caller rows.
+The private-snapshot follow-up checks #1524 at `b69285f9909`; caller shapes
+and diagnostic delivery remain the already documented SDK/host contracts.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -186,6 +188,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1588 / `447134dbf2` | Rust/TS OKX public/private/business WebSocket URLs use default TLS 443 across global/EEA live/demo, preserving host/path; relay upstream metadata changes the global live private/business targets. SDK arguments stay unchanged. Proxy upstreams and live master need a separate owner-run port migration before the public-internet 8443 deadline; see [OKX operations prerequisite](#okx-websocket-port-operations-prerequisite-1588). |
 | #1586 / `ef68c4ba56` | Removes `Cx::log`, `LogLevel`, `Notice::Log`, WASM `log` actions and native `log` notices. Diagnostics use coded `event` envelopes; DO changes from `op: 'log'` to `op: 'event'` with `warn`, preserving its host `onLog` callbacks as coded host events. Deploy compatible safe-cex-server before native clients receive Info+ venue events; DO clients must accept the new envelope before host adoption. Sam owns that deployment. See [Log shim removal](#log-shim-removal-pr6). |
 | #1592 / `389f42aa2e` | Rust always writes FILLS revision 2 with optional execution-ID refs and aligned financial columns. Updated readers retain revisions 0/1; old readers reject revision 2, requiring coordinated producer/consumer builds. Hyperliquid perp/merged spot/spot-only `tid` becomes SDK fill `id`, with `orderId` separately preserved; other venues retain order-ID fallback. See [Fill identity and wire compatibility](#fill-identity-and-wire-compatibility-1592). |
+
+| #1524 / `b69285f990` | Private snapshots isolate rejected rows while valid peers commit; stored rows protected by rejected identities remain visible, including Bitrue protective children and Kraken open orders. Unidentified rows prevent absence-based removal within their snapshot scope. Coded `row.skipped` / `snapshot.discarded` diagnostics use the existing event/health paths. No new caller shape; see [Private snapshot row isolation](#private-snapshot-row-isolation-1524). |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -403,6 +407,41 @@ execution PnL retains its separate gross convention; this does not resolve
 B11 completeness forwarding/coverage or owner-run backfills.
 Order mapping also retains generic `Order.triggerType` alongside the existing
 TP/SL-specific trigger fields; no caller signature changes.
+
+#### Private snapshot row isolation (#1524)
+
+The third snapshot batch covers Backpack, Bitrue, BloFin, Crypto.com, GRVT,
+Kraken futures/spot, KuCoin futures/spot, MEXC, OKX and WOO. Migrated private
+list reads accept valid peers when another row cannot be mapped. A rejection
+with a recoverable identity retains that identity's stored copy; a rejection
+without an identity prevents absence-based removal of stored rows in that
+snapshot's scope. Accepted rows can still replace their matching stored rows.
+A fully valid empty snapshot still clears its scope. Structural failures,
+catalogue safety holds and existing revision/terminal fences remain in effect;
+this is not permission to commit every malformed response.
+
+Callers can observe a mixture of newly mapped and retained older rows. A store
+update or resolved account read is not proof that every row was freshly decoded.
+Do not infer a close/cancel or zero balance merely from a skipped row. Balance
+aggregates keep venue-specific safety rules: KuCoin spot, for example, retains
+its previous USD wallet total when rejected currency rows would mix old and new
+values. No new per-row freshness flag, method argument or frame revision is
+introduced by #1524.
+
+Bitrue malformed order trees protect named children as well as the parent;
+when a child lacks an ID, cached children of that parent are protected too.
+Kraken futures/spot isolate malformed open-order rows instead of rejecting valid
+peers. Kraken spot also skips a malformed execution update alone, without
+emitting a fill for it or changing its order.
+
+`ROW_SKIPPED` / `SNAPSHOT_DISCARDED` are the existing wire codes `row.skipped` /
+`snapshot.discarded`, delivered through the coded diagnostic/health paths above.
+A row skip does not mean the whole snapshot was discarded, and a discard is
+not evidence that the account is empty. Repeated skip diagnostics may be
+suppressed until recovery; emitted levels vary by venue/path (several use Warn
+when retaining a stored copy and Error when none can be kept). Use code and
+level, not message matching or an assumed one-event-per-row count. The B9
+caller migration and snapshot collection requirements remain open.
 
 #### Events and worker protocol
 
