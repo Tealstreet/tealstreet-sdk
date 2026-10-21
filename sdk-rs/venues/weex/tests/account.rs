@@ -254,7 +254,7 @@ fn fills_are_per_execution_and_duplicates_are_suppressed() {
         if kind == 11 {
             assert_eq!(
                 u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
-                1
+                2
             );
             let data = &frame[at + 8..at + 8 + len];
             let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
@@ -1083,7 +1083,7 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 4);
-    assert_eq!(payload.len(), 200);
+    assert_eq!(payload.len(), 216);
     let symbol_refs: Vec<_> = payload[120..136]
         .as_chunks::<4>()
         .0
@@ -1100,15 +1100,15 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     for row in 0..4 {
         assert_eq!([value(56 + row * 16), value(64 + row * 16)], [1000., 0.1]);
     }
-    assert!(value(136).is_nan());
-    assert_eq!([value(144), value(152)], [0., -3.]);
+    assert!(value(152).is_nan());
+    assert_eq!([value(160), value(168)], [0., -3.]);
     assert!(
-        value(160).is_nan(),
+        value(176).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert!(value(168).is_nan());
-    assert_eq!([value(176), value(184)], [2., 0.]);
-    assert!(value(192).is_nan());
+    assert!(value(184).is_nan());
+    assert_eq!([value(192), value(200)], [2., 0.]);
+    assert!(value(208).is_nan());
     assert!(e.take_market_frame(NOW).is_none());
 }
 fn logs(actions: &[Action], level: Level) -> Vec<String> {

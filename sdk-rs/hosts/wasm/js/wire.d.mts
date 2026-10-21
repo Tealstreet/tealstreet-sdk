@@ -47,7 +47,7 @@ export interface EngineCapabilities {
   incomeHistory: boolean;
   fillsByOrderId: boolean;
   cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
-  leverageQuery: 'settings' | 'onRead' | 'onMetadata';
+  leverageQuery: 'settings' | 'onRead' | 'onMetadata' | 'onReadAndMetadata';
   maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
   accountLeverage: boolean;
   accountMarginType: boolean;
@@ -232,6 +232,8 @@ export interface FillRows {
   /** `[price, amount]` per execution. */
   rows: Float64Array;
   symbol?(i: number): string | undefined;
+  /** Native execution identity; absent in legacy frames or when unreported. */
+  fillId?(i: number): string | undefined;
   /** Optional financial tails; NaN means unreported, including legacy rows. */
   realizedPnl?: Float64Array;
   fee?: Float64Array;

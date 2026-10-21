@@ -91,6 +91,8 @@ pub enum LeverageQuery {
     OnRead,
     /// Rails are read when a symbol's metadata refreshes, then served from settings.
     OnMetadata,
+    /// Explicit reads are fresh, and selecting a symbol also refreshes its metadata.
+    OnReadAndMetadata,
 }
 
 /// Where a symbol's maximum leverage comes from.
@@ -208,5 +210,10 @@ mod tests {
         let word = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
         assert_eq!(word(0), 1 | 1 << 10 | 1 << 12 | 1 << 14 | 1 << 15);
         assert_eq!(word(4), 2 | 1 << 4 | 2 << 8 | 3 << 12 | 4 << 16);
+        // Append the combined policy without changing any existing wire discriminant.
+        assert_eq!(LeverageQuery::Settings as u32, 0);
+        assert_eq!(LeverageQuery::OnRead as u32, 1);
+        assert_eq!(LeverageQuery::OnMetadata as u32, 2);
+        assert_eq!(LeverageQuery::OnReadAndMetadata as u32, 3);
     }
 }

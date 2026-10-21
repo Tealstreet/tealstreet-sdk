@@ -128,8 +128,10 @@ closures: [`RUST_AUDIT_BINANCE_BYBIT.md`](RUST_AUDIT_BINANCE_BYBIT.md).
 Execution and Bybit terminal retention are bounded; private verification remains scripted.
 
 
-Engine root causes: `Fill` has no execution id and the store replaces lists with
-no freshness fence, so every venue reinvents dedupe and terminal fencing.
+Engine root causes: ~~`Fill` has no execution id~~ (optional execution identity
+now crosses FILLS revision 2; Hyperliquid publishes `tid`). The store replaces
+lists with no freshness fence, so venue-specific dedupe and terminal fencing
+remain necessary.
 
 ## Wire contract
 
@@ -422,8 +424,9 @@ Remaining evidence limitations:
 
 - No venue has live private evidence; private tapes are documented/synthetic.
   Several TS handlers emit execution identity or timestamps, now preserved by
-  the comparison. Rust live-fill frames lack those fields; other TS handlers
-  lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
+  the comparison. Rust now preserves Hyperliquid execution IDs; other venues'
+  execution IDs and live-fill timestamps remain unreported where not supplied.
+  Other TS handlers lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
   remain missing, never reconstructed into candidate output from the tape.
 - Some tape-derived TS corrections still rebuild sections. Their declared leaf
   fields and overwrite counts are visible; raw checkpoints do not use them.
@@ -546,8 +549,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   TS); ~~signed fees~~ (deliberate: TS `abs` mislabels rebates); ~~unified
   balance spot slices not populated~~ (spot holdings publish as `coins`;
   currencies stay unset because TS's `currencies.USDC` is a synthetic sizing
-  slice, not the raw spot row); fills lack execution id, realized PnL and fee
-  (engine `Fill`; claude-i2upd7).
+  slice, not the raw spot row); ~~fills lack execution id, realized PnL and fee~~
+  (FILLS revision 2 carries `tid`; #1430 financials retain live venue conventions).
 
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
@@ -745,8 +748,9 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   ~~subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`)~~
   (demand is retained and replayed once markets load; `startupDemand.wasm.test.ts`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX and
-  WEEX now read native rails `onRead`; MEXC reads a symbol its metadata refresh
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~ (BingX uses
+  fresh reads plus selected metadata refresh via `onReadAndMetadata`; WEEX keeps
+  fresh `onRead` rails; MEXC reads a symbol its metadata refresh
   has not covered yet); command
   rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
   `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
@@ -895,10 +899,16 @@ Normal inputs send the same requests as TS; the risk is resilience.
   (`trading.rs:842`); no one-shot resend on signature error 100001;~~ multi-order
   cancel sends nothing if any id is unknown (`trading.rs:780`) — intended per
   [the unknown-cancel audit](RUST_UNKNOWN_CANCEL.md) (error before any write).
-- Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
-  per-symbol leverage/margin not read; trigger move requires trigger_type;
-  bracket `workingType`; history fails on one bad row; WS message with one bad
-  field dropped.
+- Low: ~~hedge leverage sets both sides~~ (requires a side and writes only that
+  native rail); ~~per-symbol leverage/margin not read~~ (explicit metadata reads
+  stage both atomically and fence newer settings); ~~bracket `workingType`~~
+  (per-leg trigger precedence already correct); ~~WS message with one bad field
+  dropped~~ for ACCOUNT_UPDATE positions (row isolation, coded warning and REST
+  repair). Orders/fills/config retain strict decoding when identity is uncertain.
+  **RISKY — retained:** `cancelRestrictions=ONLY_NEW` guards cancel-replace
+  against partial-fill races (quantity-only amend has no such restriction);
+  trigger moves require a known source rather than guessing; malformed financial
+  history rejects instead of silently returning a plausible incomplete ledger.
 
 ### WEEX
 - High: ~~one `null` numeric field in a public row stops the venue, private start

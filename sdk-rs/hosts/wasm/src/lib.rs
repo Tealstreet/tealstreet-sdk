@@ -879,7 +879,9 @@ mod tests {
                 } else {
                     CancelAll::EachOpenSymbol
                 },
-                leverage_query: if any(
+                leverage_query: if venue == "bingx" {
+                    LeverageQuery::OnReadAndMetadata
+                } else if any(
                     &[
                         "asterdex",
                         "blofin",
@@ -890,7 +892,6 @@ mod tests {
                         "coinbase",
                         "coinbasespot",
                         "polymarket",
-                        "bingx",
                         "weex",
                     ],
                     venue,
