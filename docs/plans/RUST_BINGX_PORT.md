@@ -387,9 +387,11 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - Reproduced both failures before implementation: flat metadata produced no native
   request and a malformed WS position row blocked its valid peer. Metadata now
   signs the documented GET leverage/marginType endpoints, validates positive
-  native rails and exact mode, stages both, and returns rails only on a current
-  atomic commit. Dispatch/ACK/config/authoritative settings snapshots and newer
-  same-symbol queries fence stale results; pending writes block new reads.
+  native rails and exact mode, and stages both for a current atomic commit.
+  Dispatch/ACK/config/authoritative settings snapshots and newer same-symbol
+  queries prevent stale publication. Superseded reads and reads issued during a
+  pending write return current cached rails, with validated read values used
+  independently for missing rails; they do not fail merely because of overlap.
   Empty position snapshots do not invalidate flat metadata. A nonempty settings
   snapshot conservatively invalidates the read even if values are unchanged.
 - Stream position arrays now retain raw rows until independent strict decoding;
@@ -419,5 +421,6 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   explicit fresh leverage-read contract from #1522. New combined query policy
   keeps explicit reads fresh while selected metadata updates fetch the same
   atomic leverage/margin pair. Other OnRead venues retain their policy. The
-  original fresh-read regressions now finish both stages; settings races fail
-  without publishing partial rails. Independent integration review is clear.
+  original fresh-read regressions finish both stages when current. The race
+  follow-up preserves newer cached rails in both store and response rather than
+  failing; no stale or partial metadata is published.

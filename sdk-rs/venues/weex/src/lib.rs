@@ -153,6 +153,9 @@ pub struct WeexFutures {
     active_symbols: HashSet<String>,
     deferred_gets: Vec<DeferredGet>,
     account: account::State,
+    /// Normal/Algo order reads and Config/Metadata settings reads share a scope.
+    orders_auth: safe_cex_engine::MergedScopeAuth,
+    settings_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
@@ -207,6 +210,8 @@ impl WeexFutures {
             active_symbols: HashSet::new(),
             deferred_gets: Vec::new(),
             account: account::State::new(),
+            orders_auth: Default::default(),
+            settings_auth: Default::default(),
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
@@ -410,16 +415,28 @@ impl WeexFutures {
             cx.now,
         );
         let url = format!("{}{path_query}", paths::REST);
+        let scope = account::auth_scope(&task);
         let pending = Pending {
             task,
             invalid: false,
             skipped: Vec::new(),
             seed_generation: self.seed_generation,
         };
-        if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending);
+        let id = if let Some(at) = stream {
+            cx.request_streamed_body(method, url, headers, body, at, pending)
         } else {
-            cx.request(method, url, headers, body, pending);
+            cx.request(method, url, headers, body, pending)
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
+            );
         }
         true
     }
@@ -695,6 +712,15 @@ impl Venue for WeexFutures {
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
