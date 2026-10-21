@@ -325,3 +325,36 @@ integration re-reviews PASS; original findings and follow-ups are resolved.
 
 Push the feature branch, refresh PR#1316 evidence/re-review comments, wait for
 all CI on that exact head, merge into feat/rust-rewrite, and cut a fresh branch.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify native algo reduce-only defaults, trigger fallback and missing-
+   reference row handling; preserve intentional native semantics and record
+   unverified changes as risks.
+2. Clarify leverage write-accepted/readback-unconfirmed failures without removing
+   bounded confirmation or reporting an unconfirmed setting as successful.
+3. Warn once per symbol when isolated exposure is observed while mutations are
+   unsupported, keeping the position visible. Cover REST and stream paths.
+4. Reproduce behavior gaps, run focused WOO/Binance tests and fmt/strict Clippy/
+   bans with CARGO_BUILD_JOBS=4; independently review, push for CI and merge only
+   after overseer's exclusive1567 slot ends.
+
+- Reproduced missing isolated warning and misleading accepted-write readback error
+  before changes. A valid committed isolated position now warns once per symbol
+  using config.invalid while remaining visible. The native private stream carries
+  executions, not an independently mapped positions topic; existing fill-triggered
+  REST repair shares the same commit path. No unverified stream schema is added.
+- Leverage confirmation still retries at most three GETs. Exhaustion after an
+  accepted write says accepted/unconfirmed with Unknown outcome, preserves the
+  prior cached setting and never sends another POST. Plain reads retain their
+  existing failure wording; no unconfirmed success is invented.
+- Algo reduceOnly=false matches the native legacy contract:
+  https://docs.woox.io/products/woo-x (parent and child defaults).
+  Standalone SL fallback matches TS, and STOP without reference already isolates
+  its row and re-reads after prices exist. Attached generic-trigger semantics
+  and guessed SL/TP classification remain explicitly risky; no write semantics
+  are broadened on the legacy surface.
+
+- Validation: both new regressions failed before the repair; 163 WOO plus 246
+  Binance tests pass, touched formatting, strict Clippy and bans pass. Independent
+  read-only review found no blocker; its stale read-retry comment was corrected.

@@ -980,3 +980,10 @@ market, ticker and history rows are skipped with a warning and keep the store's 
 only a read with no usable row fails. A delayed unseen trade still emits a fill, but
 optimistic position updates apply only the cumulative delta not already present in
 reconciled order state.
+
+Rust warns once per symbol on committed isolated exposure and retains the position.
+After a leverage write is accepted, exhausted bounded readback reports that the
+setting is unconfirmed (Unknown outcome); it keeps the cached setting and never
+replays the write. The native algo reduceOnly default remains false, with child
+inheritance; do not copy the TS true default or guess STOP classification before
+reference prices exist.

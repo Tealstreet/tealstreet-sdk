@@ -77,7 +77,10 @@ PRs: ~~(1) types and plumbing, byte-identical messages, URL redaction~~
 (landed: `engine/src/error.rs`, `Cx::fail`, host `detail` beside the unchanged
 `error` text, partial batches as fields, TS `ExchangeError`); ~~(2) one
 shared parser per venue family, replacing `malformed` flags~~ (every venue
-classifies `kind`/`outcome`/`venueCode`); ~~(3) TS toast on rejection~~;
+classifies `kind`/`outcome`/`venueCode`; the later Bitunix port now also uses a
+strict command-response parser, conservative write outcomes and partial batch
+detail, rather than logging item failures followed by success);
+~~(3) TS toast on rejection~~;
 ~~(4) `outcome: Unknown` at unknown-outcome sites (**risky**)~~; ~~(5)
 `StartupFailed`, per-venue auth codes (**risky**: ends infinite retries)~~
 (validateAccount carries the startup `kind`; the `'error'` event carries

@@ -927,8 +927,11 @@ impl ApexOmni {
                     return;
                 }
                 if amendment.default_amount {
-                    amendment.order.amount -=
-                        (amendment.filled - amendment.baseline_filled).max(0.0);
+                    let additional =
+                        crate::account::subtract(amendment.filled, amendment.baseline_filled)
+                            .max(0.0);
+                    amendment.order.amount =
+                        crate::account::subtract(amendment.order.amount, additional);
                 }
                 if !amendment.terminal
                     && amendment.filled < amendment.total_amount

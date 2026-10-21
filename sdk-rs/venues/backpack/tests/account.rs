@@ -925,3 +925,123 @@ fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
         );
     }
 }
+
+#[test]
+fn null_or_missing_order_quantity_keeps_proven_trigger_size_and_valid_peers() {
+    for missing in [false, true] {
+        let mut trigger: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+        trigger["id"] = "trigger".into();
+        trigger["quantity"] = serde_json::Value::Null;
+        if missing {
+            trigger.as_object_mut().unwrap().remove("quantity");
+        }
+        trigger["triggerPrice"] = "130".into();
+        trigger["triggerQuantity"] = "3".into();
+        trigger["triggerBy"] = "MarkPrice".into();
+        let orders = format!("[{ORDER},{trigger}]");
+        let (e, _, _, _) = ready_catalogue(MARKETS, POSITIONS, &orders);
+        assert!(e.store().loaded().orders);
+        assert!(e.store().order("123").is_some());
+        let order = e.store().order("trigger").unwrap();
+        assert_eq!(
+            (order.amount, order.remaining, order.price),
+            (3.0, 3.0, 130.0)
+        );
+    }
+}
+
+#[test]
+fn unproven_missing_quantities_keep_prior_orders_and_never_start_repair() {
+    for case in [
+        "ordinary_null",
+        "ordinary_missing",
+        "zero_price",
+        "zero_size",
+        "negative_size",
+        "overfilled",
+        "blank",
+        "bad",
+        "nonfinite",
+        "boolean",
+    ] {
+        let (mut e, socket) = ready_orders(&format!("[{ORDER}]"));
+        let before = e.store().orders().to_vec();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/orders"))
+            .unwrap();
+        let mut row: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+        row["quantity"] = serde_json::Value::Null;
+        row["triggerPrice"] = "130".into();
+        row["triggerQuantity"] = "3".into();
+        match case {
+            "ordinary_null" | "ordinary_missing" => {
+                row.as_object_mut().unwrap().remove("triggerPrice");
+                row.as_object_mut().unwrap().remove("triggerQuantity");
+                if case == "ordinary_missing" {
+                    row.as_object_mut().unwrap().remove("quantity");
+                }
+            }
+            "zero_price" => row["triggerPrice"] = "0".into(),
+            "zero_size" => row["triggerQuantity"] = "0".into(),
+            "negative_size" => row["triggerQuantity"] = "-1".into(),
+            "overfilled" => row["executedQuantity"] = "4".into(),
+            "blank" => row["quantity"] = "".into(),
+            "bad" => row["quantity"] = "broken".into(),
+            "nonfinite" => row["quantity"] = "NaN".into(),
+            "boolean" => row["quantity"] = true.into(),
+            _ => unreachable!(),
+        }
+        reply(&mut e, &read, 200, &format!("[{row}]"));
+        assert_eq!(e.store().orders(), before, "{case}");
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair() {
+    let peer = ORDER.replace("\"id\":\"123\"", "\"id\":\"456\"");
+    let (mut e, socket, _, _) = ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER},{peer}]"));
+    let retained = e.store().order("123").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    let mut bad: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+    bad["quantity"] = serde_json::Value::Null;
+    bad["triggerPrice"] = "130".into();
+    bad["triggerQuantity"] = "0".into();
+    for (round, price) in ["141", "142"].into_iter().enumerate() {
+        let good = peer.replace("\"price\":\"140\"", &format!("\"price\":\"{price}\""));
+        e.handle(1000.0, Event::WsOpened { socket });
+        for request in requests(&mut e) {
+            if request.url.ends_with("/position") {
+                reply(&mut e, &request, 200, POSITIONS);
+            } else if request.url.ends_with("/orders") {
+                reply(&mut e, &request, 200, &format!("[{bad},{good}]"));
+            }
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let skipped = actions
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::Event(event))
+                        if event.message == "Backpack skipped malformed order row 123"
+                )
+            })
+            .count();
+        assert_eq!(skipped, usize::from(round == 0), "row rejection logs once");
+        assert_eq!(e.store().order("123"), Some(&retained));
+        assert_eq!(
+            e.store().order("456").unwrap().price,
+            price.parse::<f64>().unwrap()
+        );
+        assert!(!actions.iter().any(|action|matches!(action,Action::Http(request) if request.method!=safe_cex_engine::Method::Get)));
+    }
+    reread(&mut e, socket, POSITIONS, "[]");
+    assert!(e.store().orders().is_empty());
+}

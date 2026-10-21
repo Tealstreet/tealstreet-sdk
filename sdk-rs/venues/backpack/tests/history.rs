@@ -319,3 +319,55 @@ fn offset_paged_request_sequence_is_pinned() {
         ]
     );
 }
+
+#[test]
+fn null_or_missing_order_quantity_uses_proven_trigger_amount_in_history() {
+    for missing in [false, true] {
+        let (mut e, _) = ready();
+        ask(
+            &mut e,
+            Query::OrderHistory {
+                symbol: Some(SYMBOL.into()),
+                from_ms: None,
+                to_ms: None,
+                limit: Some(100),
+            },
+        );
+        let request = requests(&mut e).pop().unwrap();
+        let mut row: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+        row["quantity"] = serde_json::Value::Null;
+        if missing {
+            row.as_object_mut().unwrap().remove("quantity");
+        }
+        row["triggerPrice"] = "130".into();
+        row["triggerQuantity"] = "3".into();
+        reply(&mut e, &request, 200, &format!("[{row}]"));
+        let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows[0]["amount"], 3.0);
+    }
+}
+
+#[test]
+fn null_ordinary_or_unproven_trigger_history_fails_instead_of_returning_zero_amount() {
+    for trigger in [false, true] {
+        let (mut e, _) = ready();
+        ask(
+            &mut e,
+            Query::OrderHistory {
+                symbol: Some(SYMBOL.into()),
+                from_ms: None,
+                to_ms: None,
+                limit: Some(100),
+            },
+        );
+        let request = requests(&mut e).pop().unwrap();
+        let mut row: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+        row["quantity"] = serde_json::Value::Null;
+        if trigger {
+            row["triggerPrice"] = "130".into();
+            row["triggerQuantity"] = "0".into();
+        }
+        reply(&mut e, &request, 200, &format!("[{row}]"));
+        assert!(result(&mut e).is_err());
+    }
+}

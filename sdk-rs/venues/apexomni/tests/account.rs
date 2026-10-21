@@ -1151,3 +1151,37 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
+
+#[test]
+fn rest_and_stream_remaining_preserve_native_decimal_precision() {
+    for (amount, filled, remaining) in [
+        (0.3, 0.2, 0.1),
+        (0.00000003, 0.00000001, 0.00000002),
+        (0.3, 0.3, 0.0),
+        (0.0037, 0.0011, 0.0026),
+    ] {
+        for streamed in [false, true] {
+            let row = serde_json::json!({"id":"decimal","symbol":"BTC-USDT","status":"OPEN","type":"LIMIT","side":"BUY","size":amount.to_string(),"price":"100","cumSuccessFillSize":filled.to_string()});
+            let body = serde_json::json!({"code":0,"data":[row.clone()]}).to_string();
+            let (mut e, socket, reads) = seeded();
+            for request in reads {
+                let data = if request.url.ends_with("/v3/account") {
+                    ACCOUNT
+                } else if streamed {
+                    EMPTY_ORDERS
+                } else {
+                    &body
+                };
+                response(&mut e, &request, 30.0, data);
+            }
+            if streamed {
+                ws(&mut e, socket, 40.0, &serde_json::json!({"topic":"ws_zk_accounts_v3","type":"delta","contents":{"orders":[row]}}).to_string());
+            }
+            let order = e.store().order("decimal").unwrap();
+            assert_eq!(
+                order.remaining, remaining,
+                "amount={amount} filled={filled} streamed={streamed}"
+            );
+        }
+    }
+}

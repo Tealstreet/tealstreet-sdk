@@ -336,6 +336,7 @@ impl Backpack {
                 }
                 Kind::Orders => {
                     let d: OrderRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
+                    let quantity = d.base_quantity()?;
                     if !matches!(d.side.as_ref(), "Bid" | "Ask") {
                         return Err("Backpack invalid order side".into());
                     }
@@ -352,7 +353,7 @@ impl Backpack {
                         d.trigger_price.as_ref().map(|n| n.0),
                     );
                     let price = d.trigger_price.map_or(d.price, |n| n.0);
-                    let amount = d.trigger_quantity.map_or(d.quantity, |n| n.0);
+                    let amount = d.trigger_quantity.map_or(quantity, |n| n.0);
                     let average = d
                         .executed_quote_quantity
                         .map(|q| q.0)
