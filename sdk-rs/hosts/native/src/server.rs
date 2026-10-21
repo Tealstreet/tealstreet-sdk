@@ -891,15 +891,15 @@ fn section_parent(kind: u16) -> Option<u16> {
 /// writes sections in the order consumers apply them, so applying the segments
 /// in sequence equals applying the frame, given that each carries the header and
 /// full string table, dependent sections stay with their parent, and STATUS
-/// (loaded flags) arrives last. `None` when the frame is malformed or a unit
-/// cannot fit with the table.
+/// (loaded and hedge flags) arrives last with the SETTINGS that read its hedge
+/// flag. `None` when the frame is malformed or a unit cannot fit with the table.
 fn segment_frame(frame: &[u8], max: usize) -> Option<Vec<Arc<[u8]>>> {
     use safe_cex_engine::wire::section;
     const HEADER: usize = 16;
     let count = u16::from_le_bytes(frame.get(6..8)?.try_into().ok()?) as usize;
     // A unit is a parent section and its dependents: (head kind, bytes, sections).
     let mut units: Vec<(u16, usize, Vec<&[u8]>)> = Vec::with_capacity(count);
-    let mut status = None;
+    let mut tail: Vec<&[u8]> = Vec::new();
     let mut strings: &[u8] = &[];
     let mut at = HEADER;
     for _ in 0..count {
@@ -910,7 +910,7 @@ fn segment_frame(frame: &[u8], max: usize) -> Option<Vec<Arc<[u8]>>> {
         at += bytes.len();
         match (kind, section_parent(kind)) {
             (section::STRINGS, _) => strings = bytes,
-            (section::STATUS, _) => status = Some(bytes),
+            (section::STATUS | section::SETTINGS, _) => tail.push(bytes),
             (_, Some(parent)) => {
                 let unit = units.last_mut().filter(|unit| unit.0 == parent)?;
                 unit.1 += bytes.len();
@@ -922,8 +922,8 @@ fn segment_frame(frame: &[u8], max: usize) -> Option<Vec<Arc<[u8]>>> {
     if at != frame.len() {
         return None;
     }
-    if let Some(bytes) = status {
-        units.push((section::STATUS, bytes.len(), vec![bytes]));
+    if !tail.is_empty() {
+        units.push((section::STATUS, tail.iter().map(|s| s.len()).sum(), tail));
     }
     let fixed = HEADER + strings.len();
     let mut groups: Vec<Vec<&[u8]>> = vec![Vec::new()];
@@ -1483,6 +1483,7 @@ mod tests {
         use safe_cex_engine::wire::section::*;
         let frame = kinded_frame(&[
             (STATUS, 64),
+            (SETTINGS, 64),
             (MARKETS, 400),
             (PREDICTION_MARKETS, 300),
             (INSTRUMENT_CLASSIFICATIONS, 300),
@@ -1521,7 +1522,11 @@ mod tests {
             kinds.len() - 1,
             "loaded flags follow their data"
         );
-        assert_eq!(kinds.last().unwrap().last(), Some(&STATUS));
+        assert_eq!(
+            segment_of(SETTINGS),
+            segment_of(STATUS),
+            "settings read the hedge flag"
+        );
         // A unit larger than the limit, or a dependent without its parent, cannot be split.
         assert!(segment_frame(&frame, 1_000).is_none());
         let orphan = kinded_frame(&[(TICKERS, 400), (POSITION_GREEKS, 400), (BOOK, 400)]);
