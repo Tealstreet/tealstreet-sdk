@@ -877,6 +877,7 @@ export const VENUES = {
     };
     const attempts = new Map();
     return {
+      virtualPrivateClock: true,
       rust: 'grvt',
       initializeReplay(_impl, options) {
         if (!options.publicDataOnly) initializeCrypto();
@@ -1137,6 +1138,7 @@ export const VENUES = {
   coinbase: coinbase('coinbase'),
   coinbasespot: coinbase('coinbasespot'),
   phemex: {
+    virtualPrivateClock: true,
     rust: 'phemex',
     phemexProtocol: true,
     tsReplaySettled: (exchange, count) =>
