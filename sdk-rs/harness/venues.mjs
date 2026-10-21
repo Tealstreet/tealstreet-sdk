@@ -1406,6 +1406,7 @@ export const VENUES = {
     compareFillPrices: true,
   },
   bitrue: {
+    virtualPrivateClock: true,
     rust: 'bitrue',
     bitrueProtocol: true,
     compareBalanceCurrencies: true,
