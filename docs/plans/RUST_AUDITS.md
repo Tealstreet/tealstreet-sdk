@@ -707,8 +707,11 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
   engine (needs a resync command); `validateAccount` leaves a started engine.
-- Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
-  `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
+- Low: ~~Asterdex unsupported interval mapped to 1h breaks candle matching~~
+  (typed `Interval` refuses it);
+  ~~`num::adjust` with step ≤ 0~~ (a market without two positive finite steps is
+  a malformed catalogue row on every venue; the guard stays as defence in depth);
+  no command deadline, `execute` drops the batch tail
   on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
 
 ### Kraken
