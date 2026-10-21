@@ -3,11 +3,14 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone, Copy)]
 pub enum Next {
@@ -49,6 +52,7 @@ pub struct Account {
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
+    balance_guard: StaleGuard,
     tick: Option<TimerId>,
     orders_timer: Option<TimerId>,
     fill_timer: Option<TimerId>,
@@ -57,6 +61,8 @@ pub struct Account {
     position_times: HashMap<String, f64>,
     executions: HashSet<String>,
     execution_order: VecDeque<String>,
+    /// Trigger orders labelled before any price existed; relabelled at the seed.
+    pub unpriced_triggers: HashSet<String>,
 }
 impl Default for Account {
     fn default() -> Self {
@@ -68,6 +74,7 @@ impl Default for Account {
             orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
+            balance_guard: StaleGuard::default(),
             tick: None,
             orders_timer: None,
             fill_timer: None,
@@ -76,6 +83,7 @@ impl Default for Account {
             position_times: HashMap::new(),
             executions: HashSet::new(),
             execution_order: VecDeque::new(),
+            unpriced_triggers: HashSet::new(),
         }
     }
 }
@@ -138,6 +146,12 @@ pub fn kind(
     } else {
         OrderType::TakeProfit
     }
+}
+
+fn unpriced(store: &safe_cex_engine::Store, symbol: &str) -> bool {
+    store
+        .ticker(symbol)
+        .is_none_or(|t| t.last <= 0.0 && t.mark <= 0.0)
 }
 
 pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
@@ -416,10 +430,11 @@ impl Backpack {
             Request::Positions { rows, invalid, .. } => {
                 let result = serde_json::from_str::<PositionRow<'_>>(item).map(|r| {
                     if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
-                        // A malformed catalogue row hides its exposure; an absent market rejects the snapshot.
-                        if !self.report_skipped_market(cx, &r.symbol) {
+                        // A malformed catalogue row holds the snapshot; a filtered market is skipped.
+                        if self.report_skipped_market(cx, &r.symbol) {
                             *invalid = true;
-                            cx.log(LogLevel::Warning, "Backpack owned position market unavailable; preserving previous snapshot");
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else if r.net_quantity != 0.0 {
                         rows.push(position(
@@ -447,15 +462,11 @@ impl Backpack {
             } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
                     if cx.store.market(&r.symbol).is_none() {
-                        if !self.report_skipped_market(cx, &r.symbol)
-                            && r.symbol.ends_with("_PERP")
-                            && status(&r.status) == OrderStatus::Open
-                        {
-                            *invalid = true;
-                            cx.log(
-                                LogLevel::Warning,
-                                "Backpack working order market unavailable; preserving previous orders",
-                            );
+                        // Only a working order on a malformed market holds the snapshot.
+                        if self.report_skipped_market(cx, &r.symbol) {
+                            *invalid |= status(&r.status) == OrderStatus::Open;
+                        } else {
+                            self.report_unlisted_market(cx, &r.symbol);
                         }
                     } else {
                         if r.trigger_price.is_some()
@@ -464,7 +475,9 @@ impl Backpack {
                         {
                             repairs.push(repair);
                         }
-                        rows.push(order(r, cx.store));
+                        let mapped = order(r, cx.store);
+                        self.note_unpriced_trigger(cx.store, &mapped);
+                        rows.push(mapped);
                     }
                 });
                 if result.is_err() {
@@ -534,7 +547,12 @@ impl Backpack {
                 } => {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    if revision == self.account.balance_revision {
+                    let current = revision == self.account.balance_revision;
+                    if self.account.balance_guard.admit_issued(
+                        current,
+                        revision,
+                        STALE_SNAPSHOT_LIMIT,
+                    ) {
                         cx.store.set_balance(Balance {
                             used: r.net_equity_locked,
                             free: r.net_equity_available,
@@ -545,6 +563,9 @@ impl Backpack {
                                 r.pnl_unrealized
                             },
                         });
+                        if !current {
+                            self.balance_read(cx, recalculate, Next::None);
+                        }
                     }
                     self.next_account(cx, next);
                 }
@@ -668,12 +689,18 @@ impl Backpack {
                 self.account
                     .order_times
                     .insert(d.i.to_string(), d.event_time);
+                let order_kind = kind(cx.store, &d.s, side, &d.o, trigger);
+                if matches!(order_kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    && unpriced(cx.store, &d.s)
+                {
+                    self.account.unpriced_triggers.insert(d.i.to_string());
+                }
                 cx.store.upsert_order(Order {
                     id: d.i.to_string(),
                     parent_id: None,
                     status: status(&d.status),
                     symbol: d.s.to_string(),
-                    kind: kind(cx.store, &d.s, side, &d.o, trigger),
+                    kind: order_kind,
                     side,
                     price,
                     amount,
@@ -844,6 +871,39 @@ fn instruction(method: Method, path: &str) -> &'static str {
         (Method::Get, "/wapi/v1/history/orders") => "orderHistoryQueryAll",
         (Method::Get, "/wapi/v1/history/funding") => "fundingHistoryQueryAll",
         _ => unreachable!("unregistered Backpack instruction"),
+    }
+}
+
+impl crate::Backpack {
+    fn note_unpriced_trigger(&mut self, store: &safe_cex_engine::Store, order: &Order) {
+        if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && unpriced(store, &order.symbol)
+        {
+            self.account.unpriced_triggers.insert(order.id.clone());
+        } else {
+            self.account.unpriced_triggers.remove(&order.id);
+        }
+    }
+
+    /// A trigger read before any price defaults to StopLoss; relabel it from
+    /// the seeded price once that exists.
+    pub(crate) fn relabel_unpriced_triggers(&mut self, cx: &mut Cx<'_, Pending>) {
+        for id in std::mem::take(&mut self.account.unpriced_triggers) {
+            let Some(order) = cx.store.order(&id) else {
+                continue;
+            };
+            if unpriced(cx.store, &order.symbol) {
+                continue;
+            }
+            let relabelled = kind(
+                cx.store,
+                &order.symbol,
+                order.side,
+                "Market",
+                Some(order.price),
+            );
+            cx.store.update_order(&id, |order| order.kind = relabelled);
+        }
     }
 }
 

@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -27,6 +27,14 @@ pub struct Options {
     pub vault: Option<String>,
     pub builder: Option<Builder>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Builder {
     pub b: String,
@@ -99,14 +107,14 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     spot: bool,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
     connection: Connection,
     books: HashMap<String, Ladder>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
     assets: HashMap<String, u32>,
     isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
@@ -121,6 +129,7 @@ pub struct Hyperliquid {
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             spot: false,
@@ -280,6 +289,11 @@ impl Hyperliquid {
         }
         for market in &markets {
             self.excluded.remove(&market.id.to_ascii_lowercase());
+            // Account start seeded only the markets known then.
+            if self.account.started && cx.store.setting(&market.symbol).is_none() {
+                let seed = self.seed_setting(market);
+                cx.store.update_setting(&market.symbol, |s| *s = seed);
+            }
         }
         let mut all = cx.store.markets().to_vec();
         for market in markets {
@@ -381,6 +395,15 @@ impl Hyperliquid {
     }
     fn coin<'a>(&'a self, cx: &'a Cx<'_, Pending>, symbol: &str) -> Option<&'a str> {
         cx.store.market(symbol).map(|m| m.id.as_str())
+    }
+    /// Every catalogue read has succeeded, so an unknown coin is not a pending retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.core_discovery_incomplete
+            && self.startup.idle()
+            && self
+                .dex_names
+                .iter()
+                .all(|d| self.advanced_scopes.contains(d))
     }
     /// A coin TS hides by design (delisted or unquoted), as opposed to unknown.
     pub(crate) fn excluded_coin(&self, coin: &str) -> bool {
@@ -507,11 +530,10 @@ impl Hyperliquid {
             "candle" => {
                 let mut apply = |row: CandleRow<'_>| {
                     if let Some(symbol) = self.symbol(&row.s)
-                        && self
-                            .candles
-                            .contains_key(&(symbol.to_owned(), row.i.to_string()))
+                        && let Some(interval) = Interval::parse(&row.i)
+                        && self.candles.contains_key(&(symbol.to_owned(), interval))
                     {
-                        cx.candle(symbol, &row.i, row.candle());
+                        cx.candle(symbol, interval, row.candle());
                     }
                 };
                 if raw.starts_with('[') {
@@ -902,7 +924,14 @@ impl Venue for Hyperliquid {
         }
         for (symbol, interval) in self.candles.keys() {
             if let Some(coin) = self.coin(cx, symbol).map(str::to_owned) {
-                self.subscription(cx, "subscribe", "candle", Some(&coin), Some(interval), None);
+                self.subscription(
+                    cx,
+                    "subscribe",
+                    "candle",
+                    Some(&coin),
+                    Some(interval.as_str()),
+                    None,
+                );
             }
         }
     }
@@ -931,7 +960,8 @@ impl Venue for Hyperliquid {
         self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if !(200..300).contains(&response.status) {
+        // Trade answers keep their status so a refusal can be told from a lost write.
+        if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             self.on_request_failed(
                 cx,
                 pending,
@@ -1266,10 +1296,11 @@ impl Venue for Hyperliquid {
             Command::SubscribeOrderBook { symbol } => self.book_sub(cx, symbol, true),
             Command::UnsubscribeOrderBook { symbol } => self.book_sub(cx, symbol, false),
             Command::SubscribeCandles { symbol, interval } => {
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                if !supported(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Hyperliquid"));
+                    return;
+                }
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(coin) = self.coin(cx, &symbol).map(str::to_owned)
@@ -1279,26 +1310,26 @@ impl Venue for Hyperliquid {
                         "subscribe",
                         "candle",
                         Some(&coin),
-                        Some(&interval),
+                        Some(interval.as_str()),
                         None,
                     );
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     *count -= 1;
                     if *count > 0 {
                         return;
                     }
                 }
-                self.candles.remove(&(symbol.clone(), interval.clone()));
+                self.candles.remove(&(symbol.clone(), interval));
                 if let Some(coin) = self.coin(cx, &symbol).map(str::to_owned) {
                     self.subscription(
                         cx,
                         "unsubscribe",
                         "candle",
                         Some(&coin),
-                        Some(&interval),
+                        Some(interval.as_str()),
                         None,
                     );
                 }
@@ -1311,8 +1342,8 @@ impl Venue for Hyperliquid {
                 from_ms,
                 to_ms,
             } => {
-                if !valid_interval(&interval) {
-                    cx.done(command, Err("Unsupported candle interval".into()));
+                if !supported(interval) {
+                    cx.done(command, Err(interval.unsupported("Hyperliquid")));
                     return;
                 }
                 let Some(coin) = self.coin(cx, &symbol) else {
@@ -1335,7 +1366,7 @@ impl Venue for Hyperliquid {
                 let end = to_ms.unwrap_or(cx.now).floor();
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
-                    _ => end - interval_ms(&interval) * f64::from(limit.unwrap_or(500).min(1500)),
+                    _ => end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)),
                 };
                 if !start.is_finite()
                     || !end.is_finite()
@@ -1351,7 +1382,7 @@ impl Venue for Hyperliquid {
                     r#type: "candleSnapshot",
                     req: Req {
                         coin,
-                        interval: &interval,
+                        interval: interval.as_str(),
                         start_time: start.max(0.0).floor() as u64,
                         end_time: end as u64,
                     },
@@ -1382,24 +1413,13 @@ impl Venue for Hyperliquid {
         Box::new(self.books.iter().map(|(s, l)| (s.as_str(), &l.book)))
     }
 }
-fn interval_ms(interval: &str) -> f64 {
-    let (n, unit) = interval.split_at(interval.char_indices().last().map_or(0, |(i, _)| i));
-    n.parse::<f64>().unwrap_or(1.0)
-        * match unit {
-            "s" => 1000.0,
-            "h" => 3_600_000.0,
-            "d" => 86_400_000.0,
-            "w" => 604_800_000.0,
-            "M" => 2_592_000_000.0,
-            _ => 60_000.0,
-        }
-}
-
-fn valid_interval(interval: &str) -> bool {
-    [
-        "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M",
-    ]
-    .contains(&interval)
+// Hyperliquid's candle codes are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(
+        interval,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1 | D3 | W1 | Mo1
+    )
 }
 
 #[cfg(test)]

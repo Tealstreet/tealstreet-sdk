@@ -70,3 +70,5 @@ fn decoded_query(query: &str) -> String {
     }
     String::from_utf8(result).unwrap_or_else(|_| query.to_owned())
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);

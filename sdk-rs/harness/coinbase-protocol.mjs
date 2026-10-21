@@ -1,6 +1,6 @@
 // Public deterministic test keys. JWT verification uses Node crypto, independent
 // of both the venue's Rust signer and the frozen TS implementation.
-import { createPrivateKey, createPublicKey, verify, createECDH } from 'node:crypto';
+import { createPrivateKey, createPublicKey, verify, createECDH, sign } from 'node:crypto';
 
 const seed = Buffer.alloc(32, 13);
 const edPrivate = createPrivateKey({
@@ -52,6 +52,26 @@ export const verifyCoinbaseJwt = (token, { method, path, now = Date.now(), algor
       Buffer.from(`${parts[0]}.${parts[1]}`),
       header.alg === 'ES256' ? { key: keys.ES256, dsaEncoding: 'ieee-p1363' } : keys.EdDSA, signature);
   } catch { return false; }
+};
+
+// TS ES256 awaits WebCrypto's thread pool, which a virtual replay clock cannot
+// order against tape frames or its timers. Sign the same imported P-256 key on
+// the calling thread, so each request resolves in that turn's microtasks.
+export const installSynchronousEs256 = (subtle = globalThis.crypto.subtle) => {
+  const { importKey, sign: asyncSign } = subtle;
+  const keys = new WeakMap();
+  subtle.importKey = async function (format, data, algorithm, ...rest) {
+    const key = await importKey.call(this, format, data, algorithm, ...rest);
+    if (format === 'pkcs8' && algorithm?.name === 'ECDSA' && algorithm.namedCurve === 'P-256')
+      keys.set(key, createPrivateKey({ key: Buffer.from(data), format: 'der', type: 'pkcs8' }));
+    return key;
+  };
+  subtle.sign = function (algorithm, key, data) {
+    if (!keys.has(key) || algorithm?.name !== 'ECDSA' || algorithm.hash !== 'SHA-256')
+      return asyncSign.call(this, algorithm, key, data);
+    const signature = sign('sha256', data, { key: keys.get(key), dsaEncoding: 'ieee-p1363' });
+    return Promise.resolve(signature.buffer.slice(signature.byteOffset, signature.byteOffset + signature.length));
+  };
 };
 
 export const verifyCoinbaseRequest = ({ method, url, headers, now = Date.now() }) => {

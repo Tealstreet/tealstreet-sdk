@@ -8,10 +8,11 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
+    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue, json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -20,7 +21,7 @@ use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -36,6 +37,16 @@ pub struct Options {
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_secret);
+    }
 }
 
 struct Urls {
@@ -128,7 +139,7 @@ struct BookState {
 }
 
 pub struct AsterDex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     version: Version,
     credentials: Option<Credentials>,
     read_credentials: Option<Credentials>,
@@ -139,7 +150,7 @@ pub struct AsterDex {
     urls: Urls,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     market_rules: HashMap<String, MarketRule>,
     interest_timer: Option<TimerId>,
     startup: safe_cex_engine::startup::Backoff<bool>,
@@ -153,6 +164,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let user = nonempty(options.auth_user_address.as_deref())
             .or_else(|| nonempty(options.application_id.as_deref()));
         let signer = nonempty(options.auth_signer_address.as_deref())
@@ -288,7 +300,10 @@ impl AsterDex {
         if self.public.socket.is_some() {
             return;
         }
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
         self.public.open = false;
     }
@@ -430,11 +445,10 @@ impl AsterDex {
     fn on_kline(&self, cx: &mut Cx<'_, Pending>, body: &str) {
         if let Ok(event) = serde_json::from_str::<KlineEvent>(body) {
             let k = event.k;
-            if self
-                .candles
-                .contains_key(&(k.s.to_string(), k.i.to_string()))
+            if let Some(interval) = Interval::parse(&k.i)
+                && self.candles.contains_key(&(k.s.to_string(), interval))
             {
-                cx.candle(&k.s, &k.i, candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v));
+                cx.candle(&k.s, interval, candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v));
             }
         }
     }
@@ -576,13 +590,13 @@ fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
     }
 }
 
-fn candle_interval(value: &str) -> &str {
-    match value {
-        "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "6h" | "12h" | "1d" | "1w" => {
-            value
-        }
-        _ => "1h",
-    }
+// AsterDEX kline codes are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(
+        interval,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H6 | H12 | D1 | W1
+    )
 }
 
 fn candle(time: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
@@ -1049,11 +1063,11 @@ impl Venue for AsterDex {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let interval = candle_interval(&interval).to_owned();
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                if !supported(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("AsterDEX"));
+                    return;
+                }
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1 {
                     self.subscribe(
@@ -1064,7 +1078,6 @@ impl Venue for AsterDex {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let interval = candle_interval(&interval).to_owned();
                 let key = (symbol, interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count -= 1;
@@ -1086,7 +1099,10 @@ impl Venue for AsterDex {
                 from_ms,
                 to_ms,
             } => {
-                let interval = candle_interval(&interval);
+                if !supported(interval) {
+                    cx.done(command, Err(interval.unsupported("AsterDEX")));
+                    return;
+                }
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),

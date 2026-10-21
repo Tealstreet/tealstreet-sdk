@@ -5,7 +5,7 @@ use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
-    CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
+    CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -60,7 +60,7 @@ impl RequestRoute {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
     pub method: Method,
@@ -73,7 +73,22 @@ pub struct HttpRequest {
     pub body: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("id", &self.id)
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("url", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .field("signer_headers", &"<redacted>")
+            .field("body", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadSignRequest {
     pub exchange_name: &'static str,
@@ -81,6 +96,18 @@ pub struct PayloadSignRequest {
     pub payload: String,
     pub scheme: &'static str,
     pub encoding: &'static str,
+}
+
+impl std::fmt::Debug for PayloadSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignRequest")
+            .field("exchange_name", &self.exchange_name)
+            .field("key", &"<redacted>")
+            .field("payload", &"<redacted>")
+            .field("scheme", &self.scheme)
+            .field("encoding", &self.encoding)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +237,16 @@ pub enum VenueAction {
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
     SetAccountTier { tier: String },
+    /// Venue-reported closed positions as the venue's own JSON rows, newest
+    /// window first, for hosts that map them with the venue's TS mappers.
+    FetchClosedPositions {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    },
+    /// The venue's raw account balance payload as JSON, or `null` before one
+    /// is read, for hosts that expose it as `balance.info`.
+    FetchBalanceInfo,
 }
 
 /// The shared rejection for a venue action the venue does not implement.
@@ -244,11 +281,11 @@ pub enum Command {
     },
     SubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     UnsubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     PlaceOrders {
         command: CommandId,
@@ -337,7 +374,7 @@ pub enum Command {
     FetchCandles {
         command: CommandId,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -427,7 +464,6 @@ impl<'a> Response<'a> {
     }
 }
 
-#[derive(Debug)]
 pub enum Event<'a> {
     /// Host configuration update; infinity pauses optional venue polling.
     TickIntervalChanged {
@@ -485,6 +521,15 @@ pub enum Event<'a> {
     Command(Command),
 }
 
+impl std::fmt::Debug for Event<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Events include authenticated payloads, headers and delegated signatures.
+        f.debug_struct("Event")
+            .field("kind", &std::mem::discriminant(self))
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
@@ -526,7 +571,7 @@ struct Io<P> {
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
     changed_books_active: usize,
-    candles: Vec<(String, String, Candle)>,
+    candles: Vec<(String, Interval, Candle)>,
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
@@ -971,18 +1016,15 @@ impl<P> Cx<'_, P> {
 
     /// Queue a live candle for the next frame; a newer update of the same
     /// candle replaces the queued one.
-    pub fn candle(&mut self, symbol: &str, interval: &str, candle: Candle) {
+    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
         let same = self
             .io
             .candles
             .iter_mut()
-            .find(|(s, i, c)| s == symbol && i == interval && c.timestamp == candle.timestamp);
+            .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
         match same {
             Some(queued) => queued.2 = candle,
-            None => self
-                .io
-                .candles
-                .push((symbol.to_owned(), interval.to_owned(), candle)),
+            None => self.io.candles.push((symbol.to_owned(), interval, candle)),
         }
     }
 
@@ -1001,6 +1043,11 @@ pub trait Venue {
     /// Prevent overlapping precomputed amendments and cancellations.
     fn guard_order_mutations(&self) -> bool {
         false
+    }
+    /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
+    /// out must itself cancel any late-landing order once its fresh read proves it.
+    fn fence_uncertain_cancel_all(&self) -> bool {
+        true
     }
 
     /// What this venue answers beyond the common commands; the engine gates
@@ -1082,11 +1129,52 @@ pub trait Venue {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
 }
 
+/// Startup never hangs silently: sections still unloaded after this are named
+/// in a visible notice, repeated on a slow cadence until they load (non-terminal).
+const STARTUP_WATCH_MS: f64 = 60_000.0;
+const STARTUP_REPEAT_MS: f64 = 300_000.0;
+
+fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
+    let loaded = cx.store.loaded();
+    let tickers = cx.io.public_feed_policy != PublicFeedPolicy::Disabled;
+    let missing: Vec<&str> = [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .filter_map(|(name, done, required)| (required && !done).then_some(name))
+    .collect();
+    if missing.is_empty() {
+        return false;
+    }
+    // Only missing tickers can still leave a private account usable (no prices).
+    let level = if missing == ["tickers"] {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    };
+    cx.log(
+        level,
+        format!(
+            "Startup incomplete: still waiting for {}",
+            missing.join(", ")
+        ),
+    );
+    true
+}
+
 pub struct Engine<V: Venue> {
     venue: V,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    /// Checked on handled events, so it adds no timer of its own.
+    startup_watch_at: Option<f64>,
+    /// Hosts opt in when the account can sign; public-only engines have no account sections.
+    account_startup: bool,
     shared_books: HashMap<String, Book>,
     shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
     shared_ticker_revision: u64,
@@ -1116,6 +1204,8 @@ impl<V: Venue> Engine<V> {
             store,
             io: Io::default(),
             started: false,
+            startup_watch_at: None,
+            account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
             shared_ticker_revision: 0,
@@ -1137,6 +1227,12 @@ impl<V: Venue> Engine<V> {
         }
         self.io.public_feed_policy = policy;
         Ok(())
+    }
+
+    /// Account sections (balance, orders, positions) are expected at startup only
+    /// for an account that can sign, matching the SDK's readiness rule.
+    pub fn set_account_startup(&mut self, account: bool) {
+        self.account_startup = account;
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -1192,7 +1288,7 @@ impl<V: Venue> Engine<V> {
         }
         for update in update.candles {
             if cx.store.market(&update.symbol).is_some() {
-                cx.candle(&update.symbol, &update.interval, update.candle());
+                cx.candle(&update.symbol, update.interval, update.candle());
             }
         }
         Ok(())
@@ -1323,6 +1419,7 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
     }
 
@@ -1384,9 +1481,19 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        if let Some(at) = self.startup_watch_at
+            && now >= at
+        {
+            self.startup_watch_at =
+                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
+        }
         match event {
             Event::TickIntervalChanged { interval_ms } => {
-                self.venue.on_tick_interval(&mut cx, interval_ms)
+                // Invalid typed inputs retain the last policy, just as rejected JSON does.
+                if interval_ms > 0.0 {
+                    self.venue
+                        .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
+                }
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
@@ -1490,11 +1597,16 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(id) = cx.io.order_locks.acquire(&command, cx.store)
+                        && let Err(id) = cx.io.order_locks.acquire(
+                            &command,
+                            cx.store,
+                            self.venue.fence_uncertain_cancel_all(),
+                        )
                     {
                         let error = match &command {
                             Command::CancelSymbolOrders { symbol, .. }
-                                if cx.io.order_locks.uncertain(symbol) =>
+                                if self.venue.fence_uncertain_cancel_all()
+                                    && cx.io.order_locks.uncertain(symbol) =>
                             {
                                 "Placement outcome is uncertain; reconcile before cancel-all"
                             }
@@ -1531,7 +1643,7 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
-            if failed {
+            if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
                 };
@@ -1886,6 +1998,15 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+/// Bound account polling pressure; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(1_000.0, 120_000.0)
+    } else {
+        f64::INFINITY
+    }
+}
+
 fn apply_signature(
     http: &mut HttpRequest,
     target: &SignatureTarget,
@@ -2004,6 +2125,7 @@ mod streaming_tests {
     }
 
     struct StreamVenue {
+        interval: f64,
         at: ArrayAt,
         rows: Vec<String>,
         body: Option<String>,
@@ -2012,6 +2134,7 @@ mod streaming_tests {
         empty_book: Book,
         book_subscribers: u32,
         symbol_amend: bool,
+        fence_uncertain: bool,
         commands: Vec<Command>,
     }
 
@@ -2021,6 +2144,9 @@ mod streaming_tests {
         }
         fn guard_order_mutations(&self) -> bool {
             true
+        }
+        fn fence_uncertain_cancel_all(&self) -> bool {
+            self.fence_uncertain
         }
         type Pending = Vec<String>;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
@@ -2104,6 +2230,9 @@ mod streaming_tests {
         ) {
             self.failure = Some(error.to_owned());
         }
+        fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, interval_ms: f64) {
+            self.interval = interval_ms;
+        }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn capabilities(&self) -> Capabilities {
             Capabilities {
@@ -2132,6 +2261,28 @@ mod streaming_tests {
                     .into_iter()
                     .map(|book| ("A", book)),
             )
+        }
+    }
+
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        let mut engine = frame_engine();
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1e300, 120_000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            engine.handle(0.0, Event::TickIntervalChanged { interval_ms: input });
+            assert_eq!(engine.venue.interval, expected);
+        }
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(
+                0.0,
+                Event::TickIntervalChanged {
+                    interval_ms: invalid,
+                },
+            );
+            assert_eq!(engine.venue.interval, f64::INFINITY);
         }
     }
 
@@ -2386,6 +2537,49 @@ mod streaming_tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn opted_out_venue_receives_queued_and_later_cancel_all_after_uncertain_place() {
+        let mut engine = frame_engine();
+        engine.venue.fence_uncertain = false;
+        engine.handle(0., Event::Command(held_place(1, "A")));
+        engine.io.order_locks.note_write();
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            1,
+            "cancel-all still waits for the placement"
+        );
+        complete_held(&mut engine, 1, true);
+        assert!(engine.io.order_locks.uncertain("A"));
+        assert_eq!(
+            engine.venue.commands.len(),
+            2,
+            "queued cancel-all is dispatched"
+        );
+        complete_held(&mut engine, 2, false);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 3,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            3,
+            "later cancel-all is dispatched"
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("uncertain"))));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn complete_known_partial_outcome_does_not_poison_or_clear_older_uncertainty() {
         let mut engine = frame_engine();
         engine.handle(0., Event::Command(held_place(1, "A")));
@@ -2609,6 +2803,7 @@ mod streaming_tests {
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
         let mut engine = Engine::new(StreamVenue {
+            interval: 0.0,
             at,
             rows: Vec::new(),
             body: None,
@@ -2617,6 +2812,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         });
         engine.start(0.0);
@@ -2644,6 +2840,7 @@ mod streaming_tests {
 
     fn frame_engine() -> Engine<StreamVenue> {
         Engine::new(StreamVenue {
+            interval: 0.0,
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,
@@ -2652,6 +2849,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         })
     }
@@ -2692,7 +2890,7 @@ mod streaming_tests {
         );
         engine.io.candles.push((
             "A".into(),
-            "1m".into(),
+            Interval::M1,
             Candle {
                 timestamp: 1.,
                 open: 2.,
@@ -3723,6 +3921,49 @@ mod signing_tests {
 }
 
 #[cfg(test)]
+mod security_debug {
+    use super::*;
+
+    #[test]
+    fn transport_and_signing_debug_never_render_authentication_material() {
+        let sentinel = "credential-sentinel-never-log";
+        let http = HttpRequest {
+            id: RequestId(17),
+            method: Method::Post,
+            route: None,
+            timeout_ms: Some(5_000),
+            url: format!("https://venue.test/private?signature={sentinel}"),
+            headers: vec![("Authorization", sentinel.into())],
+            signer_headers: vec![("X-Proof".into(), sentinel.into())],
+            body: Some(sentinel.into()),
+        };
+        let signing = PayloadSignRequest {
+            exchange_name: "test-venue",
+            key: sentinel.into(),
+            payload: sentinel.into(),
+            scheme: "test",
+            encoding: "test",
+        };
+        let event = Event::PayloadSigned {
+            request: RequestId(17),
+            signature: sentinel,
+            headers: vec![("X-Proof".into(), sentinel.into())],
+        };
+        for debug in [
+            format!("{http:?}"),
+            format!("{signing:?}"),
+            format!("{event:?}"),
+        ] {
+            assert!(!debug.contains(sentinel));
+            assert!(!debug.contains("https://venue.test"));
+        }
+        assert!(format!("{http:?}").contains("RequestId(17)"));
+        assert!(format!("{signing:?}").contains("test-venue"));
+        assert!(format!("{event:?}").contains("kind"));
+    }
+}
+
+#[cfg(test)]
 mod startup_tests {
     use super::*;
     use crate::startup::{Backoff, number_or_zero};
@@ -3787,5 +4028,107 @@ mod startup_tests {
         for bad in ["NaN", "inf", "oops", "1x"] {
             assert_eq!(number_or_zero(bad), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod startup_watch_tests {
+    use super::*;
+
+    struct Idle;
+    impl Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {
+            panic!("the idle venue sets no timers");
+        }
+        fn on_command(&mut self, _cx: &mut Cx<'_, ()>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
+        engine.handle(
+            now,
+            Event::TickIntervalChanged {
+                interval_ms: 1000.0,
+            },
+        );
+        engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unloaded_startup_is_reported_until_every_section_loads() {
+        let mut engine = Engine::new(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        assert!(
+            engine
+                .drain_actions()
+                .all(|action| !matches!(action, Action::SetTimer { .. })),
+            "the watch adds no timer of its own"
+        );
+        engine.store_mut().set_markets(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS - 1.0).is_empty());
+        assert_eq!(
+            notices(&mut engine, STARTUP_WATCH_MS),
+            [(
+                LogLevel::Error,
+                "Startup incomplete: still waiting for tickers, balance, orders, positions"
+                    .to_owned()
+            )]
+        );
+        assert!(notices(&mut engine, STARTUP_WATCH_MS + 1.0).is_empty());
+        let store = engine.store_mut();
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        let repeat = STARTUP_WATCH_MS + STARTUP_REPEAT_MS;
+        assert_eq!(
+            notices(&mut engine, repeat),
+            [(
+                LogLevel::Warning,
+                "Startup incomplete: still waiting for tickers".to_owned()
+            )]
+        );
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, repeat + STARTUP_REPEAT_MS).is_empty());
+        assert!(notices(&mut engine, repeat + 10.0 * STARTUP_REPEAT_MS).is_empty());
+    }
+
+    #[test]
+    fn public_only_engine_is_not_told_its_account_never_loaded() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
+        let mut disabled = Engine::new(Idle);
+        disabled
+            .set_public_feed_policy(PublicFeedPolicy::Disabled)
+            .unwrap();
+        disabled.set_account_startup(true);
+        disabled.start(0.0);
+        let store = disabled.store_mut();
+        store.set_markets(vec![]);
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
     }
 }

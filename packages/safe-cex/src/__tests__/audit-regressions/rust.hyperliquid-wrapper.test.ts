@@ -147,6 +147,7 @@ describe('Rust Hyperliquid wrapper', () => {
       remoteSigning: false,
       enableSpotMarkets: false,
       publicFeed: { mode: 'direct' },
+      accountStartup: true,
     });
   });
 

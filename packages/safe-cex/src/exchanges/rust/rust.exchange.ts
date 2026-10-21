@@ -10,6 +10,7 @@ import type { Store } from '../../store/store.interface';
 import type {
   Candle,
   AccountGreeks,
+  ClosedPnlEntry,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
@@ -17,8 +18,10 @@ import type {
   ExecutionsOptions,
   FetchedLeverage,
   HistoricalOrder,
+  HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
+  Market,
   OHLCVOptions,
   OptionChainQuery,
   OptionChainRow,
@@ -31,18 +34,23 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, WorkerTradingMethod } from '../base';
+import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
-import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
+import type { ExchangeErrorKind } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
+import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
+import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
+import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -53,13 +61,17 @@ import {
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
+  CAPABILITY_METHODS,
   type ExchangeCapabilities,
   markBaseCapabilityFallback,
-  WORKER_TRADING_METHODS,
+  WORKER_FORWARDED_METHODS,
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
+import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
+import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -73,12 +85,19 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import {
+  IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from './publicFeed';
 
 /** Exchange names the Rust engine runs; the engine takes the same name. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
@@ -134,12 +153,44 @@ export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
+/**
+ * A hosted account: no local secret, signed by the browser through `remoteSigner`.
+ * Paradex and Polymarket keep their signing key in `key`, and Lighter runs read-only
+ * without one, as TS does, so none of them is keyless here.
+ */
+export const isKeylessRemoteSigned = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  Boolean(options.remoteSigner) &&
+  !options.secret &&
+  !(name === 'asterdex' && options.auth?.privateKey) &&
+  !['lighter', 'lighter-robinhood', 'paradex', 'polymarket'].includes(name);
+
+/**
+ * Whether `engine: 'rust'` runs this account on the engine. A spot-enabled Hyperliquid
+ * account stays on the TS venue, which merges spot markets into the perp account; the
+ * engine's perp venue does not, and refuses the option when constructed directly. A
+ * keyless remote-signed account stays on TS too, which signs through the browser.
+ */
+export const runsOnRustEngine = (
+  name: ExchangeName,
+  options: Partial<Pick<ExchangeOptions, 'engine' | 'enableSpotMarkets' | 'secret' | 'remoteSigner' | 'auth'>>,
+) =>
+  options.engine === 'rust' &&
+  isRustVenue(name) &&
+  !(name === 'hyperliquid' && options.enableSpotMarkets) &&
+  !isKeylessRemoteSigned(name, options);
+
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
+const BALANCE_INFO_SYNC_MS = 2_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
@@ -247,6 +298,7 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukeOrders',
 ]);
 const MULTI_COMMAND_WAIT_FACTOR = 5;
+const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -269,8 +321,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
-    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    if (this.options.publicFeed?.mode === 'shared' || this.usesInProcessPublicData) return 'shared';
+    // exchange-server keys its shared source by venue only, so testnet runs its own feed.
+    if (this.options.externalPublicData?.type === 'in-process' && this.options.testnet) return 'direct';
     return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  private get usesInProcessPublicData() {
+    return this.options.externalPublicData?.type === 'in-process' && !this.options.testnet;
   }
 
   override disablePublicWebsockets(): void {
@@ -278,6 +336,7 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
   private sharedValidatedMarkets?: Store['markets'];
@@ -321,8 +380,41 @@ export class RustEngineExchange extends BaseExchange {
   fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
-    await this.ensureHost();
+    // A main-thread mirror asks the worker's engine rather than building its own.
+    if (this.routesToWorker && !this.host) await this.loadWorkerCapabilities();
+    else await this.ensureHost();
     return this.capabilities;
+  };
+
+  /** Worker side of `loadCapabilities` for a main-thread mirror. */
+  fetchEngineCapabilities = async (): Promise<EngineCapabilities | undefined> => {
+    await this.ensureHost();
+    return this.capabilityRecord;
+  };
+
+  private workerCapabilities?: Promise<void>;
+  private workerCapabilityRetryAt = 0;
+  private stopWorkerCapabilitySync?: () => void;
+
+  private loadWorkerCapabilities = (): Promise<void> =>
+    (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
+      (record) => {
+        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
+      },
+      (error: unknown) => {
+        this.workerCapabilities = undefined;
+        this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
+        throw error;
+      },
+    ));
+
+  // A mirror learns capability-defined methods (Lighter tiers, history axes) once the worker has loaded.
+  private syncWorkerCapabilities = () => {
+    if (this.capabilityRecord || this.host || this.workerCapabilities || this.isDisposed) return;
+    if (!this.store.loaded.markets || !this.routesToWorker || Date.now() < this.workerCapabilityRetryAt) return;
+    void this.loadWorkerCapabilities().catch(() => {
+      /* Retried on a later store update; explicit loadCapabilities callers see the failure. */
+    });
   };
 
   /** What the venue answers, as its engine reports it; unknown until the engine exists. */
@@ -354,12 +446,19 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
+        if (this.routesToWorker) {
+          await this.callWorker('changeAccountTier', tier);
+          return;
+        }
         await this.command<null>({ op: 'setAccountTier', tier });
         this.writeLighterTier(tier);
       };
-      this.fetchAccountTier = async () =>
-        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      this.fetchAccountTier = async () => {
+        if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
+        return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      };
     }
+    if (capabilities.closedPositions) this.fetchClosedPnl = this.fetchReportedClosedPnl;
   }
 
   private fetchFilledQuantities = async (ids: string[]) => {
@@ -401,6 +500,18 @@ export class RustEngineExchange extends BaseExchange {
       // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
     }
+    // Journal paths as the TS venues declare them; bybitinverse declares none and keeps the base refusal.
+    if (['bybit', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
+      this.fetchHistoricalPositions = this.bybitJournal;
+    }
+    if (okxNames.has(this.name)) this.fetchHistoricalPositions = this.okxJournal;
+    if (this.name === 'blofin') this.fetchHistoricalPositions = this.blofinJournal;
+    if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(this.name)) {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
+    if (['hyperliquid', 'paradex'].includes(this.name)) {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
         const to = opts.to ?? Date.now();
@@ -413,7 +524,8 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
-    this.forwardTradingToWorker();
+    this.forwardToWorker();
+    this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
   get isPublicDataOnly(): boolean {
@@ -471,10 +583,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
-    if (this.options.externalPublicData) {
+    if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
-        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+        'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
+    }
+    if (this.options.externalPublicData && this.options.publicFeed) {
+      throw new Error('externalPublicData conflicts with publicFeed policy');
     }
     if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
@@ -486,7 +601,12 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
-      throw new Error('Rust Hyperliquid currently supports perpetual markets only');
+      throw new Error(
+        'Rust Hyperliquid currently supports perpetual markets only; spot-enabled accounts run on the TS venue',
+      );
+    }
+    if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
+      throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
@@ -546,7 +666,21 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
+        ...([
+          'backpack',
+          'bitrue',
+          'breakoutprop',
+          'binance',
+          'binancepm',
+          'binancespot',
+          'binanceinverse',
+          'bybit',
+          'bybitinverse',
+          'bybitspot',
+          'bybitdemo',
+          'hyrotrader',
+          'mexc',
+        ].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -604,6 +738,8 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },
+        // The engine reports account sections missing at startup only when untilLoaded waits for them.
+        accountStartup: !this.isPublicDataOnly,
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
@@ -623,7 +759,8 @@ export class RustEngineExchange extends BaseExchange {
           this.emitter.emit('deactivate');
         },
         onStartupFailed: (detail) => {
-          this.startupFailure ??= new Error(detail.message);
+          // Keeps kind/venueCode so start() and validateAccount can branch on them.
+          this.startupFailure ??= new ExchangeError(detail.message, detail);
           for (const wake of this.startupWaiters) wake();
         },
       },
@@ -665,15 +802,27 @@ export class RustEngineExchange extends BaseExchange {
     return this.emitter.hasListeners('callMethod');
   }
 
-  private forwardTradingToWorker() {
-    for (const method of WORKER_TRADING_METHODS) {
+  /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+
+  private forwardToWorker() {
+    // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
+    const capabilities = this.capabilities;
+    const inert = new Set<string>(
+      Object.entries(CAPABILITY_METHODS)
+        .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
+        .map(([, method]) => method),
+    );
+    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const];
+    for (const method of methods) {
+      if (inert.has(method)) continue;
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerTradingMethod, unknown>)[method] = async (...args: unknown[]) => {
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions', unknown>)[method] = async (
+        ...args: unknown[]
+      ) => {
         if (!this.routesToWorker) return local(...args);
-        const result = await (this.callMethodInWorker as (m: WorkerTradingMethod, ...a: unknown[]) => Promise<unknown>)(
-          method,
-          ...args,
-        );
+        const result = await this.callWorker(method, ...args);
         // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
         return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
       };
@@ -709,12 +858,25 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
+  private openSharedFeedPort = ():
+    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
+    | undefined => {
+    if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
+    const external = this.options.externalPublicData;
+    if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
+    const [port, sourcePort] = inProcessPortPair();
+    this.stopInProcessFeed = serveInProcessPublicData(external.source, sourcePort);
+    return { port, policy: { handshakeTimeoutMs: IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS, inProcess: true } };
+  };
+
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
-    if (this.options.publicFeed?.mode === 'shared') {
+    const sharedFeed = this.openSharedFeedPort();
+    if (sharedFeed) {
       this.sharedPublicFeed = new RustPublicFeedClient(
-        this.options.publicFeed.port,
+        sharedFeed.port,
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
@@ -734,6 +896,7 @@ export class RustEngineExchange extends BaseExchange {
           this.emitAndLogError(error);
           this.dispose();
         },
+        sharedFeed.policy,
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -742,6 +905,8 @@ export class RustEngineExchange extends BaseExchange {
         throw error;
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+      if (!this.sharedPublicFeed.isReady)
+        this.log('In-process public data has not loaded; continuing private startup', LogSeverity.Warning);
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
@@ -769,6 +934,29 @@ export class RustEngineExchange extends BaseExchange {
     if (this.fetchAccountTier && !this.isPublicDataOnly) {
       void this.syncLighterTier();
       this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+    // Interval only: a background read never interleaves with the caller's first commands.
+    if (this.capabilityRecord?.balanceInfo && !this.isPublicDataOnly) {
+      this.flushTimers.push(setInterval(() => void this.syncBalanceInfo(), BALANCE_INFO_SYNC_MS));
+    }
+  };
+
+  private balanceInfoJson?: string;
+
+  /**
+   * The venue's raw account payload as TS stores it in `balance.info` (Bybit: the wallet
+   * account with `accountType` and the `coin` collateral array), read by the web margin UI.
+   */
+  private syncBalanceInfo = async () => {
+    try {
+      const info = await this.command<Record<string, unknown> | null>({ op: 'fetchBalanceInfo' }, { report: false });
+      if (!info || this.isDisposed) return;
+      const json = JSON.stringify(info);
+      if (json === this.balanceInfoJson) return;
+      this.balanceInfoJson = json;
+      this.store.update({ balance: { ...this.store.balance, info } });
+    } catch {
+      // The engine reports wallet-read failures itself; the last payload stays.
     }
   };
 
@@ -1034,10 +1222,17 @@ export class RustEngineExchange extends BaseExchange {
         clearTimeout(timeout);
         resolve(result);
       };
+      // Venues log the reason just before StartupFailed in the same batch; let the typed failure win.
       const onError = (message: unknown) =>
-        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        queueMicrotask(() => {
+          if (this.startupFailure) return loaded();
+          finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        });
       const loaded = () => {
-        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.startupFailure) {
+          const { kind } = this.startupFailure as { kind?: ExchangeErrorKind };
+          return finish(kind ? { error: this.startupFailure.message, kind } : { error: this.startupFailure.message });
+        }
         if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
         if (
           started &&
@@ -1390,17 +1585,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
-    this.name === 'asterdex' &&
-    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
-      ? '1h'
-      : interval;
-
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: this.candleInterval(opts.interval),
+      interval: opts.interval,
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -1499,6 +1688,115 @@ export class RustEngineExchange extends BaseExchange {
   fetchIncomeHistoryRange = (startTime: number, endTime: number, incomeType?: string) =>
     this.command<IncomeRecord[]>({ op: 'fetchIncome', incomeType, from: startTime, to: endTime });
 
+  /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
+  private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }, report = true) =>
+    this.command<Array<Record<string, any>>>(
+      { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
+      { report },
+    );
+
+  /**
+   * Journal paths read the reported closed axis and THROW on a failed read, as TS does: an
+   * under-counted history presented as complete is the failure the journal refuses.
+   */
+  private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from, to }, false);
+    // Closed-PnL rows carry no hedge leg; the order axis does (see bybit.exchange.ts).
+    const legs = new Map<string, PositionSide | 'both'>();
+    try {
+      for (const order of await this.fetchHistoricalOrders({ from, to })) {
+        if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
+      }
+    } catch {
+      throw new Error('bybit: could not read the order axis to resolve hedge legs');
+    }
+    return aggregateBybitClosedPnl(rows, {
+      account: opts.account,
+      resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+    });
+  };
+
+  private okxJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const market = this.store.marketsById[String(row.instId ?? '')];
+      // As TS: inverse rows need a reference price the adapter lacks, so they are skipped.
+      if (!market || market.isInverse) continue;
+      const record = mapOkxPositionHistory(row, {
+        account: opts.account,
+        toBase: (contracts: number, instId: string) =>
+          this.okxContractsToBase(contracts, this.store.marketsById[instId] ?? market),
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
+  private blofinJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBlofinPositionHistory(row, {
+        account: opts.account,
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
+  /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
+  private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) return [];
+    let rows: Array<Record<string, any>>;
+    try {
+      // TS okx/blofin treat an empty symbol as account-wide; bybit sends it as given.
+      const symbol = okxNames.has(this.name) || this.name === 'blofin' ? opts.symbol || undefined : opts.symbol;
+      rows = await this.fetchClosedPositionRows({ ...opts, symbol });
+    } catch {
+      return [];
+    }
+    const account = opts.accountName || '';
+    const entries: ClosedPnlEntry[] = [];
+    for (const row of rows) {
+      let entry: ClosedPnlEntry | null;
+      if (okxNames.has(this.name)) {
+        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
+        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
+      } else if (this.name === 'blofin') {
+        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
+      } else {
+        entry = mapBybitClosedPnl(row, account, this.name === 'bybitinverse' || isBybitInverseSymbol(row.symbol));
+      }
+      if (entry) entries.push(entry);
+    }
+    return entries.sort((a, b) => b.closedTime - a.closedTime);
+  };
+
+  /**
+   * OKX `contractsToBase`. Engine markets carry no `ctValCcy`; an OKX inverse swap's
+   * contract value is always quote-denominated, which is the case TS converts by price.
+   */
+  private okxContractsToBase = (contractsNative: number, market: Market, referencePrice?: number) => {
+    const contractSize = market.contractSize || 1;
+    if (!market.isInverse) return multiply(contractsNative, contractSize);
+    const ticker = this.store.tickersById[market.id] ?? this.store.tickersBySymbol[market.symbol];
+    const price = [referencePrice, ticker?.mark, ticker?.last].find(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
+    );
+    return price ? (contractsNative * contractSize) / price : 0;
+  };
+
   fetchPublicTrades = (symbol: string, limit?: number) =>
     this.command<PublicTrade[]>({ op: 'fetchPublicTrades', symbol, limit });
 
@@ -1541,7 +1839,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const interval = this.candleInterval(opts.interval);
+    const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     const first = !listeners;
@@ -1566,8 +1864,6 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
-  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
-
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
     this.feedCandleListeners.add(listener);
@@ -1579,8 +1875,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopWorkerCapabilitySync?.();
+    this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
+    this.stopInProcessFeed?.();
+    this.stopInProcessFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();

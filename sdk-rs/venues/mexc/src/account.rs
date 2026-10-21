@@ -125,7 +125,7 @@ impl MexcFutures {
         let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let headers = c.headers(cx.now, &payload);
+        let headers = c.headers_window(cx.now, &payload, self.options.recv_window);
         let url = if method == Method::Get && !payload.is_empty() {
             format!("{}{path}?{payload}", crate::REST)
         } else {
@@ -864,22 +864,28 @@ impl MexcFutures {
                 }
                 Err(_) => snapshot.bad = true,
             },
-            Scope::Positions => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(r) => {
-                        if r.hold_vol != 0.0 && cx.store.market(&compact(&r.symbol)).is_none() {
+            Scope::Positions => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(r) => {
+                    let symbol = compact(&r.symbol);
+                    if r.hold_vol != 0.0 && cx.store.market(&symbol).is_none() {
+                        if self.malformed_markets.contains(&symbol) {
                             snapshot.bad = true;
                             cx.log(LogLevel::Warning, "MEXC owned position market unavailable; preserving previous snapshot");
-                        } else if let Some(p) = Self::map_position(cx, &r) {
-                            snapshot
-                                .native_ids
-                                .push((p.id.clone(), r.position_id.to_string()));
-                            snapshot.positions.push(p);
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Skipping MEXC position on uncatalogued market {symbol}"),
+                            );
                         }
+                    } else if let Some(p) = Self::map_position(cx, &r) {
+                        snapshot
+                            .native_ids
+                            .push((p.id.clone(), r.position_id.to_string()));
+                        snapshot.positions.push(p);
                     }
-                    Err(_) => snapshot.bad = true,
                 }
-            }
+                Err(_) => snapshot.bad = true,
+            },
             scope => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(r) => {
                     if let Some(o) = self.map_order(cx, &r, scope) {

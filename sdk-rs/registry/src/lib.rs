@@ -110,9 +110,11 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 fn finish<T: Visit, V: Venue + 'static>(
     visitor: T,
     policy: PublicFeedPolicy,
+    account_startup: bool,
     mut engine: Engine<V>,
 ) -> Result<T::Output, VenueError> {
     engine.set_public_feed_policy(policy).map_err(invalid)?;
+    engine.set_account_startup(account_startup);
     Ok(visitor.visit(engine))
 }
 
@@ -361,7 +363,7 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
-    options: EngineOptions,
+    mut options: EngineOptions,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     if !supported(venue) {
@@ -425,6 +427,7 @@ pub fn build<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
+    let account_startup = options.account_startup;
     match venue {
         #[cfg(feature = "breakoutprop")]
         "breakoutprop" => {
@@ -432,15 +435,18 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(BreakoutProp::new(BreakoutOptions {
-                    key: options.key.unwrap_or_default(),
-                    secret: options.secret.unwrap_or_default(),
-                    subaccount: options.subaccount,
+                    key: options.key.take().unwrap_or_default(),
+                    secret: options.secret.take().unwrap_or_default(),
+                    subaccount: options.subaccount.take(),
                     public_data_only: options.public_data_only,
                     tick_interval: if options.polling_enabled == Some(false) {
                         f64::INFINITY
                     } else {
-                        options.tick_interval.unwrap_or(2_000.0)
+                        safe_cex_engine::engine::bounded_tick_interval(
+                            options.tick_interval.take().unwrap_or(2_000.0),
+                        )
                     },
                     timeout_ms: options
                         .recv_window
@@ -453,13 +459,14 @@ pub fn build<T: Visit>(
         "grvt" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Grvt::new(GrvtOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                trading_account_id: options.grvt_trading_account_id,
-                signer_address: options.grvt_signer_address,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                trading_account_id: options.grvt_trading_account_id.take(),
+                signer_address: options.grvt_signer_address.take(),
                 session_proxy: options.grvt_session_proxy,
             })),
         ),
@@ -467,10 +474,11 @@ pub fn build<T: Visit>(
         "coinbase" | "coinbasespot" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(
                 Coinbase::new(CoinbaseOptions {
-                    key: options.key.unwrap_or_default(),
-                    secret: options.secret.unwrap_or_default(),
+                    key: options.key.take().unwrap_or_default(),
+                    secret: options.secret.take().unwrap_or_default(),
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
@@ -485,10 +493,11 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(Polymarket::new(PolymarketOptions {
                     public_data_only: options.public_data_only,
-                    key: options.key,
-                    polymarket: options.polymarket,
+                    key: options.key.take(),
+                    polymarket: options.polymarket.take(),
                 })),
             )
         }
@@ -496,12 +505,13 @@ pub fn build<T: Visit>(
         "paradex" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Paradex::new(ParadexOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                paradex_address: options.paradex_address,
-                subkey_address: options.subkey_address,
+                key: options.key.take(),
+                paradex_address: options.paradex_address.take(),
+                subkey_address: options.subkey_address.take(),
                 payload_signer: options.payload_signer,
             })),
         ),
@@ -509,30 +519,37 @@ pub fn build<T: Visit>(
         "apexomni" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(ApexOmni::new(ApexOmniOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
-                omni_key_seed: options.omni_key_seed,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                passphrase: options.passphrase.take(),
+                omni_key_seed: options.omni_key_seed.take(),
                 tick_interval_ms: None,
             })),
         ),
         #[cfg(feature = "txflow")]
         "txflow" => {
-            let options = safe_cex_venue_txflow::Options {
+            let mut options = safe_cex_venue_txflow::Options {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
-                vault: options.vault,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                application_id: options.application_id.take(),
+                vault: options.vault.take(),
             };
-            options.validate().map_err(invalid)?;
+            options.validate().map_err(|error| {
+                use zeroize::Zeroize;
+                options.key.zeroize();
+                options.secret.zeroize();
+                invalid(&error)
+            })?;
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(safe_cex_venue_txflow::TxFlow::new(options)),
             )
         }
@@ -540,25 +557,27 @@ pub fn build<T: Visit>(
         "kraken" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Kraken::new(KrakenOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(KrakenSpot::new(KrakenOptions {
                 // Spot private reads are POSTs and retain primary credentials.
                 read_credentials: None,
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "asterdex")]
@@ -567,21 +586,22 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(AsterDex::new(AsterOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key,
-                    secret: options.secret,
-                    application_id: options.application_id,
-                    auth_user_address: options.asterdex.user_address,
-                    auth_signer_address: options.asterdex.signer_address,
-                    auth_private_key: options.asterdex.private_key,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    auth_user_address: options.asterdex.user_address.take(),
+                    auth_signer_address: options.asterdex.signer_address.take(),
+                    auth_private_key: options.asterdex.private_key.take(),
                     api_version: options.asterdex.api_version,
-                    builder_address: options.asterdex.builder_address,
-                    builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker,
-                    builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
-                    read_key: options.asterdex.read_key,
-                    read_secret: options.asterdex.read_secret,
+                    builder_address: options.asterdex.builder_address.take(),
+                    builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
+                    builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
+                    read_key: options.asterdex.read_key.take(),
+                    read_secret: options.asterdex.read_secret.take(),
                 })),
             )
         }
@@ -591,6 +611,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(Orderly::new(OrderlyOptions {
                     broker: match venue {
                         "kodiakfi" => OrderlyBroker::KodiakFi,
@@ -602,10 +623,13 @@ pub fn build<T: Visit>(
                     },
                     public_data_only: options.public_data_only,
                     testnet: options.testnet,
-                    key: options.key,
-                    secret: options.secret,
-                    application_id: options.application_id,
-                    tick_interval: options.tick_interval,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    tick_interval: options
+                        .tick_interval
+                        .take()
+                        .map(safe_cex_engine::engine::bounded_tick_interval),
                 })),
             )
         }
@@ -613,92 +637,104 @@ pub fn build<T: Visit>(
         "lighter" | "lighter-robinhood" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Lighter::new(LighterOptions {
                 robinhood: venue == "lighter-robinhood",
                 remote_signer: options.lighter_remote_signer,
-                signer_provider: options.lighter_signer_provider,
+                signer_provider: options.lighter_signer_provider.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
-                api_key_index: options.api_key_index,
-                integrator_account_index: options.lighter_integrator_account_index,
-                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+                key: options.key.take(),
+                secret: options.secret.take(),
+                application_id: options.application_id.take(),
+                api_key_index: options.api_key_index.take(),
+                integrator_account_index: options.lighter_integrator_account_index.take(),
+                stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
             })),
         ),
         #[cfg(feature = "bitrue")]
         "bitrue" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Bitrue::new(BitrueOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                recv_window: options
+                    .recv_window
+                    .take()
+                    .unwrap_or(20_000.0)
+                    .clamp(1.0, 60_000.0) as u32,
             })),
         ),
         #[cfg(feature = "backpack")]
         "backpack" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Backpack::new(BackpackOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                recv_window: options.recv_window,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                recv_window: options.recv_window.take(),
             })),
         ),
         #[cfg(feature = "blofin")]
         "blofin" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Blofin::new(BlofinOptions {
                 broker_attribution: options.broker_attribution,
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                passphrase: options.passphrase.take(),
             })),
         ),
         #[cfg(feature = "mexc")]
         "mexc" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(MexcFutures::new(MexcOptions {
-                read_credentials: options.read_credentials.clone(),
+                recv_window: tighter_recv_window(options.recv_window),
+                read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "phemex")]
         "phemex" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(PhemexPerpetuals::new(PhemexOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "binance")]
         "binance" | "binancepm" | "binancespot" | "binanceinverse" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(BinanceFutures::new(BinanceOptions {
                 recv_window: options.recv_window,
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
                 portfolio_margin: venue == "binancepm",
                 variant: match venue {
                     "binancepm" => BinanceVariant::PortfolioMargin,
@@ -712,51 +748,55 @@ pub fn build<T: Visit>(
         "kucoinspot" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(KucoinSpot::new(KucoinOptions {
-                read_credentials: options.read_credentials.clone(),
-                broker: options.extra.and_then(|e| e.kucoin_broker),
+                read_credentials: options.read_credentials.take(),
+                broker: options.extra.take().and_then(|e| e.kucoin_broker),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                passphrase: options.passphrase.take(),
             })),
         ),
         #[cfg(feature = "kucoin")]
         "kucoin" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Kucoin::new(KucoinOptions {
-                read_credentials: options.read_credentials.clone(),
-                broker: options.extra.and_then(|e| e.kucoin_broker),
+                read_credentials: options.read_credentials.take(),
+                broker: options.extra.take().and_then(|e| e.kucoin_broker),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                passphrase: options.passphrase.take(),
             })),
         ),
         #[cfg(feature = "bingx")]
         "bingx" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Bingx::new(BingxOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "weex")]
         "weex" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(WeexFutures::new(WeexOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                passphrase: options.passphrase.take(),
                 private_ws_headers: options.private_ws_headers,
             })),
         ),
@@ -764,19 +804,21 @@ pub fn build<T: Visit>(
         "woo" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Woo::new(WooOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
+                key: options.key.take(),
+                secret: options.secret.take(),
+                application_id: options.application_id.take(),
             })),
         ),
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
-            let options = BybitOptions {
-                read_credentials: options.read_credentials.clone(),
+            let mut options = BybitOptions {
+                recv_window: tighter_recv_window(options.recv_window),
+                read_credentials: options.read_credentials.take(),
                 enable_inverse_markets: options.enable_inverse_markets,
                 enable_option_markets: options.enable_option_markets,
                 variant: match venue {
@@ -788,16 +830,29 @@ pub fn build<T: Visit>(
                 },
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                endpoints: options.endpoints.map(|e| BybitEndpoints {
+                key: options.key.take(),
+                secret: options.secret.take(),
+                endpoints: options.endpoints.take().map(|e| BybitEndpoints {
                     rest: e.rest,
                     public_ws: e.public_ws,
                     private_ws: e.private_ws,
                 }),
             };
-            options.validate().map_err(invalid)?;
-            finish(visitor, policy, Engine::new(BybitLinear::new(options)))
+            options.validate().map_err(|error| {
+                use zeroize::Zeroize;
+                options.key.zeroize();
+                options.secret.zeroize();
+                if let Some(read) = &mut options.read_credentials {
+                    read.erase_secrets();
+                }
+                invalid(&error)
+            })?;
+            finish(
+                visitor,
+                policy,
+                account_startup,
+                Engine::new(BybitLinear::new(options)),
+            )
         }
         #[cfg(feature = "bitget")]
         "bitget" | "bitgetusdc" | "bitgetinverse" => {
@@ -811,13 +866,14 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(BitgetFutures::new(BitgetOptions {
-                    read_credentials: options.read_credentials.clone(),
+                    read_credentials: options.read_credentials.take(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key,
-                    secret: options.secret,
-                    passphrase: options.passphrase,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
                     product: if venue == "bitgetinverse" {
                         Product::Inverse
                     } else if venue == "bitgetusdc" {
@@ -832,12 +888,13 @@ pub fn build<T: Visit>(
         "cryptocom" => finish(
             visitor,
             policy,
+            account_startup,
             Engine::new(Cryptocom::new(CryptocomOptions {
-                read_credentials: options.read_credentials.clone(),
+                read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
+                key: options.key.take(),
+                secret: options.secret.take(),
             })),
         ),
         #[cfg(feature = "hyperliquid")]
@@ -850,11 +907,11 @@ pub fn build<T: Visit>(
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
-                vault: options.vault,
-                builder: options.hyperliquid_builder.map(|b| Builder {
+                key: options.key.take(),
+                secret: options.secret.take(),
+                application_id: options.application_id.take(),
+                vault: options.vault.take(),
+                builder: options.hyperliquid_builder.take().map(|b| Builder {
                     b: b.address,
                     f: b.fee_tenths_bps,
                 }),
@@ -862,6 +919,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(if venue == "hyperliquidspot" {
                     Hyperliquid::new_spot(config)
                 } else {
@@ -881,14 +939,15 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
+                account_startup,
                 Engine::new(Okx::new(OkxOptions {
-                    read_credentials: options.read_credentials.clone(),
+                    read_credentials: options.read_credentials.take(),
                     testnet: options.testnet || venue.ends_with("demo"),
                     eea: venue.starts_with("okxeu"),
                     public_data_only: options.public_data_only,
-                    key: options.key,
-                    secret: options.secret,
-                    passphrase: options.passphrase,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    passphrase: options.passphrase.take(),
                 })),
             )
         }
@@ -944,6 +1003,9 @@ pub struct KucoinExtra {
 pub struct EngineOptions {
     #[serde(default)]
     pub private_only: bool,
+    /// The SDK sets this when the account can sign (not public-data-only).
+    #[serde(default)]
+    pub account_startup: bool,
     #[serde(default)]
     pub public_feed: Option<PublicFeedOptions>,
     #[serde(default)]
@@ -1078,7 +1140,9 @@ pub struct EngineOptions {
         feature = "backpack",
         feature = "bitrue",
         feature = "breakoutprop",
-        feature = "binance"
+        feature = "binance",
+        feature = "bybit",
+        feature = "mexc"
     ))]
     #[serde(default)]
     pub recv_window: Option<f64>,
@@ -1147,6 +1211,135 @@ pub struct EngineOptions {
     #[serde(default)]
     pub polling_enabled: Option<bool>,
 }
+#[cfg(any(
+    feature = "coinbase",
+    feature = "paradex",
+    feature = "binance",
+    feature = "apexomni",
+    feature = "asterdex",
+    feature = "breakoutprop",
+    feature = "kucoin",
+    feature = "kucoinspot",
+    feature = "polymarket",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "woo",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "grvt",
+    feature = "bitrue",
+    feature = "backpack",
+    feature = "phemex",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "kraken",
+    feature = "txflow",
+    feature = "orderly",
+    feature = "lighter",
+    feature = "okx"
+))]
+impl EngineOptions {
+    pub fn erase_secrets(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+        #[cfg(any(
+            feature = "grvt",
+            feature = "coinbase",
+            feature = "binance",
+            feature = "apexomni",
+            feature = "asterdex",
+            feature = "breakoutprop",
+            feature = "kucoin",
+            feature = "kucoinspot",
+            feature = "blofin",
+            feature = "bybit",
+            feature = "cryptocom",
+            feature = "bingx",
+            feature = "mexc",
+            feature = "bitget",
+            feature = "bitrue",
+            feature = "backpack",
+            feature = "phemex",
+            feature = "weex",
+            feature = "hyperliquid",
+            feature = "txflow",
+            feature = "kraken",
+            feature = "lighter",
+            feature = "woo",
+            feature = "orderly",
+            feature = "okx"
+        ))]
+        self.secret.zeroize();
+        #[cfg(any(
+            feature = "kucoin",
+            feature = "kucoinspot",
+            feature = "okx",
+            feature = "weex",
+            feature = "blofin",
+            feature = "bitget",
+            feature = "apexomni"
+        ))]
+        self.passphrase.zeroize();
+        #[cfg(feature = "apexomni")]
+        self.omni_key_seed.zeroize();
+        if let Some(read) = &mut self.read_credentials {
+            read.erase_secrets();
+        }
+        #[cfg(feature = "asterdex")]
+        self.asterdex.erase_secrets();
+        #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+        if let Some(broker) = self
+            .extra
+            .as_mut()
+            .and_then(|extra| extra.kucoin_broker.as_mut())
+        {
+            broker.broker_key.zeroize();
+        }
+        #[cfg(feature = "polymarket")]
+        if let Some(account) = &mut self.polymarket {
+            account.api_key.zeroize();
+            account.api_secret.zeroize();
+            account.api_passphrase.zeroize();
+        }
+    }
+}
+#[cfg(any(
+    feature = "coinbase",
+    feature = "paradex",
+    feature = "binance",
+    feature = "apexomni",
+    feature = "asterdex",
+    feature = "breakoutprop",
+    feature = "kucoin",
+    feature = "kucoinspot",
+    feature = "polymarket",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "woo",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "grvt",
+    feature = "bitrue",
+    feature = "backpack",
+    feature = "phemex",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "kraken",
+    feature = "txflow",
+    feature = "orderly",
+    feature = "lighter",
+    feature = "okx"
+))]
+impl Drop for EngineOptions {
+    fn drop(&mut self) {
+        self.erase_secrets();
+    }
+}
+
 #[cfg(feature = "asterdex")]
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1160,6 +1353,21 @@ pub struct AsterConfig {
     pub builder_fee_rate_taker: Option<String>,
     pub read_key: Option<String>,
     pub read_secret: Option<String>,
+}
+#[cfg(feature = "asterdex")]
+impl AsterConfig {
+    pub fn erase_secrets(&mut self) {
+        use zeroize::Zeroize;
+        self.private_key.zeroize();
+        self.read_key.zeroize();
+        self.read_secret.zeroize();
+    }
+}
+#[cfg(feature = "asterdex")]
+impl Drop for AsterConfig {
+    fn drop(&mut self) {
+        self.erase_secrets();
+    }
 }
 
 #[cfg(feature = "bybit")]
@@ -1194,15 +1402,78 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
         .transpose()
 }
 
+#[cfg(any(feature = "bybit", feature = "mexc"))]
+fn tighter_recv_window(value: Option<f64>) -> Option<u32> {
+    value
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(|value| value.floor().clamp(1.0, 20_000.0) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(feature = "bybit", feature = "mexc"))]
+    #[test]
+    fn tighter_receive_windows_survive_the_host_boundary() {
+        assert_eq!(tighter_recv_window(Some(5_000.0)), Some(5_000));
+        assert_eq!(tighter_recv_window(Some(5_000.9)), Some(5_000));
+        assert_eq!(tighter_recv_window(Some(1e300)), Some(20_000));
+        assert_eq!(tighter_recv_window(Some(0.5)), Some(1));
+        for value in [None, Some(0.0), Some(-1.0), Some(f64::NAN)] {
+            assert_eq!(tighter_recv_window(value), None);
+        }
+    }
+
+    #[cfg(feature = "binance")]
+    #[test]
+    fn unused_and_rejected_engine_options_have_owned_secret_cleanup() {
+        let mut options: EngineOptions = serde_json::from_str(
+            r#"{"key":"primary-key","secret":"primary-secret","readCredentials":{"key":"read-key","secret":"read-secret","passphrase":"read-pass"}}"#,
+        ).unwrap();
+        assert!(std::mem::needs_drop::<EngineOptions>());
+        options.erase_secrets();
+        assert!(options.key.as_deref().is_none_or(str::is_empty));
+        assert!(options.secret.as_deref().is_none_or(str::is_empty));
+        let read = options.read_credentials.as_ref().unwrap();
+        assert!(read.key.is_empty());
+        assert!(read.secret.is_empty());
+        assert!(read.passphrase.as_deref().is_none_or(str::is_empty));
+        #[cfg(feature = "asterdex")]
+        {
+            let mut nested: EngineOptions = serde_json::from_str(
+                r#"{"asterdex":{"privateKey":"wallet-secret","readKey":"api-key","readSecret":"api-secret"}}"#,
+            ).unwrap();
+            nested.erase_secrets();
+            assert!(
+                nested
+                    .asterdex
+                    .private_key
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+            );
+            assert!(
+                nested
+                    .asterdex
+                    .read_key
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+            );
+            assert!(
+                nested
+                    .asterdex
+                    .read_secret
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+            );
+        }
+    }
 
     #[test]
     fn secondary_read_options_decode_without_changing_primary_identity() {
         let options: EngineOptions = serde_json::from_str(r#"{"key":"primary","secret":"primary-secret","readCredentials":{"key":"read","secret":"read-secret","passphrase":"read-pass"}}"#).unwrap();
         assert_eq!(options.key.as_deref(), Some("primary"));
-        let read = options.read_credentials.unwrap();
+        let read = options.read_credentials.as_ref().unwrap();
         assert_eq!(read.key, "read");
         assert_eq!(read.secret, "read-secret");
         assert_eq!(read.passphrase.as_deref(), Some("read-pass"));

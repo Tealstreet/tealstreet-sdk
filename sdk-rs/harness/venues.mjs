@@ -7,6 +7,7 @@ import {
   verifyCoinbaseSubscribe,
   coinbaseSubscription,
   createCoinbaseSocketAudit,
+  installSynchronousEs256,
 } from './coinbase-protocol.mjs';
 import {
   APEX_SEED,
@@ -766,6 +767,12 @@ const coinbase = (name) => ({
   options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
   replayCredentials: COINBASE_REPLAY,
   privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  // Public startup schedules ticker polling before replay begins. Registering
+  // books before socket open adds a 100 ms retry that otherwise shifts that
+  // poll's phase depending on audit cost. Use the same completed seed/open
+  // boundary in both modes; private startup keeps its existing readiness.
+  tsBooksReady: (exchange, store) => !exchange.isPublicDataOnly
+    || Boolean(store.loaded.markets && store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
   verifyRequest: verifyCoinbaseRequest,
@@ -789,6 +796,13 @@ const coinbase = (name) => ({
   compareWriteOrder: true,
   compareClientIds: true,
   compareFillPrices: true,
+  // Both order censuses run on timers (TS write reconcile and tick, Rust tick and
+  // REST pacing). Fire them at tape time, or a checkpoint races a census in flight.
+  virtualPrivateClock: true,
+  // Native REST pacing stores an absolute next-send time; startup's paced reads
+  // must not leave it seconds ahead of a rewound clock.
+  monotonicReplayClock: true,
+  loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousEs256(); },
   isWrite: (method) => method !== 'GET',
   generatedBodyId: (key, value) =>
     key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
@@ -1241,6 +1255,7 @@ export const VENUES = {
   },
   apexomni: {
     rust: 'apexomni',
+    virtualPrivateClock: true,
     ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
     privateSocket: '/realtime_private',
     replayCredentials: { omniKeySeed: APEX_SEED },
@@ -1676,6 +1691,7 @@ export const VENUES = {
   },
   weex: {
     rust: 'weex',
+    virtualPrivateClock: true,
     requestKey: typedRequest,
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
     privateSocket: '/v3/ws/private',

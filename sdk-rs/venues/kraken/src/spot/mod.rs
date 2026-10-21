@@ -58,7 +58,7 @@ struct DepthState {
     subscribers: u32,
 }
 pub struct KrakenSpot {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
@@ -70,16 +70,19 @@ pub struct KrakenSpot {
     ws_symbols: HashMap<String, String>,
     ws_canonical: HashMap<String, String>,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     ticker_symbols: Vec<String>,
     poll: Option<TimerId>,
     markets_in_flight: bool,
     tickers_in_flight: bool,
-    catalogue_incomplete: bool,
+    /// Bases whose USD route the last catalogue read rejected as malformed.
+    rejected_routes: HashSet<String>,
+    ticker_reseed: bool,
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
-    pub fn new(mut options: Options) -> Self {
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         options.public_data_only |= options.key.as_ref().is_none_or(String::is_empty)
             || options.secret.as_ref().is_none_or(String::is_empty);
         let signer =
@@ -109,7 +112,8 @@ impl KrakenSpot {
             poll: None,
             markets_in_flight: false,
             tickers_in_flight: false,
-            catalogue_incomplete: false,
+            rejected_routes: HashSet::new(),
+            ticker_reseed: false,
             retries: vec![],
         }
     }
@@ -121,6 +125,7 @@ impl KrakenSpot {
             }
             Pending::Tickers { .. } => {
                 self.tickers_in_flight = false;
+                self.ticker_reseed = false;
                 self.discovery.failed(cx, true);
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -222,18 +227,23 @@ impl KrakenSpot {
         let mut pairs = HashMap::new();
         let mut identities = HashMap::new();
         let mut rejected = false;
+        let mut rejected_routes = HashSet::new();
         map_each::<&serde_json::value::RawValue>(text, |key, raw| {
             if key.ends_with(".d") {
                 return;
             }
-            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+            let mut reject = |wsname: &str| {
                 rejected = true;
+                rejected_routes.extend(rejected_usd_route(&key, wsname));
                 safe_cex_engine::startup::skipped_row(cx);
+            };
+            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+                let name = serde_json::from_str::<PairName<'_>>(raw.get());
+                reject(name.as_ref().map_or("", |n| &n.wsname));
                 return;
             };
             let Some((base, quote)) = p.wsname.split_once('/') else {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             };
             if base.is_empty()
@@ -242,8 +252,7 @@ impl KrakenSpot {
                 || quote.trim() != quote
                 || quote.contains('/')
             {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             let base = asset(base);
@@ -254,15 +263,13 @@ impl KrakenSpot {
             let pd = p.pair_decimals.unwrap_or(2);
             let ad = p.lot_decimals.unwrap_or(8);
             if pd > 18 || ad > 18 || p.ordermin < 0. {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             let symbol = p.wsname.to_string();
             let pretty = format!("{base}{quote}");
             if pairs.contains_key(&symbol) {
-                rejected = true;
-                safe_cex_engine::startup::skipped_row(cx);
+                reject(&p.wsname);
                 return;
             }
             for id in [&*key, &*p.altname, &symbol, &pretty] {
@@ -304,6 +311,9 @@ impl KrakenSpot {
         if markets.is_empty() {
             return Err("No supported Kraken Spot market rows".into());
         }
+        let added = markets
+            .iter()
+            .any(|market| !self.pairs.contains_key(&market.symbol));
         let recovered: Vec<_> = markets
             .iter()
             .filter(|market| {
@@ -324,7 +334,7 @@ impl KrakenSpot {
             .collect();
         self.pairs = pairs;
         self.identities = identities;
-        self.catalogue_incomplete = rejected;
+        self.rejected_routes = rejected_routes;
         if rejected {
             self.discovery.failed(cx, false);
         } else {
@@ -336,12 +346,21 @@ impl KrakenSpot {
                 self.subscribe(cx, "subscribe", "ticker", batch, None);
             }
         }
-        self.revalue_pending_balances(cx);
+        self.ticker_reseed |= added && cx.store.loaded().tickers;
+        if added {
+            self.revalue_after_catalogue(cx);
+        } else {
+            self.revalue_pending_balances(cx);
+        }
         if self.public.socket.is_none() {
             self.connect(cx);
         }
         self.private_start(cx);
-        self.tickers(cx);
+        // A persistently rejected pair re-reads only the catalogue; tickers are
+        // re-seeded when the read lists a new pair.
+        if !cx.store.loaded().tickers || added {
+            self.tickers(cx);
+        }
         Ok(())
     }
     fn tickers_response(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> Result<(), String> {
@@ -433,7 +452,7 @@ impl Venue for KrakenSpot {
         }
         let mut sent = HashSet::new();
         for (symbol, tf) in self.candles.keys() {
-            if let Some(i) = interval(tf)
+            if let Some(i) = interval(*tf)
                 && sent.insert((symbol, i))
             {
                 self.subscribe(
@@ -581,9 +600,9 @@ impl Venue for KrakenSpot {
                                 .ws_canonical
                                 .get(&*o.symbol)
                                 .map_or(&*o.symbol, String::as_str)
-                            && interval(tf) == Some(o.interval)
+                            && interval(*tf) == Some(o.interval)
                         {
-                            cx.candle(symbol, tf, candle);
+                            cx.candle(symbol, *tf, candle);
                         }
                     }
                 });
@@ -621,6 +640,7 @@ impl Venue for KrakenSpot {
             }
             Pending::Tickers { .. } => {
                 self.tickers_in_flight = false;
+                self.ticker_reseed = false;
                 self.tickers_response(cx, text)
             }
             Pending::Candles { command, .. } => {
@@ -778,28 +798,30 @@ impl Venue for KrakenSpot {
                 symbol,
                 interval: tf,
             } => {
-                if let Some(i) = interval(&tf) {
-                    let count = self.candles.entry((symbol.clone(), tf)).or_default();
-                    *count += 1;
-                    if *count == 1 {
-                        self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
-                    }
+                let Some(i) = interval(tf) else {
+                    cx.log(LogLevel::Error, tf.unsupported("Kraken Spot"));
+                    return;
+                };
+                let count = self.candles.entry((symbol.clone(), tf)).or_default();
+                *count += 1;
+                if *count == 1 {
+                    self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
                 }
             }
             Command::UnsubscribeCandles {
                 symbol,
                 interval: tf,
             } => {
-                let k = (symbol.clone(), tf.clone());
+                let k = (symbol.clone(), tf);
                 if let Some(count) = self.candles.get_mut(&k) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&k);
-                        if let Some(i) = interval(&tf)
+                        if let Some(i) = interval(tf)
                             && !self
                                 .candles
                                 .keys()
-                                .any(|(s, t)| s == &symbol && interval(t) == Some(i))
+                                .any(|(s, t)| s == &symbol && interval(*t) == Some(i))
                         {
                             self.subscribe(cx, "unsubscribe", "ohlc", &[symbol], Some(i));
                         }
@@ -813,7 +835,7 @@ impl Venue for KrakenSpot {
                 from_ms,
                 ..
             } => {
-                if let Some(i) = interval(&tf) {
+                if let Some(i) = interval(tf) {
                     let pair = self
                         .pairs
                         .get(&symbol)
@@ -836,7 +858,7 @@ impl Venue for KrakenSpot {
                         },
                     );
                 } else {
-                    cx.done(command, Err("Kraken Spot unsupported interval".into()))
+                    cx.done(command, Err(tf.unsupported("Kraken Spot")))
                 }
             }
             _ => {}

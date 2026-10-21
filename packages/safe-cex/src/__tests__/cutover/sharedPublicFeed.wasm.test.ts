@@ -1,6 +1,6 @@
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { Candle, ExchangeOptions, Market, OrderBook } from '../../types';
+import type { Candle, ExchangeOptions, Market, OrderBook, PublicDataSource, StoreData } from '../../types';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
@@ -476,6 +476,83 @@ describe('native public-feed ownership through real private workers', () => {
       /disposed/,
     );
   }, 15_000);
+
+  it('serves exchange-server in-process externalPublicData to two private accounts across a source restart', async () => {
+    // Mirrors services/exchange-server shared-public-data-source.ts: a live view over
+    // whichever public exchange the manager currently runs for the venue.
+    const first = await exchange({ key: '', secret: '', publicDataOnly: true });
+    await first.startup;
+    let current = first.account;
+    const listeners = new Set<() => void>();
+    const stops = new Map<() => void, () => void>();
+    const attach = () => {
+      for (const [listener, stop] of stops) {
+        stop();
+        stops.set(listener, current.store.subscribe(listener));
+      }
+    };
+    const source: PublicDataSource = {
+      store: {
+        subscribe: (callback) => {
+          const listener = () => callback(current.store as unknown as StoreData);
+          listeners.add(listener);
+          stops.set(listener, current.store.subscribe(listener));
+          return () => {
+            stops.get(listener)?.();
+            stops.delete(listener);
+            listeners.delete(listener);
+          };
+        },
+        get tickers() {
+          return current.store.tickers;
+        },
+        get markets() {
+          return current.store.markets;
+        },
+        get loaded() {
+          return current.store.loaded;
+        },
+      },
+      listenOrderBook: (symbol, callback) => current.listenOrderBook(symbol, callback),
+      listenOHLCV: (opts, callback) => current.listenOHLCV(opts, callback),
+    };
+    const firstSource = current;
+    const accounts: Array<Awaited<ReturnType<typeof exchange>>> = [];
+    for (let index = 0; index < 2; index++) {
+      const side = await exchange({
+        ...COINBASE_REPLAY,
+        privateOnly: true,
+        externalPublicData: { type: 'in-process', source },
+      });
+      await waitFor(() => expect(side.input.sockets.some((socket) => socket.channel === 'private')).toBe(true));
+      side.input.deliver('user');
+      await side.startup;
+      expect(side.input.sockets.map((socket) => socket.channel)).toEqual(['private']);
+      accounts.push(side);
+    }
+    const sourceBook = vi.spyOn(firstSource, 'listenOrderBook');
+    const stopBook = accounts[0].account.listenOrderBook('BTC-USD', () => {});
+    await waitFor(() => expect(sourceBook).toHaveBeenCalled());
+    stopBook();
+
+    // The manager disposes a stale public exchange and starts a replacement.
+    const replacement = await exchange({ key: '', secret: '', publicDataOnly: true });
+    await replacement.startup;
+    firstSource.dispose();
+    current = replacement.account;
+    attach();
+    replacement.input.setProductPrice(999);
+    await waitFor(() => {
+      for (const { account } of accounts) expect(account.store.tickersBySymbol['BTC-USD'].last).toBe(999);
+    });
+    for (const { account, input } of accounts) {
+      expect(account.isDisposed).toBe(false);
+      expect(input.failures).toEqual([]);
+    }
+    accounts[0].account.dispose();
+    accounts[1].account.dispose();
+    await waitFor(() => expect(listeners.size).toBe(0));
+  }, 20_000);
 
   it('rejects mismatched shared feed before private I/O and disposal settles handshake', async () => {
     const publicSide = await exchange({ key: '', secret: '', publicDataOnly: true });

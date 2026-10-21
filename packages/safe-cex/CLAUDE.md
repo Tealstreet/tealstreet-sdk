@@ -79,7 +79,14 @@ interest from attached accounts; late book subscribers receive the native
 snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
-sections or account metadata. A running/loaded direct source is mandatory.
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`). One hub per source keeps a single store
+subscription and broadcasts changed tickers every 250 ms. Like TS, it is lenient:
+private startup continues after 30 s without a loaded source, account markets the
+source has not listed are tolerated, and book/candle requests for them wait. A real
+field mismatch still fails. Testnet accounts ignore the venue-keyed source and run
+their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means
@@ -124,8 +131,10 @@ once the engine exists.
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
-worker bridge) forwards the `WORKER_TRADING_METHODS` in `exchanges/base.ts` whole
-through `callMethodInWorker`, so preflight, placement scopes and nuke retries run
+worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
+(trading, nuke, client-ID lookup, public trades, candles, history axes; plus
+`fetchHistoricalPositions` by name) whole through
+`callMethodInWorker`, so preflight, placement scopes and nuke retries run
 against the worker's state and report there once. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
 worker never has that listener. Without a bridge, an instance runs locally.
@@ -134,6 +143,15 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+
+A bridged mirror never builds an engine for capabilities. In frame mode it
+adopts the record a snapshot frame carries; in store-payload mode (and from
+`loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the
+mirror store reports markets loaded. Capability-defined methods
+(Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
+the mirror, and the tier methods forward to the worker
+(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds. Branded
+capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
 
@@ -151,6 +169,12 @@ catalog baselines. Chasers/TWAPs stop and commands arriving during recovery fail
 Shared-feed accounts require a fresh provider attachment and account init;
 their closed transferred port cannot be reused. Module-wide WASM initialization
 and sibling accounts remain independent of one account's terminal state.
+
+A terminal `StartupFailed` rejects `start()` with an `ExchangeError` that keeps
+the engine's `kind` and `venueCode`; `validateAccount` returns the same `kind`
+beside `error` (the typed failure wins over the error log venues emit just
+before it), so callers can branch on `authInvalid`/`authPermission` instead of
+matching text. A bare deactivation carries no `kind`.
 
 Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
 positive integer deadline up to 2147482647 ms; long paginated queries may need
@@ -641,7 +665,11 @@ is how a host opts in; the web main thread registers one in
 `hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
 import a telemetry client or POST to a Tealstreet route from this package** —
 call `reportException` / `reportEvent` and let the host decide. Workers still
-ship errors through the `sendToSentry` op, not the sink.
+ship errors through the `sendToSentry` op, not the sink. `emitAndLogError` (the path every command rejection takes,
+in the worker, main thread and exchange-server) and `ExchangeWorker.logError`
+tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
+and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
+the kind rather than venue text.
 
 ## Proxy & Tunnel Architecture
 

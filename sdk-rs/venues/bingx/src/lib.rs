@@ -9,22 +9,33 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -177,7 +188,7 @@ pub struct Bingx {
     credentials: Option<Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     seed: Vec<Ticker>,
     seed_index: Vec<Option<usize>>,
     seed_rows_index: Vec<Option<usize>>,
@@ -185,6 +196,7 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: safe_cex_engine::startup::Backoff<List>,
+    reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
     // Markets the live stream has priced; a late funding retry never overwrites them.
@@ -195,6 +207,7 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let config_error = options
             .read_credentials
             .as_ref()
@@ -204,12 +217,13 @@ impl Bingx {
         } else {
             options
                 .key
-                .zip(options.secret)
+                .as_ref()
+                .zip(options.secret.as_ref())
                 .filter(|(k, s)| !k.is_empty() && !s.is_empty())
                 .map(|(key, secret)| Credentials {
-                    key,
-                    secret,
-                    read: options.read_credentials,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    read: options.read_credentials.clone(),
                 })
         };
         Self {
@@ -228,6 +242,7 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: 0,
             retries: Default::default(),
+            reread_stalls: 0,
             tickers_committed: false,
             live_priced: Vec::new(),
             staged_tickers: Vec::new(),
@@ -240,6 +255,26 @@ impl Bingx {
                 .observe_order(&order, &kind, &side, attached, &native_status);
         }
         self.trading.retain_open_orders(cx.store);
+    }
+
+    /// Market-indexed side tables follow their symbols across a catalogue refresh.
+    fn remap_market_slots(&mut self, cx: &Cx<'_, Pending>, previous: &[String]) {
+        fn remap<T: Copy + Default>(
+            store: &safe_cex_engine::store::Store,
+            previous: &[String],
+            slots: &mut Vec<T>,
+        ) {
+            let mut moved = vec![T::default(); store.markets().len()];
+            for (symbol, value) in previous.iter().zip(slots.iter()) {
+                if let Some(index) = store.market_index(symbol) {
+                    moved[index as usize] = *value;
+                }
+            }
+            *slots = moved;
+        }
+        remap(cx.store, previous, &mut self.seed_index);
+        remap(cx.store, previous, &mut self.seed_rows_index);
+        remap(cx.store, previous, &mut self.live_priced);
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
@@ -350,7 +385,10 @@ impl Bingx {
             paths::PUBLIC_WS.to_owned(),
             safe_cex_engine::SocketChannel::Public,
         ));
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.open = false;
     }
 
@@ -382,7 +420,12 @@ impl Bingx {
             self.symbol_id(cx, symbol)?
         ))
     }
-    fn topic_candle(&self, cx: &Cx<'_, Pending>, symbol: &str, interval: &str) -> Option<String> {
+    fn topic_candle(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        interval: Interval,
+    ) -> Option<String> {
         Some(format!(
             "market.kline.{}.{}.trade.utc+8",
             self.symbol_id(cx, symbol)?,
@@ -526,7 +569,7 @@ impl Bingx {
             let matches: Vec<_> = self
                 .candles
                 .keys()
-                .filter(|(s, i)| s == &symbol && stream_interval(i) == Some(native_interval))
+                .filter(|(s, i)| s == &symbol && stream_interval(*i) == Some(native_interval))
                 .cloned()
                 .collect();
             let Ok(data) = serde_json::from_str::<CandleData>(data.get()) else {
@@ -535,7 +578,7 @@ impl Bingx {
             if let Some(row) = data.kline_infos_vo.into_iter().next() {
                 let candle = Candle::from(row);
                 for (symbol, interval) in matches {
-                    cx.candle(&symbol, &interval, candle)
+                    cx.candle(&symbol, interval, candle)
                 }
             }
         }
@@ -560,44 +603,29 @@ fn touch(last: f64, step: f64) -> (f64, f64) {
     )
 }
 
-fn stream_interval(interval: &str) -> Option<&'static str> {
+fn stream_interval(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match interval {
-        "1m" => "1min",
-        "3m" => "3min",
-        "5m" => "5min",
-        "15m" => "15min",
-        "30m" => "30min",
-        "1h" => "1hour",
-        "2h" => "2hour",
-        "3h" => "3hour",
-        "4h" => "4hour",
-        "6h" => "6hour",
-        "12h" => "12hour",
-        "1d" => "1day",
-        "1w" => "1week",
-        "1M" => "1month",
-        "3M" => "3month",
-        "1Y" => "1year",
+        M1 => "1min",
+        M3 => "3min",
+        M5 => "5min",
+        M15 => "15min",
+        M30 => "30min",
+        H1 => "1hour",
+        H2 => "2hour",
+        H3 => "3hour",
+        H4 => "4hour",
+        H6 => "6hour",
+        H12 => "12hour",
+        D1 => "1day",
+        W1 => "1week",
+        Mo1 => "1month",
         _ => return None,
     })
 }
 
-fn interval_ms(interval: &str) -> Option<f64> {
-    stream_interval(interval)?;
-    let unit = interval.chars().last()?;
-    let count: f64 = interval[..interval.len() - 1].parse().ok()?;
-    Some(
-        count
-            * match unit {
-                'm' => 60_000.,
-                'h' => 3_600_000.,
-                'd' => 86_400_000.,
-                'w' => 604_800_000.,
-                'M' => 2_592_000_000.,
-                'Y' => 31_536_000_000.,
-                _ => return None,
-            },
-    )
+fn interval_ms(interval: Interval) -> Option<f64> {
+    stream_interval(interval).map(|_| interval.ms())
 }
 
 pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
@@ -664,7 +692,7 @@ impl Venue for Bingx {
             .chain(
                 self.candles
                     .keys()
-                    .filter_map(|(s, i)| self.topic_candle(cx, s, i)),
+                    .filter_map(|(s, i)| self.topic_candle(cx, s, *i)),
             )
             .collect();
         for topic in topics {
@@ -854,17 +882,42 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets { mut rows, skipped } => {
+            Pending::Markets { rows, skipped } => {
                 log_skipped(cx, "market", &skipped);
                 if rows.is_empty() {
                     self.retry_list(cx, List::Markets);
                     return;
                 }
-                self.account
-                    .set_skipped_markets(skipped.iter().map(|id| id.replace('-', "")));
+                let refresh = cx.store.loaded().markets;
+                let previous: Vec<String> = if refresh {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .map(|m| m.symbol.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let mut rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 rows.shrink_to_fit();
-                self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
+                let (before, after) = self
+                    .account
+                    .set_skipped_markets(cx.store, skipped.iter().map(|id| id.replace('-', "")));
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.retry_list(cx, List::Markets);
+                } else {
+                    self.retries.succeeded(cx, &List::Markets);
+                }
+                if refresh {
+                    self.remap_market_slots(cx, &previous);
+                    return;
+                }
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);
                 }
@@ -1094,28 +1147,25 @@ impl Venue for Bingx {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if stream_interval(&interval).is_none() {
-                    cx.log(LogLevel::Error, "unsupported BingX candle interval");
+                if stream_interval(interval).is_none() {
+                    cx.log(LogLevel::Error, interval.unsupported("BingX"));
                     return;
                 }
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
-                    && let Some(topic) = self.topic_candle(cx, &symbol, &interval)
+                    && let Some(topic) = self.topic_candle(cx, &symbol, interval)
                 {
                     self.send_topic(cx, &topic, true)
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let Some(topic) = self.topic_candle(cx, &symbol, &interval) {
+                        if let Some(topic) = self.topic_candle(cx, &symbol, interval) {
                             self.send_topic(cx, &topic, false)
                         }
                     }
@@ -1133,8 +1183,8 @@ impl Venue for Bingx {
                     cx.done(command, Err(format!("unknown market {symbol}")));
                     return;
                 };
-                let Some(step) = interval_ms(&interval) else {
-                    cx.done(command, Err("invalid interval".into()));
+                let Some(step) = interval_ms(interval) else {
+                    cx.done(command, Err(interval.unsupported("BingX")));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1149,7 +1199,7 @@ impl Venue for Bingx {
                 }
                 let params = Params::new()
                     .str("symbol", &market.id)
-                    .str("interval", &interval)
+                    .str("interval", interval.as_str())
                     .num("startTime", start)
                     .num("endTime", end);
                 issue(
@@ -1181,6 +1231,58 @@ impl Venue for Bingx {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("BingX stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

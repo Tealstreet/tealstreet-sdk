@@ -7,22 +7,33 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -33,6 +44,7 @@ pub enum Pending {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
         skipped: Skipped,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -75,10 +87,13 @@ struct BookState {
 }
 
 pub struct Cryptocom {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     sockets: [Connection; 2],
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    // Instruments rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -89,15 +104,24 @@ pub struct Cryptocom {
     history: history::History,
 }
 
-pub(crate) fn interval(value: &str) -> Result<&str, String> {
-    match value {
-        "1m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "12h" => Ok(value),
-        "1d" => Ok("1D"),
-        "1w" => Ok("7D"),
-        _ => Err(format!(
-            "Unsupported Crypto.com candlestick interval: {value}"
-        )),
-    }
+const TIMEFRAMES: [(Interval, &str); 10] = [
+    (Interval::M1, "1m"),
+    (Interval::M5, "5m"),
+    (Interval::M15, "15m"),
+    (Interval::M30, "30m"),
+    (Interval::H1, "1h"),
+    (Interval::H2, "2h"),
+    (Interval::H4, "4h"),
+    (Interval::H12, "12h"),
+    (Interval::D1, "1D"),
+    (Interval::W1, "7D"),
+];
+pub(crate) fn interval(value: Interval) -> Result<&'static str, String> {
+    TIMEFRAMES
+        .iter()
+        .find(|(i, _)| *i == value)
+        .map(|(_, native)| *native)
+        .ok_or_else(|| value.unsupported("Crypto.com"))
 }
 
 fn quoted(s: &str) -> String {
@@ -151,11 +175,13 @@ impl Cryptocom {
                     rows: vec![],
                     indexes: HashMap::new(),
                     skipped: Skipped::default(),
+                    malformed: HashSet::new(),
                 }
             },
         );
     }
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -182,6 +208,8 @@ impl Cryptocom {
             options,
             sockets: [Connection::new(false), Connection::new(true)],
             discovery: Default::default(),
+            malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -193,7 +221,10 @@ impl Cryptocom {
         if self.sockets[channel].socket.is_some() {
             return;
         }
-        self.sockets[channel].supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if channel != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.sockets[channel].supervisor.connecting(cx);
+        }
         let root = if self.options.testnet {
             "wss://uat-stream.3ona.co"
         } else {
@@ -374,10 +405,12 @@ impl Cryptocom {
                     .strip_prefix("candlestick.")
                     .and_then(|s| s.split('.').next())
                     .unwrap_or("");
-                let timeframe = match timeframe {
-                    "1D" => "1d",
-                    "7D" => "1w",
-                    other => other,
+                let Some(timeframe) = TIMEFRAMES
+                    .iter()
+                    .find(|(_, native)| *native == timeframe)
+                    .map(|(i, _)| *i)
+                else {
+                    return Ok(());
                 };
                 if !self.subscriptions.contains_key(message.subscription) {
                     return Ok(());
@@ -507,6 +540,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 // Other instrument types carry fields this venue never reads.
                 let key = serde_json::from_str::<InstrumentKey>(item);
@@ -526,7 +560,13 @@ impl Venue for Cryptocom {
                             rows.push(market);
                         }
                     }
-                    Err(_) => skipped.add(key.ok().and_then(|k| k.symbol)),
+                    Err(_) => {
+                        let symbol = key.ok().and_then(|k| k.symbol);
+                        skipped.add(symbol);
+                        if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
+                            malformed.insert(symbol.into());
+                        }
+                    }
                 }
             }
             Pending::Tickers { rows, skipped } => {
@@ -568,6 +608,7 @@ impl Venue for Cryptocom {
                 } else {
                     Err("Crypto.com HTTP write failed")
                 },
+                Some(response.status),
             );
             return;
         }
@@ -595,6 +636,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
@@ -609,9 +651,33 @@ impl Venue for Cryptocom {
                     self.discovery.failed(cx, false);
                     return;
                 }
-                self.indexes = indexes;
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    let mut indexes = indexes;
+                    for (market, index) in std::mem::take(&mut self.indexes) {
+                        indexes.entry(market).or_insert(index);
+                    }
+                    self.indexes = indexes;
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    self.indexes = indexes;
+                    rows
+                };
                 cx.store.set_markets(rows);
-                self.discovery.succeeded(cx, &false);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|symbol| cx.store.market(symbol).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.discovery.failed(cx, false);
+                } else {
+                    self.discovery.succeeded(cx, &false);
+                }
+                if refresh {
+                    return;
+                }
                 self.discovery_read(cx, true);
                 if self.credentials.is_some() {
                     self.private_start(cx);
@@ -651,7 +717,7 @@ impl Venue for Cryptocom {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
+            Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -736,7 +802,7 @@ impl Venue for Cryptocom {
             Command::SubscribeCandles {
                 symbol,
                 interval: timeframe,
-            } => match interval(&timeframe) {
+            } => match interval(timeframe) {
                 Ok(timeframe) => self.add_channel(cx, format!("candlestick.{timeframe}.{symbol}")),
                 Err(error) => cx.log(LogLevel::Error, error),
             },
@@ -744,7 +810,7 @@ impl Venue for Cryptocom {
                 symbol,
                 interval: timeframe,
             } => {
-                if let Ok(timeframe) = interval(&timeframe) {
+                if let Ok(timeframe) = interval(timeframe) {
                     self.remove_channel(cx, format!("candlestick.{timeframe}.{symbol}"));
                 }
             }
@@ -755,7 +821,7 @@ impl Venue for Cryptocom {
                 from_ms,
                 to_ms,
                 ..
-            } => match interval(&timeframe) {
+            } => match interval(timeframe) {
                 Ok(timeframe) => {
                     let mut path = format!(
                         "/public/get-candlestick?instrument_name={}&timeframe={timeframe}",
@@ -793,6 +859,58 @@ impl Venue for Cryptocom {
                 .map(|(symbol, s)| (symbol.as_str(), &s.book)),
         )
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("Crypto.com stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

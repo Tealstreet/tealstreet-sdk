@@ -23,6 +23,19 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     start_with(MARKETS)
 }
 fn start_with(markets: &str) -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
+    let (e, socket, reads, timer, _) = start_with_retry(markets);
+    (e, socket, reads, timer)
+}
+/// Also returns the catalogue re-read timer a partial catalogue schedules.
+fn start_with_retry(
+    markets: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    TimerId,
+    Option<TimerId>,
+) {
     let mut e = Engine::new(Woo::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
@@ -63,6 +76,10 @@ fn start_with(markets: &str) -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId
             }
         })
         .unwrap();
+    let retry = actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if *at_ms == 1010.0 => Some(*timer),
+        _ => None,
+    });
     let reads = actions
         .into_iter()
         .filter_map(|a| {
@@ -77,7 +94,7 @@ fn start_with(markets: &str) -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId
             }
         })
         .collect();
-    (e, socket, reads, timer)
+    (e, socket, reads, timer, retry)
 }
 fn take(reads: &mut Vec<HttpRequest>, path: &str) -> HttpRequest {
     let i = reads
@@ -974,6 +991,64 @@ fn hedge_skip_keeps_only_the_unreadable_leg_and_drops_a_closed_sibling() {
     assert_eq!(e.store().positions()[0].contracts, 0.01);
 }
 #[test]
+fn steady_hedged_fills_cannot_starve_position_snapshots() {
+    let (mut e, socket, mut reads, mut timer) = start();
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, &INFO.replace("ONE_WAY", "HEDGE_MODE"));
+    reads.extend(requests(&mut e));
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        40.0,
+        r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":10,"marginMode":"CROSS"}]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let mut now = 2020.0;
+    for i in 0..3 {
+        e.handle(now, Event::TimerFired { timer });
+        let mut read = None;
+        for a in e.drain_actions() {
+            match a {
+                Action::Http(r) if r.url.contains("/v3/positions") => read = Some(r),
+                Action::SetTimer { timer: t, at_ms } if at_ms == now + 2000.0 => timer = t,
+                _ => {}
+            }
+        }
+        ws(
+            &mut e,
+            socket,
+            now + 1.0,
+            &format!(
+                r#"{{"topic":"executionreport","data":{{"symbol":"PERP_BTC_USDT","orderId":{o},"status":"FILLED","side":"BUY","type":"MARKET","quantity":0.01,"totalExecutedQuantity":0.01,"executedQuantity":0.01,"executedPrice":60001,"tradeId":{t}}}}}"#,
+                o = 300 + i,
+                t = 400 + i
+            ),
+        );
+        e.drain_actions().for_each(drop);
+        response(
+            &mut e,
+            &read.unwrap(),
+            now + 2.0,
+            r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.05,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":10,"marginMode":"CROSS"}]}}"#,
+        );
+        let rereads = requests(&mut e)
+            .into_iter()
+            .filter(|r| r.url.contains("/v3/positions"))
+            .count();
+        let long = e
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.id == "BTCUSDT:long")
+            .unwrap()
+            .contracts;
+        assert_eq!(long, if i < 2 { 0.01 } else { 0.05 });
+        assert_eq!(rereads, if i < 2 { 0 } else { 1 });
+        now += 2000.0;
+    }
+}
+#[test]
 fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
     let (mut e, _, mut reads, timer) = start();
     load(&mut e, &mut reads);
@@ -1111,4 +1186,137 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
     assert_eq!(fills.len(), 1);
     assert!((fills[0] - 0.001).abs() < 1e-12);
     assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+}
+
+// Private reads start before the ticker seed. A stop read then cannot be
+// classified; when the seed lands mid-read, the stop is re-read at once
+// instead of staying invisible until the next poll.
+#[test]
+fn stop_read_before_the_ticker_seed_is_reread_as_soon_as_prices_exist() {
+    let mut e = Engine::new(Woo::new(Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        application_id: Some("app".into()),
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, 10.0, MARKETS);
+    let mut early = requests(&mut e);
+    let ticker = take(&mut early, "/public/futures");
+    let regular = take(&mut early, "/v1/orders?");
+    let algo = take(&mut early, "/v3/algo/orders?");
+    response(&mut e, &regular, 15.0, &page(""));
+    let stop = r#"{"symbol":"PERP_BTC_USDT","algoOrderId":51,"algoType":"STOP","side":"SELL","quantity":0.01,"triggerPrice":60000.5,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0,"reduceOnly":true}"#;
+    // The stop's rows stream in before the seed; the read completes after it.
+    let body = algos(stop);
+    e.handle(
+        16.0,
+        Event::HttpStart {
+            request: algo.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        16.0,
+        Event::HttpChunk {
+            request: algo.id,
+            data: body.as_bytes(),
+        },
+    );
+    assert!(e.store().order("51").is_none());
+    response(&mut e, &ticker, 20.0, TICKERS);
+    e.handle(25.0, Event::HttpEnd { request: algo.id });
+    let mut reads = requests(&mut e);
+    let reread = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &take(&mut reads, "/v1/orders?"), 30.0, &page(""));
+    response(&mut e, &reread, 30.0, &algos(stop));
+    assert_eq!(
+        e.store()
+            .order("51")
+            .expect("stop visible after the re-read")
+            .kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+}
+
+const ETH_POSITION: &str = r#"{"symbol":"PERP_ETH_USDT","holding":1,"averageOpenPrice":3000,"markPrice":3100,"leverage":5,"marginMode":"CROSS"}"#;
+const ETH_MARKET: &str = r#"{"symbol":"PERP_ETH_USDT","base_tick":0.01,"quote_tick":0.01,"base_min":0.01,"base_max":1000,"base_imr":0.05}"#;
+
+fn positions_with_eth() -> String {
+    POS.replace("]}}", &format!(",{ETH_POSITION}]}}}}"))
+}
+
+#[test]
+fn an_anonymous_catalogue_row_never_holds_exposure_on_other_unlisted_markets() {
+    let catalogue = MARKETS.replace("]}", r#",{"symbol":3}]}"#);
+    let (mut e, _, mut reads, _) = start_with(&catalogue);
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, INFO);
+    reads.extend(requests(&mut e));
+    let pos = take(&mut reads, "/v3/positions");
+    response(&mut e, &pos, 40.0, &positions_with_eth());
+    let regular = take(&mut reads, "/v1/orders?");
+    response(
+        &mut e,
+        &regular,
+        50.0,
+        &page(&ORDER.replace("PERP_BTC_USDT", "PERP_ETH_USDT")),
+    );
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 60.0, &algos(ALGO));
+    let loaded = e.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "BTCUSDT");
+    assert!(e.store().order("9007199254740993").is_none());
+    assert!(e.store().orders().iter().all(|o| o.symbol == "BTCUSDT"));
+    assert!(!e.store().orders().is_empty());
+}
+
+#[test]
+fn a_position_on_a_named_malformed_catalogue_row_holds_the_snapshot() {
+    let catalogue = MARKETS.replace("]}", r#",{"symbol":"PERP_ETH_USDT"}]}"#);
+    let (mut e, _, mut reads, _) = start_with(&catalogue);
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, INFO);
+    reads.extend(requests(&mut e));
+    let pos = take(&mut reads, "/v3/positions");
+    response(&mut e, &pos, 40.0, &positions_with_eth());
+    assert!(!e.store().loaded().positions);
+    assert!(e.store().positions().is_empty());
+}
+
+#[test]
+fn partial_catalogue_is_reread_and_releases_the_repaired_market() {
+    let catalogue = MARKETS.replace("]}", r#",{"symbol":"PERP_ETH_USDT"}]}"#);
+    let (mut e, _, mut reads, poll, retry) = start_with_retry(&catalogue);
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    let retry = retry.expect("partial catalogue schedules a re-read");
+    e.handle(1010.0, Event::TimerFired { timer: retry });
+    let reread = requests(&mut e);
+    assert_eq!(reread.len(), 1);
+    assert!(reread[0].url.ends_with("/v1/public/info"));
+    response(
+        &mut e,
+        &reread[0],
+        1020.0,
+        &MARKETS.replace("]}", &format!(",{ETH_MARKET}]}}")),
+    );
+    assert!(e.store().market("ETHUSDT").is_some());
+    let after: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !after.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::WsConnect { .. } | Action::SetTimer { .. }
+        )),
+        "the refresh neither restarts the account nor schedules another re-read"
+    );
+    e.handle(2010.0, Event::TimerFired { timer: poll });
+    let mut reads = requests(&mut e);
+    let pos = take(&mut reads, "/v3/positions");
+    response(&mut e, &pos, 2020.0, &positions_with_eth());
+    assert!(e.store().positions().iter().any(|p| p.symbol == "ETHUSDT"));
 }

@@ -3,7 +3,7 @@
 use crate::model::CancelOrderRef;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
-use crate::model::{PlaceOrderOpts, PositionSide};
+use crate::model::{Interval, PlaceOrderOpts, PositionSide};
 use crate::{Command, Query};
 use serde::Deserialize;
 
@@ -40,11 +40,11 @@ enum CommandIn {
     },
     SubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     UnsubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     PlaceOrders {
         command: u32,
@@ -127,6 +127,18 @@ enum CommandIn {
         command: u32,
         tier: String,
     },
+    FetchBalanceInfo {
+        command: u32,
+    },
+    FetchClosedPositions {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -190,7 +202,7 @@ enum CommandIn {
     FetchCandles {
         command: u32,
         symbol: String,
-        interval: String,
+        interval: Interval,
         #[serde(default)]
         limit: Option<u32>,
         #[serde(default)]
@@ -312,6 +324,23 @@ impl From<CommandIn> for Command {
             CommandIn::SetAccountTier { command, tier } => Self::Venue {
                 command,
                 action: crate::VenueAction::SetAccountTier { tier },
+            },
+            CommandIn::FetchBalanceInfo { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchBalanceInfo,
+            },
+            CommandIn::FetchClosedPositions {
+                command,
+                symbol,
+                from,
+                to,
+            } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol,
+                    from_ms: from,
+                    to_ms: to,
+                },
             },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchMaxLeverage { command, symbol } => {
@@ -443,8 +472,8 @@ pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Er
         enum Subscription {
             SubscribeOrderBook { symbol: String },
             UnsubscribeOrderBook { symbol: String },
-            SubscribeCandles { symbol: String, interval: String },
-            UnsubscribeCandles { symbol: String, interval: String },
+            SubscribeCandles { symbol: String, interval: Interval },
+            UnsubscribeCandles { symbol: String, interval: Interval },
         }
         let command = match serde_json::from_str::<Subscription>(json)? {
             Subscription::SubscribeOrderBook { symbol } => Command::SubscribeOrderBook { symbol },
@@ -515,6 +544,7 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
                 "Polling interval must be positive or null to pause",
             ));
         }
+        let interval_ms = crate::engine::bounded_tick_interval(interval_ms);
         return Ok(HostInput::TickIntervalChanged { interval_ms });
     }
     decode_command(json).map(HostInput::Command)
@@ -540,6 +570,30 @@ mod tests {
             Command::Venue {
                 command: 6,
                 action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
+    #[test]
+    fn balance_info_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchBalanceInfo","command":8}"#).unwrap(),
+            Command::Venue {
+                command: 8,
+                action: crate::VenueAction::FetchBalanceInfo,
+            }
+        );
+    }
+    #[test]
+    fn closed_positions_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchClosedPositions","command":7,"from":1,"to":2}"#).unwrap(),
+            Command::Venue {
+                command: 7,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol: None,
+                    from_ms: Some(1.0),
+                    to_ms: Some(2.0),
+                },
             }
         );
     }
@@ -739,7 +793,9 @@ mod tests {
     fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
         assert_eq!(
             decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
-            HostInput::TickIntervalChanged { interval_ms: 123.5 }
+            HostInput::TickIntervalChanged {
+                interval_ms: 1_000.0
+            }
         );
         assert_eq!(
             decode_host_input(r#"{"op":"setTick\u0049nterval","interval":null}"#).unwrap(),
@@ -747,6 +803,25 @@ mod tests {
                 interval_ms: f64::INFINITY
             }
         );
+    }
+
+    #[test]
+    #[cfg(feature = "polling-control")]
+    fn polling_intervals_cannot_create_request_floods_or_overflow_timers() {
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1.0, 1_000.0),
+            (2_000.0, 2_000.0),
+            (1e300, 120_000.0),
+        ] {
+            let json = format!(r#"{{"op":"setTickInterval","interval":{input}}}"#);
+            assert_eq!(
+                decode_host_input(&json).unwrap(),
+                HostInput::TickIntervalChanged {
+                    interval_ms: expected
+                }
+            );
+        }
     }
 
     #[test]
@@ -834,5 +909,33 @@ mod tests {
             decode_command(r#"{"op":"setPositionMode","command":9,"hedged":true,"symbol":17}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn candle_intervals_parse_once_and_unknown_spellings_are_rejected() {
+        for interval in Interval::ALL {
+            assert_eq!(Interval::parse(interval.as_str()), Some(interval));
+            let json = format!(
+                r#"{{"op":"fetchCandles","command":3,"symbol":"BTC","interval":"{interval}"}}"#
+            );
+            assert!(matches!(
+                decode_command(&json).unwrap(),
+                Command::FetchCandles { interval: parsed, .. } if parsed == interval
+            ));
+        }
+        assert_eq!(Interval::Mo1.ms(), 2_592_000_000.0);
+        assert_eq!(Interval::H24.ms(), Interval::D1.ms());
+        for bad in ["7m", "1H", "", "60", "1mo"] {
+            let fetch =
+                format!(r#"{{"op":"fetchCandles","command":3,"symbol":"BTC","interval":"{bad}"}}"#);
+            let error = decode_command(&fetch).unwrap_err().to_string();
+            assert!(
+                error.contains("Unsupported candle interval"),
+                "{bad}: {error}"
+            );
+            let subscribe =
+                format!(r#"{{"op":"subscribeCandles","symbol":"BTC","interval":"{bad}"}}"#);
+            assert!(decode_subscription(&subscribe).is_err(), "{bad}");
+        }
     }
 }

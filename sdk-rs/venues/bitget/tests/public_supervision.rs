@@ -185,11 +185,15 @@ fn suppressed_public_feed_is_not_supervised() {
         closed: vec![],
         timers: vec![],
         done: vec![],
+        failures: vec![],
         logs: vec![],
         command_errors: vec![],
         command_notices: vec![],
         progress: vec![],
         progress_at_request: vec![],
+        expect_startup_failure: false,
+        startup_failures: vec![],
+        deactivations: 0,
     };
     h.engine.start(h.now);
     h.collect();

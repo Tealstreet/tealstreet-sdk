@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket } from './live-smoke.mjs';
+import { LIVE_SMOKE_MAX_NOTIONAL, smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket } from './live-smoke.mjs';
 import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { subscriptionKey } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 
-const market = { symbol: 'BTCUSDT', id: 'BTC/USDT:USDT', flags: MARKET_FLAG.ACTIVE,
+const market = { symbol: 'BTCUSDT', id: 'BTC/USDT:USDT', quote: 'USDT', flags: MARKET_FLAG.ACTIVE,
   precisionPrice: 0.1, precisionAmount: 0.001, minAmount: 0.001, maxAmount: 1000, minPrice: NaN, contractSize: NaN };
 const book = { bids: [100000, 1, 1], asks: [100001, 1, 1] };
 
@@ -25,10 +25,10 @@ test('default selection includes reviewed Bitget simulation quotes', () => {
 });
 
 test('minimum resting order is aligned and covers notional at its lower amended price', () => {
-  const order = smokeOrder(market, book, { minNotional: 100, lowerMultiplier: 0.8, notionalKnown: true });
-  assert.deepEqual(order, { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.002, price: 90000, amendPrice: 89000 });
-  assert.ok(order.amount * order.amendPrice >= 100);
-  assert.ok((order.amount - market.precisionAmount) * order.amendPrice < 100);
+  const order = smokeOrder(market, book, { minNotional: 50, lowerMultiplier: 0.8, notionalKnown: true });
+  assert.deepEqual(order, { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.001, price: 90000, amendPrice: 89000, timeInForce: 'PostOnly' });
+  assert.ok(order.amount * order.amendPrice >= 50);
+  assert.ok((order.amount - market.precisionAmount) * order.amendPrice < 50);
 });
 
 test('inverse minimum notional uses quote contracts', () => {
@@ -37,9 +37,9 @@ test('inverse minimum notional uses quote contracts', () => {
 });
 
 test('native lot rules override display quantities and bound the native maximum', () => {
-  const rules = { notionalKnown: true, minNotional: 100, minimumAmount: 1, amountStep: 1,
+  const rules = { notionalKnown: true, minNotional: 50, minimumAmount: 1, amountStep: 1,
     maximumAmount: 2, notionalPerAmount: 0.001, quoteQuantity: false };
-  assert.equal(smokeOrder({ ...market, minAmount: 0.001, maxAmount: 0.002 }, book, rules).amount, 2);
+  assert.equal(smokeOrder({ ...market, minAmount: 0.001, maxAmount: 0.002 }, book, rules).amount, 1);
   assert.throws(() => smokeOrder(market, book, { ...rules, minNotional: 200 }), /minimum-exceeds/);
   assert.equal(smokeOrder({ ...market, minAmount: 0 }, book, { ...rules, minNotional: 0 }).amount, 1);
 });
@@ -90,4 +90,36 @@ test('failed/aborted captures cannot gate as completed live lifecycle proof', ()
   assert.throws(() => assertLiveSmokeComplete([meta, { type: 'live-smoke-result', ok: true, cleanupComplete: true, authoritative: true, stage: 'complete', symbol: 'BTCUSDT', commands: [] },
     { type: 'live-smoke-verification', ok: true }]), /missing/);
   assert.doesNotThrow(() => assertLiveSmokeComplete([{ type: 'meta', private: true }]));
+});
+
+
+test('fixed live notional cap rejects rounded minimums, inverse face value and contract scales', () => {
+  assert.equal(LIVE_SMOKE_MAX_NOTIONAL, 100);
+  for (const [selected, rules] of [
+    [market, { notionalKnown: true, minNotional: 100 }],
+    [{ ...market, minAmount: 1, precisionAmount: 1 }, { notionalKnown: true, minNotional: 0 }],
+    [{ ...market, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE, minAmount: 1, precisionAmount: 1, contractSize: 101 },
+      { notionalKnown: true, minNotional: 0 }],
+    [market, { notionalKnown: true, minimumAmount: 1, amountStep: 1, maximumAmount: 1000, notionalPerAmount: 0.002 }],
+    [market, { notionalKnown: true, minNotional: 0, notionalPerAmount: Number.MAX_VALUE }],
+  ]) assert.throws(() => smokeOrder(selected, book, rules), /notional-cap-exceeded/);
+  for (const minNotional of [NaN, Infinity, -1])
+    assert.throws(() => smokeOrder(market, book, { notionalKnown: true, minNotional }), /unknown-minimum/);
+  const order = smokeOrder(market, book, { notionalKnown: true, minNotional: 50 }, true);
+  assert.equal(order.timeInForce, 'PostOnly');
+  assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
+  assert.ok(order.amount * order.amendPrice <= LIVE_SMOKE_MAX_NOTIONAL);
+  for (const option of ['--max-notional', '--notional-cap', '--amount', '--price'])
+    assert.throws(() => smokeArgs(['--venue', 'binance', option, '999999']));
+});
+
+
+test('explicit market selection cannot treat a BTC or ETH quote as a dollar notional', () => {
+  for (const quote of ['BTC', 'ETH', '', undefined]) {
+    const selected = { ...market, quote };
+    assert.equal(selectSmokeMarket([selected], market.symbol), undefined);
+    assert.throws(() => smokeOrder(selected, book, { notionalKnown: true }), /unknown-notional-currency/);
+  }
+  assert.equal(smokeOrder(market, book, { notionalKnown: true }).timeInForce, 'PostOnly');
+  assert.equal(smokeOrder(market, book, { notionalKnown: true }, false).timeInForce, undefined);
 });

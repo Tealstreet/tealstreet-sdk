@@ -7,9 +7,10 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -46,6 +47,13 @@ pub struct Options {
     pub application_id: Option<String>,
     pub tick_interval: Option<f64>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
 
 /// Whether `key` and `secret` are base58 Ed25519 keys this venue can sign with.
 pub fn signing_keys_valid(key: &str, secret: &str) -> bool {
@@ -72,17 +80,33 @@ pub enum Pending {
         to: Option<f64>,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
     payload_at: f64,
     recover: bool,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Connection {
+    fn new(auth_timeout_ms: Option<f64>) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            payload_at: 0.0,
+            recover: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms,
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(10_000.0),
+                ..Config::default()
+            }),
+        }
+    }
+    fn payload_stale(&self, now: f64) -> bool {
+        now - self.payload_at >= 30_000.0
+    }
 }
 struct Delta {
     ts: u64,
@@ -105,10 +129,10 @@ enum Seed {
 }
 
 pub struct Orderly {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     native: HashMap<String, String>,
     seed_backoff: safe_cex_engine::startup::Backoff<Seed>,
     generation: u64,
@@ -119,9 +143,10 @@ pub struct Orderly {
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
-            public: Connection::default(),
+            public: Connection::new(None),
             books: HashMap::new(),
             candles: HashMap::new(),
             native: HashMap::new(),
@@ -176,15 +201,23 @@ impl Orderly {
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.open = false;
-        self.public.received = cx.now;
         self.public.payload_at = cx.now;
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_feed(
             self.public_url(),
             safe_cex_engine::SocketChannel::Public,
             "market",
             self.public.recover,
         ));
-        self.public.watchdog = Some(cx.set_timer(10000.0));
+    }
+    fn drop_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(socket) = self.public.socket {
+            cx.close(socket);
+            self.on_close(cx, socket, 1006);
+        }
     }
     fn public_topic_available(&self, cx: &mut Cx<'_, Pending>) -> bool {
         if self.books.len() + self.candles.len() >= 97 {
@@ -466,7 +499,6 @@ impl Orderly {
                     {
                         self.public.payload_at = cx.now;
                         self.public.recover = false;
-                        self.public.attempts = 0;
                         cx.store.update_ticker(&symbol, |t| match topic {
                             "tickers" => {
                                 t.last = r.close.unwrap().0;
@@ -502,8 +534,9 @@ impl Orderly {
                             }
                         };
                         self.depth(cx, &s, env.ts, d)?;
-                    } else if let Some(interval) = suffix.strip_prefix("kline_")
-                        && self.candles.contains_key(&(s.clone(), interval.into()))
+                    } else if let Some(interval) =
+                        suffix.strip_prefix("kline_").and_then(Interval::parse)
+                        && self.candles.contains_key(&(s.clone(), interval))
                     {
                         let k: Kline =
                             serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
@@ -556,14 +589,16 @@ fn native_parts(native: &str) -> Option<(&str, &str)> {
     }
     Some((base, settlement))
 }
-fn interval_valid(i: &str) -> bool {
-    matches!(
-        i,
-        "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "12h" | "1d" | "1w"
-    )
+// Orderly kline types are the TS spellings.
+fn interval_valid(i: Interval) -> bool {
+    use Interval::*;
+    matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1)
 }
 
 impl Venue for Orderly {
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
+        self.account_tick_interval(cx, interval_ms);
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -588,13 +623,9 @@ impl Venue for Orderly {
         if self.public.socket != Some(socket) || self.public.open {
             return;
         }
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         self.public.open = true;
-        self.public.received = cx.now;
         self.public.ping_at = cx.now;
-        self.public.watchdog = Some(cx.set_timer(10000.0));
+        self.public.supervisor.opened(cx);
         cx.send(socket, "{\"event\":\"ping\"}");
         for topic in ["tickers", "bbos", "markprices"] {
             self.subscribe(cx, topic, true);
@@ -636,7 +667,7 @@ impl Venue for Orderly {
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         if let Err(e) = self.public_message(cx, text) {
             cx.log(LogLevel::Error, e);
         }
@@ -654,9 +685,7 @@ impl Venue for Orderly {
         }
         self.public.open = false;
         self.public.socket = None;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
+        self.public.supervisor.retry(cx);
         for state in self.books.values_mut() {
             state.last = None;
             state.bridge = true;
@@ -668,10 +697,6 @@ impl Venue for Orderly {
                 cx.clear_timer(t);
             }
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(self.public.attempts.min(6) as i32 - 1)).min(30000.0)),
-        );
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         if let Pending::Account(request) = pending {
@@ -879,7 +904,19 @@ impl Venue for Orderly {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_lost(cx, request, error),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network);
+                if request.is_read() {
+                    self.trade_failed(cx, request, error)
+                } else {
+                    self.trade_lost(
+                        cx,
+                        request,
+                        error.outcome(safe_cex_engine::Outcome::Unknown),
+                    )
+                }
+            }
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
@@ -903,28 +940,26 @@ impl Venue for Orderly {
             self.seed(cx, kind);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if !self.public.open
-                || cx.now - self.public.received >= 20000.0
-                || cx.now - self.public.payload_at >= 30000.0
-            {
-                self.public.recover =
-                    !self.public.open || cx.now - self.public.payload_at >= 30000.0;
-                let socket = self.public.socket.unwrap();
-                cx.close(socket);
-                self.on_close(cx, socket, 1006);
-            } else {
-                self.public.ping_at = cx.now;
-                cx.send(self.public.socket.unwrap(), "{\"event\":\"ping\"}");
-                self.public.watchdog = Some(cx.set_timer(10000.0));
+        match self.public.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => {}
+            SocketTick::Reconnect => return self.connect_public(cx),
+            SocketTick::Ping if self.public.payload_stale(cx.now) => {
+                self.public.recover = true;
+                return self.drop_public(cx);
             }
-            return;
+            SocketTick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    self.public.ping_at = cx.now;
+                    cx.send(socket, "{\"event\":\"ping\"}");
+                }
+                return;
+            }
+            SocketTick::TimedOut(timeout) => {
+                self.public.recover =
+                    timeout == Timeout::Connect || self.public.payload_stale(cx.now);
+                return self.drop_public(cx);
+            }
+            SocketTick::Handled => return,
         }
         let timed = self
             .books
@@ -997,22 +1032,19 @@ impl Venue for Orderly {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if (cx.store.loaded().markets && !self.native.contains_key(&symbol))
-                    || !interval_valid(&interval)
-                {
+                if !interval_valid(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Orderly"));
                     return;
                 }
-                if !self
-                    .candles
-                    .contains_key(&(symbol.clone(), interval.clone()))
+                if cx.store.loaded().markets && !self.native.contains_key(&symbol) {
+                    return;
+                }
+                if !self.candles.contains_key(&(symbol.clone(), interval))
                     && !self.public_topic_available(cx)
                 {
                     return;
                 }
-                let n = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let n = self.candles.entry((symbol.clone(), interval)).or_default();
                 *n = n.saturating_add(1);
                 if *n == 1 && self.native.contains_key(&symbol) {
                     self.subscribe(
@@ -1023,7 +1055,7 @@ impl Venue for Orderly {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(n) = self.candles.get_mut(&key) {
                     *n = n.saturating_sub(1);
                     if *n > 0 {
@@ -1049,8 +1081,11 @@ impl Venue for Orderly {
                     cx.done(command, Err("Orderly unknown symbol".into()));
                     return;
                 };
-                if !interval_valid(&interval)
-                    || limit == Some(0)
+                if !interval_valid(interval) {
+                    cx.done(command, Err(interval.unsupported("Orderly")));
+                    return;
+                }
+                if limit == Some(0)
                     || [from_ms, to_ms]
                         .into_iter()
                         .flatten()

@@ -1,5 +1,7 @@
 //! Contract payloads follow BingX-API/api-ai-skills swap-market/api-reference.md.
-use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
+};
 use safe_cex_venue_bingx::{Bingx, Options};
 
 fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
@@ -125,7 +127,7 @@ fn candle_rows_sort_by_time_and_use_seconds() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: None,
             to_ms: Some(120000.),
@@ -156,7 +158,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
         Event::Command(Command::FetchCandles {
             command: 77,
             symbol: "BTCUSDT".into(),
-            interval: "💥".into(),
+            interval: safe_cex_engine::model::Interval::S1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -349,4 +351,72 @@ fn supervisor_retains_backoff_across_open_flaps_and_bounds_connecting() {
             );
         }
     }
+}
+
+#[derive(Default)]
+struct Suppressed {
+    requests: Vec<RequestId>,
+    timers: Vec<(TimerId, f64)>,
+    connects: usize,
+    closes: usize,
+}
+
+impl Suppressed {
+    fn collect(&mut self, e: &mut Engine<Bingx>) {
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(r) => self.requests.push(r.id),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } => self.connects += 1,
+                Action::WsClose { .. } => self.closes += 1,
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(Bingx::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
+    e.start(0.);
+    let mut h = Suppressed::default();
+    h.collect(&mut e);
+    for body in [
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
+    ] {
+        let request = h.requests.remove(0);
+        let response = Response {
+            status: 200,
+            headers: "",
+            body,
+        };
+        e.handle(1., Event::HttpResponse { request, response });
+        h.collect(&mut e);
+    }
+    assert_eq!(e.store().markets().len(), 1, "public startup completed");
+    let mut fired = 0;
+    while let Some(&(timer, at)) = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= 600_000.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        h.timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        h.collect(&mut e);
+        fired += 1;
+    }
+    assert_eq!(
+        (h.connects, h.closes),
+        (0, 0),
+        "no public connects or closes"
+    );
+    assert_eq!(fired, 0, "no supervision timers fire");
 }

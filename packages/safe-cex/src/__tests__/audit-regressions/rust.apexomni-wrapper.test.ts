@@ -107,6 +107,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
       remoteSigning: false,
       enableSpotMarkets: false,
       publicFeed: { mode: 'direct' },
+      accountStartup: true,
     });
   });
 

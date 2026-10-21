@@ -1,9 +1,18 @@
 import { isWriteRequest } from './requests.mjs';
+import { tapeHeaders } from './tape-fields.mjs';
 
 // Polling transports have HTTP activity and loaded state, without a socket.
 export const replayTransportReady = (venue, openSockets, loaded = true) =>
   loaded && (venue.polling === true || openSockets > 0);
 export const deterministicReplay = (venue, isPrivate) => venue.polling === true || venue.virtualPrivateClock === true || !isPrivate;
+// Public/polling startup can finish at a different wall time when protocol
+// auditing is enabled. Keep its pending poll deadlines anchored to tape epoch,
+// just like an explicitly virtual private replay, instead of carrying that
+// startup wall-time jitter into the measured transport workload.
+export const frozenReplayStartup = (venue, isPrivate) => !isPrivate || venue.polling === true || venue.virtualPrivateClock === true;
+// A venue whose private engine paces REST by absolute deadlines keeps a
+// monotonic clock: its tape epoch follows the virtual time startup consumed.
+export const continuousReplayStartup = (venue, isPrivate) => isPrivate && venue.virtualPrivateClock === true && venue.monotonicReplayClock === true;
 export const recordingReady = (venue, { frames, httpResponses, loaded, books, requestedBooks }) =>
   (venue.polling === true ? httpResponses > 0 && loaded : frames > 0) && books >= requestedBooks;
 
@@ -70,7 +79,8 @@ export const createRecordingPolicy = (venue, options, credentialed = false) => {
   return {
     replayOptions,
     sanitize(record) {
-      if (!session) return record;
+      if (!session) return Object.hasOwn(record, 'headers') ? { ...record,
+        headers: tapeHeaders(record.headers).map(([name, value]) => `${name}: ${value}`).join('\n') } : record;
       for (const field of ['body', 'requestBody']) {
         try { collectSecrets(JSON.parse(record[field]), secrets); } catch { /* Not JSON. */ }
       }

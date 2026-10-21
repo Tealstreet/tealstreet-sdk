@@ -20,10 +20,18 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
   `StartupFailed{error}` rejects `start()`; Bybit fails startup on definitive
   key rejections (10003/10004 after resend/10010/33004) of its signed fee read.
-- Secrets in logs: 53 log sites interpolate raw bodies; Bitrue logs whole
-  private frames (`bitrue/src/account.rs:700`), Bybit logs the signed request
-  body (`bybit/src/lib.rs:550`); native transport errors include signed URLs
-  (`hosts/native/src/transport.rs:390,404`).
+- Secrets in logs: ~~53 log sites interpolate raw bodies (broader sweep remains).~~
+  Swept: direct body interpolation is gone. Non-2xx `HTTP {status}: {body}`
+  failures keep the venue's error envelope as an actionable message. Every
+  private replay now fails if any log line or command result quotes a replay
+  credential or a signed query (`harness/notice-leaks.mjs`).
+  ~~Bitrue logs whole private frames (`bitrue/src/account.rs:700`), Bybit logs
+  the signed request body (`bybit/src/lib.rs:550`); native transport errors
+  include signed URLs (`hosts/native/src/transport.rs:390,404`).~~ Fixed at
+  private diagnostic/signing and native connection-error boundaries, with
+  all-notice credential/URL regressions. Current reqwest body-stream errors
+  already omit URLs; that path is regression coverage, not a reproduced fix.
+  Ordinary business rejection messages remain actionable.
 - Native and Durable Object hosts drop logs with no client attached; an
   oversized native broadcast disconnects every peer (`server.rs:386`).
 
@@ -91,8 +99,8 @@ discarded, rows skipped, last private message) exposed via `getHealth()`.
 Hosts forward events and write Warn+ to stderr/console with no client.
 
 PRs: (1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
-HTTP failure, no-client fallback; (2) redaction sweep with a test that fails on
-secrets in any notice; (3) engine-level ws and auth counting; (4) venue batches
+HTTP failure, no-client fallback; ~~(2) redaction sweep with a test that fails on
+secrets in any notice~~ (every private replay checks every notice); (3) engine-level ws and auth counting; (4) venue batches
 assigning codes and fixing levels (keep message text stable); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.
 
@@ -112,9 +120,11 @@ Low risk, do first:
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
    settle it.~~ Done: `engine::url` dialects and `Query`; Kraken's form
    spelling and AsterDEX's raw-value query stay venue-specific.
-3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
-   Migrate with constants unchanged, then jitter, then one startup-retry policy
-   (fixes startup fail-closed on OKX, BloFin, Bitget).
+3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
+   Migrate with constants unchanged, then jitter~~ (done: one schedule shared
+   with `engine::socket::Supervisor`, reconnects jittered); then one
+   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget),
+   landing with the public-startup PR.
 4. ~~`engine::time`: ISO/civil-date math in 9 venues.~~ Done: civil math,
    month arithmetic and ISO formatting shared; venue text grammars stay local.
 
@@ -126,8 +136,10 @@ Medium:
    (crate and host wiring done; TS credential checks moving in batches);
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.
-7. Typed `Interval` parsed once; venues reject unsupported intervals instead of
-   silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).
+7. ~~Typed `Interval` parsed once; venues reject unsupported intervals instead of
+   silently falling back (Hyperliquid 1m, TxFlow 30d, AsterDEX 1h).~~ Done:
+   `model::Interval` decoded at the command boundary; AsterDEX, Kraken and
+   Kraken Spot fallbacks removed.
 
 Bridge (contract change):
 8. Engine-reported capabilities replace 76 venue-name branches in
@@ -144,5 +156,9 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`),
-`RangeWalk` for the 16 hand-rolled history paginators, one `SocketSpec`.
+(done: `engine::test_support`), one `SocketSpec`.
+~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
+`windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
+Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,
+Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
+[RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).

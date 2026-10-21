@@ -2,6 +2,7 @@
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
@@ -26,6 +27,7 @@ const RETAINED_EXECUTIONS: usize = 20_000;
 const PING_MS: f64 = 15_000.0;
 const SILENCE_MS: f64 = 45_000.0;
 const REPAIR_MS: f64 = 750.0;
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     ListenKey {
@@ -82,6 +84,8 @@ pub struct Account {
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
     balance_in_flight: Option<u64>,
+    mode_guard: StaleGuard,
+    balance_guard: StaleGuard,
     poll_count: u8,
     last_positions: f64,
     cumulative_fills: HashMap<String, f64>,
@@ -251,8 +255,21 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
-    pub fn set_skipped_markets(&mut self, symbols: impl Iterator<Item = String>) {
-        self.skipped_markets = symbols.filter(|s| !s.is_empty()).collect();
+    /// Keeps earlier malformed markets the new catalogue still lacks; returns the
+    /// malformed count before and after.
+    pub fn set_skipped_markets(
+        &mut self,
+        store: &safe_cex_engine::store::Store,
+        symbols: impl Iterator<Item = String>,
+    ) -> (usize, usize) {
+        let before = self.skipped_markets.len();
+        self.skipped_markets
+            .extend(symbols.filter(|s| !s.is_empty()));
+        self.skipped_markets
+            .retain(|symbol| store.market(symbol).is_none());
+        self.reported_markets
+            .retain(|symbol| store.market(symbol).is_none());
+        (before, self.skipped_markets.len())
     }
     /// Whether a row's market is unknown; a market dropped at startup is an error once.
     fn untracked_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
@@ -571,11 +588,18 @@ impl Account {
                 let symbol = row.symbol.replace('-', "");
                 if self.untracked_market(cx, &symbol) {
                     if row.position_amt != 0.0 {
-                        *unavailable = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            "BingX owned position market unavailable; preserving previous snapshot",
-                        );
+                        if self.skipped_markets.contains(&symbol) {
+                            *unavailable = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "BingX owned position market unavailable; preserving previous snapshot",
+                            );
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Skipping BingX position on uncatalogued market {symbol}"),
+                            );
+                        }
                     }
                     return;
                 }
@@ -667,11 +691,21 @@ impl Account {
                 }
                 if self.untracked_market(cx, &order.symbol) {
                     if order.status == OrderStatus::Open {
-                        *unavailable = true;
-                        cx.log(
-                            LogLevel::Warning,
-                            "BingX working order market unavailable; preserving previous orders",
-                        );
+                        if self.skipped_markets.contains(&order.symbol) {
+                            *unavailable = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "BingX working order market unavailable; preserving previous orders",
+                            );
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!(
+                                    "Skipping BingX order on uncatalogued market {}",
+                                    order.symbol
+                                ),
+                            );
+                        }
                     }
                     return;
                 }
@@ -751,7 +785,15 @@ impl Account {
             }
             Request::PositionMode { revision } => {
                 self.mode_in_flight = false;
-                if revision != self.positions_revision {
+                let current = revision == self.positions_revision;
+                // Only discovery may commit a stale read; a known mode, possibly
+                // just set by a command, waits for a current one.
+                let admit = if self.mode_known {
+                    current
+                } else {
+                    self.mode_guard.admit(current, STALE_SNAPSHOT_LIMIT)
+                };
+                if !admit {
                     self.fetch_mode(cx, credentials);
                     return;
                 }
@@ -766,6 +808,9 @@ impl Account {
                     }
                     Err(_) => cx.log(LogLevel::Error, "BingX malformed position mode response"),
                 }
+                if !current {
+                    self.fetch_mode(cx, credentials);
+                }
             }
             Request::Balance {
                 revision,
@@ -778,7 +823,8 @@ impl Account {
                     cx.log(LogLevel::Error, "BingX malformed balance snapshot");
                     return;
                 }
-                if revision == self.balance_revision {
+                let current = revision == self.balance_revision;
+                if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT) {
                     if let Some(balance) = usdt.or(first) {
                         cx.store.set_balance(balance);
                     } else {
@@ -787,7 +833,8 @@ impl Account {
                             "BingX balance snapshot contained no settlement asset",
                         );
                     }
-                } else {
+                }
+                if !current {
                     self.fetch_balance(cx, credentials);
                 }
             }
