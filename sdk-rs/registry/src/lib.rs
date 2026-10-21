@@ -272,6 +272,8 @@ pub fn supported(venue: &str) -> bool {
         "lighter" | "lighter-robinhood" => true,
         #[cfg(feature = "bitrue")]
         "bitrue" => true,
+        #[cfg(feature = "bitunix")]
+        "bitunix" => true,
         #[cfg(feature = "backpack")]
         "backpack" => true,
         #[cfg(feature = "blofin")]
