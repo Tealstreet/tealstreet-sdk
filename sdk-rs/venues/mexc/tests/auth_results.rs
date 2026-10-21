@@ -143,7 +143,6 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
         (200, r#"{"success":false,"code":513,"message":"602"}"#),
         (429, r#"{"success":false,"code":510}"#),
         (200, r#"{"success":true,"code":0}"#),
-        (200, r#"{"success":true,"code":0,"data":[false]}"#),
         (401, r#"<html>unauthorized</html>"#),
     ] {
         let (mut e, a) = started(true);
@@ -180,6 +179,63 @@ fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_reads() {
     );
     // Plan orders still refuse the key, so stop orders' success is no evidence.
     assert!(orders(&reply(&mut e, &stop, 200, ok)).is_empty());
+}
+
+#[test]
+fn row_failures_do_not_withhold_successful_envelope_evidence() {
+    for read in [false, true] {
+        for (path, scope) in [
+            ("account/assets", AccountReadScope::Balance),
+            ("position/open_positions", AccountReadScope::Positions),
+            ("order/list/open_orders", AccountReadScope::Orders),
+            ("planorder/list/orders", AccountReadScope::Orders),
+            ("stoporder/list/orders", AccountReadScope::Orders),
+        ] {
+            let (mut e, all) = started(read);
+            let r = http(&all, path);
+            let a = reply(
+                &mut e,
+                &r,
+                200,
+                r#"{"success":true,"code":0,"data":[false]}"#,
+            );
+            assert_eq!(
+                auth(&a),
+                [(
+                    if read {
+                        CredentialSlot::Secondary
+                    } else {
+                        CredentialSlot::Primary
+                    },
+                    scope,
+                    AuthOutcome::Accepted
+                )],
+                "{path}"
+            );
+        }
+    }
+}
+
+#[test]
+fn accepted_credentials_still_commit_good_asset_peers_and_report_bad_rows() {
+    let (mut e, all) = started(true);
+    let r = http(&all, "account/assets");
+    let a = reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"success":true,"code":0,"data":[false,{"currency":"USDT","availableBalance":40,"equity":42}]}"#,
+    );
+    assert_eq!(
+        auth(&a),
+        [(
+            CredentialSlot::Secondary,
+            AccountReadScope::Balance,
+            AuthOutcome::Accepted
+        )]
+    );
+    assert_eq!(e.store().balance().total, 42.0);
+    assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)));
 }
 
 #[test]

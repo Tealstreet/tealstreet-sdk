@@ -118,3 +118,19 @@ existing handling. No downstream callers change.
 All 532 Bybit/Binance tests, strict scoped Clippy and formatting pass; independent
 review is clean. The existing headerless-10006 public regression now checks the
 ten-second fallback while preserving its error and recovery assertions.
+
+### Auth evidence follows envelopes, not mapped rows
+
+The follow-up reconciles BingX, MEXC and WEEX through the shared pure
+`AuthOutcome::accepted_list` helper. A typed success envelope with the required
+list accepts credentials even when row mapping fails; missing/malformed required
+data yields no outcome before grouped auth state mutates. Existing typed
+credential rejection, signer selection, fences, financial reducers and non-list
+settings validation stay intact. See [the single rule](RUST_AUTH_RESULTS.md).
+The two old BingX/MEXC false-row None cases are now explicit Accepted cases; all
+other original controls remain. Four baseline regressions reproduce the old
+row-quality gates and MEXC grouped-state clearing; twelve new tests also cover
+valid peers, diagnostics, list shapes and grouped orders/settings recovery.
+All 705 touched-venue/Binance tests and 11 scoped engine tests pass, along with
+strict scoped Clippy and formatting. Independent implementation/final reviews
+are clean. Full CI and the separate merge guard remain the final gates.
