@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExchangeName, Market } from '../../types';
+import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 
 import { mapBlofinClosedPosition } from '../../exchanges/blofin/blofin.income';
 import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';
@@ -16,10 +17,10 @@ afterEach(() => {
   for (const exchange of exchanges.splice(0)) exchange.dispose();
 });
 
-const make = (name: ExchangeName, rows: unknown, options: Record<string, unknown> = {}) => {
+const make = (name: ExchangeName, rows: unknown, options: Record<string, unknown> = {}, capabilities: Partial<EngineCapabilities> = {}) => {
   const exchange = new RustEngineExchange(name, { key: 'k', secret: 's', passphrase: 'p', ...options }, new DefaultStore());
   exchanges.push(exchange);
-  adoptEngineCapabilities(exchange);
+  adoptEngineCapabilities(exchange, capabilities);
   const command = vi
     .spyOn(exchange as unknown as { command: Command }, 'command')
     .mockImplementation(async () => (rows instanceof Error ? Promise.reject(rows) : rows));
@@ -45,6 +46,15 @@ const BYBIT_ROWS = [
 ];
 
 describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
+  it('selects row format and inverse interpretation from the engine record', async () => {
+    const { exchange } = make('binance', [BYBIT_ROWS[0]], {}, {
+      closedPositions: true, closedPositionFormat: 'bybit', inverseClosedPositions: true,
+    });
+    await expect(exchange.fetchClosedPnl({ symbol: 'ETHUSDT', accountName: 'fixture' })).resolves.toEqual([
+      mapBybitClosedPnl(BYBIT_ROWS[0], 'fixture', true),
+    ]);
+  });
+
   it('bybit pages through the engine and maps like the TS venue, newest close first', async () => {
     const { exchange, command } = make('bybit', BYBIT_ROWS);
     const entries = await exchange.fetchClosedPnl({ symbol: 'ETHUSDT', from: 1, to: 2, accountName: 'acct' });

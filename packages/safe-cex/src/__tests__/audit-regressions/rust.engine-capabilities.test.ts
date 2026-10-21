@@ -1,6 +1,6 @@
 import type { EngineCapabilities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeName, Order } from '../../types';
+import type { ExchangeName, Order, StoreData } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,7 +15,7 @@ import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 const running: RustEngineExchange[] = [];
 
 /** A venue whose bridge behaviour comes only from the record its engine reports. */
-const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo') => {
+const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo', native?: () => Partial<StoreData>) => {
   const commands: Array<Record<string, unknown>> = [];
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
@@ -57,10 +57,10 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
   }));
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
-  installNativeStartupFrames(engine, store);
+  installNativeStartupFrames(engine, store, native);
   const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, store);
   running.push(exchange);
-  return { exchange, commands, started };
+  return { exchange, commands, started, engine };
 };
 
 const order = (id: string, symbol: string): Order =>
@@ -81,6 +81,65 @@ describe('Rust bridge routes from the engine capability record', () => {
   afterEach(() => {
     for (const exchange of running.splice(0)) exchange.dispose();
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('waits for pending native startup before history and placement, even after capabilities arrive', async () => {
+    vi.useFakeTimers();
+    let ready = false;
+    const { exchange, commands, started } = fixture({}, 'txflow', () => ({
+      loaded: { markets: ready, tickers: ready, orders: ready, positions: ready, balance: ready },
+    }));
+    const startup = exchange.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).toHaveBeenCalledOnce();
+    expect(exchange.engineCapabilities).toBeDefined();
+    const history = exchange.fetchHistoricalOrders({ from: 1, to: 2 });
+    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(commands.filter((command) => ['fetchOrderHistory', 'placeOrders'].includes(String(command.op)))).toEqual([]);
+    ready = true;
+    await vi.advanceTimersByTimeAsync(250);
+    await startup;
+    await expect(history).resolves.toEqual([]);
+    await expect(placement).resolves.toEqual([]);
+    expect(commands.filter((command) => ['fetchOrderHistory', 'placeOrders'].includes(String(command.op)))).toHaveLength(2);
+  });
+
+  it('settles queued calls through the existing startup disposal lifecycle without dispatching writes', async () => {
+    vi.useFakeTimers();
+    const { exchange, commands } = fixture({}, 'txflow', () => ({
+      loaded: { markets: false, tickers: false, orders: false, positions: false, balance: false },
+    }));
+    const startup = exchange.start();
+    const failedStartup = expect(startup).rejects.toThrow('disposed');
+    await vi.advanceTimersByTimeAsync(0);
+    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    const failedPlacement = expect(placement).rejects.toMatchObject({
+      kind: 'invalidInput', outcome: 'notSent', message: expect.stringContaining('placeOrders: exchange has not started because startup failed'),
+    });
+    exchange.dispose();
+    await failedStartup;
+    await failedPlacement;
+    expect(commands.some((command) => command.op === 'placeOrders')).toBe(false);
+  });
+
+  it('keeps an undispatched queued write notSent when native startup traps', async () => {
+    vi.spyOn(console, 'trace').mockImplementation(() => {});
+    const { exchange, commands, engine } = fixture({}, 'txflow');
+    engine.start = () => { throw new WebAssembly.RuntimeError('fixture startup trap'); };
+    const errors = vi.fn();
+    exchange.on('error', errors);
+    const startup = exchange.start();
+    const startupFailure = expect(startup).rejects.toMatchObject({ code: 'ENGINE_DEAD' });
+    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    await expect(placement).rejects.toMatchObject({
+      kind: 'invalidInput', outcome: 'notSent', cause: { code: 'ENGINE_DEAD' },
+      message: expect.stringContaining('placeOrders: exchange has not started because startup failed'),
+    });
+    await startupFailure;
+    expect(commands.some((command) => command.op === 'placeOrders')).toBe(false);
+    expect(errors).toHaveBeenCalledOnce();
   });
 
   it('routes MEXC snapshot queries without a book subscription', async () => {

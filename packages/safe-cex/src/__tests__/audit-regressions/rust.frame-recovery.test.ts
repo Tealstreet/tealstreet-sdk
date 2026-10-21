@@ -127,6 +127,18 @@ const settle = async () => {
 };
 
 describe('Rust frame recovery callers', () => {
+  it('isolates book callback copies from the engine policy rather than the venue name', () => {
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, new DefaultStore());
+    adoptEngineCapabilities(exchange, { isolatedBookSubscriptions: true });
+    const observed: number[] = [];
+    exchange.listenOrderBook('BTCUSDT', (book) => { book.bids[0].price = 999; });
+    exchange.listenOrderBook('BTCUSDT', (book) => { observed.push(book.bids[0].price); });
+    try {
+      receive(exchange, fixture());
+      expect(observed).toEqual([100]);
+    } finally { exchange.dispose(); }
+  });
+
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -833,6 +845,7 @@ describe('Rust frame recovery callers', () => {
   ])('does not return KuCoin cached leverage %s/%s as confirmed account rails', async (buyLeverage, sellLeverage) => {
     const store = new DefaultStore();
     const exchange = new RustEngineExchange('kucoin', { key: '', secret: '' }, store);
+    adoptEngineCapabilities(exchange);
     receive(exchange, fixture({ fills: 0, leverage: NaN, buyLeverage, sellLeverage }));
     const cached = store.fetchedLeverage.BTCUSDT;
     const maximum = vi.spyOn(exchange, 'fetchSymbolMaxLeverage');

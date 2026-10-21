@@ -62,6 +62,24 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
     marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
     hostClock: is('backpack', 'coinbase', 'coinbasespot', ...ORDERLY),
+    positionHistory: is('kraken', 'bitget', 'bitgetusdc', 'bitgetinverse') ? 'fillsAccount'
+      : is('binance', 'hyperliquid', 'paradex') ? 'fillsSymbol'
+      : is('bybit', 'bybitdemo', 'hyrotrader') ? 'bybit'
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('woo') ? 'wooOrders' : 'unsupported',
+    closedPositionFormat: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse') ? 'bybit'
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : 'unsupported',
+    fillHistoryTime: is('woo') ? 'nonnegativeSecondsOrMilliseconds'
+      : is('apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'kraken', 'coinbase', 'coinbasespot')
+        ? 'secondsOrMilliseconds' : 'asProvided',
+    stpControls: is('asterdex'),
+    bybitExecutionControls: is('bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'),
+    rejectClientSlippage: is('hyrotrader'),
+    finiteCommandNumbers: is('coinbase', 'coinbasespot'),
+    finiteHistoryBounds: is('coinbase', 'coinbasespot'),
+    rejectOrderHistoryFilters: is('txflow', 'coinbase', 'coinbasespot', ...ORDERLY),
+    publicCatalogueValidation: is('breakoutprop'),
+    isolatedBookSubscriptions: is('asterdex'),
+    inverseClosedPositions: is('bybitinverse'),
     ...overrides,
   };
   return JSON.stringify(record);

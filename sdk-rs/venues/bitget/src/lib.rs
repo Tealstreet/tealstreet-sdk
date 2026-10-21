@@ -573,6 +573,7 @@ fn candle(row: &CandleRow) -> Candle {
 impl Venue for BitgetFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::FillsAccount,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             quantity_units: if self.inverse() {
                 safe_cex_engine::QuantityUnits::InverseNative

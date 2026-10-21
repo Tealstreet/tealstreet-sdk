@@ -273,6 +273,7 @@ impl Venue for ApexOmni {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             account: safe_cex_engine::AccountLookup::Query,
             order_history: false,
             income_history: false,

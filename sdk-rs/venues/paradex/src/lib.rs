@@ -89,6 +89,8 @@ impl Venue for Paradex {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::FillsSymbol,
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account: safe_cex_engine::AccountLookup::Query,

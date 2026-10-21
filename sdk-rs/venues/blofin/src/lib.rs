@@ -472,6 +472,9 @@ impl Venue for Blofin {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            position_history: safe_cex_engine::PositionHistory::Blofin,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Blofin,
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
