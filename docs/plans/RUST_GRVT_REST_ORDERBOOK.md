@@ -8,7 +8,7 @@ before merge. Preserve #1679 typed builder errors and NX structural migration.
 
 1. Reproduce native capability/JSON/query refusal. Match TS market-symbol lookup:
    missing market returns an owned empty book without HTTP; mapped markets post
-   unsigned MDG /lite/v1/book with {instrument_id:market.id}, no caller limit,
+   unsigned MDG /lite/v1/book with {i:market.id,d:50}, no caller limit,
    session, account header or signature, on live/testnet roots.
 2. Add an unstreamed command-owned public Book job. Bypass session refresh and
    response cookie/account evidence even for native code1000. Retain existing
@@ -34,3 +34,16 @@ before merge. Preserve #1679 typed builder errors and NX structural migration.
 
 No new product enablement, NX writes, TS deletion, budgets, release automation,
 local release WASM builds or full replay/timing matrices. Four local Cargo jobs.
+
+
+Plan audit correction before implementation:
+- TS's legacy instrument_id request and long-only response mapping do not match
+  the actual lite protocol. The current official [Orderbook Levels schema](https://api-docs.grvt.io/market_data_api/#orderbook-levels) requires i and d,
+  allows depth50 and demonstrates r.b/a with p/s. Use {i:nativeId,d:50}; preserve
+  TS's ignored caller limit, market lookup, order and cumulative base quantities.
+  Decode both lite and full side/level aliases; no decimal metadata rescaling.
+- This is a documented narrow correction to TS, not new product support. Native
+  rate code1006 is RateLimited even on HTTP200; auth-looking public code1000
+  must never enter the existing account_refresh path. HTTP status has precedence.
+- All seven original-source regression groups fail through actual venue calls;
+  standalone JSON remains separately exercised before Cargo admission is enabled.
