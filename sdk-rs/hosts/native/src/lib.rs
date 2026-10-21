@@ -58,6 +58,15 @@ pub fn now_ms() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
 }
 
+/// Cryptographic production providers; replay hosts explicitly replace identity
+/// entropy, and signing entropy only when a test deliberately requests it.
+pub fn production_entropy() -> safe_cex_engine::entropy::Entropy {
+    fn fill(bytes: &mut [u8]) -> Result<(), String> {
+        getrandom::getrandom(bytes).map_err(|error| error.to_string())
+    }
+    safe_cex_engine::entropy::Entropy::new(Box::new(fill), Box::new(fill))
+}
+
 pub struct Host<V: Venue, T: Transport> {
     engine: Engine<V>,
     transport: T,
@@ -80,6 +89,21 @@ impl<V: Venue, T: Transport> Host<V, T> {
             timers: HashMap::new(),
             clock: now_ms,
         }
+    }
+
+    pub fn with_entropy(
+        mut self,
+        fill: safe_cex_engine::entropy::Fill,
+    ) -> Result<Self, safe_cex_engine::VenueError> {
+        self.engine.set_entropy(fill)?;
+        Ok(self)
+    }
+    pub fn with_signing_entropy(
+        mut self,
+        fill: safe_cex_engine::entropy::Fill,
+    ) -> Result<Self, safe_cex_engine::VenueError> {
+        self.engine.set_signing_entropy(fill)?;
+        Ok(self)
     }
 
     /// Feed live configuration alongside transport completions.
@@ -365,7 +389,10 @@ mod timer_tests {
             }
         }
         let order = Rc::new(RefCell::new(Vec::new()));
-        let mut host = Host::new(Engine::new(TimerVenue::default()), Recorded(order.clone()));
+        let mut host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(TimerVenue::default()),
+            Recorded(order.clone()),
+        );
         host.engine.handle(
             0.,
             Event::Command(Command::FetchLeverage {
@@ -385,7 +412,10 @@ mod timer_tests {
 
     #[tokio::test(start_paused = true)]
     async fn huge_future_timer_stays_alive_until_cleared_then_normal_timers_fire() {
-        let mut host = Host::new(Engine::new(TimerVenue::default()), NoNetwork);
+        let mut host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(TimerVenue::default()),
+            NoNetwork,
+        );
         host.clock = || 0.;
         // Exercise raw venue timers independently of the clamped polling control.
         host.engine.start(0.);

@@ -5,7 +5,7 @@ use safe_cex_venue_cryptocom::{Cryptocom, Options};
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":0,"result":{"data":[{"symbol":"BROKENUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true},{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"###;
 fn public_engine() -> Engine<Cryptocom> {
-    Engine::new(Cryptocom::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(Cryptocom::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

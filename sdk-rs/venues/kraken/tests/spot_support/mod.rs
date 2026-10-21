@@ -52,7 +52,7 @@ pub fn ready_with_payloads(
 ) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
     let mut opts = options();
     opts.public_data_only = public;
-    let mut e = Engine::new(KrakenSpot::new(opts));
+    let mut e = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(opts));
     e.start(NOW);
     let mut pubsocket = None;
     let mut private = None;

@@ -19,7 +19,16 @@ fn secondary_get_keeps_primary_mutations() {
     let venue = Blofin::new(options());
     for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
         let headers = venue
-            .headers("/secondary-test", method, 1700000000000.0, "")
+            .headers(
+                |bytes| {
+                    bytes.fill(7);
+                    Ok(())
+                },
+                "/secondary-test",
+                method,
+                1700000000000.0,
+                "",
+            )
             .unwrap();
         let key = if method == Method::Get {
             "read-key"

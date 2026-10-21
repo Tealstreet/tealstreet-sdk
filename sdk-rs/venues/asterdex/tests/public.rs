@@ -33,7 +33,7 @@ impl Harness {
 
     fn start_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut harness = Self {
-            engine: Engine::new(AsterDex::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(options)),
             now: 1_700_000_000_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),

@@ -191,9 +191,8 @@ fn shared_native_prices_revalue_private_account_without_venue_public_subscriptio
 
 #[test]
 fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
-    use safe_cex_engine::Engine;
     use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
-    let mut engine = Engine::new(Hyperliquid::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
     }));

@@ -17,7 +17,7 @@ impl Rig {
         Self::with_options(policy, options())
     }
     fn with_options(policy: PublicFeedPolicy, options: Options) -> Self {
-        let mut engine = Engine::new(Lighter::new(options));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut rig = Self {
@@ -189,7 +189,7 @@ fn explicit_zero_mark_uses_last_in_both_direct_and_shared_modes() {
 
 #[test]
 fn shared_feed_does_not_mark_private_state_loaded_before_native_snapshot() {
-    let mut engine = Engine::new(Lighter::new(options()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();

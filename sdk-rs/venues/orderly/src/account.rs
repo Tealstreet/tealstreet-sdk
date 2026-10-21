@@ -1792,7 +1792,7 @@ mod margin_mode_rows {
             ..Default::default()
         });
         venue.account.defaults = defaults.iter().map(|(s, m)| ((*s).into(), *m)).collect();
-        let mut e = Engine::new(venue);
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.start(1000.0);
         for _ in 0..8 {
             let out: Vec<_> = e.drain_actions().collect();

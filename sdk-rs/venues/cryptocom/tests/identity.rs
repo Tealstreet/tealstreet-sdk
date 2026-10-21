@@ -15,7 +15,7 @@ fn options() -> Options {
     }
 }
 fn engine(options: Options) -> Engine<Cryptocom> {
-    let mut e = Engine::new(Cryptocom::new(options));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,

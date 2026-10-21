@@ -46,7 +46,7 @@ impl Harness {
     }
     fn unstarted() -> Self {
         let mut h = Self {
-            engine: Engine::new(Bingx::new(Options {
+            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()

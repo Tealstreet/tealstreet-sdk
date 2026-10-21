@@ -10,7 +10,6 @@ import {
   installSynchronousEs256,
 } from './coinbase-protocol.mjs';
 import { installSynchronousDigest } from './sync-webcrypto.mjs';
-import { initializeBitgetReplay } from './replay-entropy.mjs';
 import {
   APEX_SEED,
   apexWireBody,
@@ -1543,7 +1542,6 @@ export const VENUES = {
   bitget: {
     rust: 'bitget',
     virtualPrivateClock: true,
-    initializeReplay: initializeBitgetReplay,
     ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
     tsBooksSubscribed: (exchange, count) =>
       Object.entries(exchange.publicWebsocket.messageHandlers).filter(
@@ -1555,7 +1553,6 @@ export const VENUES = {
   bitgetusdc: {
     rust: 'bitgetusdc',
     virtualPrivateClock: true,
-    initializeReplay: initializeBitgetReplay,
     ts: { module: `${root}/bitget/bitgetusdc.exchange.ts`, className: 'BitgetUSDCExchange', name: 'bitgetusdc' },
     tsBooksSubscribed: (exchange, count) =>
       Object.entries(exchange.publicWebsocket.messageHandlers).filter(
@@ -1568,7 +1565,6 @@ export const VENUES = {
     inverseNativeAmounts: true,
     rust: 'bitgetinverse',
     virtualPrivateClock: true,
-    initializeReplay: initializeBitgetReplay,
     ts: {
       module: `${root}/bitget/bitgetinverse.exchange.ts`,
       className: 'BitgetInverseExchange',

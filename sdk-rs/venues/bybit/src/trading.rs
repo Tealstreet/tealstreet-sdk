@@ -1655,7 +1655,9 @@ impl BybitLinear {
             return Err("A limit option needs a price or implied volatility".into());
         }
         let generated = if opts.client_order_id.is_none() {
-            Some(safe_cex_crypto::uuid::uuid()?)
+            Some(safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+                cx.fill_entropy(bytes)
+            })?)
         } else {
             None
         };

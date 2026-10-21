@@ -1,4 +1,4 @@
-use safe_cex_engine::{Action, Engine, Event, Notice, Response};
+use safe_cex_engine::{Action, Event, Notice, Response};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
@@ -10,7 +10,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
-    let mut engine = Engine::new(ApexOmni::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -75,7 +75,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
 // A contract without a positive default margin rate has no leverage fallback.
 #[test]
 fn contract_without_positive_default_margin_rate_is_malformed() {
-    let mut engine = Engine::new(ApexOmni::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

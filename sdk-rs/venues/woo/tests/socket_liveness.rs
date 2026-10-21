@@ -21,12 +21,14 @@ fn seed_tickers(e: &mut LivenessEngine) -> Vec<Action> {
 }
 
 fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
-    let mut e = Engine::new(safe_cex_venue_woo::Woo::new(safe_cex_venue_woo::Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        application_id: Some("app".into()),
-        ..Default::default()
-    }));
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_woo::Woo::new(
+        safe_cex_venue_woo::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            application_id: Some("app".into()),
+            ..Default::default()
+        },
+    ));
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
@@ -241,12 +243,14 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
 
 #[test]
 fn private_connection_that_never_opens_is_closed_and_backed_off() {
-    let mut e = Engine::new(safe_cex_venue_woo::Woo::new(safe_cex_venue_woo::Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        application_id: Some("app".into()),
-        ..Default::default()
-    }));
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_woo::Woo::new(
+        safe_cex_venue_woo::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            application_id: Some("app".into()),
+            ..Default::default()
+        },
+    ));
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);

@@ -6,7 +6,7 @@ use support::{META, NOW, reply_at};
 
 #[test]
 fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
-    let mut e = Engine::new(Lighter::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -95,7 +95,7 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
 #[test]
 fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
     for failed in [false, true] {
-        let mut e = Engine::new(Lighter::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
             public_data_only: true,
             ..Options::default()
         }));

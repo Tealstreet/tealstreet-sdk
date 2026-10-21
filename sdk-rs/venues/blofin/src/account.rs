@@ -282,6 +282,7 @@ impl Blofin {
     }
     pub(crate) fn headers(
         &self,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
         path: &str,
         method: Method,
         now: f64,
@@ -308,7 +309,7 @@ impl Blofin {
         let secret = read.map_or(self.options.secret.as_deref().unwrap(), |r| {
             r.secret.as_str()
         });
-        let nonce = safe_cex_crypto::uuid::uuid()?;
+        let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
         let timestamp = num::format(now.floor());
         Ok(vec![
             (
@@ -332,7 +333,13 @@ impl Blofin {
         request: Request,
         stream: bool,
     ) {
-        match self.headers(path, Method::Get, cx.now, "") {
+        match self.headers(
+            |bytes| cx.fill_signing_entropy(bytes),
+            path,
+            Method::Get,
+            cx.now,
+            "",
+        ) {
             Ok(headers) => {
                 let pending = Pending::Account(request);
                 if stream {
@@ -489,7 +496,9 @@ impl Blofin {
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.account.supervisor.opened(cx);
-        let nonce = match safe_cex_crypto::uuid::uuid() {
+        let nonce = match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+            cx.fill_signing_entropy(bytes)
+        }) {
             Ok(n) => n,
             Err(e) => {
                 cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e);

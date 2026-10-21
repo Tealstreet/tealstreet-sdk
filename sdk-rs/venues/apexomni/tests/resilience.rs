@@ -1,8 +1,6 @@
 mod support;
 use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
-use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, SocketChannel, SocketId,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::*;
 
@@ -16,7 +14,7 @@ fn list(rows: &[&str]) -> String {
     format!(r#"{{"code":0,"data":[{}]}}"#, rows.join(","))
 }
 fn engine(seed: &str) -> TestEngine {
-    Engine::new(ApexOmni::new(Options {
+    safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),

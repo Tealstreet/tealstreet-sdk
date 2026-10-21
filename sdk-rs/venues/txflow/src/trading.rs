@@ -492,7 +492,7 @@ impl TxFlow {
             let cloid = match &opts.client_order_id {
                 Some(id) if valid_cloid(id) => id.clone(),
                 Some(_) => return Err("TxFlow clientOrderId must be nonempty, at most 64 UTF-8 bytes and not start with 0x".into()),
-                None => format!("ts_{}", safe_cex_crypto::uuid::uuid()?),
+                None => format!("ts_{}", safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?),
             };
             if !ids.insert(cloid.clone()) || cx.store.orders().iter().any(|o| o.client_order_id.as_deref() == Some(&cloid)) || self.trading.active.iter().chain(self.trading.queue.iter()).any(|job| job.waiting.iter().any(|(id,_)| id == &cloid) || job.steps.iter().any(|step| matches!(&step.effect, Effect::Place(ids) if ids.iter().any(|(id,_)| id == &cloid)))) {
                 return Err("Duplicate TxFlow clientOrderId".into());
