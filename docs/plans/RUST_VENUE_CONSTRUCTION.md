@@ -18,3 +18,17 @@ Landing branch: `feat/rust-rewrite`. Preserve venue behavior; one PR per phase.
 Verify each phase with focused registry, venue, wasm-host and TS bridge checks;
 CI owns compiled WASM, replay and timing gates. Audit each diff, publish review
 findings, merge only green CI, and apply the lane's landing/revert guard.
+
+## Phase 2: shared public-mode rules
+
+A JSON table beside the SDK bridge declares signing and private-data conditions.
+TS evaluates it synchronously; Rust embeds and evaluates the same file before
+credential validation and startup configuration. `publicMode` carries requested
+public intent plus raw remote/payload/index presence, alongside the existing
+`publicDataOnly` hint. Absent `publicMode`, native/harness options retain their
+legacy interpretation. Construction metadata adds optional signing/public bits.
+
+Verification: existing venue-wrapper regressions, focused registry/wasm and
+Binance tests, feature-only builds, typecheck/lint, and a compiled parity matrix
+for every registered name in CI. Pin remote versus payload signers, Hyperliquid
+versus Spot, explicit-private Paradex refusal, and untrimmed string presence.

@@ -450,3 +450,33 @@ SDK82, host/socket/wire52 and mock Workers9 pass, with SDK typecheck/lint;
 independent SDK/host review is clear. The selected WASM is990638bytes.
 Rebuilt public/all8private replays, combined
 controls and exact-head CI rerun; final measurements/results are posted on PR1325.
+
+### Port-review lows plan (2026-10-21)
+
+1. Reverify spot total/free/used and explicit OHLCV lower bounds against native
+   mappings and documented fields. Preserve correct behavior where TS differs.
+2. Keep CFM summary unrealized-PnL/equity aggregation unchanged without verified
+   portfolio/spot accounting evidence; record the unresolved risk precisely.
+3. Update audit/caller notes and independent review. Re-run relevant existing
+   regressions; avoid runtime changes where current behavior is already correct.
+   A documentation-only family PR is exempt from the code merge hold.
+
+- Revalidation is documentation-only. `account.rs::Request::SpotBalance` uses
+  total_balance_crypto, available_to_trade_crypto, and their difference for
+  total/free/used. The existing holding regression proves a total2/free1 row
+  retains total2; copying TS available-as-total would lose held funds.
+- `public.rs::FetchCandles` maps explicit from_ms to native start (seconds),
+  independently of defaulted/explicit limit; it validates the range and uses
+  limit only as the fallback window length and native count. The frozen TS
+  implementation defaults limit before testing !limit, making its from branch
+  unreachable. Preserving an explicit lower bound is the intended contract.
+- CFM uses balance_summary.unrealized_pnl; TS zero is not proof of correct equity
+  accounting. Keep this source pending verified CFM/spot accounting and consumer
+  evidence. This family makes no runtime or caller-contract change.
+- Primary field/parameter references:
+  https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/portfolios/get-portfolio-breakdown
+  https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles
+- Re-ran existing invalid-holding and public-candle regressions: both pass.
+  Explicit-from disposition is source inspection, not a claim of dedicated
+  lower-bound regression coverage. Independent read-only review found no blockers;
+  diff whitespace check passes. Full CI follows the documentation-only PR.

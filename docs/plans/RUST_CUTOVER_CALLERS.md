@@ -1369,3 +1369,11 @@ keep their API and can retry a read invalidated by a concurrent settings change;
 or write retry is added. Malformed position-stream rows retain prior exposure
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
+### Coinbase port-review retained read semantics
+
+Coinbase Rust spot currency balances continue using native total/free and their
+held difference; chart reads continue honoring an explicit from bound. These
+intentional corrections to the TS reference are not parity defects. CFM summary
+unrealized-PnL/equity aggregation remains an explicit accounting risk pending
+portfolio and downstream consumer evidence. This revalidation changes no API,
+selector, deployment status or runtime behavior.
