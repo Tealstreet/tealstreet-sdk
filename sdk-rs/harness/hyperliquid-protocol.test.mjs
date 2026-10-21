@@ -13,7 +13,8 @@ const VAULT = '0x1719884eb866cb12b2287399b15f7db5e7d775ea';
 const CLOID = '0x00000000000000000000000000000001';
 const row = (c = CLOID) => ({ a: 0, b: true, p: '90', s: '0.25', r: false, t: { limit: { tif: 'Gtc' } }, c });
 const order = (...rows) => ({ type: 'order', orders: rows.length ? rows : [row()], grouping: 'na' });
-const signed = (action = order(), extra = {}) => signHyperliquidFrame(action, { nonce: NOW, ...extra });
+let nextNonce = NOW;
+const signed = (action = order(), extra = {}) => signHyperliquidFrame(action, { nonce: nextNonce++, ...extra });
 const request = (frame, testnet = false) => ({ method: 'POST', url: `https://api.hyperliquid${testnet ? '-testnet' : ''}.xyz/exchange`, body: JSON.stringify(frame, (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value), now: NOW });
 const validator = (extra = {}, context) => createHyperliquidRequestValidator({ ...options, ...extra }, context);
 const info = (type, user) => ({ method: 'POST', url: 'https://api.hyperliquid.xyz/info', body: JSON.stringify({ type, ...(user === undefined ? {} : { user }) }) });
@@ -92,7 +93,22 @@ test('private info binds account, vault and agent subjects; metadata stays unsig
   validator({ vault: VAULT })(info('clearinghouseState', VAULT));
 });
 
+test('public anonymous fee probe preserves only the recorded 422 fallback', () => {
+  const config = { publicDataOnly: true, key: '', secret: '', applicationId: undefined };
+  const record = { t: 0, type: 'http', method: 'POST', url: info('userFees', '').url,
+    requestBody: info('userFees', '').body, status: 422, body: 'Failed to deserialize the JSON body into the target type' };
+  const tape = new Tape([record], venueOf('hyperliquid'), false, 30000, undefined, [], config);
+  assert.equal(tape.respond(record.method, record.url, record.requestBody).status, 422);
+  assert.equal(tape.invalidSignatures, 0);
+  const success = new Tape([{ ...record, status: 200 }], venueOf('hyperliquid'), false, 30000, undefined, [], config);
+  assert.throws(() => success.respond(record.method, record.url, record.requestBody), /recorded rejection/);
+  assert.throws(() => validator()(info('userFees', '')), /identity mismatch/);
+  assert.throws(() => validator(config)(info('clearinghouseState', '')), /identity mismatch/);
+});
+
 test('vault and signed expiry cannot be silently omitted or changed', async () => {
+  const withoutExpiry = await signed();
+  validator()(request({ ...withoutExpiry, expiresAfter: null }));
   const frame = await signed(order(), { vaultAddress: VAULT, expiresAfter: NOW + 10000 });
   validator({ vault: VAULT })(request(frame));
   assert.throws(() => validator()(request(frame)), /vault identity mismatch/);
@@ -106,6 +122,24 @@ test('nonce validity follows documented open bounds and permits out-of-order val
   for (const nonce of [NOW - 2 * 86400000, NOW + 86400000, -1, 1.5, '1700000000000'])
     assert.throws(() => validator()(request({ ...frame, nonce })), /nonce/);
   for (const nonce of [NOW + 86400000 - 1, NOW - 2 * 86400000 + 1, NOW]) validator()(request(await signed(order(), { nonce })));
+});
+
+test('signer nonce history rejects replay and eviction while allowing out-of-order unused values', async () => {
+  const verify = validator();
+  const action = { type: 'updateLeverage', asset: 0, isCross: true, leverage: 10 };
+  for (let i = 1; i <= 100; i++) verify(request(await signed(action, { nonce: NOW + i * 2 })));
+  const duplicate = await signed(action, { nonce: NOW + 100 });
+  assert.throws(() => verify(request(duplicate)), /signer nonce/);
+  verify(request(await signed(action, { nonce: NOW + 3 })));
+  for (const nonce of [NOW + 1, NOW + 2]) {
+    const evicted = await signed(action, { nonce });
+    assert.throws(() => verify(request(evicted)), /signer nonce/);
+  }
+  const fresh = validator();
+  const newest = await signed(action, { nonce: NOW + 1000 });
+  fresh(request(newest));
+  fresh(request(await signed(action, { nonce: NOW + 900 })));
+  assert.throws(() => fresh(request(newest)), /signer nonce/);
 });
 
 test('cloid creation checks distinguish duplicate IDs, retries and references', async () => {
@@ -174,6 +208,25 @@ test('Tape rejects signed missing creation IDs before the normalized ACK', async
   assert.equal(tape.missingWrites, 1);
   assert.equal(tape.receiptRequests.length, 0);
   assert.equal(respond(tape, frame).status, 200);
+});
+
+test('Tape rejects signer nonce reuse across different actions without consuming the later ACK', async (t) => {
+  t.mock.method(Date, 'now', () => NOW);
+  const action = { type: 'updateLeverage', asset: 0, isCross: true, leverage: 10 };
+  const first = await signed(action);
+  const second = await signed({ ...action, leverage: 20 });
+  const tape = tapeOf([ack(first, 1), ack(second, 2)]);
+  tape.commandIndex = 1;
+  assert.equal(respond(tape, first).status, 200);
+  tape.commandIndex = 2;
+  const reused = await signed(second.action, { nonce: first.nonce });
+  assert.throws(() => respond(tape, reused), /signer nonce/);
+  assert.equal(tape.missingWrites, 1);
+  assert.equal(tape.unacknowledgedStages.has(2), true);
+  const wrongIntent = await signed({ ...action, leverage: 30 }, { nonce: second.nonce });
+  assert.throws(() => respond(tape, wrongIntent), /recorded write intent/);
+  assert.equal(respond(tape, second).status, 200);
+  assert.equal(tape.missingWrites, 0);
 });
 
 test('Tape binds generated amend references to acknowledged creations', async (t) => {
@@ -249,7 +302,7 @@ test('premature signed writes cannot poison later generated ID bindings', async 
     assert.equal(tape.missingWrites, 2);
     assert.equal(tape.unacknowledgedStages.has(2), true);
     tape.time = 100;
-    assert.equal(respond(tape, await signed(order(row(SECOND)))).status, 200);
+    assert.equal(respond(tape, await signed(order(row(SECOND)), { nonce: early.nonce })).status, 200);
     tape.commandIndex = 3;
     const good = await signed({ type: 'modify', oid: 123, order: row(SECOND) });
     assert.equal(respond(tape, good).status, 200);

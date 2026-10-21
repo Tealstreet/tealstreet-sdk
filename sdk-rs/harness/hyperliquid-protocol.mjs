@@ -43,14 +43,14 @@ export function hyperliquidActionHash(frame) {
   if (!object(frame.action) || !integer(frame.nonce)) fail('malformed action or nonce');
   const vault = frame.vaultAddress;
   if (vault != null && !address(vault)) fail('malformed vault');
-  if (frame.expiresAfter !== undefined && !integer(frame.expiresAfter)) fail('malformed expiry');
-  const suffix = Buffer.alloc(9 + (vault == null ? 0 : 20) + (frame.expiresAfter === undefined ? 0 : 9));
+  if (frame.expiresAfter != null && !integer(frame.expiresAfter)) fail('malformed expiry');
+  const suffix = Buffer.alloc(9 + (vault == null ? 0 : 20) + (frame.expiresAfter == null ? 0 : 9));
   suffix.writeBigUInt64BE(BigInt(frame.nonce));
   if (vault != null) {
     suffix[8] = 1;
     Buffer.from(vault.slice(2), 'hex').copy(suffix, 9);
   }
-  if (frame.expiresAfter !== undefined) suffix.writeBigUInt64BE(BigInt(frame.expiresAfter), suffix.length - 8);
+  if (frame.expiresAfter != null) suffix.writeBigUInt64BE(BigInt(frame.expiresAfter), suffix.length - 8);
   // Preserve insertion order and lossless uint64 action fields. Sorting here
   // would validate a different payload from the one sent to the venue.
   return ethers.keccak256(Buffer.concat([encode(msgpackValue(frame.action), { useBigInt64: true }), suffix]));
@@ -77,6 +77,9 @@ export function createHyperliquidRequestValidator(options, { callerIds = new Set
   const account = vault || options.applicationId?.toLowerCase();
   const creations = new Map();
   const aliases = new Map();
+  // Fresh offline signer history; retain the highest 100 acknowledged nonces.
+  // Different vault/account subjects still share this configured signer's set.
+  const nonces = new Set();
   return ({ method, url, body, now = Date.now() }) => {
     const endpoint = new URL(url);
     if (method !== 'POST' || endpoint.origin !== origin || endpoint.search || endpoint.hash ||
@@ -86,6 +89,12 @@ export function createHyperliquidRequestValidator(options, { callerIds = new Set
     if (!object(frame)) fail('malformed request');
     if (endpoint.pathname === '/info') {
       if (typeof frame.type !== 'string' || !frame.type) fail('missing info type');
+      // The live public recording includes TS probing userFees with no wallet.
+      // Preserve its recorded 422 fallback, never accept it as an account read
+      // or silently grant a successful fee response to an invalid subject.
+      if (options.publicDataOnly === true && options.key === '' && !account &&
+          frame.type === 'userFees' && frame.user === '')
+        return (record) => { if (record.status !== 422) fail('anonymous fee probe must retain recorded rejection'); };
       if (agentInfo.has(frame.type) || accountInfo.has(frame.type) || frame.user !== undefined) {
         const expected = agentInfo.has(frame.type) ? signer : account;
         if (!address(expected) || !address(frame.user) || frame.user.toLowerCase() !== expected)
@@ -101,7 +110,7 @@ export function createHyperliquidRequestValidator(options, { callerIds = new Set
     // nonces are signer-scoped and may legitimately arrive out of order.
     if (!integer(now) || !integer(frame.nonce) || frame.nonce <= now - 2 * 86400000 || frame.nonce >= now + 86400000)
       fail('stale or malformed nonce');
-    if (frame.expiresAfter !== undefined && (!integer(frame.expiresAfter) || frame.expiresAfter <= now))
+    if (frame.expiresAfter != null && (!integer(frame.expiresAfter) || frame.expiresAfter <= now))
       fail('expired or malformed expiry');
     if (frame.vaultAddress != null && !address(frame.vaultAddress)) fail('malformed vault');
     if ((frame.vaultAddress?.toLowerCase() ?? null) !== vault) fail('vault identity mismatch');
@@ -196,9 +205,13 @@ export function createHyperliquidRequestValidator(options, { callerIds = new Set
       const prior = creations.get(id);
       if (prior && (prior.command !== command || prior.intent !== intent)) fail('reused creation cloid');
     }
+    if (nonces.has(frame.nonce) || (nonces.size === 100 && frame.nonce <= Math.min(...nonces)))
+      fail('reused or evicted signer nonce');
     // Tape commits only when Responses has selected an eligible ACK. A signed
     // but premature attempt must not poison the later creation/alias bindings.
     const commit = () => {
+      nonces.add(frame.nonce);
+      if (nonces.size > 100) nonces.delete(Math.min(...nonces));
       for (const id of created) creations.set(id, { command, intent });
       for (const [expected, actual] of bindings) aliases.set(expected, actual);
     };

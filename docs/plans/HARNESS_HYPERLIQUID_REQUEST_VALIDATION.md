@@ -67,7 +67,10 @@ default change is required.
 The factory validates original wire requests before canonicalization. A lazy
 harness-only oracle recovers the configured signer from ordered msgpack/EIP712
 bytes, binds mainnet/testnet, vault and private account/agent read subjects, and
-checks the documented open nonce interval. Published independent main/test/vault
+checks the documented open nonce interval plus the highest-100 signer nonce
+replay window. This is a fresh offline signer stream, not unseen shared-wallet
+history from live processes. Optional null expiry is treated as absent, as in
+the official SDK. Published independent main/test/vault
 vectors and an order connection ID guard against shared signer mistakes. Safe
 integers beyond msgpack's 32-bit forms and lossless JSON uint64 order IDs retain
 their integer wire encoding; field ordering remains signature-sensitive.
@@ -89,9 +92,17 @@ bytes remain unchanged. Request validation certifies the exercised authenticatio
 and intent contract, not full action-schema coverage, private parity or live
 behavior. Existing six/eight private account differences remain strict FAILs.
 
-Focused protocol/clock tests: 26 pass. Removing only the catalog factory makes
+Focused protocol/clock tests: 29 pass. Removing only the catalog factory makes
 the actual Tape invalid-signature regression fail with "Missing expected
-exception": the old path consumed the ACK. Time-stage poisoning, missing/changed
+exception": the old path consumed the ACK. Cross-action nonce reuse, eviction/out-of-order values, time-stage poisoning, missing/changed
 references, caller ownership and uint64 tamper controls pass with the factory.
 Initial full serial harness: 1037 pass; protocol-shape follow-up checked separately. Current-head CI/five-pair proof remain required before
 merge; final run IDs/hashes belong in the PR body.
+
+Initial CI39695664088 passed all1038 harness tests but the public TS replay
+rejected its recorded anonymous userFees probe. The live public fixture already
+contains exactly userFees/user="" with HTTP422. Preserve only that explicit
+public-data-only, no-wallet rejection/fallback: matched status must remain422;
+a fabricated200 and every private empty-subject read reject. This is not an
+authenticated account read. One diagnostic TS correctness replay identified the
+failure; no local public timing or release build was run.

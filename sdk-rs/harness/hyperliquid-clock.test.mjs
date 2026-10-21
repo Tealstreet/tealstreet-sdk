@@ -52,11 +52,12 @@ for (const spot of [false, true]) {
       [[], []], [[3001], []], [[], []], [[3002], []], [[], []],
       [[], [3003]], [[], []], [[], []], ...(spot ? [[[3005], []], [[], []]] : []),
     ];
+    const nonceBase = Date.now();
     for (const [index, write] of writes.entries()) {
       tape.commandIndex = index + 1;
       tape.settledCommands = index;
       assert.deepEqual([ids(core), ids(hip3)], stages[index], `before ACK ${index + 1}`);
-      const frame = await signHyperliquidFrame(JSON.parse(write.requestBody).action);
+      const frame = await signHyperliquidFrame(JSON.parse(write.requestBody).action, { nonce: nonceBase + index });
       assert.equal(tape.respond(write.method, write.url, JSON.stringify(frame)).status, 200);
       assert.deepEqual([ids(core), ids(hip3)], stages[index + 1], `after ACK ${index + 1}`);
       tape.settledCommands = index + 1;
