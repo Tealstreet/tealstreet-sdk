@@ -321,6 +321,7 @@ export async function executeCommand(
 
   // Execute the command
   try {
+    if (command.requiresConnection) exchange?.syncAccountState?.();
     const result = await command.execute(ctx);
     return convertResult(result);
   } catch (error) {

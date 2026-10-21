@@ -1,6 +1,7 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
 mod history;
+mod identity;
 mod sign;
 mod trading;
 mod wire;
@@ -45,6 +46,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     History(history::Request),
+    Identity(CommandId),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
@@ -530,6 +532,7 @@ impl MexcFutures {
     }
     fn failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Depth { symbol, generation } => {
                 if self
                     .books
@@ -575,6 +578,7 @@ impl Venue for MexcFutures {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -773,6 +777,7 @@ impl Venue for MexcFutures {
             return;
         }
         match pending {
+            Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Account(request) => {
                 let ok = response.status == 200;
                 self.account_response(cx, request, response);
@@ -956,6 +961,7 @@ impl Venue for MexcFutures {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchAccount { command } => self.fetch_identity(cx, command),
             Command::SetTickerSymbols { symbols } => {
                 self.ticker_symbols = symbols;
                 self.reconcile_tickers(cx);

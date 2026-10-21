@@ -410,6 +410,7 @@ export class FrameApplier {
             ...(orders.clientOrderId(i) !== undefined && { clientOrderId: orders.clientOrderId(i) }),
             ...(orders.parentId(i) !== undefined && { parentId: orders.parentId(i) }),
             ...(enums.timeInForce !== undefined && { timeInForce: enums.timeInForce as Order['timeInForce'] }),
+            ...(trigger && { triggerType: trigger }),
             ...(enums.type === 'take_profit_market' && trigger && { tpTriggerType: trigger }),
             ...(orders.tpTriggerType?.(i) !== undefined && {
               tpTriggerType: orders.tpTriggerType!(i) as Order['tpTriggerType'],
@@ -594,9 +595,12 @@ export class FrameApplier {
       changed = true;
       break;
     }
+    // A current-state read is not another independent venue observation. Its
+    // pending stream frame still owns order/position freshness when it arrives.
     if (changed) {
       try {
-        this.store.update(update);
+        if (frame.accountRead?.()) this.store.update(update, false, 'account-read');
+        else this.store.update(update);
       } catch (error) {
         if (!errors.length) throw error;
         errors.push(error);
@@ -765,6 +769,8 @@ export class FrameApplier {
         ? fallback
         : (this.frameMarkets.get(frame)?.symbols[rows!.market[i]] ?? this.symbol(rows!.market[i], fallback));
       if (symbol === undefined) throw new FrameApplyError('Fill identity requires a market snapshot');
+      const realizedPnl = rows!.realizedPnl?.[i];
+      const fee = rows!.fee?.[i];
       fills.push({
         id: rows!.orderId(i),
         orderId: rows!.orderId(i),
@@ -774,6 +780,8 @@ export class FrameApplier {
         }),
         price: rows!.rows[i * 2],
         amount: rows!.rows[i * 2 + 1],
+        ...(realizedPnl !== undefined && Number.isFinite(realizedPnl) && { realizedPnl }),
+        ...(fee !== undefined && Number.isFinite(fee) && { fee }),
       } as OrderFillEvent);
     }
     return fills;

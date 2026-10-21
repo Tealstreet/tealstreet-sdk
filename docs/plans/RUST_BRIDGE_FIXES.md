@@ -684,3 +684,267 @@ additional consumer cases, types and strict scoped lint pass. Independent
 source and fixture-preservation review PASS. Actual native credential outcome
 feedback remains phase 6b; manually invoking Base auth methods proves only
 resolved-policy propagation. No combined-WASM acceptance claimed yet.
+
+### Account reads and observation freshness
+
+Review found that full non-consuming account reads would otherwise manufacture
+order update IDs, and then the ordinary flush would count the same native
+observation again. That can falsely confirm a chaser's missing order. Add an
+optional empty ACCOUNT_READ section to these frames, decoded at every consumer.
+FrameApplier passes explicit read-source metadata to Store.update: apply rows
+and notify readers without advancing orders/positions observation counters.
+Ordinary bulk replacements keep their required counter bumps. Guard recursive
+read notification; never restore counters after notifying observers. Tests
+cover repeated reads followed by the normal flush and missing-order handling.
+
+Direct consumers synchronize through the Base no-op/Rust native seam before
+CLI account-dependent preprocessing, connected command execution and chaser initial position
+capture. The structural CLI interface keeps the seam optional for non-SDK
+consumers. Failure follows existing visible command error paths; disconnected
+session management and ticker-only predicates remain independent of private
+snapshots. Lazy account token/loop/condition reads also cover alias/variable
+expansion without blocking an unrelated help/disconnect command.
+
+## Phase 5 audited plan
+
+Generic order triggerType is already encoded and decoded but dropped by the
+FrameApplier; preserve it beside existing TP/SL aliases. Fills carry native
+order identity but omit the event orderId required by chaser attribution; add
+that field while retaining existing id. Append optional realizedPnl and fee
+columns after the legacy fill prefix, preserving old frame readers and missing
+versus zero. Use native typed producer fields on Hyperliquid, MEXC and WEEX;
+retain each live event's established fee/PnL convention, including Hyperliquid
+close-event net PnL. No new network reads, synthetic financial guesses or fill
+count/dedup changes. Verify legacy/new wire decoding, zeros/rebates, exact
+native events, worker forwarding and chaser tracking.
+
+Aster already canonicalizes unsupported intervals consistently in fetch,
+subscription and provider paths, with an actual-WASM regression. Invalid
+numeric steps are already guarded natively. Verify and retain those fixes.
+Candle lastSide has no demonstrated repository consumer and native Bybit kline
+messages do not supply aggressor side; skip under the production-impact bar
+instead of inventing it from candle direction.
+
+## Phase 4d first identity-query batch plan
+
+Implement rare typed getAccount commands for Backpack, BingX, Phemex and WOO
+using existing private request/signing/continuation machinery and the selected
+read credentials. Preserve TS identity semantics: Backpack /api/v1/account
+accountId or userId; BingX USDT balance userId (fallback first row); Phemex
+USDT g-accounts/accountPositions account.userID; WOO /v3/accountinfo response
+applicationId and referrerID, not the configured WS application ID. User and
+affiliate identifiers remain decimal strings without f64 conversion, including
+values above 2^53. Required missing identity or public-only use fails visibly;
+failed reads never clear account Store domains. No identity derived from
+balances, positions or configured unrelated identifiers. Native command handlers
+and route/shape/secondary-credential/failure tests precede SDK dispatch wiring
+in the later consolidated identity batch. Existing working account commands
+and venues with no TS identity API remain unchanged.
+
+First batch implemented, independently reviewed PASS. Final scoped evidence is
+393 unique native cases, including 24 new identity controls, strict all-target/
+all-feature Clippy, bans and scoped fmt. An old Phemex unsupported-command list
+was corrected only for its newly supported FetchAccount case; its other
+assertions and full 38-case trading suite pass. Exact decimal identity, read-key
+selection, optional fields, errors/duplicate delivery and unchanged account
+state are covered. SDK dispatch and standalone JSON decoder exposure remain
+consolidated identity work; this is not consumer getAccount acceptance yet.
+
+## Phase 4a bulk-close plan
+
+Rust nuke/nukePositions selects a single current native position snapshot and
+submits native-unit reduce-only market closes as one existing placeOrders
+command. Reuse the established nativePositionSize policy by moving its
+implementation into safe-cex and retaining the script-api-core export; avoid a
+reverse package dependency or a divergent sizing copy. Validate all required
+market/amount inputs before dispatch. Keep the native batch's accepted IDs,
+partial failures and unknown-outcome metadata unchanged. Do not automatically
+retry a close against unchanged positions: repeated Base nuke passes can place
+duplicate writes before reconciliation. One pass with visible failure meets
+the production bar; retry-count lifecycle parity is deliberately skipped.
+
+Nuke still attempts the requested order cancellation after a failed close and
+rethrows the original close failure (each failed native command already owns
+its visible error); cancellation alone throws its own error. Preserve isNuking
+cleanup on every exit and reject a concurrent nuke visibly. Test preflush state,
+linear multipliers, inverse notional, exact native sizing extras, zero rows,
+missing/invalid input before any write, partial/unknown rejection with no retry,
+and cancel-after-close-failure. Standalone CLI and shared sizing checks must
+stay green after the implementation move.
+
+## Phase 4d second identity-query batch plan
+
+Binance USD-M uses /fapi/v3/balance and PM /papi/v1/balance (first row
+accountAlias); do not substitute USD-M's different reconciliation account route.
+Spot and COIN-M remain unsupported for identity as TS. Bybit linear/inverse/
+spot/demo uses /v5/user/query-api userID/inviterID; Hyro remains unsupported.
+Bitget products use /api/v2/spot/account/info: truthy parentId is the user,
+raw userId the subaccount, and inviterId the affiliate. KuCoin futures uses
+/api/v1/user-info userId/subUserId/referrerUserId; retain the working Spot route.
+Reuse selected-read credentials, passphrase fallbacks and native retry/routing
+machinery. Capture IDs as text/u64, including values above 2^53. Normalize
+numeric zero optional affiliate/subaccount sentinels to null, while preserving
+explicit text identities such as '0'; never turn a falsey sentinel into a truthy
+affiliate. Missing required identities reject visibly. No Store/cycle mutation.
+Extend the existing FetchAccount JSON decoder universally for standalone
+identity-enabled crates, rather than relying on combined Aster/Polymarket
+features. Verify each product's route, read-key signatures, nullable/parent
+semantics, large IDs, failures before I/O and once-only completion/error.
+
+## Phase 4d third identity-query batch plan
+
+Crypto.com POST private/get-accounts returns result.this_account.uuid, with
+affiliate null; use its primary private-POST signing and existing safe read
+signature retry policy. GRVT POST /lite/v1/account_summary validates the chosen
+trading subaccount, then returns the authenticated session's main account ID,
+not trading_account_id. Reuse login deferral/headers and preserve generation
+fences, including legitimate header rotation on the current response. Paradex
+GET /account returns account_number through the existing JWT queue, with
+affiliate null; pending authentication failures must settle the rare read once.
+Dedicated identity continuations leave reconciliation flags and account Store
+domains unchanged. Verify routes/signing, required/missing/large IDs,
+public-only/missing credentials and malformed/error results. GRVT tests separate
+main/trading IDs and stale-session responses; Paradex tests expired JWT queue
+and refresh. Native batches precede consolidated SDK/standalone integration.
+
+### SDK current-state and read-freshness checkpoint
+
+Current native queries, default cancel-all symbol selection and direct CLI/
+chaser decisions now synchronize the engine state. ACCOUNT_READ applies and
+forwards rows without manufacturing streaming observation counters. Independent
+SDK, CLI/chaser and read-freshness reviews PASS. Checks pass: 501 SDK cases in
+32 files (25 new account controls), 545 CLI cases in 15 files (ten new decision
+controls), 18 chaser-instance cases, SDK/CLI types and strict scoped lint.
+Core/host marker checks and source reviews pass; ordinary Store bulk counters
+and venue-global cancel-all paths retain their assertions.
+
+The new actual Binance case proved RED on the previous combined artifact in
+exactly marker presence and worker/main freshness, while native ghost clearing
+already worked. After the official rebuild all 48 registered actual venue cases
+pass, including real worker transfer, native private baseline restoration,
+read marker/counters and public/event preservation. Both web/node artifacts are
+12,474,948 bytes, SHA256
+e5afbf13da1938ee254d045e34609745ec001205f114d1a44152ee06ba128b38.
+The artifact also contains the financial/native-first-identity source frozen
+for that rebuild; it does not contain subsequent parser or identity batches.
+Public fixtures prove the real account ABI and mapping, not funded private
+reconciliation or REST resync completion. Bulk closes are the following slice.
+
+### Phase 5 financial/wire checkpoint
+
+Implemented optional financial fill tails without changing legacy row prefixes
+or bytes when metadata is absent. Native HL/MEXC/WEEX producers preserve their
+established live conventions and execution dedup/counts; historical gross PnL
+remains unchanged. Independent review caught HL's old default-zero raw fields
+inventing reported zeroes: native presence now remains optional, net PnL needs
+both reported values, and fee presence is independent. Generic triggerType and
+fill orderId now reach SDK consumers; the actual chaser accepts decoded fills.
+Native/host/SDK financial source and fixture reviews PASS after that fix.
+
+Checks: 368 core plus three-venue native cases, including six new functions and
+a strengthened history assertion; strict native Clippy, fmt/bans and whitespace
+checks pass. All 149 host JS tests pass, including 20 wire cases. Five new SDK
+frame/transfer/chaser cases, SDK types and strict scoped lint pass. An initial
+SDK fixture used the wrong enum export and exact float equality for chaser's
+derived filledSize; these fixtures were corrected without changing production
+math. The independent frame fixture also now encodes generic triggerType.
+Actual producer-to-SDK acceptance remains part of final combined private gates;
+the component evidence is explicitly separate from the 48 public account tests.
+
+## Phase 4d final identity-query batch plan
+
+Lighter/Robinhood resolves an unsigned lookup selector independently of signer,
+secret and API-key-index initialization, including public-only use. Preserve
+account index zero/large decimal IDs and referrer from the same selected row;
+never invoke identity_ready or mutate signer/nonces/financial Store state.
+MEXC validates signed GET /api/v1/private/account/assets (valid empty array
+allowed), then returns mexc: plus the first 24 lowercase hex SHA256 characters
+of the raw PRIMARY options key. WEEX validates signed GET
+/capi/v3/account/accountConfig and canTrade:true, then uses the analogous weex:
+primary-key hash. Selected read credentials validate the GET; they never replace
+the primary identity source. Capture the raw primary fingerprint/public-only
+admission before native constructors consume/trim options. Explicit public-only
+and invalid selected credentials reject before private validation. Test exact
+signing/routing, hash vectors, read-vs-primary attribution, Lighter fallback and
+same-row referrals, errors/duplicates and unchanged account snapshots.
+
+## Phase 6b auth foundation plan
+
+Use the refined in-flight context, pure typed outcome hook and scope-isolated
+counters in RUST_AUTH_RESULTS.md. Core owns one complete response observation
+point across buffered, streamed and missing-list error delivery. Typed host and
+native-server notices carry no secret or body. JS validates context and updates
+the exact resolved Base interval after per-slot/per-scope evidence. No generic
+log/body regex, public-success reset or intermediate retry rejection. Tests
+prove all completion/error paths, no context reuse after duplicate/failure,
+mixed credentials and partial permissions, callback/dead/dispose fences and
+initial/changed/Infinity/server-multiplier policy. The foundation does not claim
+all venue classifiers exist; those must be tagged and verified by native slice.
+
+## Phase 4d identity batch 2 checkpoint
+
+Binance USD-M/PM, four Bybit products including demo, three Bitget products,
+and Kucoin Futures now have dedicated native identity continuations. They
+preserve selected read signing, broker/passphrase/clock retry behavior and exact
+numeric IDs without running account reducers. Binance Spot/Coin-M and Hyro keep
+their explicit unsupported identity behavior. Empty secondary passphrases reject
+before private I/O; omitted passphrases retain native fallback. Both getAccount
+and fetchAccount now decode without unrelated feature flags, including a
+standalone Backpack WASM build. Independent parser and venue reviews PASS.
+
+605 native tests in 45 nonempty suites PASS (49 including empty suites);
+19 final focused controls overlap that total. Strict Clippy, fmt, bans and diff
+checks PASS. Default-core command parser and standalone Backpack host alias
+controls PASS. Logs: /tmp/bridge-identity-batch2-*.log and
+/tmp/bridge-identity-parser-*.log. SDK routing and rebuilt-WASM identity proof
+remain pending; these receipts cover native implementation and feature graphs.
+
+## Phase 4d session-backed identity checkpoint
+
+Crypto.com, GRVT and Paradex identity queries reuse their native sign/session
+state machines and dedicated read continuations. Crypto.com retains its one
+signature resend and safe-read network retries. GRVT fences old generations,
+allows legitimate current-session header rotation, and uses the selected/default
+trading subaccount before private startup. Paradex retains JWT acquisition,
+expiry refresh and delegated/direct signer routing. Login failures settle
+identity waiters once; no identity reducer changes financial state.
+
+309 native tests PASS in 22 nonempty suites (25 including empty doctests),
+including 26 new controls. Strict Clippy, fmt, bans and whitespace checks PASS.
+Independent implementation review PASS. Logs: /tmp/bridge-identity3-*.log.
+SDK dispatch and final combined-WASM acceptance remain separate gates.
+
+## Phase 4d final native identity checkpoint
+
+Lighter/Robinhood resolves unsigned account selectors without initializing a
+signer, nonce or private account state. Lookup fallback and deployment routing
+are shared with startup; index zero and large decimal IDs remain exact, and
+referrals come from the selected row. MEXC and WEEX validate with the selected
+read credential, then namespace identity from a fixed SHA256 prefix of the raw
+primary key. Explicit public-only and invalid selected credentials reject before
+validation I/O; WEEX requires typed canTrade:true. Account/financial state and
+existing signing/rate behavior stay unchanged.
+
+285 native tests PASS across 26 nonempty suites (29 including empty doctests),
+including 24 new controls. Strict Clippy, fmt, bans and diff checks PASS.
+Independent correctness review PASS. Logs: /tmp/bridge-identity-final-*.log.
+This completes the planned native identity batches, not SDK dispatch or the
+final combined-WASM identity acceptance gate.
+
+## Phase 4a native bulk-close checkpoint
+
+Rust nukePositions now reads one native snapshot and validates the full batch
+before submitting reduce-only market closes in venue units, preserving hedge
+legs and inverse notional sizing. It never retries a close automatically after
+partial/unknown outcome. Nuke also attempts native cancel-all after close failure
+and rethrows the original close failure. Concurrent nukes reject and ownership
+clears on every exit. The existing sizing implementation moved unchanged to a
+safe-cex utility leaf; script-api-core re-exports it without a dependency cycle.
+
+33 account-state controls PASS, including eight new nuke controls. Seven shared
+sizing-policy tests and 32 CLI preparation/account-state tests PASS. SDK,
+script-api-core and CLI-core typechecks PASS. Independent plan and implementation
+reviews PASS; strict scoped lint PASS with ignored tests explicitly included. Initial fixture collisions were corrected to represent distinct hedge
+legs; no production assertion was weakened. Logs: /tmp/bridge-phase4a-nuke-*.log
+and /tmp/bridge-phase4a-sizing-policy-tests.log. This is current engine state,
+not proof of network resynchronization or a new unknown-outcome classifier.
