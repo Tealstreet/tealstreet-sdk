@@ -167,6 +167,12 @@ pub struct NativeOrder {
     pub tp_limit: f64,
     pub sl_limit: f64,
 }
+pub struct OrderReadProgress {
+    serial: u64,
+    issued: f64,
+    timer: TimerId,
+    dirty: bool,
+}
 #[derive(Default)]
 pub struct AccountState {
     /// Symbols whose leverage/margin mode were read on first candle interest.
@@ -182,6 +188,7 @@ pub struct AccountState {
     pub position_dirty: bool,
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
+    pub order_reads: [Option<OrderReadProgress>; 2],
     pub terminal: HashMap<String, f64>,
     pub timers: [Option<TimerId>; 3],
     pub tick: Option<TimerId>,
@@ -193,7 +200,7 @@ pub struct AccountState {
     pub reduces: HashMap<String, bool>,
     pub filled: HashMap<String, (f64, f64)>,
     pub pending_executions: HashMap<String, f64>,
-    pub login_retry: Option<TimerId>,
+    pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
@@ -201,8 +208,16 @@ const TICK_MS: f64 = 500.0;
 /// An unanswered balance read is abandoned after this long.
 const BALANCE_STALL_MS: f64 = 10_000.0;
 const POSITION_STALL_MS: f64 = 10_000.0;
+const ORDER_STALL_MS: f64 = 10_000.0;
 
 impl Axis {
+    fn order_slot(self) -> Option<usize> {
+        match self {
+            Self::Orders => Some(0),
+            Self::Tpsl => Some(1),
+            _ => None,
+        }
+    }
     pub(crate) fn index(self) -> usize {
         match self {
             Self::Balance => 0,
@@ -398,6 +413,18 @@ impl BitunixFutures {
                 cx.clear_timer(timer);
             }
         }
+        if let Some(slot) = axis.order_slot() {
+            if after.is_none()
+                && let Some(progress) = self.account.order_reads[slot].as_mut()
+                && cx.now < progress.issued + ORDER_STALL_MS
+            {
+                progress.dirty = true;
+                return;
+            }
+            if let Some(progress) = self.account.order_reads[slot].take() {
+                cx.clear_timer(progress.timer);
+            }
+        }
         let path = match axis {
             Axis::Balance => ACCOUNT,
             Axis::Positions => POSITIONS,
@@ -433,6 +460,14 @@ impl BitunixFutures {
             invalid: false,
             baselines: vec![],
         };
+        if let Some(slot) = axis.order_slot() {
+            self.account.order_reads[slot] = Some(OrderReadProgress {
+                serial: read.serial,
+                issued: cx.now,
+                timer: cx.set_timer(ORDER_STALL_MS),
+                dirty: false,
+            });
+        }
         if axis == Axis::Positions {
             self.account.position_read = Some((read.serial, cx.now));
             self.account.position_dirty = false;
@@ -531,8 +566,12 @@ impl BitunixFutures {
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 self.position_answered(cx, &read);
+                self.order_answered(cx, &read);
                 if read.axis == Axis::Positions {
                     self.debounce(cx, Axis::Positions);
+                }
+                if read.axis.order_slot().is_some() {
+                    self.debounce(cx, Axis::Orders);
                 }
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
@@ -597,9 +636,27 @@ impl BitunixFutures {
             self.debounce(cx, Axis::Positions);
         }
     }
+    pub(crate) fn order_answered(&mut self, cx: &mut Cx<'_, Pending>, read: &Read) {
+        let Some(slot) = read.axis.order_slot() else {
+            return;
+        };
+        if !self.account.order_reads[slot]
+            .as_ref()
+            .is_some_and(|p| p.serial == read.serial)
+        {
+            return;
+        }
+        let progress = self.account.order_reads[slot].take().unwrap();
+        cx.clear_timer(progress.timer);
+        if progress.dirty || read.generation != self.account.generations[2] {
+            self.debounce(cx, Axis::Orders);
+        }
+    }
     pub(crate) fn debounce(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         let i = axis.index();
-        if axis == Axis::Positions && self.account.timers[i].is_some() {
+        if matches!(axis, Axis::Positions | Axis::Orders | Axis::Tpsl)
+            && self.account.timers[i].is_some()
+        {
             return;
         }
         if let Some(t) = self.account.timers[i].take() {
@@ -608,14 +665,31 @@ impl BitunixFutures {
         self.account.timers[i] = Some(cx.set_timer(1000.0));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.login_retry == Some(timer) {
+        if let Some(slot) = self
+            .account
+            .order_reads
+            .iter()
+            .position(|p| p.as_ref().is_some_and(|p| p.timer == timer))
+        {
+            let progress = self.account.order_reads[slot].as_mut().unwrap();
+            let remaining = progress.issued + ORDER_STALL_MS - cx.now;
+            if remaining > 0.0 {
+                progress.timer = cx.set_timer(remaining);
+            } else {
+                self.read_axis(cx, if slot == 0 { Axis::Orders } else { Axis::Tpsl });
+            }
+            return true;
+        }
+        if let Some((owned_timer, socket)) = self.account.login_retry
+            && owned_timer == timer
+        {
             self.account.login_retry = None;
-            if let Some(s) = self
+            if self
                 .sockets
                 .iter()
-                .find(|s| s.active && matches!(s.feed, Feed::Private) && s.opened)
+                .any(|s| s.active && s.id == socket && matches!(s.feed, Feed::Private) && s.opened)
             {
-                self.login(cx, s.id);
+                self.login(cx, socket);
             }
             return true;
         }
@@ -776,6 +850,7 @@ impl BitunixFutures {
         response: Response<'_>,
     ) {
         self.position_answered(cx, &read);
+        self.order_answered(cx, &read);
         if read.axis == Axis::Balance {
             self.account.balance_answered = self.account.balance_answered.max(read.serial);
         }
@@ -1187,33 +1262,66 @@ impl BitunixFutures {
         }
         (orders, natives)
     }
-    pub(crate) fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: &Message<'_>) {
+    pub(crate) fn private_message(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: safe_cex_engine::SocketId,
+        m: &Message<'_>,
+    ) {
+        let operation = if m.op.is_empty() {
+            m.ch.as_ref()
+        } else {
+            m.op.as_ref()
+        };
+        if operation == "login" {
+            #[derive(serde::Deserialize)]
+            struct Login {
+                result: bool,
+            }
+            let result = m
+                .data
+                .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
+                .map(|login| login.result);
+            if result == Some(true) {
+                if let Some((timer, owner)) = self.account.login_retry
+                    && owner == socket
+                {
+                    self.account.login_retry = None;
+                    cx.clear_timer(timer);
+                }
+                return;
+            }
+            if result == Some(false) {
+                cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
+                    "Bitunix private ws login failed, double check your key and secret",
+                );
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "Malformed Bitunix private login response",
+                );
+            }
+            if self
+                .account
+                .login_retry
+                .is_some_and(|(_, owner)| owner == socket)
+            {
+                return;
+            }
+            if let Some((timer, _)) = self.account.login_retry.take() {
+                cx.clear_timer(timer);
+            }
+            self.account.login_retry = Some((cx.set_timer(2000.0), socket));
+            return;
+        }
         let Some(raw) = m.data else {
             return;
         };
         let text = raw.get();
-        match if m.op.is_empty() {
-            m.ch.as_ref()
-        } else {
-            m.op.as_ref()
-        } {
-            "login" => {
-                #[derive(serde::Deserialize)]
-                struct Login {
-                    result: bool,
-                }
-                if !serde_json::from_str::<Login>(text).is_ok_and(|l| l.result) {
-                    cx.notice(
-                        Level::Error,
-                        code::AUTH_REJECTED,
-                        "Bitunix private ws login failed, double check your key and secret",
-                    );
-                    if let Some(t) = self.account.login_retry.take() {
-                        cx.clear_timer(t);
-                    }
-                    self.account.login_retry = Some(cx.set_timer(2000.0));
-                }
-            }
+        match operation {
             "balance" => {
                 self.account.generations[0] += 1;
                 self.debounce(cx, Axis::Balance);

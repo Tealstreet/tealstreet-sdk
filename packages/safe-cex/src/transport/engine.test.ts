@@ -592,7 +592,9 @@ describe('engine socket routing at the raw transport boundary', () => {
                 const upstream = `wss://venue.example/socket-${channel}`;
                 const handler = handlers(channel);
                 routed.connect(upstream, handler);
-                const target = route.tunnelled ? route.host! : upstream;
+                // Bitunix TS classes explicitly select fallback on this option.
+                const target = exchange === 'bitunix' && tealstreetWsRoute
+                  ? route.fallback! : route.tunnelled ? route.host! : upstream;
                 const expectedHeaders = {
                   ...(['bybit', 'bybitinverse', 'bybitspot'].includes(exchange) && bybitSiteId
                     ? { 'x-site-id': bybitSiteId }
@@ -1672,5 +1674,55 @@ describe('Bybit product public sockets', () => {
       { contains: '/v5/public/option', route: {} },
     ]);
     expect(resolveEngineRoutingPlan('bybitinverse', brazil, 'https://api.bybit.com').publicWsRoutes).toBeUndefined();
+  });
+});
+
+
+describe('Bitunix explicit WebSocket routing', () => {
+  it.each([true, false, undefined])('honors explicit route=%s from the first connect for every stable feed', (tealstreetWsRoute) => {
+    const opts = options({ tealstreetWsRoute });
+    const plan = resolveEngineRoutingPlan('bitunix', opts, 'https://fapi.bitunix.com');
+    // Legacy TS callers keep consuming fallback from the shared resolver.
+    const legacy = resolveExchangeRouting('bitunix', opts);
+    expect(legacy.wsPublic.host).toBeUndefined();
+    expect(legacy.wsPublic.fallback).toBe('wss://bitunix-fapi-proxy-ja.tealstreet.io/public/');
+    const feeds = [
+      ['public', 'ticker:0', 'wss://fapi.bitunix.com/public/', 'wss://bitunix-fapi-proxy-ja.tealstreet.io/public/'],
+      ['public', 'price:300', 'wss://fapi.bitunix.com/public/', 'wss://bitunix-fapi-proxy-ja.tealstreet.io/public/'],
+      ['private', 'private', 'wss://fapi.bitunix.com/private/', 'wss://bitunix-fapi-proxy-ja.tealstreet.io/private/'],
+      ['business', 'futures', 'wss://api.bitunix.com/ws-futures/?from=contract&compress=2', 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2'],
+    ] as const;
+    const raw = makeRaw();
+    const transport = createEngineTransport('bitunix', opts, raw);
+    try {
+      for (const [channel, feed, url, proxy] of feeds) {
+        expect(plan.ws[channel].host).toBe(tealstreetWsRoute ? proxy : undefined);
+        expect(plan.ws[channel].fallback).toBe(tealstreetWsRoute ? undefined : proxy);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          transport.connect(url, { channel, context: { feed, recover: false }, onOpen() {}, onMessage() {}, onClose() {} });
+          expect(raw.connect.mock.lastCall![0]).toBe(tealstreetWsRoute || attempt === 2 ? proxy : url);
+        }
+        transport.connect(url, { channel, context: { feed: `recover:${feed}`, recover: true }, onOpen() {}, onMessage() {}, onClose() {} });
+        expect(raw.connect.mock.lastCall![0]).toBe(proxy);
+      }
+    } finally { transport.dispose!(); }
+  });
+
+  it('keeps direct-provider sockets direct and reports unsupported explicit routing', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = makeRaw();
+    const transport = createEngineTransport('bitunix', options({ tealstreetWsRoute: true, transport: directTransport }), raw);
+    try {
+      const url = 'wss://fapi.bitunix.com/private/';
+      transport.connect(url, handlers('private'));
+      expect(raw.connect.mock.lastCall![0]).toBe(url);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('[bitunix] tealstreetWsRoute requested but the direct transport is active'));
+    } finally { transport.dispose!(); warning.mockRestore(); }
+  });
+
+  it('does not force Bitget fallback-only channels with the Bitunix option', () => {
+    const plan = resolveEngineRoutingPlan('bitget', options({ tealstreetWsRoute: true }), 'https://api.bitget.com');
+    expect(plan.ws.public.host).toBeUndefined();
+    expect(plan.ws.private.host).toBeUndefined();
   });
 });

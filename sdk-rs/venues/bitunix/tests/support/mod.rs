@@ -36,18 +36,29 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         .collect()
 }
 pub fn startup() -> (TestEngine, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         ..Options::default()
     }));
-    e.start(0.0);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, PAIRS);
+    startup_with_engine(e)
+}
+/// Settle the initial mode-change reconciliation before the fixture's time zero.
+/// Tests exercise post-startup events from 100ms onward without a hidden pending
+/// debounce that a notification would previously postpone.
+pub fn startup_with_engine(mut e: TestEngine) -> (TestEngine, SocketId) {
+    let mut now = -1000.0;
+    e.start(now);
     let mut private = None;
+    let mut repairs = Vec::new();
     loop {
         let actions: Vec<_> = e.drain_actions().collect();
         if actions.is_empty() {
+            if let Some((timer, at)) = repairs.pop() {
+                now = at;
+                e.handle(at, Event::TimerFired { timer });
+                continue;
+            }
             break;
         }
         for a in actions {
@@ -56,10 +67,12 @@ pub fn startup() -> (TestEngine, SocketId) {
                     if url.contains("/private/") {
                         private = Some(socket);
                     }
-                    e.handle(0.0, Event::WsOpened { socket });
+                    e.handle(now, Event::WsOpened { socket });
                 }
                 Action::Http(r) => {
-                    let body = if r.url.ends_with("/tickers") {
+                    let body = if r.url.ends_with("/trading_pairs") {
+                        PAIRS
+                    } else if r.url.ends_with("/tickers") {
                         TICKERS
                     } else if r.url.contains("get_pending_positions") {
                         POSITIONS
@@ -70,11 +83,27 @@ pub fn startup() -> (TestEngine, SocketId) {
                     } else {
                         ACCOUNT
                     };
-                    reply(&mut e, r.id, body);
+                    e.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
                 }
+                Action::SetTimer { timer, at_ms } if at_ms == 0.0 => repairs.push((timer, at_ms)),
+                Action::ClearTimer { timer } => repairs.retain(|(pending, _)| *pending != timer),
                 _ => {}
             }
         }
     }
+    assert!(
+        e.store().loaded().orders,
+        "startup must settle both order endpoints"
+    );
     (e, private.unwrap())
 }

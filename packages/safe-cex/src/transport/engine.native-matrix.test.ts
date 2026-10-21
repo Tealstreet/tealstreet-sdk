@@ -87,6 +87,8 @@ const cases: Case[] = [
   { name: 'coinbase-proxy-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
   { name: 'coinbasespot-proxy-jwt', exchange: 'coinbasespot', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
   { name: 'coinbase-how-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true, tealstreetTunnel: true }, how: true },
+  { name: 'bitunix-force-ws', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com', options: { tealstreetWsRoute: true } },
+  { name: 'bitunix-direct-first-ws', exchange: 'bitunix', baseURL: 'https://fapi.bitunix.com', options: { tealstreetWsRoute: false } },
   { name: 'direct-provider', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {}, direct: true },
   { name: 'tealstreet-direct', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {} },
   { name: 'asia-pool', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: { tealstreetProxy: true } },
@@ -423,7 +425,9 @@ const buildCase = async (input: Case) => {
     const declared =
       productRouting(url) ??
       routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
-    const route: Partial<ResolvedWs> = declared.directUrls?.includes(url) ? {} : declared;
+    // TS Bitunix socket classes select fallback immediately on this explicit flag.
+    const forced = input.exchange === 'bitunix' && options.tealstreetWsRoute && declared.fallback;
+    const route: Partial<ResolvedWs> = declared.directUrls?.includes(url) ? {} : forced ? { host: declared.fallback } : declared;
     const candidates = [
       route.host ?? url,
       ...(input.relay && route.relay ? [route.relay] : []),

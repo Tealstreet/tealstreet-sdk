@@ -327,7 +327,11 @@ fn rejection_coverage_overflow_preserves_every_cached_raw_family() {
     }
 }
 
-fn initial_halves() -> (TestEngine, Vec<HttpRequest>) {
+fn initial_halves() -> (
+    TestEngine,
+    Vec<HttpRequest>,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
     use safe_cex_venue_bitunix::{BitunixFutures, Options};
     let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
         key: Some("replay-key".into()),
@@ -336,6 +340,7 @@ fn initial_halves() -> (TestEngine, Vec<HttpRequest>) {
     }));
     e.start(0.0);
     let mut halves = Vec::new();
+    let mut repairs = Vec::new();
     loop {
         let actions: Vec<_> = e.drain_actions().collect();
         if actions.is_empty() {
@@ -357,19 +362,23 @@ fn initial_halves() -> (TestEngine, Vec<HttpRequest>) {
                     };
                     answer(&mut e, r.id, 0.0, bytes);
                 }
+                Action::SetTimer { timer, at_ms } if at_ms == 1000.0 => {
+                    repairs.push((timer, at_ms))
+                }
+                Action::ClearTimer { timer } => repairs.retain(|(pending, _)| *pending != timer),
                 _ => {}
             }
         }
     }
     assert_eq!(halves.len(), 2);
     assert!(!e.store().loaded().orders);
-    (e, halves)
+    (e, halves, repairs)
 }
 #[test]
 fn partial_initial_halves_never_load_and_recovery_requires_both_current_serials() {
     for bad_tpsl in [false, true] {
         for bad_first in [false, true] {
-            let (mut e, mut halves) = initial_halves();
+            let (mut e, mut halves, mut repairs) = initial_halves();
             halves.sort_by_key(|r| r.url.contains("/tpsl/") != bad_tpsl);
             if !bad_first {
                 halves.reverse();
@@ -391,13 +400,24 @@ fn partial_initial_halves_never_load_and_recovery_requires_both_current_serials(
                 }
                 assert!(!e.store().loaded().orders);
             }
-            let timer = e
-                .drain_actions()
-                .find_map(|a| match a {
-                    Action::SetTimer { timer, at_ms } if at_ms == retry_at => Some(timer),
-                    _ => None,
-                })
-                .unwrap();
+            // Keep the earlier bootstrap repair if it was already armed; a bad
+            // half must not postpone that deadline. Replay timer cancellation.
+            for action in e.drain_actions() {
+                match action {
+                    Action::SetTimer { timer, at_ms } if at_ms >= 1000.0 && at_ms <= retry_at => {
+                        repairs.push((timer, at_ms))
+                    }
+                    Action::ClearTimer { timer } => {
+                        repairs.retain(|(pending, _)| *pending != timer)
+                    }
+                    _ => {}
+                }
+            }
+            let (timer, at) = repairs
+                .into_iter()
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .expect("one coalesced initial repair");
+            retry_at = at;
             e.handle(retry_at, Event::TimerFired { timer });
             let retry = requests(&mut e);
             assert_eq!(retry.len(), 2);
