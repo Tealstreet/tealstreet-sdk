@@ -119,6 +119,9 @@ pub enum ArrayAt {
     EnvelopeFieldOrNested(&'static str, &'static str),
     /// A direct array or one of several accepted nested array names.
     EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
+    /// First matching array field at any depth in a versioned envelope.
+    #[cfg(feature = "any-field-envelope")]
+    AnyFieldEnvelope(&'static [&'static str]),
 }
 
 /// Who rejects a malformed array element.
@@ -330,7 +333,15 @@ impl ArraySplitter {
                                 matches(&[field])
                                     || nested.iter().any(|name| matches(&[field, name]))
                             }
+                            #[cfg(feature = "any-field-envelope")]
+                            ArrayAt::AnyFieldEnvelope(_) => false,
                         };
+                    // Versioned envelopes may wrap the target in arrays.
+                    #[cfg(feature = "any-field-envelope")]
+                    if let ArrayAt::AnyFieldEnvelope(names) = self.at {
+                        self.armed = self.containers.last() == Some(&b'{')
+                            && names.iter().any(|name| name.as_bytes() == self.key);
+                    }
                     continue;
                 }
                 b'[' | b'{' => {
@@ -353,6 +364,8 @@ impl ArraySplitter {
                                 }
                                 ArrayAt::EnvelopeFieldOrNested(..)
                                 | ArrayAt::EnvelopeFieldOrNestedAny(..) => self.armed,
+                                #[cfg(feature = "any-field-envelope")]
+                                ArrayAt::AnyFieldEnvelope(_) => self.armed,
                             };
                         self.armed = false;
                         if found {
@@ -1083,6 +1096,25 @@ mod tests {
             assert_eq!(
                 std::str::from_utf8(splitter.outside()).unwrap(),
                 body.replace("[1]", "[]")
+            );
+        }
+    }
+
+    #[cfg(feature = "any-field-envelope")]
+    #[test]
+    fn any_field_selector_preserves_array_wrapped_versioned_envelopes() {
+        let body = br#"{"version":[{"rows":[1,2],"cursor":"next"}],"code":0}"#;
+        for size in [1, 2, 9, 1024] {
+            let mut splitter = ArraySplitter::new(ArrayAt::AnyFieldEnvelope(&["rows"]));
+            let mut items = Vec::new();
+            for chunk in body.chunks(size) {
+                splitter.feed(chunk, |item| items.push(item.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, ["1", "2"]);
+            assert_eq!(
+                splitter.outside(),
+                br#"{"version":[{"rows":[],"cursor":"next"}],"code":0}"#
             );
         }
     }

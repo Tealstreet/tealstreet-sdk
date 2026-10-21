@@ -7,6 +7,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const KEY: &str = "/openApi/user/auth/userDataStream";
 const MODE: &str = "/openApi/swap/v1/positionSide/dual";
 const BALANCE: &str = "/openApi/swap/v3/user/balance";
@@ -724,6 +727,173 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let mut h = Harness::ready();
+    let now = h.now;
+    let engine = &mut h.engine;
+    let (now, mut reads) = policy_poll_read(engine, now, "positions");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("balance") {
+                BALANCES
+            } else if r.url.contains("positions") {
+                POSITION
+            } else {
+                r#"{"code":0,"data":{"orders":[]}}"#
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
 // ETH-USDT is a malformed contract row (identity only); MISSING-USDT is not listed at all.
 const PARTIAL_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125},{"symbol":"ETH-USDT","asset":"ETH"}]}"#;
 const BOTH_MARKETS: &str = r#"{"code":0,"data":[{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#;
@@ -1222,4 +1392,28 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         assert!(h.engine.store().hedged(), "stale step {step}");
         read = h.take(MODE);
     }
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    let markets = PARTIAL_MARKETS.replace(
+        r#"{"symbol":"ETH-USDT","asset":"ETH"}"#,
+        r#"{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":400,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100}"#,
+    );
+    let mut h = with_markets(&markets);
+    assert!(h.engine.store().market("ETHUSDT").is_none());
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    h.fire_at(3000.0);
+    let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
+    h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
 }

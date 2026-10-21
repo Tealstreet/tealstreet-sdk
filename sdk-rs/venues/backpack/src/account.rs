@@ -401,7 +401,7 @@ impl Backpack {
                 if let Some(t) = self.account.tick.take() {
                     cx.clear_timer(t);
                 }
-                self.account.tick = Some(cx.set_timer(10000.0));
+                self.account.tick = Some(cx.set_poll_timer(10000.0));
             }
             Next::None => {}
         }
@@ -594,7 +594,7 @@ impl Backpack {
             cx.log(LogLevel::Error, e);
             self.next_account(cx, failure_next);
             if self.account.tick.is_none() {
-                self.account.tick = Some(cx.set_timer(10000.0));
+                self.account.tick = Some(cx.set_poll_timer(10000.0));
             }
         }
     }
@@ -844,8 +844,9 @@ impl Backpack {
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.socket.supervisor.connecting(cx);
-        self.account.socket.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.account.socket.socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
+        ));
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {

@@ -231,13 +231,14 @@ impl Cryptocom {
             "wss://stream.crypto.com"
         };
         let kind = if channel == 0 { "market" } else { "user" };
-        self.sockets[channel].socket = Some(cx.connect_channel(
-            format!("{root}/exchange/v1/{kind}"),
-            if channel == 0 {
-                safe_cex_engine::SocketChannel::Public
-            } else {
-                safe_cex_engine::SocketChannel::Private
-            },
+        self.sockets[channel].socket = Some(cx.connect(
+            safe_cex_engine::SocketSpec::new(format!("{root}/exchange/v1/{kind}")).channel(
+                if channel == 0 {
+                    safe_cex_engine::SocketChannel::Public
+                } else {
+                    safe_cex_engine::SocketChannel::Private
+                },
+            ),
         ));
     }
 
@@ -551,15 +552,20 @@ impl Venue for Cryptocom {
                     return;
                 }
                 match serde_json::from_str::<Instrument>(item) {
-                    Ok(row) => {
-                        if let Some(market) = row.market() {
+                    Ok(row) => match row.market() {
+                        Some(market) if market.precision.is_tradable() => {
                             indexes.insert(
                                 market.id.clone(),
                                 row.underlying_symbol.unwrap_or_default().into(),
                             );
                             rows.push(market);
                         }
-                    }
+                        Some(market) => {
+                            skipped.add(Some(row.symbol));
+                            malformed.insert(market.symbol);
+                        }
+                        None => {}
+                    },
                     Err(_) => {
                         let symbol = key.ok().and_then(|k| k.symbol);
                         skipped.add(symbol);

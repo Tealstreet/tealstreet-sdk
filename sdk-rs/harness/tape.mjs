@@ -373,6 +373,7 @@ export class Tape {
       this.lifecycleStreams.get(key).add(stream);
     }
     this.startupDelivered = new Set();
+    this.earlyDelivered = new Set();
 
     this.open = new Map();
     this.waiters = [];
@@ -562,6 +563,7 @@ export class Tape {
     if (this.responses.isWrite(method, url) && response.status !== 599) {
       this.expectedWrites.shift();
       this.unacknowledgedStages.delete(this.responses.served.afterCommand);
+      this.deliverBeforeAck(this.responses.served.afterCommand);
     }
     try {
       this.requestAudit?.response({ method, url, body, headers, response });
@@ -610,6 +612,22 @@ export class Tape {
       });
     } finally {
       this.pollingFence = undefined;
+    }
+  }
+
+  // A venue often pushes a write's order event before its REST acknowledgement.
+  // A frame marked beforeAck reaches its socket after the write is served but
+  // before the client consumes the acknowledgement (a microtask ahead of it).
+  deliverBeforeAck(stage) {
+    if (!(stage > 0)) return;
+    for (const frame of this.frames) {
+      if (!frame.beforeAck || frame.afterCommand !== stage || this.earlyDelivered.has(frame)) continue;
+      const [socket] = this.sockets(frame.url, frame.socket);
+      if (!socket) continue;
+      this.earlyDelivered.add(frame);
+      queueMicrotask(() => {
+        try { this.deliver(socket, frame.text); } catch (error) { this.earlyFailure ??= error; }
+      });
     }
   }
 
@@ -1052,7 +1070,7 @@ export class Tape {
         this.settledCommands = this.commandIndex;
       } else if (frame.type === 'wait' || frame.type === 'http') {
         // Advance explicit horizons; real requests select HTTP responses.
-      } else if (this.startupDelivered.has(frame)) {
+      } else if (this.startupDelivered.has(frame) || this.earlyDelivered.has(frame)) {
         // Still advance tape time, frame count and tick callbacks below.
       } else {
         await this.deliverFrame(frame);
@@ -1060,6 +1078,7 @@ export class Tape {
       delivered++;
       onTick?.(frame.t);
       await new Promise(setImmediate);
+      if (this.earlyFailure) throw this.earlyFailure;
       if (checkpoints.has(delivered))
         await checkpoint?.({ ordinal: delivered, recordIndex: this.recordIndices.get(frame), t: frame.t ?? 0 });
     }

@@ -160,8 +160,12 @@ impl Backpack {
             if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                 self.public.supervisor.connecting(cx);
             }
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+            self.public.socket = Some(
+                cx.connect(
+                    safe_cex_engine::SocketSpec::new(WS)
+                        .channel(safe_cex_engine::SocketChannel::Public),
+                ),
+            );
         }
     }
     fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
@@ -633,7 +637,7 @@ impl Venue for Backpack {
                         || r.market_type != "PERP"
                         || !r.symbol.contains('_')
                     {
-                        return;
+                        return true;
                     }
                     let mut split = r.symbol.split('_');
                     let base = split.next().unwrap_or("").to_owned();
@@ -642,7 +646,7 @@ impl Venue for Backpack {
                         let n = safe_cex_engine::num::parse(&f.base);
                         if n > 0.0 { (1.0 / n).round() } else { 1.0 }
                     });
-                    rows.push(Market {
+                    let market = Market {
                         id: r.symbol.to_string(),
                         symbol: r.symbol.into_owned(),
                         pretty_symbol: None,
@@ -683,9 +687,14 @@ impl Venue for Backpack {
                         is_read_only: None,
                         taker_fee: None,
                         maker_fee: None,
-                    });
+                    };
+                    let tradable = market.precision.is_tradable();
+                    if tradable {
+                        rows.push(market);
+                    }
+                    tradable
                 });
-                if r.is_err() {
+                if !r.unwrap_or(false) {
                     safe_cex_engine::startup::skipped_row(cx);
                     skipped.push(row_symbol(item));
                 }

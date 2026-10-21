@@ -84,8 +84,8 @@ calls. For example, `{"op":"subscribeOrderBook","symbol":"BTCUSDT"}` has no
 result, while `{"op":"fetchLeverage","command":7,"symbol":"BTCUSDT"}` produces
 `{"type":"done","command":7,"result":"...JSON..."}` (or `error`). IDs are u32,
 unique among pending commands for this connection; the native server isolates
-them across clients. `setTickerSymbols`, `setTickInterval` and book/candle
-subscribe/unsubscribe have no completion. `setTickInterval` affects the whole
+them across clients. `setTickerSymbols`, `setPollScale` and book/candle
+subscribe/unsubscribe have no completion. `setPollScale` affects the whole
 account. Native writes can first emit
 `{"type":"commandProgress","command":7,"receipts":[{"symbol":"BTCUSDT","kind":"clientOrderId","identity":"native-id"}]}`.
 These are selected native identities, not placement acknowledgements. Kinds
@@ -98,7 +98,9 @@ same client ownership. They do not settle the command: `done` remains its result
 Consumers should combine diagnostics with that result for one visible failure
 per command, preserving a partial-success diagnostic and an unknown timeout.
 Other notices are
-`error`, `log` and `deactivate`, relayed as JSON.
+`error`, `log`, `event` and `deactivate`, relayed as JSON.
+`event` carries `level` (`debug`/`info`/`warn`/`error`), a stable dotted `code`,
+`message` and optional flat `fields`; match on `code`, not message text.
 Native typed decoding and venue capability checks remain authoritative.
 
 The adapter never retries or replays a sent command. On disconnect a sent

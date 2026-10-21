@@ -7,6 +7,64 @@ use support::*;
 const POSITION: &str = r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","liqPx":"30000","mgnMode":"cross","imr":"200","mmr":"20"}"#;
 const ORDER: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"123","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"1","px":"38000","lever":"10","reduceOnly":"false","clOrdId":"caller123"}"#;
 
+#[test]
+fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    }));
+    e.start(0.);
+    let market = actions(&mut e).remove(0);
+    reply(&mut e, &market, &envelope(MARKET), 1.);
+    // Account config is requested alongside the ticker seed once markets load.
+    let mut initial = actions(&mut e);
+    let ticker = initial.remove(0);
+    reply(&mut e, &ticker, &envelope(TICKER), 2.);
+    initial.extend(actions(&mut e));
+    let config = initial
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.,
+    );
+    let pending = actions(&mut e);
+    let timer = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2003. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    complete(&mut e, pending, ORDER);
+    let expected = e.store().balance().clone();
+    for scale in [f64::INFINITY, 15., 0.25] {
+        e.handle(100., Event::PollScaleChanged { scale });
+        assert!(actions(&mut e).is_empty());
+    }
+    e.handle(
+        100.,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.store_mut().set_balance(Default::default());
+    e.handle(2003., Event::TimerFired { timer });
+    assert_eq!(e.store().balance(), &expected);
+    let after = actions(&mut e);
+    assert!(!after.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        after
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 4003.))
+    );
+}
+
 fn startup() -> (
     Engine<Okx>,
     safe_cex_engine::SocketId,
@@ -718,4 +776,20 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         !out.iter()
             .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 3002.0))
     );
+}
+
+#[test]
+fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
+    for kind in ["mmp", "mmp_and_post_only", "elp"] {
+        let (mut e, _, _, pending) = startup();
+        complete(
+            &mut e,
+            pending,
+            &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+        );
+        let o = &e.store().orders()[0];
+        assert_eq!(o.id, "123", "{kind}");
+        assert_eq!(o.filled, 0.01, "{kind}");
+        assert_eq!(o.client_order_id.as_deref(), Some("caller123"), "{kind}");
+    }
 }

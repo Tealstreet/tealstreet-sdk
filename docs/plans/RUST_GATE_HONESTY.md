@@ -535,6 +535,13 @@ never retry an unchanged failed performance measurement to obtain a pass.
   2026-10-20 audit-fix merges (#1355, #1357, #1360, #1361, #1365, #1370, #1353,
   #1369, #1376, #1372, #1381, #1364, #1382, #1380). Overseer decision: raise the
   combined ceiling to 13,631,488 (13 MiB); per-family budgets unchanged.
+- Adding the Bitunix family (#1309) grew the combined WASM from 13,523,241
+  (landing `c50c51abd9`) to 13,931,829 bytes at opt-level 3, and to 13,870,074 with
+  Bitunix size-optimized (CI `39525669706`). Users download only their venue's
+  family since #1393 (Bitunix 843,722 of 1,310,720), so the combined figure caps
+  total package size and a new family legitimately adds its crate. Overseer
+  decision (2026-10-21, +Bitunix family): raise the combined ceiling to
+  14,155,776 (13.5 MiB); per-family budget unchanged.
 - CI `39453323762`: landing changed the MEXC, BloFin and Backpack private tape
   generators. New hashes declare only previously declared paths (MEXC 82 of
   118, BloFin 91 of 91, Backpack 164 of 164). TxFlow public newly fails on

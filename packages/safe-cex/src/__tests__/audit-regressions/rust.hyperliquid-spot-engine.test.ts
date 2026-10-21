@@ -16,7 +16,8 @@ describe('spot-enabled Hyperliquid accounts stay on the TS venue', () => {
     expect(runsOnRustEngine('hyperliquid', {})).toBe(false);
     // The flag means nothing to other venues.
     expect(runsOnRustEngine('bybit', { engine: 'rust', enableSpotMarkets: true })).toBe(true);
-    expect(runsOnRustEngine('bitunix', { engine: 'rust' })).toBe(false);
+    expect(runsOnRustEngine('bitunix', { engine: 'rust', enableSpotMarkets: true })).toBe(true);
+    expect(runsOnRustEngine('bitunix', {})).toBe(false);
   });
 
   it('createExchange builds the TS venue for a spot-enabled account and the engine otherwise', async () => {

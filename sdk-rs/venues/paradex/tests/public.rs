@@ -576,7 +576,7 @@ fn market_maker_and_taker_fees_survive_normalization() {
         public_data_only: true,
         ..Options::default()
     });
-    h.reply("/markets",r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","maker_fee":"-0.0001","taker_fee":"0.0002"}]}"#);
+    h.reply("/markets",r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.1","maker_fee":"-0.0001","taker_fee":"0.0002"}]}"#);
     let m = h.e.store().market(BTC).unwrap();
     assert_eq!((m.maker_fee, m.taker_fee), (Some(-0.0001), Some(0.0002)));
 }
@@ -945,7 +945,7 @@ fn malformed_selected_perpetual_numbers_skip_only_the_bad_market_row() {
             ..Options::default()
         });
         h.reply("/markets", &format!(r#"{{"results":[
-            {{"symbol":"BTC-USD-PERP","asset_kind":"PERP","step_size":"0.001","price_bands_width":"5"}},
+            {{"symbol":"BTC-USD-PERP","asset_kind":"PERP","step_size":"0.001","price_tick_size":"0.1","price_bands_width":"5"}},
             {{"symbol":"ETH-USD-PERP","asset_kind":"PERP","status":"ACTIVE","price_tick_size":{invalid}}}
         ]}}"#));
         assert!(h.e.store().loaded().markets);
@@ -1195,4 +1195,29 @@ fn suppressed_public_feed_is_not_supervised() {
         "no public connects or closes: {sockets:?}"
     );
     assert_eq!(fired, 0, "no supervision timers fire");
+}
+
+#[test]
+fn a_market_without_a_positive_step_is_skipped_as_malformed() {
+    for (valid, bad) in [
+        (r#""price_tick_size":"0.01""#, r#""price_tick_size":"0""#),
+        (
+            r#""order_size_increment":"0.001""#,
+            r#""order_size_increment":"-0.001""#,
+        ),
+        (
+            r#""order_size_increment":"0.001""#,
+            r#""order_size_increment":"""#,
+        ),
+    ] {
+        let markets = MARKETS.replace(valid, bad);
+        assert_ne!(markets, MARKETS);
+        let mut h = Harness::empty(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        h.reply("/markets", &markets);
+        assert!(h.e.store().market("BTC-USD-PERP").is_some(), "{bad}");
+        assert!(h.e.store().market("ETH-USD-PERP").is_none(), "{bad}");
+    }
 }

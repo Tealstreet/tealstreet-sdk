@@ -7,6 +7,7 @@
     feature = "bitrue",
     feature = "coinbase",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -31,10 +32,10 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
-use safe_cex_engine::{Engine, ErrorKind, PublicFeedPolicy, Venue, VenueError};
+use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
 #[cfg(feature = "asterdex")]
@@ -51,6 +52,8 @@ use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "bitrue")]
 use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
+#[cfg(feature = "bitunix")]
+use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "breakoutprop")]
@@ -107,14 +110,22 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
     VenueError::new(message.to_string()).kind(ErrorKind::InvalidInput)
 }
 
+/// Engine settings every venue receives after construction.
+#[derive(Clone, Copy)]
+struct Startup {
+    account: bool,
+    log_level: Level,
+}
+
 fn finish<T: Visit, V: Venue + 'static>(
     visitor: T,
     policy: PublicFeedPolicy,
-    account_startup: bool,
+    startup: Startup,
     mut engine: Engine<V>,
 ) -> Result<T::Output, VenueError> {
     engine.set_public_feed_policy(policy).map_err(invalid)?;
-    engine.set_account_startup(account_startup);
+    engine.set_account_startup(startup.account);
+    engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
 }
 
@@ -261,6 +272,8 @@ pub fn supported(venue: &str) -> bool {
         "lighter" | "lighter-robinhood" => true,
         #[cfg(feature = "bitrue")]
         "bitrue" => true,
+        #[cfg(feature = "bitunix")]
+        "bitunix" => true,
         #[cfg(feature = "backpack")]
         "backpack" => true,
         #[cfg(feature = "blofin")]
@@ -430,7 +443,14 @@ pub fn build<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
-    let account_startup = options.account_startup;
+    let startup = Startup {
+        account: options.account_startup,
+        log_level: match options.log_level.as_deref() {
+            None => Level::Info,
+            Some(text) => Level::parse(text)
+                .ok_or_else(|| invalid("logLevel must be debug, info, warn or error"))?,
+        },
+    };
     match venue {
         #[cfg(feature = "breakoutprop")]
         "breakoutprop" => {
@@ -438,19 +458,14 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(BreakoutProp::new(BreakoutOptions {
                     key: options.key.take().unwrap_or_default(),
                     secret: options.secret.take().unwrap_or_default(),
                     subaccount: options.subaccount.take(),
                     public_data_only: options.public_data_only,
-                    tick_interval: if options.polling_enabled == Some(false) {
-                        f64::INFINITY
-                    } else {
-                        safe_cex_engine::engine::bounded_tick_interval(
-                            options.tick_interval.take().unwrap_or(2_000.0),
-                        )
-                    },
+                    // The runtime polling policy (`setPollScale`) owns the cadence from here.
+                    tick_interval: 2_000.0,
                     timeout_ms: options
                         .recv_window
                         .unwrap_or(20_000.0)
@@ -462,7 +477,7 @@ pub fn build<T: Visit>(
         "grvt" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Grvt::new(GrvtOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -477,7 +492,7 @@ pub fn build<T: Visit>(
         "coinbase" | "coinbasespot" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(
                 Coinbase::new(CoinbaseOptions {
                     key: options.key.take().unwrap_or_default(),
@@ -496,7 +511,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(Polymarket::new(PolymarketOptions {
                     public_data_only: options.public_data_only,
                     key: options.key.take(),
@@ -508,7 +523,7 @@ pub fn build<T: Visit>(
         "paradex" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Paradex::new(ParadexOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -522,7 +537,7 @@ pub fn build<T: Visit>(
         "apexomni" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(ApexOmni::new(ApexOmniOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -552,7 +567,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(safe_cex_venue_txflow::TxFlow::new(options)),
             )
         }
@@ -560,7 +575,7 @@ pub fn build<T: Visit>(
         "kraken" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Kraken::new(KrakenOptions {
                 read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
@@ -573,7 +588,7 @@ pub fn build<T: Visit>(
         "krakenspot" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(KrakenSpot::new(KrakenOptions {
                 // Spot private reads are POSTs and retain primary credentials.
                 read_credentials: None,
@@ -589,7 +604,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(AsterDex::new(AsterOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
@@ -614,7 +629,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(Orderly::new(OrderlyOptions {
                     broker: match venue {
                         "kodiakfi" => OrderlyBroker::KodiakFi,
@@ -629,10 +644,7 @@ pub fn build<T: Visit>(
                     key: options.key.take(),
                     secret: options.secret.take(),
                     application_id: options.application_id.take(),
-                    tick_interval: options
-                        .tick_interval
-                        .take()
-                        .map(safe_cex_engine::engine::bounded_tick_interval),
+                    tick_interval: None,
                 })),
             )
         }
@@ -640,7 +652,7 @@ pub fn build<T: Visit>(
         "lighter" | "lighter-robinhood" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Lighter::new(LighterOptions {
                 robinhood: venue == "lighter-robinhood",
                 remote_signer: options.lighter_remote_signer,
@@ -659,7 +671,7 @@ pub fn build<T: Visit>(
         "bitrue" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Bitrue::new(BitrueOptions {
                 read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
@@ -672,11 +684,23 @@ pub fn build<T: Visit>(
                     .clamp(1.0, 60_000.0) as u32,
             })),
         ),
+        #[cfg(feature = "bitunix")]
+        "bitunix" => finish(
+            visitor,
+            policy,
+            startup,
+            Engine::new(BitunixFutures::new(BitunixOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key.take(),
+                secret: options.secret.take(),
+            })),
+        ),
         #[cfg(feature = "backpack")]
         "backpack" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Backpack::new(BackpackOptions {
                 read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
@@ -689,7 +713,7 @@ pub fn build<T: Visit>(
         "blofin" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Blofin::new(BlofinOptions {
                 broker_attribution: options.broker_attribution,
                 read_credentials: options.read_credentials.take(),
@@ -704,7 +728,7 @@ pub fn build<T: Visit>(
         "mexc" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(MexcFutures::new(MexcOptions {
                 recv_window: tighter_recv_window(options.recv_window),
                 read_credentials: options.read_credentials.take(),
@@ -717,7 +741,7 @@ pub fn build<T: Visit>(
         "phemex" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(PhemexPerpetuals::new(PhemexOptions {
                 read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
@@ -730,7 +754,7 @@ pub fn build<T: Visit>(
         "binance" | "binancepm" | "binancespot" | "binanceinverse" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(BinanceFutures::new(BinanceOptions {
                 recv_window: options.recv_window,
                 read_credentials: options.read_credentials.take(),
@@ -751,7 +775,7 @@ pub fn build<T: Visit>(
         "kucoinspot" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(KucoinSpot::new(KucoinOptions {
                 read_credentials: options.read_credentials.take(),
                 broker: options.extra.take().and_then(|e| e.kucoin_broker),
@@ -766,7 +790,7 @@ pub fn build<T: Visit>(
         "kucoin" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Kucoin::new(KucoinOptions {
                 read_credentials: options.read_credentials.take(),
                 broker: options.extra.take().and_then(|e| e.kucoin_broker),
@@ -781,7 +805,7 @@ pub fn build<T: Visit>(
         "bingx" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Bingx::new(BingxOptions {
                 read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
@@ -793,7 +817,7 @@ pub fn build<T: Visit>(
         "weex" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(WeexFutures::new(WeexOptions {
                 read_credentials: options.read_credentials.take(),
                 public_data_only: options.public_data_only,
@@ -807,7 +831,7 @@ pub fn build<T: Visit>(
         "woo" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Woo::new(WooOptions {
                 read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
@@ -853,7 +877,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(BybitLinear::new(options)),
             )
         }
@@ -869,7 +893,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(BitgetFutures::new(BitgetOptions {
                     read_credentials: options.read_credentials.take(),
                     testnet: options.testnet,
@@ -891,7 +915,7 @@ pub fn build<T: Visit>(
         "cryptocom" => finish(
             visitor,
             policy,
-            account_startup,
+            startup,
             Engine::new(Cryptocom::new(CryptocomOptions {
                 read_credentials: options.read_credentials.take(),
                 testnet: options.testnet,
@@ -922,7 +946,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(if venue == "hyperliquidspot" {
                     Hyperliquid::new_spot(config)
                 } else {
@@ -942,7 +966,7 @@ pub fn build<T: Visit>(
             finish(
                 visitor,
                 policy,
-                account_startup,
+                startup,
                 Engine::new(Okx::new(OkxOptions {
                     read_credentials: options.read_credentials.take(),
                     testnet: options.testnet || venue.ends_with("demo"),
@@ -976,6 +1000,7 @@ pub struct KucoinExtra {
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -1011,6 +1036,9 @@ pub struct EngineOptions {
     pub account_startup: bool,
     #[serde(default)]
     pub public_feed: Option<PublicFeedOptions>,
+    /// Minimum event level: `debug`, `info` (default), `warn` or `error`.
+    #[serde(default)]
+    pub log_level: Option<String>,
     #[serde(default)]
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     #[cfg(feature = "blofin")]
@@ -1048,6 +1076,7 @@ pub struct EngineOptions {
         feature = "coinbase",
         feature = "paradex",
         feature = "binance",
+        feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
@@ -1075,6 +1104,7 @@ pub struct EngineOptions {
         feature = "grvt",
         feature = "coinbase",
         feature = "binance",
+        feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
         feature = "breakoutprop",
@@ -1204,20 +1234,15 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub endpoints: Option<EndpointOptions>,
-    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
-    #[serde(default)]
-    pub tick_interval: Option<f64>,
     #[cfg(feature = "breakoutprop")]
     #[serde(default)]
     pub subaccount: Option<String>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub polling_enabled: Option<bool>,
 }
 #[cfg(any(
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",
@@ -1251,6 +1276,7 @@ impl EngineOptions {
             feature = "grvt",
             feature = "coinbase",
             feature = "binance",
+            feature = "bitunix",
             feature = "apexomni",
             feature = "asterdex",
             feature = "breakoutprop",
@@ -1312,6 +1338,7 @@ impl EngineOptions {
     feature = "coinbase",
     feature = "paradex",
     feature = "binance",
+    feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
     feature = "breakoutprop",

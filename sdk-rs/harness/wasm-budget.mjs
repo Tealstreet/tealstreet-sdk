@@ -4,10 +4,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-// Single-venue family bundles: 1.25 MiB (#1421, RUST_WASM_FAMILIES.md). The
-// shipped combined artifact has its own fixed 13 MiB ceiling (raised from 12 MiB
-// for the 2026-10-20 audit fixes), checked before any standalone build replaces it.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_310_720, combined: 13_631_488 });
+// Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
+// 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
+// total package size; overseer 2026-10-21 raised it to 13.5 MiB for the Bitunix family.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_776 });
 export const wasmBudgetError = (bytes, profile) => {
   if (!Object.hasOwn(WASM_BUDGETS, profile) || !Number.isSafeInteger(bytes) || bytes <= 0) return 'invalid wasm budget input';
   return bytes > WASM_BUDGETS[profile] ? `${profile} wasm ${bytes} exceeds ${WASM_BUDGETS[profile]} bytes` : undefined;

@@ -606,6 +606,26 @@ test('staged reads advance only after their command write is acknowledged and pr
   tape.assertWritesConsumed();
 });
 
+test('an order event marked beforeAck reaches its socket once, before the client reads the acknowledgement', { timeout: 1000 }, async () => {
+  const socketUrl = 'wss://example.test/private';
+  const write = { ...record('POST', { quantity: '3' }), afterCommand: 1 };
+  const records = [
+    write,
+    { type: 'command', t: 1, op: 'placeOrders' },
+    { type: 'ws', t: 2, url: socketUrl, text: 'event', beforeAck: true, afterCommand: 1 },
+  ];
+  const tape = new Tape(records, {}, false);
+  const seen = [];
+  tape.connect(socketUrl, () => {}, (text) => seen.push(text));
+  await tape.play(undefined, async () => {}, async () => {
+    const response = tape.respond('POST', URL, write.requestBody);
+    await Promise.resolve();
+    seen.push(`ack:${response.status}`);
+    return [];
+  });
+  assert.deepEqual(seen, ['event', 'ack:200']);
+});
+
 test('a staged command without an acknowledged write opens its reads once it settles', () => {
   const early = { ...record('GET'), body: 'early' };
   const later = { ...record('GET'), body: 'later', afterCommand: 1 };
