@@ -66,7 +66,7 @@ pub enum Pending {
     },
     SymbolSettings {
         symbol: String,
-        generation: u64,
+        write_revision: u64,
         serial: u64,
     },
 }
@@ -651,10 +651,10 @@ impl Venue for BitunixFutures {
             }
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
             } => {
-                self.symbol_settings_response(cx, &symbol, generation, serial, response);
+                self.symbol_settings_response(cx, &symbol, write_revision, serial, response);
                 return;
             }
             other => other,
@@ -747,10 +747,10 @@ impl Venue for BitunixFutures {
             }
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
             } => {
-                self.settings_failed(cx, &symbol, generation, serial, Some(&response));
+                self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
             }
             pending => pending,
@@ -793,10 +793,10 @@ impl Venue for BitunixFutures {
             }
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
             } => {
-                self.settings_failed(cx, &symbol, generation, serial, Some(&response));
+                self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
             }
             pending => pending,
@@ -825,9 +825,9 @@ impl Venue for BitunixFutures {
             Pending::Candles { command } => cx.fail(command, error),
             Pending::SymbolSettings {
                 symbol,
-                generation,
+                write_revision,
                 serial,
-            } => self.settings_failed(cx, &symbol, generation, serial, None),
+            } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             Pending::Markets { .. } => self.public_failed(
                 cx,
                 DiscoveryRead::Markets,
