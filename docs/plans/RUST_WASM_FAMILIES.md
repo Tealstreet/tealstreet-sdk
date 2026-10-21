@@ -107,3 +107,9 @@ The per-family (single-venue) budget rose from 1,258,291 bytes (1.2 MiB) to
 separately, so the budget bounds one venue's download, not the total. The
 growth is correctness, bridge (typed command outcomes and order-identity
 receipts) and logging code. The combined 13 MiB budget is unchanged.
+
+It rose again to 1,343,488 bytes (1.28125 MiB) on 2026-10-21. The landing's
+web Bybit family built at 1,310,360 bytes (360 bytes of headroom), and account
+identities (#1430) add FetchAccount command decoding and an identity read to
+every identity venue, about 14 KB for Bybit. The extra 32 KB leaves room for
+the next venue feature instead of reopening the budget each time.
