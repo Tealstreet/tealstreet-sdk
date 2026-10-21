@@ -34,7 +34,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
         ? 'eachPlacedSymbol'
         : 'eachOpenSymbol',
-    leverageQuery: is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
+    leverageQuery: is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'bingx', 'weex', ...OKX, ...ORDERLY)
       ? 'onRead'
       : is('mexc', 'woo', 'kraken')
         ? 'onMetadata'
