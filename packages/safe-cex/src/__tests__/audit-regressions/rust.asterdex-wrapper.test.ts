@@ -78,7 +78,7 @@ const fixture = (
   );
   running.push(exchange);
   const setNativeHedged = (isHedged: boolean) => { nativeSettings.isHedged = isHedged; };
-  return { exchange, construct, commands, store, setNativeHedged };
+  return { exchange, construct, commands, store, setNativeHedged, engine };
 };
 
 describe('Aster Rust wrapper account and typed command boundary', () => {
@@ -244,7 +244,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   });
 
   it('serves engine-owned public metadata and the account alias query', async () => {
-    const { exchange, store, commands, setNativeHedged } = fixture();
+    const { exchange, store, commands, setNativeHedged, engine } = fixture();
     store.update({
       markets: [
         {

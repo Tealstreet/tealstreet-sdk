@@ -141,8 +141,9 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
       }, new DefaultStore());
       running.push(exchange);
-      await expect(exchange.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: expect.stringContaining(`Rust ${name} does not support payloadSigner`) });
+      const message = `Rust ${name} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials.`;
+      await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
+      await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }
     expect(requests).toEqual([]);
     expect(signatures).toBe(0);
@@ -170,7 +171,7 @@ it('compiled constructor exposes structured native failure detail', async () => 
   }
   expect(failure).toBeInstanceOf(Error);
   expect(JSON.parse((failure as { venueError: string }).venueError)).toMatchObject({
-    message: expect.stringContaining('Rust binance does not support payloadSigner'),
+    message: expect.stringContaining('remove payloadSigner and configure local signing credentials'),
     kind: 'unsupported', outcome: 'notSent',
   });
 });

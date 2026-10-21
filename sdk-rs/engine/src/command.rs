@@ -25,10 +25,6 @@ enum CommandIn {
     FetchAccountGreeks {
         command: u32,
     },
-    #[cfg(any(feature = "command-apexomni", feature = "command-kucoinspot"))]
-    GetAccount {
-        command: u32,
-    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -104,7 +100,7 @@ enum CommandIn {
     FetchStpMode {
         command: u32,
     },
-    #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
+    #[serde(alias = "getAccount")]
     FetchAccount {
         command: u32,
     },
@@ -230,8 +226,6 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-options")]
             CommandIn::FetchAccountGreeks { command } => Self::FetchAccountGreeks { command },
-            #[cfg(any(feature = "command-apexomni", feature = "command-kucoinspot"))]
-            CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
                 symbol,
@@ -303,7 +297,6 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
             #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
             CommandIn::FetchOrderBook {
@@ -616,16 +609,11 @@ mod tests {
     }
     #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
-        let account = decode_command(r#"{"op":"getAccount","command":77}"#);
-        assert_eq!(
-            account.is_ok(),
-            cfg!(any(
-                feature = "command-apexomni",
-                feature = "command-kucoinspot"
-            ))
-        );
-        if let Ok(command) = account {
-            assert_eq!(command, Command::FetchAccount { command: 77 });
+        for op in ["getAccount", "fetchAccount"] {
+            assert_eq!(
+                decode_command(&format!(r#"{{"op":"{op}","command":77}}"#)).unwrap(),
+                Command::FetchAccount { command: 77 }
+            );
         }
         let cancel = decode_command(
             r#"{"op":"cancelOrdersWithSymbols","command":78,"orders":[{"id":"unseen","symbol":"BTC-USDT"}]}"#,
