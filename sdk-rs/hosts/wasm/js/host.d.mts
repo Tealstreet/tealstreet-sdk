@@ -52,6 +52,15 @@ export interface Transport {
   clearTimeout(handle: unknown): void;
 }
 
+/** Validated definitive GRVT builder refusal, independent of JS class identity. */
+export interface BuilderAuthorizationDetail {
+  code: 'GRVT_BUILDER_UNAUTHORIZED';
+  reason: 'unauthorized' | 'cap-too-low';
+  requiredRaw: number;
+  authorizedRaw?: number;
+}
+export function builderAuthorizationOf(value: unknown): BuilderAuthorizationDetail | undefined;
+
 /** Structured engine failure (`engine/src/error.rs`); `message` is the user-facing text. */
 export interface VenueErrorDetail {
   message: string;
@@ -62,6 +71,7 @@ export interface VenueErrorDetail {
   venueMessage?: string;
   retryAfterMs?: number;
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
+  builderAuthorization?: BuilderAuthorizationDetail;
 }
 
 export interface EngineHandlers {
@@ -141,6 +151,10 @@ export interface CommandIdentity {
 
 /** A classified venue failure built from the engine's `detail`; `message` is unchanged venue text. */
 export class ExchangeError extends Error {
+  readonly code?: 'GRVT_BUILDER_UNAUTHORIZED';
+  readonly reason?: BuilderAuthorizationDetail['reason'];
+  readonly requiredRaw?: number;
+  readonly authorizedRaw?: number;
   constructor(message: string, detail?: VenueErrorDetail);
   readonly kind?: NonNullable<VenueErrorDetail['kind']>;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */

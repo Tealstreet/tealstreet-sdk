@@ -1,5 +1,7 @@
-import type { OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
+import type { BuilderAuthorizationDetail, OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
+
+import { builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -64,6 +66,10 @@ export type SerializedCommandError = {
   name?: string;
   stack?: string;
   code?: string | number;
+  /** Definitive builder approval details; present only with the validated stable code. */
+  reason?: BuilderAuthorizationDetail['reason'];
+  requiredRaw?: number;
+  authorizedRaw?: number;
   command?: string;
   timeoutMs?: number;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
@@ -100,9 +106,14 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
     const field = source[key];
     if (typeof field === 'string') result[key] = field;
   }
-  if (typeof source.code === 'string' || (typeof source.code === 'number' && Number.isFinite(source.code))) {
+  if (
+    (typeof source.code === 'string' && source.code !== 'GRVT_BUILDER_UNAUTHORIZED') ||
+    (typeof source.code === 'number' && Number.isFinite(source.code))
+  ) {
     result.code = source.code;
   }
+  const builder = builderAuthorizationOf(source);
+  if (builder) Object.assign(result, builder);
   if (
     typeof source.timeoutMs === 'number' &&
     Number.isSafeInteger(source.timeoutMs) &&

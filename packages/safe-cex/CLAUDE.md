@@ -283,6 +283,14 @@ allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
 
+Definitive GRVT builder approval refusals expose stable
+`GRVT_BUILDER_UNAUTHORIZED`, `reason`, `requiredRaw` and optional `authorizedRaw`.
+The SDK-root `builderAuthorizationOf(error)` validates the complete record and
+works for TS classes, native host errors and worker/hosted deserialization.
+Use it instead of class identity or text. Unknown/pending/network/malformed
+checks stay ordinary failures. The command error allowlist retains only validated
+approval fields; the old class export stays available without prototype repair.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a
