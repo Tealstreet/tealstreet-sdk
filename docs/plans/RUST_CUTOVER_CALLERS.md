@@ -235,8 +235,9 @@ execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 ### What remains before cutover (beyond owner decisions B1–B3)
 
 Remaining SDK/host work: preserve #1554's incomplete-history metadata across
-worker/hosted forwarding (B11). #1593 fixes native/DO notice ownership and #1591
-guards direct SDK journal folds; neither completes NX propagation or coverage.
+worker/hosted forwarding and any SDK reshaping of history results (for example,
+exchange-mcp `withUtc`) (B11). #1593 fixes native/DO notice ownership and #1591
+guards direct SDK journal folds; neither completes those boundaries or NX coverage.
 B2's engine port is costed in
 [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md) and undecided; hosted accounts
 keep working without it.
@@ -1012,6 +1013,7 @@ checked at `fdd2389a825`:
 | Boundary | Required edit / proof |
 | --- | --- |
 | SDK `webworker/handlers/CallMethodHandler.ts` → `RustEngineExchange.forwardToWorker` (`WORKER_FORWARDED_METHODS`); NX `services/exchange-server` VWC → `apps/web/src/utils/shim/worker/ExchangeServerWorker.ts` | Carry completeness as an explicit serializable field beside the rows, and restore it at the receiving API boundary. The current `callMethod:done` sends the array directly: structured clone drops the non-enumerable property, as does the hosted JSON hop. Prove both worker and hosted round trips, including an unflagged concurrent request. Deploy the sender and receiver together. |
+| SDK/MCP history reshaping: `packages/exchange-mcp/src/tools.ts:46-47,175,195` (`withUtc`) | Preserve completeness explicitly through `rows.map` and MCP serialization for fills/income; a non-enumerable array property does not survive either boundary. Prove flagged and unflagged results remain distinct rather than presenting partial rows as complete. |
 | NX `apps/web/src/utils/historical/collectAccountAxes.ts` (`runAxis`, `enumerateTradedSymbols`, symbol-scoped fill aggregation) and derived-history adapters | Inspect the flag before `map`/`filter`/spread/folding/enumeration can drop it. A truncated income symbol list also makes the derived fill/position axis incomplete, even if each subsequent fill read succeeds. Preserve that state in `CollectedAxis`/`AxisOutcome`; do not return `status: 'ok'` for it. #1591 already guards direct SDK journal folds as described above; NX derived axes must still preserve their own completeness state. |
 | NX `apps/web/src/utils/historical/runHistoricalWindow.ts` (`collectAccountAxis` → `postHistoricalRecords` → `completeWindow`) | Leave `historical_coverage` uncompleted for incomplete results. Currently only `status: 'ok'` reaches `completeWindow`, so the collection outcome must distinguish partial data from a successful empty/full window. Keep the available rows distinct from a claim of complete coverage; persisting partial rows must not complete that claim. Add a truncated-window regression. |
 | Native sessions / Durable Object clients, if adopted (`sdk-rs/hosts/native/src/server.rs`, `sdk-rs/hosts/wasm/js/workers.mjs`) | The array flag is attached by `EngineHost`, not encoded as a new frame or `done` field. A direct session client must correlate `history.incomplete` itself and carry completeness onward. Both hosts now remap the event's `fields.command` through the same pending owner as `done` and target the owning client; remote consumers must correlate the translated marker before consuming rows. No current NX `NativeFrameSession` caller was found. |
