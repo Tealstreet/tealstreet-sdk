@@ -519,12 +519,6 @@ impl Backpack {
 }
 
 impl Venue for Backpack {
-    fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities {
-            account: safe_cex_engine::AccountLookup::Query,
-            ..safe_cex_engine::Capabilities::BASE
-        }
-    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -536,6 +530,7 @@ impl Venue for Backpack {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
             host_clock: true,
             ..safe_cex_engine::Capabilities::BASE
         }
