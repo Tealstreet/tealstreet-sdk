@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { captureRustFill } from './comparison-policy.mjs';
 import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 
@@ -73,6 +74,14 @@ test('Rust revised sections preserve native fields and identity through the SDK'
     assert.deepEqual(store.positions.map((row) => row.symbol), ['A', 'ORPHAN']);
     assert.deepEqual(applier.fills(initial).map((row) => [row.orderId, row.symbol, row.amount]),
       [['tracked-order', 'A', 0.25], ['orphan-order', 'ORPHAN', 0.25]]);
+    assert.equal(initial.first(11).revision, 2);
+    assert.deepEqual(applier.fills(initial).map((row) => row.id), ['9007199254740997', 'orphan-order']);
+    const table = initial.fills();
+    const captures = Array.from({ length: table.count }, (_, i) => captureRustFill(table, i));
+    assert.deepEqual(captures.map(({ id, executionId, fee }) => ({ id, executionId, fee })), [
+      { id: 'tracked-order', executionId: '9007199254740997', fee: -0.25 },
+      { id: 'orphan-order', executionId: undefined, fee: undefined },
+    ]);
     assert.equal(store.fetchedLeverage.ORPHAN.buyLeverage, 11);
     assert.equal(store.marketsBySymbol.ORPHAN, undefined);
   });
