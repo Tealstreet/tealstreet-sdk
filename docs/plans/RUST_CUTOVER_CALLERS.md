@@ -170,6 +170,8 @@ query/result boundaries were rechecked read-only at `65e086a3c90`; B11 remains o
 The bridge capability follow-up checks #1637 at `673565c2e61`; final runtime
 fields, construction metadata and pending-start behavior are recorded below.
 NX caller ordering was rechecked read-only at `65e086a3c90`.
+The Bitunix public-discovery follow-up checks #1636 at `62adf7651b0`; private
+initialization ordering and the shared startup visibility scope are updated below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -252,6 +254,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1633 / `a29812d8e` | Bitunix history transport/HTTP/envelope/malformed-row failures now reject instead of resolving earlier rows as complete. Genuine remaining-page caps or stalled order/income paging retain rows with command-attributed `history.incomplete`; a completed final page does not get a false cap marker. Callers must preserve failure versus partial versus complete outcomes before coverage. |
 | #1627 / `9a4446203` | WEEX income lifetime-budget, truncated-chunk, advertised-cursor, failed-page and terminal-failure markers now carry their query command. Existing retained rows, chunk continuation, pacing and terminal rejection policy stay unchanged; a marker on a rejected query is not a successful partial array. |
 | #1637 / `673565c2e` | Runtime bridge policy now follows engine capability flags/enums; shared construction rules retain synchronous policy and expose optional `construction().bridge`. Capability-dependent public calls wait for an existing startup; no-start/failed-start calls reject with method-named `ExchangeError` `invalidInput`/`notSent`. Worker forwarding stays first. NX explicit readiness is recommended; typed rejection handling is required. See [Runtime capability readiness](#runtime-capability-readiness-1637). |
+| #1636 / `62adf7651` | A usable Bitunix catalogue starts private initialization before ticker seeding finishes. Valid public rows survive malformed typed peers; unusable required seeds retry without false loaded-empty readiness. Independent discovery retries honor rate floors and use existing startup.degraded/recovered codes. Ticker recovery does not restart private settings/polling; private/history failure policy and caller shapes stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2195,10 +2198,33 @@ unconfirmed success is returned. Caller method signatures and quantities remain
 unchanged; native algo reduce-only defaults and protective trigger semantics stay
 as documented.
 
+### Bitunix catalogue and ticker readiness (#1636)
+
+A usable nonempty catalogue now begins private initialization while its ticker
+seed is still pending or retrying. Public ticker subscriptions still wait for a
+usable ticker seed. Ticker recovery does not reset private settings, restart
+private initialization or replay trading writes. Private I/O starting does not
+prove completed ticker/public readiness or successful completion of SDK `start()`.
+
+Typed malformed catalogue/ticker rows emit Warn `row.skipped` while valid peers
+commit; eligibility/API-support filtering remains. Empty, filtered-only or
+all-unusable required seeds retry instead of publishing loaded-empty readiness.
+Malformed envelopes or truncated streams do not publish their valid prefix.
+Consumers can therefore see a usable partial catalogue and delayed tickers;
+row skipping is not proof that every venue row was refreshed.
+
+Separate catalogue/ticker retries use the shared capped backoff and server/native
+rate-limit floors. Public discovery diagnostics retain parsed venue fields and
+sanitized messages instead of raw response bodies. Extend the required
+code-based degraded/recovered visibility below to Bitunix too; these retrying
+public reads are not terminal startup failures. Private/history strictness and
+caller arguments/results remain unchanged.
+
 ## Required startup degradation visibility
 
 **Required cutover caller work; tealstreet-next remains read-only here.**
-#1615 (`c63acfc19c2`) reports OKX/BloFin/Bitget public startup
+#1615 (`c63acfc19c2`) reports OKX/BloFin/Bitget public startup; #1636
+(`62adf7651b0`) extends the same shared reporting to Bitunix. It emits
 `startup.degraded` at Warn once after six failures of one required read, while
 capped retries continue. Fields include `kind`, `read`, `attempts`, and parsed
 `venueCode`/`venueMessage` when available, plus `retryAfterMs` for a positive
@@ -2206,7 +2232,8 @@ finite cooldown. After a prior degraded report, Info `startup.recovered` follows
 usable markets and tickers, including usable partial catalogues; repair timers
 continue. These use the existing Event wire and do not emit terminal
 `StartupFailed`. Warn preserves SDK `validateAccount` behavior by avoiding its
-Error listeners. Private reads, Bybit and post-loaded recovery keep their policy.
+Error listeners. Private/history failure policies, Bybit and post-loaded recovery
+remain separate.
 
 The caller must key on the codes, regardless of level. Keep diagnostic delivery
 at an Info minimum so recovery is not filtered out; the engine defaults to Info.
