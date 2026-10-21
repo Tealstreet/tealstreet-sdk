@@ -52244,7 +52244,7 @@
     },
     {
       "venue": "blofin",
-      "tapeSha256": "67eb2c9429b96b859c80244f66f7609514033f2db4a6d46266a21c260fd7e26b",
+      "tapeSha256": "94fea8cd48b653777773825e6fc54cc4406996318d45bdf09b2f4ae2e232d935",
       "tape": "sdk-rs/harness/tapes/blofin-private.jsonl",
       "diagnostics": [
         {

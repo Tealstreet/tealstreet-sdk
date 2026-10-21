@@ -135,6 +135,9 @@ The private-snapshot follow-up checks #1524 at `b69285f9909`; caller shapes
 and diagnostic delivery remain the already documented SDK/host contracts.
 The construction build follow-up checks #1599 at `e7f0b3d3628`; the shared
 JSON remains a source-build input, now consumed by the Cargo build script.
+The BingX overlap follow-up checks #1604 at `0d4f17a1bdd`, including its
+integration with the landed auth work; publication and read-return semantics
+are documented separately below.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -192,6 +195,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1592 / `389f42aa2e` | Rust always writes FILLS revision 2 with optional execution-ID refs and aligned financial columns. Updated readers retain revisions 0/1; old readers reject revision 2, requiring coordinated producer/consumer builds. Hyperliquid perp/merged spot/spot-only `tid` becomes SDK fill `id`, with `orderId` separately preserved; other venues retain order-ID fallback. See [Fill identity and wire compatibility](#fill-identity-and-wire-compatibility-1592). |
 | #1524 / `b69285f990` | Private snapshots (batch-3 venues) isolate rejected rows while valid peers commit; stored rows protected by rejected identities remain visible, including Bitrue protective children and Kraken open orders. Unidentified rows prevent absence-based removal within their snapshot scope. Coded `row.skipped` / `snapshot.discarded` diagnostics use the existing event/health paths. No new caller shape; see [Private snapshot row isolation](#private-snapshot-row-isolation-1524). |
 | #1599 / `e7f0b3d36` | Rust construction rules are compiled from the shared JSON into a static table by Cargo `build.rs`, replacing runtime JSON decoding. B1 source builds still require the JSON input; compiled engines contain the table. TS rules, parity and caller options/eligibility are unchanged. |
+| #1604 / `0d4f17a1b` | BingX revision/query-generation races and reads issued during pending settings writes fence stale store publication while returning usable cached buy/sell rails, with validated-read fallback independently per missing rail. Overlap alone no longer fails the read or causes `null`; genuine read failures remain possible. Current reads retain atomic leverage/margin publication; caller APIs and write retry behavior stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -361,9 +365,13 @@ remains an owner item. Paradex signing transport and polling are unchanged.
 
 #1522's leverage reads use native signed symbol queries: BingX maps long/short
 rails to `buyLeverage`/`sellLeverage`; WEEX returns rails plus `marginType` from
-the symbol configuration. BingX fences against configuration events and settings
-writes; WEEX fences against settings writes. Failures leave native settings
-intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
+the symbol configuration. BingX fences stale store publication against
+configuration/settings changes and newer same-symbol queries. Superseded reads
+and reads issued during a pending settings write still return current cached
+buy/sell rails, falling back independently to validated read values for a
+missing rail; overlap alone does not fail the read or cause a `null` result.
+WEEX fences store publication against settings writes. Native read failures
+still leave settings intact. `onMetadata` serves finite positive cached buy/sell rails, otherwise
 issues native `fetchLeverage` (Kraken spot still returns `null`); `settings` stays cache-only. Ship matching engine and
 capability reader so BingX/WEEX retain both account lookup and on-read leverage.
 
@@ -1618,11 +1626,17 @@ subtracts. This corrects TS's BUY/rate display, with no write-contract change.
 ### BingX port-review metadata and stream recovery
 
 Rust BingX `updateSymbolMetadata(symbol)` now reads native leverage and margin
-mode for flat symbols and publishes them together. Existing metadata consumers
-keep their API and can retry a read invalidated by a concurrent settings change;
-`fetchLeverageForSymbol` performs a fresh leverage/margin pair on every explicit
-read; selected metadata refreshes publish the same atomic settings. No extra
-polling or write retry is added. Malformed position-stream rows retain prior exposure
+mode for flat symbols and publishes them together when the read remains current.
+Revision/query-generation races and reads issued during a pending settings write
+prevent stale store publication; they still return current cached buy/sell rails,
+with an independent validated-read fallback for each missing rail. Overlap alone
+never fails the read or produces `null`; transport failures and invalid native
+leverage responses can still fail the read. A read that is no longer current
+when its leverage response arrives (including one issued during a pending write)
+skips the margin-mode request. A read issued during a pending write stays
+ineligible to publish even after that write settles. Current reads retain atomic leverage/margin publication.
+`fetchLeverageForSymbol` and selected metadata refreshes keep their existing APIs.
+No extra polling or write retry is added. Malformed position-stream rows retain prior exposure
 while valid peers update, followed by authoritative REST repair. Hedge leverage
 and bracket trigger-source contracts remain as documented.
 
@@ -1653,6 +1667,22 @@ wire value instead of native refusal or TS's mark/last fallback. Default sources
 are unchanged. OHLCV consumers retain the caller's daily cutoff; Rust deliberately
 keeps the latest valid daily bars that TS's prior-day shift omitted. Shapes and
 caller signatures are unchanged.
+
+### MEXC port-review snapshot and plan corrections
+
+Rust MEXC `fetchOrderBook(symbol, limit)` now returns an independent public REST
+snapshot without requiring a feed subscription. Existing callers keep the same
+shape: sorted bids/asks with base-asset `amount`, cumulative base `total`, and
+an exact string `lastUpdateId`. Default depth is 100; the SDK accepts 1–1000
+levels. Query results never replace subscribed books. Rate limits fail with a
+retry delay; callers choose whether to retry. Public endpoint refusals cannot
+invalidate private account credentials.
+
+Plan orders now expose the native reduce-only flag or closing-side semantics;
+opening plans no longer appear reduce-only. Position stops stay reduce-only.
+Order overlays and reduce-only sizing consumers receive corrected flags; no
+placement units or signatures change. Native fill-fee sign remains unchanged
+pending independent debit/rebate evidence.
 
 ### Coinbase port-review retained read semantics
 

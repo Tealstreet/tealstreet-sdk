@@ -1634,6 +1634,7 @@ export const VENUES = {
   },
   blofin: {
     rust: 'blofin',
+    virtualPrivateClock: true,
     blofinProtocol: true,
     validateSocketMessage(socket, text, now = Date.now()) {
       if (text === 'ping' || text === 'pong') return;
