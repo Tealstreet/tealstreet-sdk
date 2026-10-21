@@ -187,3 +187,25 @@ before adding an exact key and specific cause. Require fresh mandatory
 public/private verification, independent reviews, five identical head CI
 pairs, full green CI, a separate BingX dependency guard and an audited
 merge receipt before reporting and moving to the Bybit family.
+
+## Bybit family phase
+
+Enable the virtual private clock in the shared Bybit harness factory for
+linear, inverse, Spot, demo and Hyro. Preserve all protocol/signing checks,
+environment routing, generation-aware subscriptions and wire payloads.
+Start with the clock flag; change fixture metadata or replay entropy only
+if complete raw evidence demonstrates a problem and ownership is coordinated.
+
+Coordinate with the Bybit row-starvation fix and its leverage-ACK/position
+fence follow-up. Final declarations and proof must use the actual merged
+production sources; re-integrate and re-derive if those land during this
+phase. Earlier iteration evidence is historical once dependencies change.
+
+Use a fingerprint-matching CI engine for five focused private pairs per
+alias. Compare all 50 complete raw outputs excluding only measured metrics,
+including generated order-link IDs, timestamps and command receipts. Derive
+exact tape-bound declarations from observed outputs; never carry stale keys.
+Require fresh ten-case suite verification, independent reviews, five head
+CI pairs per private identity, full green CI, a separate guard protecting
+the shared `bybit` crate and an audited merge receipt before reporting and
+moving to Crypto.com.
