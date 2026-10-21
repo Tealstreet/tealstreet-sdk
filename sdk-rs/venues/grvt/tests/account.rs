@@ -368,7 +368,46 @@ fn malformed_spot_balance_row_keeps_aggregate_and_other_coins() {
         (coins[0].currency.as_str(), coins[0].balance.total),
         ("USDT", 65.)
     );
-    assert_eq!(skip_warnings(&h, "spot balance"), 1);
+    assert_eq!(skip_warnings(&h, "spot balance"), 2);
+}
+
+#[test]
+fn malformed_spot_balance_row_keeps_its_stored_coin_while_peers_update() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","spot_balances":[{"c":"ETH","b":"2"},{"c":"USDT","b":"65"}]}}"#,
+        "",
+    );
+    let tick = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 60_000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.timer(tick, h.now + 60_000.);
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","spot_balances":[{"c":"ETH","b":"bad"},{"c":"USDT","b":"70"}]}}"#,
+        "",
+    );
+    let coins: Vec<_> = h
+        .engine
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| (c.currency.as_str(), c.balance.total))
+        .collect();
+    assert_eq!(coins, [("USDT", 70.), ("ETH", 2.)]);
 }
 
 #[test]
@@ -1484,6 +1523,108 @@ fn unknown_instrument_order_row_is_skipped_and_known_identity_keeps_stored_copy(
     ids.sort();
     assert_eq!(ids, ["88", "9223372036854775807"]);
     assert_eq!(skip_warnings(&h, "order"), 2);
+}
+#[test]
+fn unidentified_order_row_keeps_stored_orders_and_commits_its_peers() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.reply("open_orders", &format!("{{\"r\":[{OPEN}]}}"), "");
+    next_orders_refresh(&mut h);
+    let fresh = OPEN
+        .replace("0xabcd", "0xbeef")
+        .replace("9223372036854775807", "88");
+    h.reply(
+        "open_orders",
+        &format!("{{\"r\":[{{\"broken\":true}},{fresh}]}}"),
+        "",
+    );
+    let mut ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["88", "9223372036854775807"]);
+}
+#[test]
+fn unidentified_position_row_keeps_stored_positions_and_commits_its_peers() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let btc = r#"{"i":"BTC_USDT_Perp","s":"-2","ep":"100","n":"200","l":"20","el":"140","up":"-2","mt":"CROSS","et":"1700000000000000900"}"#;
+    h.ws(r#"{"s":"v1.position","f":{}}"#);
+    let timer = |h: &Harness| {
+        h.actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 500. => Some(*timer),
+                _ => None,
+            })
+            .unwrap()
+    };
+    h.timer(timer(&h), h.now + 500.);
+    h.reply("positions", &format!("{{\"r\":[{btc}]}}"), "");
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.);
+    h.ws(r#"{"s":"v1.position","f":{}}"#);
+    h.timer(timer(&h), h.now + 500.);
+    let grown = btc
+        .replace("\"s\":\"-2\"", "\"s\":\"-3\"")
+        .replace("1700000000000000900", "1700000000000001900");
+    h.reply(
+        "positions",
+        &format!("{{\"r\":[{{\"broken\":true}},{grown}]}}"),
+        "",
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, 3.);
+}
+#[test]
+fn rejected_position_row_logs_an_error_only_when_no_stored_copy_is_kept() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let btc = r#"{"i":"BTC_USDT_Perp","s":"-2","ep":"100","n":"200","l":"20","el":"140","up":"-2","mt":"CROSS","et":"1700000000000000900"}"#;
+    let timer = |h: &Harness| {
+        h.actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 500. => Some(*timer),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let poll = |h: &mut Harness, rows: &str| {
+        h.ws(r#"{"s":"v1.position","f":{}}"#);
+        h.timer(timer(h), h.now + 500.);
+        let start = h.actions.len();
+        h.reply("positions", &format!("{{\"r\":[{rows}]}}"), "");
+        h.actions[start..]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.message.contains("malformed GRVT position row") =>
+                {
+                    Some(event.level)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    use safe_cex_engine::Level;
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [Level::Error]);
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(poll(&mut h, btc), []);
+    assert_eq!(poll(&mut h, r#"{"broken":true}"#), [Level::Warn]);
+    assert_eq!(poll(&mut h, btc), []);
+    let bad = btc.replace("\"s\":\"-2\"", "\"s\":null");
+    assert_eq!(poll(&mut h, &bad), [Level::Warn]);
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.);
 }
 const FOREIGN_MALFORMED: &str = r#"{"r":[{"oi":"0x999","m":{"co":"66"}}]}"#;
 #[test]

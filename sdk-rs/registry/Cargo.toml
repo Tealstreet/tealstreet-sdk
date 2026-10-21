@@ -68,7 +68,6 @@ orderly = ["dep:safe-cex-venue-orderly"]
 [dependencies]
 safe-cex-engine.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 zeroize.workspace = true
 safe-cex-venue-breakoutprop = { path = "../venues/breakoutprop", optional = true }
 safe-cex-venue-grvt = { workspace = true, optional = true }
@@ -97,6 +96,13 @@ safe-cex-venue-kucoin = { workspace = true, optional = true }
 safe-cex-venue-bybit = { workspace = true, optional = true }
 safe-cex-venue-hyperliquid = { workspace = true, optional = true }
 safe-cex-venue-okx = { workspace = true, optional = true }
+
+[build-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -1,14 +1,11 @@
 //! Synchronous SDK and native construction share these declarative conditions.
-use std::{collections::HashMap, sync::OnceLock};
-
 use serde::Deserialize;
 
 use crate::EngineOptions;
 
-type Conditions = Vec<Vec<Input>>;
+type Conditions = &'static [&'static [Input]];
 
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy)]
 enum Input {
     Key,
     Secret,
@@ -23,29 +20,13 @@ enum Input {
     CanSign,
 }
 
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
     can_sign: Option<Conditions>,
     private_eligible: Option<Conditions>,
-    explicit_private_error: Option<String>,
+    explicit_private_error: Option<&'static str>,
 }
 
-#[derive(Deserialize)]
-struct Rules {
-    default: Rule,
-    venues: HashMap<String, Rule>,
-}
-
-fn rules() -> &'static Rules {
-    static RULES: OnceLock<Rules> = OnceLock::new();
-    RULES.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
-        ))
-        .expect("valid checked-in construction rules")
-    })
-}
+include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
 
 /// Raw caller intent, supplied only by SDKs that use shared construction rules.
 #[derive(Deserialize)]
@@ -68,10 +49,9 @@ pub struct Resolved {
 
 pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
     let mode = options.public_mode.as_ref()?;
-    let rules = rules();
-    let rule = rules.venues.get(venue);
+    let rule = venue_rule(venue);
     let present = |value: &Option<String>| value.as_ref().is_some_and(|value| !value.is_empty());
-    let matches = |conditions: &Conditions, can_sign: bool| {
+    let matches = |conditions: Conditions, can_sign: bool| {
         conditions.iter().all(|group| {
             group.iter().any(|input| match input {
                 Input::Key => present(&options.key),
@@ -103,20 +83,20 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
         })
     };
     let can_sign = matches(
-        rule.and_then(|rule| rule.can_sign.as_ref())
-            .or(rules.default.can_sign.as_ref())
+        rule.and_then(|rule| rule.can_sign)
+            .or(DEFAULT_RULE.can_sign)
             .expect("default signing conditions"),
         false,
     );
     let public_data_only = mode.requested == Some(true)
         || !matches(
-            rule.and_then(|rule| rule.private_eligible.as_ref())
-                .or(rules.default.private_eligible.as_ref())
+            rule.and_then(|rule| rule.private_eligible)
+                .or(DEFAULT_RULE.private_eligible)
                 .expect("default private conditions"),
             can_sign,
         );
     let explicit_private_error = if mode.requested == Some(false) && public_data_only {
-        rule.and_then(|rule| rule.explicit_private_error.as_deref())
+        rule.and_then(|rule| rule.explicit_private_error)
     } else {
         None
     };

@@ -3,6 +3,7 @@ use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -28,7 +29,62 @@ const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 /// Delay before re-reading a symbol whose open-order read failed `failures` times in a row.
 const ORDER_RETRY: Backoff = Backoff::new(500.0, 16, 30_000.0);
+const SKIP_LOG_LIMIT: usize = 4_096;
+/// A committed snapshot's settings and the position rows it rejected.
+type SnapshotSettings<'a> = (
+    &'a [(String, MarketSetting)],
+    &'a SnapshotBuilder<String, Position>,
+);
 
+/// A skipped row is an error only when the store has no copy for it to keep.
+fn skip_level(stored: bool) -> Level {
+    if stored { Level::Warn } else { Level::Error }
+}
+/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
+fn log_skip(
+    cx: &mut Cx<'_, Pending>,
+    logged: &mut HashSet<String>,
+    key: &str,
+    level: Level,
+    message: impl Into<String>,
+) {
+    if logged.len() >= SKIP_LOG_LIMIT {
+        logged.clear();
+    }
+    if logged.insert(key.to_owned()) {
+        cx.notice(level, code::ROW_SKIPPED, message);
+    }
+}
+/// Every order id a malformed open-order row names, its children included, and
+/// whether some child's id is unreadable (it could be any cached child).
+fn order_tree_ids(item: &str) -> (Vec<String>, bool) {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity<'a> {
+        #[serde(borrow, default)]
+        order_id: Option<Text<'a>>,
+        #[serde(borrow, default)]
+        child_orders: Option<Vec<Identity<'a>>>,
+    }
+    fn collect(row: Identity<'_>, ids: &mut Vec<String>, unnamed: &mut bool) {
+        match row.order_id.filter(|id| !id.is_empty()) {
+            Some(id) => ids.push(id.to_string()),
+            None => *unnamed = true,
+        }
+        for child in row.child_orders.into_iter().flatten() {
+            collect(child, ids, unnamed);
+        }
+    }
+    let mut ids = Vec::new();
+    let mut unnamed = false;
+    match serde_json::from_str::<Identity<'_>>(item) {
+        Ok(row) if row.order_id.as_ref().is_some_and(|id| !id.is_empty()) => {
+            collect(row, &mut ids, &mut unnamed)
+        }
+        _ => {}
+    }
+    (ids, unnamed)
+}
 enum OrderRead {
     Reconciled,
     Superseded,
@@ -62,8 +118,9 @@ pub enum Request {
         symbol: String,
         revision: u64,
         lookup: Option<(CommandId, String)>,
-        rows: Vec<Order>,
+        rows: SnapshotBuilder<String, Order>,
         quotes: HashMap<String, f64>,
+        /// Duplicate ids or an oversized lookup: the whole read is discarded.
         invalid: bool,
     },
 }
@@ -77,7 +134,7 @@ impl Request {
                 invalid,
                 ..
             } => {
-                rows.clear();
+                *rows = SnapshotBuilder::default();
                 quotes.clear();
                 *invalid = false;
             }
@@ -88,8 +145,9 @@ impl Request {
 #[derive(Default)]
 pub struct Snapshot {
     balances: HashMap<String, Balance>,
-    positions: Vec<Position>,
+    positions: SnapshotBuilder<String, Position>,
     settings: Vec<(String, MarketSetting)>,
+    /// A structural failure or owned exposure on a catalogue-malformed contract.
     invalid: bool,
     valuation_pending: bool,
     uncatalogued: Vec<String>,
@@ -126,6 +184,10 @@ pub struct Account {
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
     terminal_queue: VecDeque<String>,
+    /// Contracts (empty when unidentified) whose skipped position row was already logged.
+    position_skips: HashSet<String>,
+    /// `symbol id` (id empty when unidentified) of open-order rows already logged as skipped.
+    order_skips: HashSet<String>,
 }
 #[derive(Default)]
 struct OrderBackoff {
@@ -566,7 +628,7 @@ impl Bitrue {
                 symbol,
                 revision: self.account.orders_revision,
                 lookup: None,
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 quotes: HashMap::new(),
                 invalid: false,
             }),
@@ -657,7 +719,7 @@ impl Bitrue {
                 symbol,
                 revision: self.account.orders_revision,
                 lookup: Some((command, client_order_id)),
-                rows: vec![],
+                rows: SnapshotBuilder::default(),
                 quotes: HashMap::new(),
                 invalid: false,
             }),
@@ -1098,8 +1160,8 @@ impl Bitrue {
         }
     }
     fn snapshot_item(
-        &self,
-        cx: &Cx<'_, Pending>,
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
         data: &mut Snapshot,
         item: &str,
     ) -> Result<(), ()> {
@@ -1122,9 +1184,14 @@ impl Bitrue {
         data.balances.insert(coin.margin_coin.to_string(), balance);
         for group in groups {
             if group.contract_name.is_empty() {
-                return Err(());
+                self.reject_position(cx, data, None);
+                continue;
             }
-            let Some(market) = cx.store.market(&group.contract_name) else {
+            let Some(symbol) = cx
+                .store
+                .market(&group.contract_name)
+                .map(|m| m.symbol.clone())
+            else {
                 // Only owned exposure on a contract skipped as malformed blocks the snapshot.
                 if group.positions.iter().all(|row| row.volume.0 == 0.0) {
                     continue;
@@ -1139,26 +1206,33 @@ impl Bitrue {
                 continue;
             };
             for row in group.positions {
+                // A row that cannot be read keeps this contract's stored position.
                 let side = match &*row.side {
-                    "BUY" => PositionSide::Long,
-                    "SELL" => PositionSide::Short,
-                    _ => return Err(()),
+                    "BUY" => Some(PositionSide::Long),
+                    "SELL" => Some(PositionSide::Short),
+                    _ => None,
                 };
                 let margin_type = match row.position_type.0 {
-                    1.0 => safe_cex_engine::model::MarginType::Cross,
-                    2.0 => safe_cex_engine::model::MarginType::Isolated,
-                    _ => return Err(()),
+                    1.0 => Some(safe_cex_engine::model::MarginType::Cross),
+                    2.0 => Some(safe_cex_engine::model::MarginType::Isolated),
+                    _ => None,
                 };
-                if row.volume.0 < 0.0 || row.open_price.0 < 0.0 || row.leverage_level.0 < 0.0 {
-                    return Err(());
-                }
                 let leverage = if row.leverage_level.0 > 0.0 {
                     row.leverage_level.0
                 } else {
-                    cx.store.setting(&market.symbol).map_or(0.0, |s| s.leverage)
+                    cx.store.setting(&symbol).map_or(0.0, |s| s.leverage)
                 };
-                if row.volume.0 > 0.0 && leverage <= 0.0 {
-                    return Err(());
+                let (Some(side), Some(margin_type)) = (side, margin_type) else {
+                    self.reject_position(cx, data, Some(&symbol));
+                    continue;
+                };
+                if row.volume.0 < 0.0
+                    || row.open_price.0 < 0.0
+                    || row.leverage_level.0 < 0.0
+                    || (row.volume.0 > 0.0 && leverage <= 0.0)
+                {
+                    self.reject_position(cx, data, Some(&symbol));
+                    continue;
                 }
                 let setting = MarketSetting {
                     leverage,
@@ -1168,31 +1242,32 @@ impl Bitrue {
                 if data
                     .settings
                     .iter()
-                    .any(|(symbol, prior)| symbol == &market.symbol && *prior != setting)
+                    .any(|(prior_symbol, prior)| prior_symbol == &symbol && *prior != setting)
                 {
                     return Err(());
                 }
-                data.settings.push((market.symbol.clone(), setting));
+                data.settings.push((symbol.clone(), setting));
                 if row.volume.0 == 0.0 {
                     continue;
                 }
-                if data.positions.iter().any(|p| p.symbol == market.symbol) {
+                if data.positions.rows().iter().any(|p| p.symbol == symbol) {
                     return Err(());
                 }
                 let existing = cx
                     .store
                     .positions()
                     .iter()
-                    .find(|p| p.symbol == market.symbol && p.side == side);
+                    .find(|p| p.symbol == symbol && p.side == side);
                 let liquidation = [row.force_liquidation_price, row.reduce_price]
                     .into_iter()
                     .flatten()
                     .map(|n| n.0)
                     .find(|n| *n > 0.0)
                     .unwrap_or_else(|| existing.map_or(0.0, |p| p.liquidation_price));
+                let mut valuation_pending = false;
                 let unrealized_pnl = cx
                     .store
-                    .ticker(&market.symbol)
+                    .ticker(&symbol)
                     .map(|ticker| ticker.last)
                     .filter(|last| last.is_finite() && *last > 0.0)
                     .map(|last| {
@@ -1205,15 +1280,18 @@ impl Bitrue {
                     })
                     .filter(|value| value.is_finite())
                     .unwrap_or_else(|| {
-                        data.valuation_pending = true;
+                        valuation_pending = true;
                         existing.map_or(0.0, |p| p.unrealized_pnl)
                     });
                 if !unrealized_pnl.is_finite() {
-                    return Err(());
+                    self.reject_position(cx, data, Some(&symbol));
+                    continue;
                 }
+                data.valuation_pending |= valuation_pending;
+                self.account.position_skips.remove(&symbol);
                 data.positions.push(Position {
-                    id: market.symbol.clone(),
-                    symbol: market.symbol.clone(),
+                    id: symbol.clone(),
+                    symbol: symbol.clone(),
                     side,
                     entry_price: row.open_price.0,
                     notional: row.position_balance.0,
@@ -1230,6 +1308,28 @@ impl Bitrue {
             }
         }
         Ok(())
+    }
+    /// Rejects a position row by contract; an unnamed group protects every stored position.
+    fn reject_position(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        data: &mut Snapshot,
+        symbol: Option<&str>,
+    ) {
+        let skips = &mut self.account.position_skips;
+        match symbol {
+            Some(symbol) => {
+                let level = skip_level(cx.store.position(symbol).is_some());
+                let message = format!("Bitrue skipped malformed position row {symbol}");
+                log_skip(cx, skips, symbol, level, message);
+            }
+            None => {
+                let level = skip_level(!cx.store.positions().is_empty());
+                let message = "Bitrue skipped malformed position group without a contract";
+                log_skip(cx, skips, "", level, message);
+            }
+        }
+        data.positions.reject(symbol.map(str::to_owned));
     }
     fn map_rest_order(
         &self,
@@ -1410,7 +1510,7 @@ impl Bitrue {
     fn finish_leverage(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        settings: Option<&[(String, MarketSetting)]>,
+        settings: Option<SnapshotSettings<'_>>,
         error: &str,
     ) {
         #[derive(Serialize)]
@@ -1423,7 +1523,9 @@ impl Bitrue {
         }
         for (command, symbol) in std::mem::take(&mut self.account.leverage_queries) {
             let result = settings
-                .and_then(|rows| {
+                // A rejected row leaves its contract's leverage unknown.
+                .filter(|(_, positions)| positions.allows_absence(&symbol))
+                .and_then(|(rows, _)| {
                     rows.iter()
                         .find(|(s, _)| *s == symbol)
                         .map(|(_, s)| *s)
@@ -1481,16 +1583,51 @@ impl Bitrue {
                         }
                         self.map_order_tree(cx, symbol, &row, None)
                     });
-                match mapped {
-                    Ok(mapped)
-                        if mapped
-                            .iter()
-                            .all(|row| !rows.iter().any(|o| o.id == row.id))
-                            && (lookup.is_none() || rows.len() + mapped.len() <= 20_000) =>
-                    {
-                        rows.extend(mapped)
+                let Ok(mapped) = mapped else {
+                    let (mut ids, unnamed_child) = order_tree_ids(item);
+                    if unnamed_child && let Some(parent) = ids.first().cloned() {
+                        // An unnamed child could be any cached child of its parent.
+                        ids.extend(
+                            cx.store
+                                .orders()
+                                .iter()
+                                .filter(|o| o.parent_id.as_deref() == Some(parent.as_str()))
+                                .map(|o| o.id.clone()),
+                        );
                     }
-                    _ => *invalid = true,
+                    let skips = &mut self.account.order_skips;
+                    if let Some(id) = ids.first() {
+                        let level = skip_level(ids.iter().any(|id| cx.store.order(id).is_some()));
+                        let message = format!("Bitrue skipped malformed order row {id}");
+                        log_skip(cx, skips, &format!("{symbol} {id}"), level, message);
+                    } else {
+                        let level =
+                            skip_level(!cx.store.orders().iter().any(|o| o.symbol == *symbol));
+                        let message =
+                            format!("Bitrue skipped malformed {symbol} order row without an id");
+                        log_skip(cx, skips, &format!("{symbol} "), level, message);
+                        rows.reject(None);
+                    }
+                    for id in ids {
+                        rows.reject(Some(id));
+                    }
+                    return;
+                };
+                if mapped
+                    .iter()
+                    .all(|row| !rows.rows().iter().any(|o| o.id == row.id))
+                    && (lookup.is_none() || rows.rows().len() + mapped.len() <= 20_000)
+                {
+                    for row in &mapped {
+                        self.account
+                            .order_skips
+                            .remove(&format!("{symbol} {}", row.id));
+                    }
+                    for row in mapped {
+                        rows.push(row);
+                    }
+                } else {
+                    *invalid = true;
                 }
             }
             _ => {}
@@ -1666,18 +1803,25 @@ impl Bitrue {
                             format!("Skipping Bitrue position on uncatalogued contract {contract}"),
                         );
                     }
+                    if data.positions.rejected() == 0 {
+                        self.account.position_skips.clear();
+                    }
+                    self.finish_leverage(
+                        cx,
+                        Some((&data.settings, &data.positions)),
+                        "Bitrue account did not report leverage metadata for this symbol",
+                    );
+                    // A rejected row cannot prove its position flat; keep the stored copy.
+                    let positions = data
+                        .positions
+                        .commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     let closed: Vec<String> = cx
                         .store
                         .positions()
                         .iter()
-                        .filter(|p| !data.positions.iter().any(|n| n.id == p.id))
+                        .filter(|p| !positions.iter().any(|n| n.id == p.id))
                         .map(|p| p.symbol.clone())
                         .collect();
-                    self.finish_leverage(
-                        cx,
-                        Some(&data.settings),
-                        "Bitrue account did not report leverage metadata for this symbol",
-                    );
                     for (symbol, setting) in data.settings {
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
@@ -1695,7 +1839,7 @@ impl Bitrue {
                     currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
                     cx.store.set_balance(balance);
                     cx.store.set_currency_balances(currencies);
-                    cx.store.set_positions(data.positions);
+                    cx.store.set_positions(positions);
                     cx.store.set_hedged(false);
                     self.account.loaded = true;
                     self.account.settings_revision += 1;
@@ -1738,12 +1882,14 @@ impl Bitrue {
                         command,
                         &symbol,
                         &client_order_id,
-                        (schema && !invalid).then_some(rows.as_slice()),
+                        (schema && !invalid && rows.rejected() == 0).then_some(rows.rows()),
                     );
                     return;
                 }
                 let complete = schema && !invalid;
                 let success = complete && revision == self.account.orders_revision;
+                // A rejected row may be the order a census is looking for.
+                let census = success && rows.rejected() == 0;
                 if success {
                     let mut retained = cx
                         .store
@@ -1752,6 +1898,23 @@ impl Bitrue {
                         .filter(|o| o.symbol != symbol)
                         .cloned()
                         .collect::<Vec<_>>();
+                    if census {
+                        let prefix = format!("{symbol} ");
+                        self.account
+                            .order_skips
+                            .retain(|key| !key.starts_with(&prefix));
+                    }
+                    let accepted = rows.rows().len();
+                    let mut rows = rows.commit(
+                        cx.store
+                            .orders()
+                            .iter()
+                            .filter(|o| o.symbol == symbol)
+                            .cloned(),
+                        |o| o.id.clone(),
+                    );
+                    // Stored copies kept for rejected rows are not new observations.
+                    retained.extend(rows.split_off(accepted));
                     for row in rows {
                         if self.account.terminal.contains_key(&row.id) && !terminal(row.status)
                             || self.account.terminal.get(&row.id) == Some(&OrderStatus::Closed)
@@ -1802,8 +1965,10 @@ impl Bitrue {
                         cx.store.upsert_order(order);
                     }
                 }
-                let read = if self.trade_census(cx, &symbol, revision, success) {
+                let read = if self.trade_census(cx, &symbol, revision, census) {
                     cx.orders_reconciled(Some(&symbol));
+                    OrderRead::Reconciled
+                } else if success {
                     OrderRead::Reconciled
                 } else if complete {
                     OrderRead::Superseded
