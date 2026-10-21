@@ -14,7 +14,7 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
@@ -2061,6 +2061,7 @@ export class BaseExchange implements Exchange {
         },
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     } else {
@@ -2092,6 +2093,8 @@ export class BaseExchange implements Exchange {
       const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
       this.emitter.emit('error', formattedMsg, {
         enhancedContext: enhancedError?.context,
+        // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     }

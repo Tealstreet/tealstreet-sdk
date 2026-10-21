@@ -150,6 +150,8 @@ pub struct Kucoin {
     message_id: u64,
     book_generation: u64,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    /// Discovery retries wait out a rate-limit window the venue announced.
+    discovery_paused_until: f64,
     // Unified symbols of contracts rejected as malformed; owned exposure there holds.
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
@@ -243,6 +245,7 @@ impl Kucoin {
             message_id: 0,
             book_generation: 0,
             discovery: Default::default(),
+            discovery_paused_until: 0.0,
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
         }
@@ -963,6 +966,10 @@ impl Venue for Kucoin {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let status = response.status;
         let body = response.body;
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
@@ -1041,7 +1048,8 @@ impl Venue for Kucoin {
             }
             Pending::Markets { rows, malformed } => {
                 if success(status, body).is_err() || rows.is_empty() {
-                    self.discovery.failed(cx, false);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.discovery.failed_after(cx, false, pause);
                 } else {
                     let refresh = cx.store.loaded().markets;
                     let rows = if refresh {
@@ -1074,7 +1082,8 @@ impl Venue for Kucoin {
             }
             Pending::Tickers { rows, invalid } => {
                 if success(status, body).is_err() || invalid || rows.is_empty() {
-                    self.discovery.failed(cx, true);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.discovery.failed_after(cx, true, pause);
                 } else {
                     self.discovery.succeeded(cx, &true);
                     cx.store.set_tickers(rows);
@@ -1122,8 +1131,14 @@ impl Venue for Kucoin {
                 self.reconnect_later(cx, channel);
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Markets { .. } => self.discovery.failed(cx, false),
-            Pending::Tickers { .. } => self.discovery.failed(cx, true),
+            Pending::Markets { .. } => {
+                let pause = self.discovery_paused_until - cx.now;
+                self.discovery.failed_after(cx, false, pause);
+            }
+            Pending::Tickers { .. } => {
+                let pause = self.discovery_paused_until - cx.now;
+                self.discovery.failed_after(cx, true, pause);
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
