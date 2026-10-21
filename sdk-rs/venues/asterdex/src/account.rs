@@ -1112,6 +1112,7 @@ impl AsterDex {
                     }
                 }
                 cx.fill(Fill {
+                    id: None,
                     order_id: id.clone(),
                     symbol: o.s.to_string(),
                     side: order_side(&o.side),
@@ -1125,6 +1126,7 @@ impl AsterDex {
             let execution_previous = self.account.execution_progress(&id, filled);
             if execution.is_none() && filled > execution_previous {
                 cx.fill(Fill {
+                    id: None,
                     order_id: id.clone(),
                     symbol: o.s.to_string(),
                     side: order_side(&o.side),

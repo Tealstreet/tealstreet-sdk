@@ -22,7 +22,7 @@ fn execution_rows(frame: &[u8], expected_count: usize) -> &[u8] {
         if kind == safe_cex_engine::wire::section::FILLS {
             assert_eq!(
                 u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
-                1
+                2
             );
             let payload = &frame[at + 8..at + 8 + length];
             let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;

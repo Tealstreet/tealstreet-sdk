@@ -1235,6 +1235,7 @@ impl Account {
                     native.price
                 };
                 cx.fill(Fill {
+                    id: None,
                     order_id: id.to_owned(),
                     symbol: symbol.clone(),
                     side: order_side(&native.side),

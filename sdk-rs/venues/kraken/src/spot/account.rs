@@ -943,6 +943,7 @@ impl KrakenSpot {
                     fills.push((
                         key,
                         Fill {
+                            id: None,
                             order_id: o.id.clone(),
                             symbol,
                             side,

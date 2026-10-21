@@ -578,6 +578,7 @@ impl KucoinSpot {
                     self.fills.remove(&k);
                 }
                 cx.fill(Fill {
+                    id: None,
                     order_id: order.id.clone(),
                     symbol: order.symbol.clone(),
                     side: order.side,

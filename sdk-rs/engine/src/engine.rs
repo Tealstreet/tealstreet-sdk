@@ -211,6 +211,8 @@ pub enum Notice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fill {
+    /// Native execution identity, distinct from the order identity when reported.
+    pub id: Option<String>,
     pub order_id: String,
     pub symbol: String,
     pub side: OrderSide,
@@ -2469,7 +2471,7 @@ impl<V: Venue> Engine<V> {
         w.candles(&candles);
         let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 1);
+            w.begin_revision(section::FILLS, 2);
             w.u32(fills.len() as u32);
             let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
             w.u32s(orders);
@@ -2487,17 +2489,19 @@ impl<V: Venue> Engine<V> {
                 let symbol = w.string(&fill.symbol);
                 w.u32(symbol);
             }
-            if fills.iter().any(|(_, financials)| financials.is_some()) {
-                w.pad();
-                w.f64s(fills.iter().map(|(_, financials)| {
-                    financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
-                }));
-                w.f64s(
-                    fills
-                        .iter()
-                        .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
-                );
+            for (fill, _) in &fills {
+                let id = w.optional_string(fill.id.as_deref());
+                w.u32(id);
             }
+            w.pad();
+            w.f64s(fills.iter().map(|(_, financials)| {
+                financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
+            }));
+            w.f64s(
+                fills
+                    .iter()
+                    .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
+            );
             w.end();
         }
         let empty = w.is_empty();
@@ -2696,6 +2700,7 @@ mod streaming_tests {
 
     fn execution() -> Fill {
         Fill {
+            id: None,
             order_id: "9007199254740995".into(),
             symbol: "A".into(),
             side: OrderSide::Buy,
@@ -2705,7 +2710,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn fill_financials_leave_revision_one_bytes_identical_when_absent() {
+    fn revision_two_fills_preserve_absent_identity_and_financial_values() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -2740,10 +2745,12 @@ mod streaming_tests {
                 expected.extend(value.to_le_bytes());
             }
             expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
-            expected.extend(0u32.to_le_bytes()); // Section padding.
+            expected.extend(crate::wire::NONE.to_le_bytes()); // Missing execution identity.
+            expected.extend(f64::NAN.to_le_bytes());
+            expected.extend(f64::NAN.to_le_bytes());
             assert_eq!(
                 fills, expected,
-                "absent financials must preserve the symbol-bearing revision-one payload"
+                "revision two represents absent financials and identity explicitly"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
         }
@@ -2786,7 +2793,7 @@ mod streaming_tests {
             .unwrap()
             .1;
         assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 3);
-        assert_eq!(fills.len(), 152);
+        assert_eq!(fills.len(), 160);
         let rows: Vec<_> = fills[40..88]
             .as_chunks::<8>()
             .0
@@ -2795,8 +2802,8 @@ mod streaming_tests {
             .collect();
         assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
         assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        assert_eq!(&fills[100..104], &[0; 4]);
-        let floats: Vec<_> = fills[104..]
+        assert_eq!(&fills[100..112], &[255; 12]);
+        let floats: Vec<_> = fills[112..]
             .as_chunks::<8>()
             .0
             .iter()
@@ -3712,6 +3719,7 @@ mod streaming_tests {
                 },
             );
             cx.fill(Fill {
+                id: None,
                 order_id: "9007199254740995".into(),
                 symbol: "A".into(),
                 side: OrderSide::Buy,
@@ -3840,6 +3848,7 @@ mod streaming_tests {
         // A pending fill would promote the flush to a full frame (MARKETS first).
         engine.io.fills.push((
             Fill {
+                id: None,
                 order_id: "filled-order".into(),
                 symbol: "ORPHAN".into(),
                 side: OrderSide::Buy,
@@ -3869,8 +3878,8 @@ mod streaming_tests {
         );
         assert_eq!(
             fills.len(),
-            40,
-            "one fill includes a padded symbol-reference tail"
+            56,
+            "one revision-two fill includes identity and financial columns"
         );
         let reference = u32::from_le_bytes(fills[32..36].try_into().unwrap()) as usize;
         let strings = sections
@@ -5385,6 +5394,7 @@ mod placement_ack_tests {
                 cx.store.remove_orders(&[id]);
             } else if let Some(id) = text.strip_prefix("fill:") {
                 cx.fill(Fill {
+                    id: None,
                     order_id: id.into(),
                     symbol: "BTCUSDT".into(),
                     side: OrderSide::Buy,
@@ -5822,6 +5832,7 @@ mod fill_frame_tests {
             cx.store.upsert_order(order());
             if text == "fill" {
                 cx.fill(Fill {
+                    id: None,
                     order_id: "7".into(),
                     symbol: "A".into(),
                     side: OrderSide::Buy,

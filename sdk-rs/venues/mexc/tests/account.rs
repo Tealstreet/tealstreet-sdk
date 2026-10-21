@@ -1041,7 +1041,7 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 5);
-    assert_eq!(payload.len(), 248);
+    assert_eq!(payload.len(), 264);
     let symbol_refs: Vec<_> = payload[144..164]
         .as_chunks::<4>()
         .0
@@ -1061,17 +1061,17 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
             [65000., 0.001]
         );
     }
-    assert!(value(168).is_nan());
-    assert_eq!([value(176), value(184)], [0., -2.]);
+    assert!(value(184).is_nan());
+    assert_eq!([value(192), value(200)], [0., -2.]);
     assert!(
-        value(192).is_nan(),
+        value(208).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert_eq!(value(200), 5.);
-    assert!(value(208).is_nan());
-    assert_eq!([value(216), value(224)], [0.2, 0.]);
-    assert!(value(232).is_nan());
-    assert!(value(240).is_nan());
+    assert_eq!(value(216), 5.);
+    assert!(value(224).is_nan());
+    assert_eq!([value(232), value(240)], [0.2, 0.]);
+    assert!(value(248).is_nan());
+    assert!(value(256).is_nan());
     assert!(e.take_market_frame(200.).is_none());
 }
 #[test]

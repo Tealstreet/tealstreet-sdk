@@ -1250,6 +1250,7 @@ impl Polymarket {
         if !executions.contains_key(trade) {
             executions.insert(trade.into(), amount);
             cx.fill(Fill {
+                id: None,
                 order_id: order.into(),
                 symbol: market.symbol.clone(),
                 side,

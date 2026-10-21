@@ -2422,6 +2422,7 @@ impl Coinbase {
                 }
                 if price > 0.0 {
                     cx.fill(Fill {
+                        id: None,
                         order_id: o.id.clone(),
                         symbol: o.symbol.clone(),
                         side: o.side,

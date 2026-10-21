@@ -2326,6 +2326,7 @@ impl Lighter {
             id: format!("{market}:{execution_id}"),
             timestamp,
             fill: Fill {
+                id: None,
                 order_id: order.into(),
                 symbol: symbol.into(),
                 side,
