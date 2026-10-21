@@ -261,6 +261,8 @@ export interface EngineHealth {
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface EngineConstruction {
+  canSign?: boolean;
+  publicDataOnly?: boolean;
   asterdexApiVersion?: 'v1' | 'v3';
 }
 
