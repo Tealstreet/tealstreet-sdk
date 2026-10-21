@@ -163,6 +163,8 @@ pub mod code {
     pub const COMMAND_UNSUPPORTED: &str = "command.unsupported";
     /// Account options are invalid, so the venue cannot start as configured.
     pub const CONFIG_INVALID: &str = "config.invalid";
+    /// A setting change was applied, but may behave unexpectedly as the user asked it.
+    pub const SETTING_CAUTION: &str = "setting.caution";
     /// Startup progress, such as markets loaded.
     pub const STARTUP_PROGRESS: &str = "startup.progress";
     /// A routine account summary, logged at Debug.

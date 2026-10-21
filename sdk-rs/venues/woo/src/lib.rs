@@ -1293,7 +1293,7 @@ fn reread_partial<P>(
     if *stalls == 5 {
         cx.notice(
             Level::Warn,
-            code::ROW_SKIPPED,
+            code::REQUEST_FAILED,
             format!("WOO stops re-reading a catalogue with {after} malformed markets"),
         );
     }

@@ -247,7 +247,7 @@ impl KrakenSpot {
         }
     }
     pub(super) fn reject_auth(&self, cx: &mut Cx<'_, Pending>, error: &str) {
-        cx.notice(Level::Error, code::CONFIG_INVALID, error);
+        cx.notice(Level::Error, code::AUTH_REJECTED, error);
         cx.deactivate();
     }
     pub(super) fn request_private(

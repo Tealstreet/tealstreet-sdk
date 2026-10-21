@@ -1524,7 +1524,7 @@ impl Coinbase {
                 (None, None) if response.status == 401 => {
                     cx.notice(
                         Level::Error,
-                        code::CONFIG_INVALID,
+                        code::AUTH_REJECTED,
                         "Coinbase credentials rejected",
                     );
                     cx.deactivate();
@@ -1556,7 +1556,7 @@ impl Coinbase {
                 }
                 cx.notice(
                     Level::Error,
-                    code::CONFIG_INVALID,
+                    code::AUTH_REJECTED,
                     "Coinbase credentials rejected",
                 );
                 cx.deactivate();
@@ -1595,7 +1595,7 @@ impl Coinbase {
                     Request::Portfolios if matches!(response.status, 403 | 404) => {
                         cx.notice(
                             Level::Error,
-                            code::CONFIG_INVALID,
+                            code::AUTH_REJECTED,
                             "Coinbase credentials rejected",
                         );
                         cx.deactivate();

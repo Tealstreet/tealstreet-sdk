@@ -752,7 +752,7 @@ impl PhemexPerpetuals {
             } else {
                 cx.notice(
                     Level::Error,
-                    code::STREAM_UNAVAILABLE,
+                    code::AUTH_REJECTED,
                     "Phemex private websocket authentication rejected",
                 );
                 cx.close(socket);

@@ -829,7 +829,7 @@ impl BybitLinear {
             "API key"
         };
         let text = format!("Bybit rejected the {which} ({code}): {message}");
-        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, &text);
+        cx.notice(Level::Error, code::AUTH_REJECTED, &text);
         cx.startup_failed(
             VenueError::new(text)
                 .kind(kind)

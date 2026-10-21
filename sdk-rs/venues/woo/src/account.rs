@@ -1876,7 +1876,7 @@ impl Woo {
                 } else {
                     cx.notice(
                         Level::Error,
-                        code::STREAM_UNAVAILABLE,
+                        code::AUTH_REJECTED,
                         if msg.message.is_empty() {
                             "WOO X private websocket authentication failed".into()
                         } else {

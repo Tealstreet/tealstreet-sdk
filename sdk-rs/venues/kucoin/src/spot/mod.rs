@@ -12,8 +12,8 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
-    SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
+    SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
