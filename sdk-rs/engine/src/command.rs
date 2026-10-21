@@ -906,6 +906,15 @@ mod tests {
             });
             assert_eq!(armed, [expected], "{json}");
         }
+        // A finite scale whose product overflows is still capped; it never pauses.
+        let json = r#"{"op":"setPollScale","scale":1e308}"#;
+        let HostInput::PollScaleChanged { scale, .. } = decode_host_input(json).unwrap() else {
+            panic!("{json} must decode as a polling control")
+        };
+        let armed = armed_after(|engine| {
+            engine.handle(0.0, crate::Event::PollScaleChanged { scale });
+        });
+        assert_eq!(armed, [120_000.0], "overflowing product takes the cap");
     }
 
     #[test]

@@ -107,6 +107,7 @@ pub struct Account {
     snapshot_settings_revision: u64,
     snapshot_positions_seen: bool,
     read_failures: u32,
+    unlisted_logged: HashSet<String>,
 }
 impl Account {
     pub(crate) fn new() -> Self {
@@ -533,6 +534,18 @@ impl Kraken {
         self.account.records.insert(order.id.clone(), order.clone());
         cx.store.upsert_order(order);
     }
+    /// Rows on a market the catalogue filtered or never listed are skipped; only a
+    /// market skipped as malformed (`skipped_markets`) holds the snapshot.
+    fn account_unlisted(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
+        for symbol in symbols {
+            if self.account.unlisted_logged.insert(symbol.clone()) {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Kraken {symbol} is not a listed market; its rows are skipped"),
+                );
+            }
+        }
+    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started || self.signer.is_none() || self.options.public_data_only {
             return;
@@ -832,6 +845,7 @@ impl Kraken {
                 } else if let Some(raw) = msg.orders {
                     let mut orders = vec![];
                     let mut valid = true;
+                    let mut unlisted = vec![];
                     let result = json::each::<OrderWire<'_>>(raw.get(), |r| {
                         if r.symbol.is_empty() {
                             valid = false;
@@ -841,10 +855,13 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
-                        } else if r.symbol.starts_with("PF_") {
+                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
                             valid = false;
+                        } else {
+                            unlisted.push(r.symbol.into_owned());
                         }
                     });
+                    self.account_unlisted(cx, unlisted);
                     if result.is_ok() && valid {
                         self.account.payloads.insert("open_orders".into(), cx.now);
                         if msg.feed == "open_orders_snapshot"
@@ -889,6 +906,7 @@ impl Kraken {
                 if let Some(raw) = msg.positions {
                     let mut positions = vec![];
                     let mut valid = true;
+                    let mut unlisted = vec![];
                     let result = json::each::<PositionWire<'_>>(raw.get(), |r| {
                         if r.symbol.is_empty() {
                             valid = false;
@@ -898,10 +916,14 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
-                        } else if r.symbol.starts_with("PF_") && r.balance.or(r.size) != Some(0.0) {
+                        } else if r.balance.or(r.size) == Some(0.0) {
+                        } else if self.skipped_markets.contains(r.symbol.as_ref()) {
                             valid = false;
+                        } else {
+                            unlisted.push(r.symbol.into_owned());
                         }
                     });
+                    self.account_unlisted(cx, unlisted);
                     if result.is_ok() && valid {
                         self.account.positions_revision += 1;
                         self.account
@@ -1168,8 +1190,10 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
-                    } else if row.symbol.starts_with("PF_") {
+                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                         request.valid = false;
+                    } else {
+                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
                 Err(_) => request.valid = false,
@@ -1184,9 +1208,11 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
-                    } else if row.symbol.starts_with("PF_") && row.balance.or(row.size) != Some(0.0)
-                    {
+                    } else if row.balance.or(row.size) == Some(0.0) {
+                    } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                         request.valid = false;
+                    } else {
+                        self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                     }
                 }
                 Err(_) => request.valid = false,

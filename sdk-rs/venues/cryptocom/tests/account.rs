@@ -329,6 +329,26 @@ fn cached_rest_after_reopen_keeps_newer_live_exposure() {
     assert_eq!(h.engine.store().positions()[0].last_update, Some(11.0));
 }
 
+// ETHUSD-PERP is deliberately filtered (not tradable); BADUSD-PERP is malformed.
+fn catalogue(bad_leverage: &str) -> String {
+    let perp = |symbol: &str, tradable: bool, leverage: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","inst_type":"PERPETUAL_SWAP","tradable":{tradable},"base_ccy":"X","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":{leverage}}}"#
+        )
+    };
+    format!(
+        r#"{{"code":0,"result":{{"data":[{},{},{}]}}}}"#,
+        perp("BTCUSD-PERP", true, r#""50""#),
+        perp("ETHUSD-PERP", false, r#""50""#),
+        perp("BADUSD-PERP", true, bad_leverage),
+    )
+}
+fn rows(rows: &[&str]) -> String {
+    format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, rows.join(","))
+}
+const BTC_POSITION: &str =
+    r#"{"instrument_name":"BTCUSD-PERP","quantity":"1","cost":"100","update_timestamp_ms":1}"#;
+
 #[test]
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let mut h = Harness::new();
@@ -450,31 +470,61 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
 }
 
 #[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let mut h = Harness::new();
-    h.reply("get-positions", r#"{"code":0,"result":{"data":[{"instrument_name":"MISSINGUSD-PERP","quantity":"1","cost":"100"}]}}"#);
-    assert!(!h.engine.store().loaded().positions);
-    assert!(h.actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+fn owned_position_and_order_on_filtered_market_are_skipped_and_the_chain_commits() {
+    let mut h = Harness::with_instruments(&catalogue("50"));
+    let filtered = BTC_POSITION.replace("BTCUSD-PERP", "ETHUSD-PERP");
+    h.reply("get-positions", &rows(&[BTC_POSITION, &filtered]));
+    h.reply("user-balance", BALANCE);
+    let filtered_order = ORDER
+        .replace("BTCUSD-PERP", "ETHUSD-PERP")
+        .replace("9007199254740993", "2");
+    h.reply("private/get-open-orders", &rows(&[ORDER, &filtered_order]));
+    h.reply("advanced/get-open-orders", EMPTY);
+    let store = h.engine.store();
+    let loaded = store.loaded();
+    assert!(loaded.positions && loaded.balance && loaded.orders);
+    assert_eq!(store.balance().total, 1000.0);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSD-PERP");
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "9007199254740993");
+    assert!(warned(&h, "position on uncatalogued market ETHUSD-PERP"));
+    assert!(warned(&h, "order on uncatalogued market ETHUSD-PERP"));
 }
 
 #[test]
-fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
+fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
+    let mut h = Harness::with_instruments(&catalogue("50"));
+    h.reply("get-positions", &rows(&[BTC_POSITION]));
+    h.reply("user-balance", BALANCE);
+    h.reply("private/get-open-orders", EMPTY);
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
+    next_tick(&mut h);
+    let changed = BTC_POSITION.replace("\"1\"", "\"3\"").replace(":1}", ":2}");
+    let malformed = BTC_POSITION.replace("BTCUSD-PERP", "BADUSD-PERP");
+    h.reply("get-positions", &rows(&[&changed, &malformed]));
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
+    assert!(warned(&h, "owned position market unavailable"));
+}
+
+#[test]
+fn working_order_on_malformed_market_rejects_snapshot_but_other_missing_rows_are_skipped() {
     for (symbol, status, loaded) in [
-        ("MISSINGUSD-PERP", "ACTIVE", false),
-        ("MISSINGUSD-PERP", "FILLED", true),
+        ("BADUSD-PERP", "ACTIVE", false),
+        ("BADUSD-PERP", "FILLED", true),
+        ("ETHUSD-PERP", "ACTIVE", true),
+        ("MISSINGUSD-PERP", "ACTIVE", true),
         ("MISSING_USD", "ACTIVE", true),
     ] {
-        let mut h = Harness::new();
+        let mut h = Harness::with_instruments(&catalogue("50"));
         h.reply("get-positions", EMPTY);
         h.reply("user-balance", BALANCE);
         let order = ORDER
             .replace("BTCUSD-PERP", symbol)
             .replace("ACTIVE", status);
-        h.reply(
-            "private/get-open-orders",
-            &format!(r#"{{"code":0,"result":{{"data":[{order}]}}}}"#),
-        );
+        h.reply("private/get-open-orders", &rows(&[&order]));
         if loaded {
             h.reply("advanced/get-open-orders", EMPTY);
         }
@@ -485,6 +535,38 @@ fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_
         );
     }
 }
+
+#[test]
+fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
+    let mut h = Harness::with_instruments(&catalogue("50"));
+    assert!(h.engine.store().market("BTCUSD-PERP").is_some());
+    assert!(h.engine.store().market("BADUSD-PERP").is_none());
+    let retry = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("partial catalogue retry");
+    h.load();
+    h.actions.clear();
+    h.now += 1000.0;
+    h.event(Event::TimerFired { timer: retry });
+    h.reply("public/get-instruments", &catalogue(r#""20""#));
+    assert!(h.engine.store().market("BADUSD-PERP").is_some());
+    assert!(h.engine.store().market("BTCUSD-PERP").is_some());
+    assert!(
+        !h.actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::WsConnect { .. } | Action::SetTimer { .. }
+        )),
+        "no ticker reseed, private restart or further retry: {:?}",
+        h.actions
+    );
+    assert!(h.engine.store().loaded().positions);
+}
+
 fn warned(h: &Harness, needle: &str) -> bool {
     h.actions.iter().any(|a| {
         matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message })

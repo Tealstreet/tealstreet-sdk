@@ -782,7 +782,7 @@ async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
             let fixture = Fixture::new(config()).await;
             let mut socket = fixture.connect("a").await;
             frame(&mut socket).await;
-            // Scales of the venue's 1 s cadence: 1e308 s, then 0.001 ms.
+            // Scales of the venue's 1 s cadence: 1e308 ms, then 0.001 ms.
             send(&mut socket, r#"{"op":"setPollScale","scale":1e305}"#).await;
             send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
             assert!(
