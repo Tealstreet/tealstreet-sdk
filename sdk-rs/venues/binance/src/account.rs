@@ -612,9 +612,8 @@ impl BinanceFutures {
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
             Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
-                cx.notice(
-                    Level::Error,
-                    code::REQUEST_FAILED,
+                cx.retried_failure(
+                    "binance.account:615",
                     format!("Binance positions: {message}"),
                 );
                 if let Some(join) = &mut self.account.positions
@@ -626,16 +625,11 @@ impl BinanceFutures {
             }
             Request::Account { .. } => {
                 self.account.account_in_flight = false;
-                cx.notice(
-                    Level::Error,
-                    code::REQUEST_FAILED,
-                    format!("Binance account: {message}"),
-                );
+                cx.retried_failure("binance.account:629", format!("Binance account: {message}"));
             }
             Request::OpenOrders { generation } | Request::OpenAlgoOrders { generation } => {
-                cx.notice(
-                    Level::Error,
-                    code::REQUEST_FAILED,
+                cx.retried_failure(
+                    "binance.account:636",
                     format!("Binance fetchOrders error: {message}"),
                 );
                 if let Some(join) = &mut self.account.orders
@@ -646,11 +640,7 @@ impl BinanceFutures {
                 self.finish_orders(cx);
             }
             Request::LeverageBrackets(_) | Request::PositionMode => {
-                cx.notice(
-                    Level::Error,
-                    code::REQUEST_FAILED,
-                    format!("Binance: {message}"),
-                );
+                cx.retried_failure("binance.account:649", format!("Binance: {message}"));
             }
         }
     }

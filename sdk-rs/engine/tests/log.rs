@@ -35,6 +35,8 @@ impl Venue for Logger {
             }
             Some(("close", socket)) => cx.close(SocketId(socket.parse().unwrap())),
             Some(("deactivate", _)) => cx.deactivate(),
+            Some(("retry", "a")) => cx.retried_failure("site.a", "read failed"),
+            Some(("retry", _)) => cx.retried_failure("site.b", "read failed"),
             Some(("rejectlogged", _)) => {
                 cx.notice(Level::Error, code::AUTH_REJECTED, "key rejected");
                 cx.deactivate();
@@ -353,4 +355,41 @@ fn an_auth_rejected_event_and_a_deactivation_in_one_event_count_once() {
     assert_eq!(engine.health().auth_failures, 1);
     send(&mut engine, "rejectlogged:");
     assert_eq!(engine.health().auth_failures, 2);
+}
+
+#[test]
+fn a_retried_read_is_an_error_once_per_quiet_spell_and_per_site() {
+    let mut engine = engine();
+    let level_at = |engine: &mut Engine<Logger>, now: f64, site: &str| {
+        engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: &format!("retry:{site}"),
+            },
+        );
+        let levels: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(LogEvent {
+                    level,
+                    code: "request.failed",
+                    ..
+                })) => Some(level),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(levels.len(), 1, "one request.failed event");
+        levels[0]
+    };
+    assert_eq!(level_at(&mut engine, 0., "a"), Level::Error);
+    assert_eq!(level_at(&mut engine, 1_000., "a"), Level::Warn);
+    assert_eq!(
+        level_at(&mut engine, 1_000., "b"),
+        Level::Error,
+        "sites are independent"
+    );
+    // Still failing every poll: the quiet spell is measured from the latest failure.
+    assert_eq!(level_at(&mut engine, 290_000., "a"), Level::Warn);
+    assert_eq!(level_at(&mut engine, 590_001., "a"), Level::Error);
 }

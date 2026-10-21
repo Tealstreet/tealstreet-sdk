@@ -864,6 +864,8 @@ struct Io<P> {
     sockets: SocketRoles,
     /// One rejection often arrives as an auth-kind failure plus `deactivate`.
     auth_failure_counted: bool,
+    /// Engine time of each retried read's latest failure, by call site.
+    retried_failures: HashMap<&'static str, f64>,
 }
 
 impl<P> Default for Io<P> {
@@ -896,6 +898,7 @@ impl<P> Default for Io<P> {
             health: Health::default(),
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
+            retried_failures: HashMap::new(),
         }
     }
 }
@@ -1211,6 +1214,19 @@ impl<P> Cx<'_, P> {
     /// [`Cx::event`] without fields.
     pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
         self.event(level, code, message, Vec::new());
+    }
+
+    /// A `request.failed` read the venue retries on its own schedule. It is an
+    /// Error (toast, auth classification) when `site` has not failed for
+    /// [`RETRIED_FAILURE_QUIET_MS`]; repeats inside that window are warnings.
+    pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
+        let quiet = self
+            .io
+            .retried_failures
+            .insert(site, self.now)
+            .is_none_or(|at| self.now - at >= RETRIED_FAILURE_QUIET_MS);
+        let level = if quiet { Level::Error } else { Level::Warn };
+        self.notice(level, log_code::REQUEST_FAILED, message);
     }
 
     /// Counted in [`Health`] whatever the host's minimum level.
@@ -2431,6 +2447,9 @@ fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, messag
         }));
     }
 }
+
+/// How long a retried read must stay quiet before its next failure is an Error again.
+pub const RETRIED_FAILURE_QUIET_MS: f64 = 5.0 * 60_000.0;
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]

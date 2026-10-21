@@ -938,7 +938,7 @@ impl Backpack {
             request.step,
             Step::Place { optional: true, .. } | Step::Cancel { optional: true, .. }
         ) {
-            cx.notice(Level::Warn, code::CHILD_LEG_FAILED, &error.message);
+            cx.notice(Level::Error, code::CHILD_LEG_FAILED, &error.message);
             self.run_trade(cx, request.command);
         } else {
             let job = self.trading.jobs.remove(&request.command);

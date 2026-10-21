@@ -820,11 +820,7 @@ impl Venue for AsterDex {
             Pending::ExchangeInfo { rows, skipped } => {
                 log_skipped_rows(cx, "market", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.notice(
-                        Level::Error,
-                        code::REQUEST_FAILED,
-                        "Aster market bootstrap failed",
-                    );
+                    cx.retried_failure("asterdex.lib:823", "Aster market bootstrap failed");
                     self.startup.failed(cx, true);
                     return;
                 }
@@ -851,11 +847,7 @@ impl Venue for AsterDex {
             Pending::Daily { rows, skipped } => {
                 log_skipped_rows(cx, "ticker", &skipped);
                 if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
-                    cx.notice(
-                        Level::Error,
-                        code::REQUEST_FAILED,
-                        "Aster ticker bootstrap failed",
-                    );
+                    cx.retried_failure("asterdex.lib:854", "Aster ticker bootstrap failed");
                     self.startup.failed(cx, false);
                     return;
                 }
