@@ -567,8 +567,8 @@ impl WeexFutures {
             b.last = None;
             b.buffer.clear();
             b.failures += 1;
-            let delay = Backoff::new(1_000.0, 5, 60_000.0)
-                .delay(b.failures.saturating_sub(1))
+            let delay = cx
+                .jittered(Backoff::new(1_000.0, 5, 60_000.0).delay(b.failures.saturating_sub(1)))
                 .max(self.paused_until - cx.now);
             b.retry = Some(cx.set_timer(delay));
         }

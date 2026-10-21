@@ -108,6 +108,9 @@ pub struct Account {
     spot_filled: HashMap<String, (String, f64)>,
     spot_fill_orders: VecDeque<String>,
     spot_fill_tids: HashSet<u64>,
+    /// Merged spot holdings (coin, total, hold) from the last spot state.
+    spot_holdings: Option<Vec<(String, f64, f64)>>,
+    published_coins: Option<Vec<CoinBalance>>,
     spot_fill_queue: VecDeque<u64>,
     notify_fills: HashSet<u64>,
     notify_queue: VecDeque<u64>,
@@ -282,12 +285,16 @@ impl Hyperliquid {
             }
         }
     }
+    /// TS synthesises no position (and so no leverage row) for a merged spot pair.
+    pub(crate) fn has_setting(&self, m: &Market) -> bool {
+        self.spot || m.is_spot != Some(true)
+    }
     pub(crate) fn seed_setting(&self, m: &Market) -> MarketSetting {
         // HIP-3 assets get no activeAssetData, so this seed is what writes start from;
         // TS writes every HIP-3 asset isolated.
         let isolated = self.isolated_only.contains(&m.symbol) || m.id.contains(':');
         MarketSetting {
-            leverage: if self.spot {
+            leverage: if self.spot || m.is_spot == Some(true) {
                 1.0
             } else {
                 20f64.min(m.limits.leverage.max)
@@ -334,6 +341,7 @@ impl Hyperliquid {
             .markets()
             .iter()
             .enumerate()
+            .filter(|(_, m)| self.has_setting(m))
             .map(|(i, m)| (i as u32, self.seed_setting(m)))
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
@@ -509,6 +517,16 @@ impl Hyperliquid {
             );
         }
     }
+    /// TS `shouldTrackSpotHoldings`: spot is collateral (unified/portfolio) or the
+    /// account opted into spot markets.
+    pub(crate) fn tracks_spot_holdings(&self) -> bool {
+        self.account.mode != Mode::Standard || self.spot_markets
+    }
+    pub(crate) fn refresh_spot_holdings(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.tracks_spot_holdings() {
+            self.refresh_spot(cx, true);
+        }
+    }
     fn refresh_spot(&mut self, cx: &mut Cx<'_, Pending>, force: bool) {
         if self.account.spot_inflight
             || (!force && cx.now - self.account.spot_at < 10_000.0)
@@ -542,9 +560,7 @@ impl Hyperliquid {
             cx.clear_timer(t);
         }
         self.private_subscribe(cx);
-        if self.account.mode != Mode::Standard {
-            self.refresh_spot(cx, true);
-        }
+        self.refresh_spot_holdings(cx);
         self.live_balance(cx);
     }
     pub(crate) fn private_subscribe(&self, cx: &mut Cx<'_, Pending>) {
@@ -610,7 +626,7 @@ impl Hyperliquid {
         ] {
             send(cx, kind, None, None, None);
         }
-        if self.account.mode != Mode::Standard {
+        if self.tracks_spot_holdings() {
             send(
                 cx,
                 "spotState",
@@ -630,7 +646,7 @@ impl Hyperliquid {
             }
         }
         for m in &markets {
-            if !m.id.contains(':') {
+            if !m.id.contains(':') && m.is_spot != Some(true) {
                 send(cx, "activeAssetData", None, Some(&m.id), None);
             }
         }
@@ -847,7 +863,12 @@ impl Hyperliquid {
                     }
                     if let Some(order) = self.map_order(cx, &row) {
                         orders.push(order);
-                    } else if spot_coin(&row.coin) != self.spot || self.excluded_coin(&row.coin) {
+                    } else if (spot_coin(&row.coin)
+                        && !self.spot
+                        && (!self.spot_markets || !self.spot_committed))
+                        || (!spot_coin(&row.coin) && self.spot)
+                        || self.excluded_coin(&row.coin)
+                    {
                         // The main-dex read also lists the other product's orders.
                     } else if self.discovery_settled() {
                         if self
@@ -1318,6 +1339,11 @@ impl Hyperliquid {
                     .any(|stable| coin.eq_ignore_ascii_case(stable))
             {
                 1.0
+            } else if self.spot_markets
+                && let price = self.spot_mark_price(cx, coin)
+                && price > 0.0
+            {
+                price
             } else if let Some(symbol) = self.symbol(coin) {
                 let ticker = cx.store.ticker(symbol)?;
                 [ticker.mark, ticker.last]
@@ -1405,9 +1431,16 @@ impl Hyperliquid {
             };
             let available = pending.available;
             let ws = pending.ws;
-            self.account.pending_spot = None;
+            let pending = self.account.pending_spot.take().expect("pending spot");
             self.warn_unvalued(cx, unvalued);
             self.commit_collateral(cx, equity, hold, available, ws);
+            self.publish_spot_coins(
+                cx,
+                pending
+                    .balances
+                    .iter()
+                    .map(|(coin, total, _)| (coin.as_str(), *total)),
+            );
         }
         if self.account.mode != Mode::Standard && self.account.spot.is_none() {
             return;
@@ -1437,6 +1470,51 @@ impl Hyperliquid {
             }
         };
         cx.store.set_balance(balance);
+        self.publish_spot_holdings(cx);
+    }
+    /// TS publishes merged spot holdings as `balance.coins`, valued on each balance
+    /// update; only a changed valuation reaches the store.
+    fn publish_spot_holdings(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(holdings) = &self.account.spot_holdings else {
+            return;
+        };
+        let coins: Vec<CoinBalance> = holdings
+            .iter()
+            .map(|(coin, total, _)| CoinBalance {
+                base: coin.clone(),
+                amount: *total,
+                notional: total * self.spot_mark_price(cx, coin),
+            })
+            .collect();
+        if self.account.published_coins.as_ref() != Some(&coins) {
+            cx.store.set_coin_balances(coins.clone());
+            self.account.published_coins = Some(coins);
+        }
+    }
+    /// TS `getSpotCollateralMarkPrice`: the coin's spot pair (USDC, then other stable
+    /// quotes), then its own ticker, then its perp; the first positive mark.
+    pub(crate) fn spot_mark_price(&self, cx: &Cx<'_, Pending>, coin: &str) -> f64 {
+        let upper = coin.to_ascii_uppercase();
+        if ["USDC", "USDT", "USD", "USDH"].contains(&upper.as_str()) {
+            return 1.0;
+        }
+        let pairs = [
+            format!("{coin}/USDC"),
+            format!("{upper}/USDC"),
+            format!("{upper}/USDH"),
+            format!("{upper}/USDT0"),
+            format!("{upper}/USDE"),
+        ];
+        let own = self.symbol(coin).map(str::to_owned);
+        let perp = format!("{upper}-PERP");
+        pairs
+            .iter()
+            .chain(own.as_ref())
+            .chain(std::iter::once(&perp))
+            .filter_map(|symbol| cx.store.ticker(symbol))
+            .map(|ticker| ticker.mark)
+            .find(|mark| mark.is_finite() && *mark > 0.0)
+            .unwrap_or(0.0)
     }
     fn spot_price(&self, cx: &Cx<'_, Pending>, coin: &str, path: &mut Vec<String>) -> f64 {
         if ["USDC", "USDT", "USD", "USDH"]
@@ -1535,6 +1613,24 @@ impl Hyperliquid {
         if self.account.spot_authoritative_ws && (!ws || available.is_none()) {
             return;
         }
+        if self.spot_markets {
+            self.account.spot_holdings = Some(
+                state
+                    .balances
+                    .iter()
+                    .filter(|b| {
+                        !b.coin.trim().is_empty() && b.total.is_finite() && b.hold.is_finite()
+                    })
+                    .map(|b| (b.coin.trim().to_owned(), b.total, b.hold))
+                    .collect(),
+            );
+            if self.account.mode == Mode::Standard {
+                // Standard spot is holdings only, never collateral (TS).
+                self.account.spot_revision += 1;
+                self.live_balance(cx);
+                return;
+            }
+        }
         self.account.spot_revision += 1;
         let values = self
             .account
@@ -1575,6 +1671,39 @@ impl Hyperliquid {
         self.warn_unvalued(cx, unvalued);
         self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
+        self.publish_spot_coins(
+            cx,
+            state.balances.iter().map(|b| (b.coin.as_ref(), b.total)),
+        );
+    }
+    /// Spot holdings for the margin panel, as TS shows them; USD totals stay unified.
+    fn publish_spot_coins<'a>(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        balances: impl Iterator<Item = (&'a str, f64)>,
+    ) {
+        let coins = balances
+            .filter(|(_, total)| *total != 0.0)
+            .map(|(coin, total)| CoinBalance {
+                base: coin.to_string(),
+                amount: total,
+                notional: total * self.collateral_price(cx, coin).unwrap_or(0.0),
+            })
+            .collect();
+        cx.store.set_coin_balances(coins);
+    }
+    /// The USD price collateral valuation uses for one coin, when it has one.
+    fn collateral_price(&self, cx: &Cx<'_, Pending>, coin: &str) -> Option<f64> {
+        if ["USDC", "USDT", "USD", "USDH"]
+            .iter()
+            .any(|stable| coin.eq_ignore_ascii_case(stable))
+        {
+            return Some(1.0);
+        }
+        let ticker = cx.store.ticker(self.symbol(coin)?)?;
+        [ticker.mark, ticker.last]
+            .into_iter()
+            .find(|price| price.is_finite() && *price > 0.0)
     }
     pub(crate) fn map_order(&self, cx: &Cx<'_, Pending>, row: &OrderRow<'_>) -> Option<Order> {
         let symbol = self.symbol(&row.coin)?.to_owned();
@@ -1693,7 +1822,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            "userNonFundingLedgerUpdates" if self.spot || self.account.mode != Mode::Standard => {
+            "userNonFundingLedgerUpdates" if self.spot || self.tracks_spot_holdings() => {
                 self.refresh_spot(cx, false)
             }
             _ => {}
@@ -1911,6 +2040,13 @@ impl Hyperliquid {
                         }
                     }
                     self.refresh_spot(cx, true);
+                } else if cx
+                    .store
+                    .market(&symbol)
+                    .is_some_and(|m| m.is_spot == Some(true))
+                {
+                    // A merged spot fill moves holdings, never a position (TS).
+                    self.refresh_spot(cx, false);
                 } else {
                     self.optimistic_fill(cx, &symbol, &fill);
                 }

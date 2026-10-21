@@ -81,6 +81,7 @@ export function krakenSpotCommandResult(result, command) {
 let audit, state;
 export const krakenspot = {
   rust: 'krakenspot',
+  virtualPrivateClock: true,
   recordAfterReady: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/kraken/krakenspot.exchange.ts', className: 'KrakenSpotExchange', name: 'krakenspot' },
   replayCredentials: KRAKEN_SPOT_REPLAY,

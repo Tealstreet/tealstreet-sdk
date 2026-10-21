@@ -446,6 +446,11 @@ mod tests {
     use safe_cex_engine::book::Book;
     use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
 
+    /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
+    fn jittered(actual: f64, nominal: f64) -> bool {
+        (0.75 * nominal..=nominal).contains(&actual)
+    }
+
     struct Probe {
         inner: AsterDex,
         method: Method,
@@ -878,7 +883,7 @@ mod tests {
             let index = self
                 .timers
                 .iter()
-                .position(|(_, at)| *at == self.now + delay)
+                .position(|(_, at)| jittered(*at - self.now, delay))
                 .expect("retry timer");
             let (timer, at) = self.timers.remove(index);
             self.now = at;

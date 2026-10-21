@@ -243,13 +243,177 @@ fn asterdex_rules(options: &EngineOptions) -> Result<(), VenueError> {
     Ok(())
 }
 
+/// Whether this build constructs `venue`.
+pub fn supported(venue: &str) -> bool {
+    match venue {
+        #[cfg(feature = "breakoutprop")]
+        "breakoutprop" => true,
+        #[cfg(feature = "grvt")]
+        "grvt" => true,
+        #[cfg(feature = "coinbase")]
+        "coinbase" | "coinbasespot" => true,
+        #[cfg(feature = "polymarket")]
+        "polymarket" => true,
+        #[cfg(feature = "paradex")]
+        "paradex" => true,
+        #[cfg(feature = "apexomni")]
+        "apexomni" => true,
+        #[cfg(feature = "txflow")]
+        "txflow" => true,
+        #[cfg(feature = "kraken")]
+        "kraken" => true,
+        #[cfg(feature = "kraken")]
+        "krakenspot" => true,
+        #[cfg(feature = "asterdex")]
+        "asterdex" => true,
+        #[cfg(feature = "orderly")]
+        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => true,
+        #[cfg(feature = "lighter")]
+        "lighter" | "lighter-robinhood" => true,
+        #[cfg(feature = "bitrue")]
+        "bitrue" => true,
+        #[cfg(feature = "bitunix")]
+        "bitunix" => true,
+        #[cfg(feature = "backpack")]
+        "backpack" => true,
+        #[cfg(feature = "blofin")]
+        "blofin" => true,
+        #[cfg(feature = "mexc")]
+        "mexc" => true,
+        #[cfg(feature = "phemex")]
+        "phemex" => true,
+        #[cfg(feature = "binance")]
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" => true,
+        #[cfg(feature = "kucoinspot")]
+        "kucoinspot" => true,
+        #[cfg(feature = "kucoin")]
+        "kucoin" => true,
+        #[cfg(feature = "bingx")]
+        "bingx" => true,
+        #[cfg(feature = "weex")]
+        "weex" => true,
+        #[cfg(feature = "woo")]
+        "woo" => true,
+        #[cfg(feature = "bybit")]
+        "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => true,
+        #[cfg(feature = "bitget")]
+        "bitget" | "bitgetusdc" | "bitgetinverse" => true,
+        #[cfg(feature = "cryptocom")]
+        "cryptocom" => true,
+        #[cfg(feature = "hyperliquid")]
+        "hyperliquid" | "hyperliquidspot" => true,
+        #[cfg(feature = "okx")]
+        "okx" | "okxeu" | "okxdemo" | "okxeudemo" => true,
+        _ => false,
+    }
+}
+
+/// Venues that sign with a local key and secret refuse a remote signer in place of one;
+/// the rest delegate or derive signing.
+#[cfg(any(
+    feature = "grvt",
+    feature = "coinbase",
+    feature = "binance",
+    feature = "apexomni",
+    feature = "asterdex",
+    feature = "breakoutprop",
+    feature = "kucoin",
+    feature = "kucoinspot",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "bitrue",
+    feature = "backpack",
+    feature = "phemex",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "txflow",
+    feature = "kraken",
+    feature = "lighter",
+    feature = "woo",
+    feature = "orderly",
+    feature = "okx"
+))]
+fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
+    const DELEGATED: [&str; 9] = [
+        "hyperliquid",
+        "paradex",
+        "lighter",
+        "lighter-robinhood",
+        "txflow",
+        "coinbase",
+        "coinbasespot",
+        "polymarket",
+        "breakoutprop",
+    ];
+    // Without a remote signer, missing credentials simply mean a public account.
+    if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
+        return Ok(());
+    }
+    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    // AsterDEX V3 signs with its wallet private key, which TS resolves from auth or the secret.
+    #[cfg(feature = "asterdex")]
+    let signer = if venue == "asterdex" {
+        [&options.asterdex.private_key, &options.secret]
+            .iter()
+            .any(|value| value.as_deref().is_some_and(|text| !text.trim().is_empty()))
+    } else {
+        present(&options.secret)
+    };
+    #[cfg(not(feature = "asterdex"))]
+    let signer = present(&options.secret);
+    if !present(&options.key) || !signer {
+        return Err(invalid(
+            "Rust engine private accounts require a local API key and secret; remote signing is unsupported",
+        ));
+    }
+    Ok(())
+}
+
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    if let Some(read) = &options.read_credentials {
+    if !supported(venue) {
+        return Err(invalid(format!("unsupported venue: {venue}")));
+    }
+    #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
+        feature = "binance",
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "breakoutprop",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "phemex",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "txflow",
+        feature = "kraken",
+        feature = "lighter",
+        feature = "woo",
+        feature = "orderly",
+        feature = "okx"
+    ))]
+    local_signing_rules(venue, &options)?;
+    // AsterDEX's read agent travels in `asterdex.readKey`/`readSecret`; it ignores these.
+    if let Some(read) = &options.read_credentials
+        && venue != "asterdex"
+    {
         read.validate().map_err(invalid)?;
     }
     #[cfg(feature = "weex")]
@@ -770,11 +934,6 @@ pub fn build<T: Visit>(
         ),
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
-            if venue == "hyperliquid" && options.enable_spot_markets {
-                return Err(invalid(
-                    "Rust Hyperliquid currently supports perpetual markets only",
-                ));
-            }
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -786,6 +945,7 @@ pub fn build<T: Visit>(
                     b: b.address,
                     f: b.fee_tenths_bps,
                 }),
+                enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
             };
             finish(
                 visitor,
@@ -974,6 +1134,36 @@ pub struct EngineOptions {
     ))]
     #[serde(default)]
     pub secret: Option<String>,
+    #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
+        feature = "binance",
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "breakoutprop",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "phemex",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "txflow",
+        feature = "kraken",
+        feature = "lighter",
+        feature = "woo",
+        feature = "orderly",
+        feature = "okx"
+    ))]
+    /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
+    #[serde(default)]
+    pub remote_signing: bool,
     #[cfg(feature = "paradex")]
     #[serde(default)]
     pub paradex_address: Option<String>,
@@ -1327,8 +1517,15 @@ mod tests {
         assert_eq!(read.key, "read");
         assert_eq!(read.secret, "read-secret");
         assert_eq!(read.passphrase.as_deref(), Some("read-pass"));
+        let missing: EngineOptions =
+            serde_json::from_str(r#"{"readCredentials":{"key":"read"}}"#).unwrap();
         assert!(
-            serde_json::from_str::<EngineOptions>(r#"{"readCredentials":{"key":"read"}}"#).is_err()
+            missing
+                .read_credentials
+                .as_ref()
+                .unwrap()
+                .validate()
+                .is_err()
         );
     }
 }

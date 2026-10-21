@@ -121,7 +121,8 @@ Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
-order-book queries and options. `RustEngineExchange` routes from that record,
+order-book queries, options, and whether signatures take the host clock as-is
+(`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
 `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
@@ -202,6 +203,19 @@ all outcome/receipt fields even when listeners throw. The shared command-error
 allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
+
+## Rust incomplete history
+
+A Rust history read that cannot be walked completely still returns the rows it
+read, with a `history.incomplete` warning event that names its `command`. The
+host then marks the returned array with a non-enumerable `incomplete: true`.
+Kraken (a full 500-row `account-log` page its since-only cursor cannot advance)
+and Binance (exhausted income chunks) set it. Existing callers see a plain array.
+A consumer recording coverage must not treat a flagged result as complete; the
+in-package journal (`journal/buildRecords.ts`) does not read it yet. Structured
+clone drops the property, so a worker or server hop must forward it, translating
+`fields.command` (the engine's id) to its own request id as it does for `done`.
+The event is a Warn: a host whose minimum level is Error drops it, and the flag.
 
 ## Rust socket health
 

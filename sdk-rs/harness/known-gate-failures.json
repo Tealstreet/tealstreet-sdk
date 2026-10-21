@@ -17716,6 +17716,59 @@
       ]
     },
     {
+      "venue": "hyperliquid",
+      "tapeSha256": "4d735e68ad388c615fcdb85fc0fabeec9eecbfccc573077b62a25d61419902e2",
+      "tape": "sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
+          "keys": [
+            "account fills[0].executionId",
+            "checkpoint 1 account.fills[0].executionId",
+            "checkpoint 10 account.fills[0].executionId",
+            "checkpoint 11 account.fills[0].executionId",
+            "checkpoint 12 account.fills[0].executionId",
+            "checkpoint 2 account.fills[0].executionId",
+            "checkpoint 3 account.fills[0].executionId",
+            "checkpoint 4 account.fills[0].executionId",
+            "checkpoint 5 account.fills[0].executionId",
+            "checkpoint 6 account.fills[0].executionId",
+            "checkpoint 7 account.fills[0].executionId",
+            "checkpoint 8 account.fills[0].executionId",
+            "checkpoint 9 account.fills[0].executionId"
+          ]
+        },
+        {
+          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
+          "keys": [
+            "checkpoint 6 account.orders[0].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[0]",
+            "checkpoint 2 account.orders.length",
+            "checkpoint 2 account.orders[0]"
+          ]
+        },
+        {
+          "divergence": "Per-symbol leverage/margin settings or readiness differs between implementations.",
+          "keys": [
+            "checkpoint 0 account.settings[2].leverage"
+          ]
+        },
+        {
+          "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
+          "keys": [
+            "checkpoint 0 account.positions.length",
+            "checkpoint 0 account.positions[1]"
+          ]
+        }
+      ]
+    },
+    {
       "venue": "hyperliquidspot",
       "tapeSha256": "178577316af9b4bfb6ac3a120ba6b1eac4e53acca9baff015d57b9a3d0a0b96f",
       "tape": "sdk-rs/harness/tapes/hyperliquidspot-private.jsonl",
@@ -36407,22 +36460,6 @@
       ]
     },
     {
-      "venue": "krakenspot",
-      "tapeSha256": "087a10d1f34d1ac3bf1d81a0e5d3166b070e2f7b97da04da683f19c309da953b",
-      "tape": "sdk-rs/harness/tapes/krakenspot-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
-          "keys": [
-            "checkpoint 10 account.orders[0].status",
-            "checkpoint 11 account.orders[0].status",
-            "checkpoint 12 account.orders[0].status",
-            "checkpoint 13 account.orders[0].status"
-          ]
-        }
-      ]
-    },
-    {
       "venue": "kucoin",
       "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
@@ -52269,7 +52306,7 @@
     },
     {
       "venue": "backpack",
-      "tapeSha256": "0877502441e921eda112d0ba38d914c43f1b4f95b4b045513dbd9fceed5e9070",
+      "tapeSha256": "f95174bf4bfff348fed06b8b101e5ebccf93a96b59255c44b4f1d97a6e3867c5",
       "tape": "sdk-rs/harness/tapes/backpack-private.jsonl",
       "diagnostics": [
         {

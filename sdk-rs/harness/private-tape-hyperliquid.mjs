@@ -2,11 +2,20 @@
 // /exchange and websocket payloads. The signing key is the PUBLIC official SDK
 // test vector, never a funded wallet or a local credential.
 //   corepack yarn -s rust:private-tape-hyperliquid --out <file>
+// `--spot` records the same account with `enableSpotMarkets`: merged spot pairs,
+// holdings and a spot order lifecycle.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 
-const { values } = parseArgs({ options: { out: { type: 'string', default: 'sdk-rs/harness/tapes/hyperliquid-private.jsonl' } } });
+const { values } = parseArgs({
+  options: {
+    out: { type: 'string' },
+    spot: { type: 'boolean', default: false },
+  },
+});
+const SPOT = values.spot;
+values.out ??= `sdk-rs/harness/tapes/hyperliquid${SPOT ? '-spot' : ''}-private.jsonl`;
 const REST = 'https://api.hyperliquid.xyz';
 const SOCKET = 'wss://api-ui.hyperliquid.xyz/ws';
 const USER = '0x14791697260e4c9a71f18484c9f997b308e59325';
@@ -14,7 +23,10 @@ const BUILDER = { b: '0xea629e1e8534b82f704a818643f2daf38cb7fd4d', f: 10 };
 const KEY = '0x0123456789012345678901234567890123456789012345678901234567890123';
 const EPOCH = 1792454400000;
 const cloid = (n) => `0x${n.toString(16).padStart(32, '0')}`;
-const records = [{ t: 0, type: 'config', private: true, options: { key: USER, secret: KEY, applicationId: USER } }];
+const records = [{
+  t: 0, type: 'config', private: true,
+  options: { key: USER, secret: KEY, applicationId: USER, ...(SPOT ? { enableSpotMarkets: true } : {}) },
+}];
 let clock = 0;
 const at = () => (clock += 400); // Beyond the TS write client's 3 RPS guard.
 const http = (path, requestBody, body, status = 200) => records.push({
@@ -48,8 +60,23 @@ info('metaAndAssetCtxs', [{ universe: [
 ] }, [ctx(100), ctx(200)]]);
 info('perpDexs', [null, { name: 'xyz', fullName: 'Synthetic HIP-3', deployer: USER, oracleUpdater: USER }]);
 info('metaAndAssetCtxs', [{ universe: [{ name: 'xyz:FOO', szDecimals: 2, maxLeverage: 10, onlyIsolated: false }] }, [ctx(50)]], { dex: 'xyz' });
-// The TS perps class also discovers spot. This tape deliberately has no spot markets.
-info('spotMetaAndAssetCtxs', [{ universe: [], tokens: [] }, []]);
+// Spot discovery runs only with enableSpotMarkets. UBTC is Unit-bridged (shown as
+// BTC); HYPE quotes in USDH; contexts join by coin, not position.
+info('spotMetaAndAssetCtxs', SPOT ? [{
+  tokens: [
+    { name: 'USDC', index: 0, szDecimals: 8, weiDecimals: 8, tokenId: `0x${'00'.repeat(16)}`, isCanonical: true, fullName: null },
+    { name: 'UBTC', index: 1, szDecimals: 5, weiDecimals: 10, tokenId: `0x${'01'.repeat(16)}`, isCanonical: false, fullName: 'Unit Bitcoin' },
+    { name: 'HYPE', index: 2, szDecimals: 2, weiDecimals: 8, tokenId: `0x${'02'.repeat(16)}`, isCanonical: false, fullName: 'Hyperliquid' },
+    { name: 'USDH', index: 3, szDecimals: 2, weiDecimals: 8, tokenId: `0x${'03'.repeat(16)}`, isCanonical: false, fullName: 'USDH' },
+  ],
+  universe: [
+    { name: '@1', tokens: [1, 0], index: 1, isCanonical: false },
+    { name: '@2', tokens: [2, 3], index: 2, isCanonical: false },
+  ],
+}, [
+  { coin: '@2', midPx: '30', markPx: '30.1', prevDayPx: '29', dayNtlVlm: '3000', dayBaseVlm: '100', circulatingSupply: '1000', totalSupply: '1000' },
+  { coin: '@1', midPx: '60000', markPx: '60010', prevDayPx: '59000', dayNtlVlm: '600000', dayBaseVlm: '10', circulatingSupply: '21', totalSupply: '21' },
+]] : [{ universe: [], tokens: [] }, []]);
 info('userRole', { role: 'user' }, { user: USER });
 info('userAbstraction', 'disabled', { user: USER });
 info('userFees', { userCrossRate: '0.00045', userAddRate: '0.00015' }, { user: USER });
@@ -72,7 +99,12 @@ info('clearinghouseState', core, { user: USER });
 info('clearinghouseState', hip3, { user: USER, dex: 'xyz' });
 frontendOrders([], '', 0);
 frontendOrders([], 'xyz', 0);
-info('spotClearinghouseState', { balances: [] }, { user: USER });
+const spotBalances = SPOT ? [
+  { coin: 'USDC', token: 0, total: '500', hold: '0', entryNtl: '0' },
+  { coin: 'UBTC', token: 1, total: '0.5', hold: '0.1', entryNtl: '29000' },
+  { coin: 'HYPE', token: 2, total: '10', hold: '0', entryNtl: '290' },
+] : [];
+info('spotClearinghouseState', { balances: spotBalances }, { user: USER });
 
 ws('allMids', { mids: { BTC: '100', ETH: '200', 'xyz:FOO': '50' } });
 ws('clearinghouseState', { user: USER, dex: '', clearinghouseState: core });
@@ -141,6 +173,20 @@ update(hipStop, 'canceled');
 command({ op: 'placeOrders', orders: [{ symbol: 'ETH-PERP', type: 'market', side: 'buy', amount: 0.1, clientOrderId: cloid(4) }] });
 reply({ type: 'order', orders: [limit(1, true, '210', '0.1', false, cloid(4))], grouping: 'na', builder: BUILDER }, [{ filled: { oid: 3004, totalSz: '0.1', avgPx: '200' } }]);
 update(order('ETH', 3004, 'B', 210, 0, { cloid: cloid(4), origSz: '0.1' }), 'filled');
+
+if (SPOT) {
+  ws('spotState', { user: USER, spotState: { balances: spotBalances } });
+  // A spot limit on the Unit pair: asset 10000 + index, never reduce-only, 8 - szDecimals price decimals.
+  command({ op: 'placeOrders', orders: [{ symbol: 'UBTC/USDC', type: 'limit', side: 'buy', amount: 0.01, price: 59000, clientOrderId: cloid(5) }] });
+  reply({ type: 'order', orders: [limit(10001, true, '59000', '0.01', false, cloid(5))], grouping: 'na', builder: BUILDER }, [{ resting: { oid: 3005 } }]);
+  const spotOrder = order('@1', 3005, 'B', 59000, 0.01, { cloid: cloid(5) });
+  update(spotOrder, 'open');
+  frontendOrders([spotOrder]);
+  command({ op: 'cancelOrders', ids: ['3005'] });
+  reply({ type: 'cancel', cancels: [{ a: 10001, o: 3005 }] }, ['success']);
+  frontendOrders([]);
+  update(spotOrder, 'canceled');
+}
 
 // Authoritative snapshots converge after the optimistic fill and any heal.
 // Preserve ETH's setting-only row by repeating its activeAssetData last.

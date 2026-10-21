@@ -23,6 +23,7 @@ export const SECTION = {
   DERIVATIVE_PRODUCTS: 17,
   POSITION_GREEKS: 18,
   CAPABILITIES: 19,
+  UNDERLYING_TOKENS: 20,
 };
 
 export const NONE = 0xffffffff;
@@ -52,7 +53,7 @@ export const marketQuantityUnits = (flags) => {
 const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
   'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
-  'closedPositions', 'balanceInfo',
+  'closedPositions', 'balanceInfo', 'hostClock',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
@@ -264,6 +265,20 @@ export class Frame {
       symbolType: (i) => this.string(refs[i * 3]),
       marketRegion: (i) => this.string(refs[i * 3 + 1]),
       underlyingTicker: (i) => this.string(refs[i * 3 + 2]),
+    };
+  }
+
+  /** The venue token behind a market (Hyperliquid UBTC behind BTC/USDC). */
+  underlyingTokens() {
+    const section = this.first(SECTION.UNDERLYING_TOKENS);
+    if (!section) return undefined;
+    const count = rowCount(this, section);
+    if (4 + count * 12 > section.length) throw new Error('Truncated underlying tokens');
+    const market = new Uint32Array(this.buffer, section.offset + 4, count);
+    const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count * 2);
+    return { count, market,
+      name: (i) => requiredString(this, refs[i * 2]),
+      fullName: (i) => this.string(refs[i * 2 + 1]),
     };
   }
 
