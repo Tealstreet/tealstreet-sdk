@@ -572,3 +572,60 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
         read = next;
     }
 }
+
+// Private reads start before the ticker seed. A trigger order read then was
+// labelled StopLoss against a missing price and stayed so until the next poll.
+#[test]
+fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_backpack::Backpack::new(
+        safe_cex_venue_backpack::Options {
+            read_credentials: None,
+            public_data_only: false,
+            key: Some("test-public-key".into()),
+            secret: Some(STANDARD.encode([7u8; 32])),
+            recv_window: None,
+        },
+    ));
+    e.start(1000.0);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, MARKETS);
+    let take_profit = r#"[{"id":"tp","symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Market","triggerPrice":"150","quantity":"5","executedQuantity":"0","status":"TriggerPending","createdAt":1000}]"#;
+    let mut seed = vec![];
+    for _ in 0..6 {
+        for r in requests(&mut e) {
+            if r.url.contains("/tickers") || r.url.contains("/markPrices") {
+                seed.push(r);
+                continue;
+            }
+            let body = if r.url.ends_with("/account") {
+                r#"{"leverageLimit":"10"}"#
+            } else if r.url.ends_with("/position") {
+                POSITIONS
+            } else if r.url.ends_with("/collateral") {
+                BALANCE
+            } else {
+                take_profit
+            };
+            reply(&mut e, &r, 200, body);
+        }
+    }
+    let early = e
+        .store()
+        .order("tp")
+        .expect("order read before the seed")
+        .kind;
+    assert_eq!(early, safe_cex_engine::model::OrderType::StopLoss);
+    for r in seed {
+        let body = if r.url.contains("/tickers") {
+            r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
+        } else {
+            "[]"
+        };
+        reply(&mut e, &r, 200, body);
+    }
+    assert_eq!(
+        e.store().order("tp").unwrap().kind,
+        safe_cex_engine::model::OrderType::TakeProfit
+    );
+}
