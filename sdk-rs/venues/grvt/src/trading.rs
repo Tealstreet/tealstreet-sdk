@@ -1225,7 +1225,7 @@ impl Grvt {
                     cx.fail(id, error.kind(ErrorKind::Unsupported));
                 } else {
                     cx.store.set_hedged(false);
-                    cx.done(id, Ok("[]".into()));
+                    cx.done(id, "[]".into());
                 }
                 return true;
             }
@@ -1392,7 +1392,7 @@ impl Grvt {
             }
             None => cx.done(
                 plan.command,
-                Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
+                serde_json::to_string(&plan.created).expect("GRVT result IDs"),
             ),
         }
         self.refresh_orders(cx);

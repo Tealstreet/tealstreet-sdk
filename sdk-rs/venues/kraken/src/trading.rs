@@ -187,7 +187,7 @@ impl Kraken {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(*command, Ok("null".into()));
+                    cx.done(*command, "null".into());
                 }
                 return true;
             }
@@ -573,7 +573,7 @@ impl Kraken {
             };
             let Some(mut step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
-                cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap()));
+                cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
                 continue;
             };
             if matches!(&step, Step::Cancel(_))
@@ -963,7 +963,7 @@ impl Kraken {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
             match result {
-                Ok(result) => cx.done(job.command, Ok(result)),
+                Ok(result) => cx.done(job.command, result),
                 Err(mut error) => {
                     if job.amend_canceled {
                         error.message = format!(

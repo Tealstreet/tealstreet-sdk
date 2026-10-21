@@ -341,7 +341,7 @@ impl Cryptocom {
                     code::COMMAND_UNSUPPORTED,
                     "Position mode is always hedged on Crypto.com",
                 );
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
                 return;
             }
             _ => return,
@@ -401,7 +401,7 @@ impl Cryptocom {
                     }
                     cx.fail(command, error);
                 }
-                _ => cx.done(command, Ok(serde_json::to_string(&job.ids).unwrap())),
+                _ => cx.done(command, serde_json::to_string(&job.ids).unwrap()),
             }
         }
     }

@@ -202,10 +202,7 @@ impl BybitLinear {
         if self.category_enabled(Category::Option) {
             true
         } else {
-            cx.done(
-                command,
-                Err("Options are not enabled on this Bybit account".into()),
-            );
+            cx.fail(command, "Options are not enabled on this Bybit account");
             false
         }
     }
@@ -226,7 +223,7 @@ impl BybitLinear {
                 .any(|value| !value.is_finite() || value < 0.0)
             || matches!((query.strike_min, query.strike_max), (Some(min), Some(max)) if min > max)
         {
-            cx.done(command, Err("Invalid Bybit option chain query".into()));
+            cx.fail(command, "Invalid Bybit option chain query");
             return;
         }
         self.select_category(Category::Option);
@@ -269,7 +266,7 @@ impl BybitLinear {
         expiries.dedup();
         cx.done(
             command,
-            Ok(serde_json::to_string(&expiries).unwrap_or_default()),
+            serde_json::to_string(&expiries).unwrap_or_default(),
         );
     }
 
@@ -278,7 +275,7 @@ impl BybitLinear {
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, Err("Bybit account Greeks need an API key".into()));
+            cx.fail(command, "Bybit account Greeks need an API key");
             return;
         }
         self.select_category(Category::Option);
@@ -308,7 +305,7 @@ impl BybitLinear {
             Request::Chain { invalid, .. } | Request::Greeks { invalid, .. } => *invalid,
         };
         if invalid {
-            cx.done(command, Err("Malformed Bybit option response".into()));
+            cx.fail(command, "Malformed Bybit option response");
             return;
         }
         let outcome = response
@@ -319,7 +316,7 @@ impl BybitLinear {
                 None => Err("Malformed Bybit option response".into()),
             });
         if let Err(error) = outcome {
-            cx.done(command, Err(error));
+            cx.fail(command, error);
             return;
         }
         let result = match request {
@@ -378,6 +375,9 @@ impl BybitLinear {
                 serde_json::to_string(&rows)
             }
         };
-        cx.done(command, result.map_err(|error| error.to_string()));
+        match result.map_err(|error| error.to_string()) {
+            Ok(data) => cx.done(command, data),
+            Err(error) => cx.fail(command, error),
+        };
     }
 }

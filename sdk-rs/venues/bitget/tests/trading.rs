@@ -1095,8 +1095,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("456") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -1134,8 +1134,8 @@ fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown
             assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(out.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 992, result: Err(error) })
-                    if error.contains("missing") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 992, error })
+                    if error.legacy_text().contains("missing") && error.legacy_text().contains("not found")
             )));
         } else {
             let cancel = out
@@ -1193,9 +1193,9 @@ fn plain(actions: impl Iterator<Item = safe_cex_engine::Action>) -> Vec<safe_cex
             safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
                 command,
                 error,
-            }) => safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {
+            }) => safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
                 command,
-                result: Err(error.legacy_text()),
+                error: error.clone(),
             }),
             a => a,
         })

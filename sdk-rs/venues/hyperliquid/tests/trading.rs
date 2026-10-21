@@ -101,10 +101,11 @@ fn invalid_or_duplicate_caller_id_rejects_entire_batch_before_a_write() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -135,8 +136,8 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
         );
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.legacy_text().contains("Bybit")
         )));
     }
 }
@@ -156,9 +157,11 @@ fn full_position_stop_accepts_waiting_without_oid() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
-    assert!(e.drain_plain().any(
-        |a| matches!(a,Action::Notice(Notice::CommandDone{result:Ok(ref ids),..})if ids=="[]")
-    ));
+    assert!(
+        e.drain_plain().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{result:ref ids,..})if ids=="[]")
+        )
+    );
 }
 #[test]
 fn own_bracket_leg_is_inferred_from_cloid_before_rest_returns() {
@@ -263,7 +266,7 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
     let result = e
         .drain_plain()
         .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result: Ok(s), .. }) = a {
+            if let Action::Notice(Notice::CommandDone { result: s, .. }) = a {
                 Some(s)
             } else {
                 None
@@ -305,10 +308,11 @@ fn malformed_cancel_ack_stops_replacement_and_keeps_original() {
             .iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -444,9 +448,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-            command: 2, result: Err(error),
-        }) if error.contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain")))
         );
         message(
             &mut e,
@@ -464,9 +466,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         );
         assert!(
             e.drain_plain()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-            command: 3, result: Err(ref error),
-        }) if error.contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -605,13 +605,11 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 1,
-            result: Err(_),
-        })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
     assert_eq!(
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
@@ -708,8 +706,8 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
         );
         let rejected = e.drain_plain().collect::<Vec<_>>();
         assert!(rejected.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { command: 3, result: Err(error) })
-            if error == "Order amendment or cancellation is already in flight")));
+            Action::Notice(Notice::CommandFailed { command: 3, error })
+            if error.legacy_text() == "Order amendment or cancellation is already in flight")));
         assert!(!rejected.iter().any(|a| matches!(a, Action::Http(_))));
         reply_at(
             &mut e,
@@ -725,8 +723,8 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
-                if error.contains("no longer open"))));
+                Action::Notice(Notice::CommandFailed { command: 2, error })
+                if error.legacy_text().contains("no longer open"))));
         } else {
             let cancel = action_write(&actions);
             assert_eq!(body(cancel)["action"]["cancels"][0]["o"], 9);
@@ -844,9 +842,7 @@ fn definite_settings_rejection_keeps_next_queued_command_usable() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 1, result: Err(error),
-    }) if error == "Cannot switch margin mode with open orders"))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text() == "Cannot switch margin mode with open orders"))
     );
     let second = action_write(&actions);
     assert_eq!(body(second)["action"]["isCross"], true);
@@ -903,9 +899,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
     );
     assert!(
         e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 2, result: Err(ref error),
-    }) if error.contains("settings are uncertain")))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
     );
     reply_at(
         &mut e,
@@ -1000,7 +994,8 @@ fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 1, result }) if result.is_err() == amend)));
+                Action::Notice(Notice::CommandFailed { command: 1, .. }) if amend)
+                || !amend && matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))));
         }
     }
 }
@@ -1042,8 +1037,8 @@ fn filled_source_aborts_inflight_amend_but_own_cancel_frame_allows_replacement()
                     .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
             );
             assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("source was filled"))));
+                Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.legacy_text().contains("source was filled"))));
         } else {
             let replacement = action_write(&actions);
             assert_eq!(body(replacement)["action"]["orders"][0]["p"], "85");
@@ -1092,7 +1087,7 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
     let result = e
         .drain_plain()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.unwrap()),
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result),
             _ => None,
         })
         .unwrap();
@@ -1172,8 +1167,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.legacy_text().contains("456") && error.legacy_text().contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -1274,7 +1269,7 @@ fn cross_on_an_isolated_only_market_is_rejected_before_signing() {
         !out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(m), .. }) if m.contains("isolated margin only"))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: m, .. }) if m.legacy_text().contains("isolated margin only"))));
 }
 
 #[test]

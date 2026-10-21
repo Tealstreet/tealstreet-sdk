@@ -47,17 +47,19 @@ fn result(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandDone { command: 7, result }) => Some(result.clone()),
+            Action::Notice(Notice::CommandDone { command: 7, result }) => Some(Ok(result.clone())),
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("query completion")
 }
 fn no_completion(actions: &[Action]) {
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
-    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+    )));
 }
 fn advance(e: &mut Engine<WeexFutures>, now: &mut f64, actions: Vec<Action>) -> Vec<Action> {
     let (timer, at) = actions

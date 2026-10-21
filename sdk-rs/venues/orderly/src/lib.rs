@@ -869,7 +869,10 @@ impl Venue for Orderly {
             limit,
         } = pending
         {
-            cx.done(command, candle_history(response, from, to, limit));
+            match candle_history(response, from, to, limit) {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            };
             return;
         }
         if let Err(e) = checked(response) {
@@ -929,7 +932,7 @@ impl Venue for Orderly {
                 ..
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
+                cx.done(command, serde_json::to_string(&rows).unwrap());
             }
             invalid => self.on_request_failed(cx, invalid, "Orderly invalid response rows"),
         }
@@ -954,7 +957,7 @@ impl Venue for Orderly {
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
             Pending::Candles { command, .. } | Pending::CandleHistory { command, .. } => {
-                cx.done(command, Err(error.into()))
+                cx.fail(command, error)
             }
         }
     }
@@ -1117,11 +1120,11 @@ impl Venue for Orderly {
                 to_ms,
             } => {
                 let Some(native) = self.native.get(&symbol) else {
-                    cx.done(command, Err("Orderly unknown symbol".into()));
+                    cx.fail(command, "Orderly unknown symbol");
                     return;
                 };
                 if !interval_valid(interval) {
-                    cx.done(command, Err(interval.unsupported("Orderly")));
+                    cx.fail(command, interval.unsupported("Orderly"));
                     return;
                 }
                 if limit == Some(0)
@@ -1131,7 +1134,7 @@ impl Venue for Orderly {
                         .any(|n| !n.is_finite() || !(0.0..=253402300799000.0).contains(&n))
                     || from_ms.zip(to_ms).is_some_and(|(a, b)| a > b)
                 {
-                    cx.done(command, Err("Orderly invalid candle parameters".into()));
+                    cx.fail(command, "Orderly invalid candle parameters");
                     return;
                 }
                 if from_ms.is_some() || to_ms.is_some() {
@@ -1139,7 +1142,7 @@ impl Venue for Orderly {
                     let from = from_ms.unwrap_or(0.0);
                     let to = to_ms.unwrap_or(cx.now);
                     if from > to {
-                        cx.done(command, Ok("[]".into()));
+                        cx.done(command, "[]".into());
                         return;
                     }
                     // Both bounds are mandatory on the native history endpoint.
@@ -1185,7 +1188,13 @@ impl Venue for Orderly {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),
-            Command::FetchAccount { command } => cx.done(command, self.account_identity()),
+            Command::FetchAccount { command } => {
+                let result: Result<String, String> = self.account_identity();
+                match result {
+                    Ok(data) => cx.done(command, data),
+                    Err(error) => cx.fail(command, error),
+                }
+            }
             trade => self.trade_command(cx, trade),
         }
     }

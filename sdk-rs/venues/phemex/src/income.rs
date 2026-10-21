@@ -72,28 +72,25 @@ impl PhemexPerpetuals {
             unreachable!()
         };
         if self.options.public_data_only || self.credentials.is_none() {
-            cx.done(
-                command,
-                Err("Phemex private history requires credentials".into()),
-            );
+            cx.fail(command, "Phemex private history requires credentials");
             return;
         }
         // This route is an account ledger; its documented rows have no symbol.
         if symbol.is_some() {
-            cx.done(
+            cx.fail(
                 command,
-                Err("Phemex account income cannot be filtered by symbol".into()),
+                "Phemex account income cannot be filtered by symbol",
             );
             return;
         }
         let end = to_ms.unwrap_or(cx.now.floor());
         let start = from_ms.unwrap_or((end - 30. * DAY).max(0.));
         if !valid_time(start) || !valid_time(end) || start > end || limit == Some(0) {
-            cx.done(command, Err("Invalid Phemex income range or limit".into()));
+            cx.fail(command, "Invalid Phemex income range or limit");
             return;
         }
         if self.income.active.len() >= 16 || !self.income.active.insert(command) {
-            cx.done(command, Err("Too many active Phemex income queries".into()));
+            cx.fail(command, "Too many active Phemex income queries");
             return;
         }
         let request = Request {
@@ -149,10 +146,10 @@ impl PhemexPerpetuals {
                         request.rows.truncate(limit);
                     }
                     self.income.active.remove(&request.command);
-                    cx.done(
-                        request.command,
-                        serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
-                    );
+                    match serde_json::to_string(&request.rows) {
+                        Ok(data) => cx.done(request.command, data),
+                        Err(error) => cx.fail(request.command, error.to_string()),
+                    }
                     return;
                 }
             }
@@ -291,7 +288,7 @@ impl PhemexPerpetuals {
         error: &str,
     ) {
         self.income.active.remove(&request.command);
-        cx.done(request.command, Err(error.into()));
+        cx.fail(request.command, error);
     }
     pub(crate) fn income_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         let Some(index) = self.income.deferred.iter().position(|(id, _)| *id == timer) else {

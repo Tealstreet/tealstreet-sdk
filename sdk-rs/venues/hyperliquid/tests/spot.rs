@@ -422,10 +422,11 @@ fn spot_invalid_bracket_prices_still_reject_the_batch_before_writes() {
         );
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -478,9 +479,8 @@ fn spot_history_matches_inherited_empty_capabilities_without_private_reads() {
         let a = e.drain_plain().collect::<Vec<_>>();
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
-            a.iter().any(
-                |a| matches!(a,Action::Notice(Notice::CommandDone{result:Ok(s),..})if s=="[]")
-            )
+            a.iter()
+                .any(|a| matches!(a,Action::Notice(Notice::CommandDone{result:s,..})if s=="[]"))
         );
     }
 }
@@ -504,10 +504,10 @@ fn spot_fixed_settings_do_not_issue_perpetual_leverage_actions() {
         e.handle(3000.0, Event::Command(command));
         let a = e.drain_plain().collect::<Vec<_>>();
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(a.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
     assert_eq!(e.store().setting("PURR/USDC").unwrap().leverage, 1.0);
 }
@@ -536,9 +536,11 @@ fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
         200,
         r#"[{"t":1000,"o":"1","h":"2","l":"0.5","c":"1.5","v":"10"}]"#,
     );
-    assert!(e.drain_plain().any(
-        |a| matches!(a,Action::Notice(Notice::CommandDone{result:Ok(s),..})if s.contains("1.5"))
-    ));
+    assert!(
+        e.drain_plain().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{result:s,..})if s.contains("1.5"))
+        )
+    );
 }
 fn acknowledge(e: &mut Engine<Hyperliquid>, r: &HttpRequest, now: f64, body: &str) {
     e.handle(
@@ -673,13 +675,10 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
         !a.iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
     );
-    assert!(a.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone {
-            command: 2,
-            result: Err(_)
-        })
-    )));
+    assert!(
+        a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
+    );
     assert!(e.store().positions().iter().all(|p| p.contracts == 0.0));
 }
 #[test]

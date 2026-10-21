@@ -107,7 +107,7 @@ fn inexact_candle_intervals_are_rejected_not_served_from_a_smaller_one() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 6, result: Err(e) }) if e == "Kraken Spot does not support 12h candles")));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 6, error: e }) if e.legacy_text() == "Kraken Spot does not support 12h candles")));
     e.handle(
         NOW,
         Event::Command(Command::FetchCandles {
@@ -131,7 +131,7 @@ fn inexact_candle_intervals_are_rejected_not_served_from_a_smaller_one() {
         &rs[0],
         r#"{"error":[],"result":{"XXBTZUSD":[[1700000000,"1","2","0.5","1.5","1","3",4]],"last":1700000001}}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:7,result:Ok(s)})if s.contains("1700000000"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:7,result:s})if s.contains("1700000000"))));
 }
 #[test]
 fn disconnect_clears_book_and_ignores_old_socket() {
@@ -202,13 +202,12 @@ fn public_candle_network_read_retries_three_times_and_settles() {
             assert_eq!(request.url, next.url);
             request = next;
         } else {
-            assert!(actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandDone {
-                    command: 30,
-                    result: Err(_)
-                })
-            )));
+            assert!(
+                actions.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 30, .. })
+                ))
+            );
             assert!(
                 !actions
                     .iter()

@@ -242,7 +242,7 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
         .drain_actions()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result.unwrap())
+                Some(result)
             } else {
                 None
             }
