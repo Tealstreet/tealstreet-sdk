@@ -12,6 +12,7 @@ export function consumerFrame(
   marketSymbols: readonly string[] = data.markets?.map((market) => market.symbol) ?? ['BTCUSDT'],
   /** The venue's quantity-units code, written into market flag bits 8-11. */
   quantityUnits = 0,
+  accountRead = false,
 ): ArrayBuffer {
   const strings: string[] = [];
   const ref = (value: string | undefined) => {
@@ -165,7 +166,7 @@ export function consumerFrame(
       (row.close === undefined ? 0 : (8 | (row.close ? 4 : 0)) << 16) |
       (rejection.indexOf(row.extra?.rejectReason) << 20) |
       (tif.indexOf(row.timeInForce) << 24) |
-      (trigger.indexOf(row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType) << 28);
+      (trigger.indexOf(row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType)) << 28);
     table(
       7,
       [
@@ -283,6 +284,8 @@ export function consumerFrame(
   });
   view.setUint32(4 + strings.length * 4, end, true);
   sections.push({ kind: 1, bytes });
+  // ACCOUNT_READ: a current-state read that must not advance freshness IDs.
+  if (accountRead) sections.push({ kind: 21, bytes: new Uint8Array(0) });
   const buffer = new ArrayBuffer(16 + sections.reduce((n, s) => n + 8 + s.bytes.length, 0));
   const header = new DataView(buffer);
   header.setUint32(0, 0x46584353, true);

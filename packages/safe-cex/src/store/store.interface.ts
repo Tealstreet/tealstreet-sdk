@@ -15,7 +15,7 @@ export type StoreUpdate = Partial<StoreData> & {
 };
 
 export interface Store {
-  update: (changes: StoreUpdate, fromWorker?: boolean) => void;
+  update: (changes: StoreUpdate, fromWorker?: boolean, source?: 'account-read') => void;
   reset: () => void;
   subscribe: (cb: (data: StoreData, fromWorker?: boolean) => void) => () => void;
 
