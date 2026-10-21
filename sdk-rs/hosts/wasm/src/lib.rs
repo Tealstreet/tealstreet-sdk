@@ -403,7 +403,7 @@ impl WasmEngine {
     pub fn health(&self) -> String {
         let h = self.inner.health();
         format!(
-            r#"{{"wsOpened":{},"wsClosed":{},"reconnects":{},"authFailures":{},"httpFailures":{},"rateLimited":{},"snapshotsDiscarded":{},"rowsSkipped":{}}}"#,
+            r#"{{"wsOpened":{},"wsClosed":{},"reconnects":{},"authFailures":{},"httpFailures":{},"rateLimited":{},"snapshotsDiscarded":{},"rowsSkipped":{},"lastPrivateMessage":{}}}"#,
             h.ws_opened,
             h.ws_closed,
             h.reconnects,
@@ -411,7 +411,10 @@ impl WasmEngine {
             h.http_failures,
             h.rate_limited,
             h.snapshots_discarded,
-            h.rows_skipped
+            h.rows_skipped,
+            h.last_private_message_ms
+                .filter(|at| at.is_finite())
+                .map_or_else(|| "null".to_owned(), |at| at.to_string())
         )
     }
 
@@ -1304,6 +1307,7 @@ mod tests {
                     rate_limited: 6,
                     snapshots_discarded: 7,
                     rows_skipped: 8,
+                    last_private_message_ms: Some(1_700_000_000_123.0),
                 }
             }
         }
@@ -1317,7 +1321,8 @@ mod tests {
         assert_eq!(
             health,
             serde_json::json!({"wsOpened":1,"wsClosed":2,"reconnects":3,"authFailures":4,
-                "httpFailures":5,"rateLimited":6,"snapshotsDiscarded":7,"rowsSkipped":8})
+                "httpFailures":5,"rateLimited":6,"snapshotsDiscarded":7,"rowsSkipped":8,
+                "lastPrivateMessage":1_700_000_000_123u64})
         );
     }
 
