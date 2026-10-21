@@ -10,3 +10,14 @@ Validate the generated schema and condition rendering with focused Rust tests;
 run registry construction checks, Bybit/Binance tests, fmt, strict Clippy, bans
 and the existing JS construction parity test. CI must measure optimized WASM and
 run the unchanged replay/size gates. Do not change budgets or build WASM locally.
+
+The build script validates the shared schema and emits immutable condition slices
+and an exact venue match into OUT_DIR. serde_json is now a host build/dev
+registry dependency. Missing/null fields retain default fallback; explicit empty
+conditions remain true and an empty inner group remains false. All venue rules
+remain available even in single-family builds.
+
+The CI WASM fingerprint now includes the shared JSON, which is a real Rust build
+input. The added dirty/committed-input regression failed against the old input
+list. Independent review found no behavior changes. Optimized size savings and
+the existing compiled TS/Rust parity matrix are gated by fresh CI artifacts.
