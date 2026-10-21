@@ -760,6 +760,7 @@ impl Venue for BitunixFutures {
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 self.position_answered(cx, &read);
+                self.order_answered(cx, &read);
                 if read.axis == account::Axis::Balance {
                     self.account.balance_answered = self.account.balance_answered.max(read.serial);
                 }

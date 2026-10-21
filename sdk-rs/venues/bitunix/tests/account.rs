@@ -83,7 +83,7 @@ fn reconciliation_cannot_consume_a_market_execution_awaiting_metadata() {
     assert!(observed_fills(&mut e).is_empty());
     reconcile_order_snapshot(
         &mut e,
-        1200.0,
+        1100.0,
         r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"market","side":"BUY","orderType":"MARKET","qty":"2","price":"0","tradeQty":"1","avgPrice":"125"}]}}"#,
     );
     assert!(observed_fills(&mut e).is_empty());
@@ -166,7 +166,7 @@ fn partial_metadata_recovery_keeps_the_highest_deferred_execution_pending() {
     );
     reconcile_order_snapshot(
         &mut e,
-        1200.0,
+        1100.0,
         r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"unknown","side":"BUY","orderType":"MARKET","qty":"3","price":"0","tradeQty":"2","avgPrice":"125"}]}}"#,
     );
     let complete = r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"unknown","dealAmount":"2","averagePrice":"125"}}"#;

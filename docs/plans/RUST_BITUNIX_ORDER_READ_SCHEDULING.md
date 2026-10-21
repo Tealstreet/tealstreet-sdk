@@ -27,6 +27,11 @@ and implementation reviews, green CI and separate own-only merge guard.
 Fresh branch from actual lifecycle landing77a5e5faaec. Integrate exact reviewed
 #1650 head27430679ef9 as a genuine account/lifecycle/read-admission dependency;
 this PR cannot merge before the preceding stack lands with that head, or after
-its changes without re-integrating and rerunning. Do not alter the eight heads
-already running CI. Full keyed-admission design: reviewed read-only analysis in
-/tmp/bitunix-order-read-progress-design.md (continuity evidence, not a dependency).
+its changes without re-integrating and rerunning. The held clock/login/routing
+stack must finish before this dependent scheduling PR can merge. The later keyed-admission phase must preserve current
+WS raw families, malformed identity coverage and staged initial-half authority.
+
+Verification: all seven regressions fail against the original scheduling source
+and pass with the correction. Bitunix/Binance native tests pass (427), together
+with strict Clippy, formatting and bans. Independent implementation and fixture
+reviews are clear. CI and the final landing guard remain required.

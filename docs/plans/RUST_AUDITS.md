@@ -510,7 +510,9 @@ Remaining resilience and completeness findings are independent of request parity
   Command-owned preflight remains strict; notifications coalesce one follow-up
   without moving deadlines, and lost reads recover without admitting old replies.
   Order/TP-SL event generation still fences the entire order snapshot; keyed order
-  reconciliation remains a separate open finding.
+  reconciliation remains a separate open finding. Order read scheduling now keeps
+  independent bounded endpoint tokens and the first coalesced repair deadline;
+  ordinary refresh cannot supersede a fresh command-owned or background read.
 - Medium: ~~history failures return success with empty or partial rows~~.
   Rust now rejects failed first/later pages (transport, HTTP/native, malformed
   rows/envelopes), so a failed read cannot establish complete history. Full
