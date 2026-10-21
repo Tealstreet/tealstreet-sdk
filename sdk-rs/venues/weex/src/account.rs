@@ -920,6 +920,7 @@ impl WeexFutures {
                         if let Some(side) = side(&row.order_side) {
                             cx.fill_with_financials(
                                 Fill {
+                                    id: None,
                                     order_id: row.order_id.to_string(),
                                     symbol: row.symbol.to_string(),
                                     side,

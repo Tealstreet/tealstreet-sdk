@@ -2034,6 +2034,7 @@ impl Grvt {
                                 .map_or_else(|| fill.native_id.to_string(), |(id, _)| id.clone())
                         };
                         cx.fill(Fill {
+                            id: None,
                             order_id: id,
                             symbol: market.symbol.clone(),
                             side: if fill.buyer {

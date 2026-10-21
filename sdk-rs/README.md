@@ -126,13 +126,15 @@ IDs and JSON wire types; only generated IDs and documented volatile fields vary.
 
 ## Live execution financials
 
-`Cx::fill` retains the original FILLS payload. Venues with authoritative
-per-execution values can use `fill_with_financials`: if either optional value is
-finite, the payload appends one realized-PnL f64 column followed by one fee f64
-column, both indexed by the existing fill rows. Missing values are NaN; zero is
-retained. The JavaScript reader exposes optional `realizedPnl` and `fee` arrays.
-Legacy rows, IDs and event counts are unchanged, and account snapshots never
-consume these events. Synthetic or cumulative-order fills do not invent values.
+FILLS writes revision 2: existing rows and symbol references, optional `Fill.id`
+execution references, then aligned realized-PnL and fee f64 columns. Missing IDs
+use the wire NONE reference; missing financials are NaN and zero is retained.
+Venues use `fill_with_financials` for authoritative per-execution values.
+`fillId`, `realizedPnl` and `fee` expose those columns in JavaScript. The reader
+also accepts legacy revision 0/1, including revision 1 with or without financial
+tails. SDK event `id` uses execution identity when present, while `orderId`
+retains attribution. Account snapshots never consume these events. Synthetic or
+cumulative-order fills do not invent execution IDs or financial values.
 
 Financial conventions remain those of each live venue event. Hyperliquid close
 events report net realized PnL (`closedPnl - fee`) and the execution fee; opening

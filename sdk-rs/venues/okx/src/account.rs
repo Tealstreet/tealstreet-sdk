@@ -1335,6 +1335,7 @@ impl Okx {
         if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
             entry.insert(cx.now);
             cx.fill(Fill {
+                id: None,
                 order_id: row.ord_id.into(),
                 symbol: m.symbol.clone(),
                 side: side(row.side),
