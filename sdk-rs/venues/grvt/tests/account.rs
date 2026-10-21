@@ -1663,3 +1663,18 @@ fn readable_unmatched_order_row_retains_orders_while_a_native_id_is_unknown() {
     ids.sort();
     assert_eq!(ids, ["55", "9223372036854775807"]);
 }
+
+#[test]
+fn ip_whitelist_rejection_keeps_its_actionable_message() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.ws(r#"{"code":1008,"message":"IP not whitelisted","status":403}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            message,
+        }) if message.starts_with("GRVT IP is not whitelisted")
+    )));
+}

@@ -903,3 +903,22 @@ fn undecodable_rows_on_a_malformed_market_still_hold_the_snapshot() {
         );
     }
 }
+
+#[test]
+fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+    for step in ["0", "-0.001"] {
+        let markets = MARKETS.replace(
+            BOGUS_BTC.0,
+            &BOGUS_BTC.0.replace("\"0.001\"", &format!("\"{step}\"")),
+        );
+        let btc_position = POSITIONS.replace("SOL_USDC_PERP", "BTC_USDC_PERP");
+        let (e, _, logs, _) = ready_catalogue(&markets, &btc_position, "[]");
+        assert!(e.store().market("BTC_USDC_PERP").is_none());
+        assert!(!e.store().loaded().positions);
+        assert!(
+            logs.iter()
+                .any(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is held")),
+            "{logs:?}"
+        );
+    }
+}
