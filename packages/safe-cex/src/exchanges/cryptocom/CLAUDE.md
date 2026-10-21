@@ -693,3 +693,17 @@ History reads use exact nanosecond cursors, overlap/deduplicate boundaries and
 walk ranged income to exhaustion. Settlement PnL uses `realized_pnl`; historical
 requested limit prices stay separate from triggers. The replay harness records
 these corrections under `KNOWN_TS_FIXES`.
+
+
+Native REST `fetchOrderBook` uses unsigned GET `/public/get-book` with the raw
+URL-encoded instrument name and fixed depth50 on live/UAT; caller limit is ignored
+as in TS. It needs no market seed, credentials or subscription and never changes
+the live book, ticker or account stores. The required numeric code0 response uses
+only the first book; raw price IDs, native row order and zero quantities survive,
+with total0 and no update ID. Missing/empty/null data or a null first book is empty;
+an explicitly null result or malformed financial levels fails atomically. Missing
+result uses outer data, while a present result takes precedence. Native/HTTP/read
+transport failures are owned typed NotSent errors; public auth-looking errors
+never invalidate account keys. Rate hints are preserved under the shared cap and
+no automatic retries or stream recovery are introduced. The standalone Crypto.com
+family explicitly enables its JSON order-book command decoder.

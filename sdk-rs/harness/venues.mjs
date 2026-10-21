@@ -265,6 +265,7 @@ const orderly = (alias) => {
   const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
   return {
     family: 'orderly',
+    virtualPrivateClock: true,
     orderlyProtocol: true,
     subscriptionGenerations: true,
     publicTickers: (records) => {

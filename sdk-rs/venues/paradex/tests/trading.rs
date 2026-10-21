@@ -1070,11 +1070,6 @@ fn unsupported_aster_commands_complete_with_an_error_instead_of_waiting_forever(
             command: 191,
             mode: StpMode::ExpireTaker,
         },
-        Command::FetchOrderBook {
-            command: 191,
-            symbol: "BTC-USD-PERP".into(),
-            limit: None,
-        },
         Command::CancelOrdersWithSymbols {
             command: 191,
             orders: vec![],
@@ -1235,4 +1230,56 @@ fn several_failed_placements_share_an_outcome_only_when_they_agree() {
         assert_eq!(h.failures.len(), 1);
         assert_eq!(h.failures[0].outcome, outcome, "{second}");
     }
+}
+
+#[test]
+fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
+    let mut h = private();
+    let before = (
+        h.e.store().balance().clone(),
+        h.e.store().positions().to_vec(),
+        h.e.store().orders().to_vec(),
+    );
+    h.actions.clear();
+    h.command(Command::FetchOrderBook {
+        command: 70,
+        symbol: "BTC-USD-PERP".into(),
+        limit: None,
+    });
+    assert_eq!(h.pending.len(), 1);
+    let request = h.take("/orderbook/");
+    assert!(request.headers.is_empty());
+    h.respond(
+        request,
+        401,
+        r#"{"error":"INVALID_API_KEY","message":"invalid api key"}"#,
+    );
+    assert!(h.result(70).is_err());
+    assert!(h.pending.is_empty());
+    assert!(!h.actions.iter().any(|a| matches!(
+        a,
+        Action::SignPayload { .. } | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+    )));
+    assert_eq!(
+        (
+            h.e.store().balance().clone(),
+            h.e.store().positions().to_vec(),
+            h.e.store().orders().to_vec()
+        ),
+        before
+    );
+    h.command(Command::FetchAccount { command: 71 });
+    assert_eq!(h.pending.len(), 1);
+    let request = h.take("/account");
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "Authorization" && value == "Bearer jwt")
+    );
+    h.respond(request, 200, r#"{"account_number":"9007199254740993"}"#);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(h.result(71).unwrap()).unwrap()["userId"],
+        "9007199254740993"
+    );
 }

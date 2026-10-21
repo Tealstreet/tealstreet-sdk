@@ -1051,7 +1051,18 @@ mod tests {
                 account_margin_type: any(&["blofin", "kucoinspot"], venue),
                 cancel_with_symbols: any(&["asterdex", "kucoinspot"], venue),
                 amend_with_symbol: venue == "kucoinspot",
-                order_book_query: any(&["asterdex", "polymarket", "mexc", "backpack"], venue),
+                order_book_query: any(
+                    &[
+                        "asterdex",
+                        "polymarket",
+                        "mexc",
+                        "backpack",
+                        "cryptocom",
+                        "grvt",
+                        "paradex",
+                    ],
+                    venue,
+                ),
                 options: false,
                 market_refresh: any(
                     &[
