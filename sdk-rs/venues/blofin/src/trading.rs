@@ -1185,8 +1185,9 @@ impl Blofin {
                         .iter()
                         .any(|o| o.status == OrderStatus::Open))
             {
-                cx.log(
-                    LogLevel::Error,
+                cx.notice(
+                    Level::Error,
+                    code::SETTING_CAUTION,
                     "Changing margin type with open positions / orders is allowed but can cause unexpected behavior. Symbols with open positions will remain synced to previous mode until position is closed.",
                 );
             }

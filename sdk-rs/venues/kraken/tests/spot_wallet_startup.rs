@@ -86,7 +86,12 @@ impl Wallet {
             if let Action::Notice(Notice::Log {
                 level: LogLevel::Warning,
                 message,
-            }) = action
+            })
+            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Warn,
+                message,
+                ..
+            })) = action
             {
                 self.warnings.push(message);
             }

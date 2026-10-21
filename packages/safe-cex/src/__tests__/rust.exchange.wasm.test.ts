@@ -974,7 +974,9 @@ describe('RustEngineExchange', () => {
       expect(outputs).toEqual([entry === 'bytes' ? undefined : '']);
       await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
       socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
-      expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
+      expect(JSON.parse(outputs[1]!)).toEqual([
+        { op: 'event', level: 'error', code: 'subscription.rejected', message: '[WS]subscribe:topic rejected' },
+      ]);
       expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
     },
   );

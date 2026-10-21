@@ -5,13 +5,15 @@ mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue, num,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -632,7 +634,7 @@ impl Venue for Woo {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.seed(cx, false);
@@ -694,7 +696,11 @@ impl Venue for Woo {
         };
         if !msg.event.is_empty() {
             if msg.success == Some(false) {
-                cx.log(LogLevel::Error, "WOO public subscription rejected");
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    "WOO public subscription rejected",
+                );
             }
             match msg.event.as_ref() {
                 "ping" => cx.send(socket, r#"{"event":"pong"}"#),
@@ -934,7 +940,7 @@ impl Venue for Woo {
                 skipped,
             } => {
                 if let Some(text) = skipped.summary("markets") {
-                    cx.log(LogLevel::Warning, text);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
                 }
                 if rows.is_empty() {
                     self.on_request_failed(
@@ -1002,7 +1008,7 @@ impl Venue for Woo {
                 skipped,
             } => {
                 if let Some(text) = skipped.summary("tickers") {
-                    cx.log(LogLevel::Warning, text);
+                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
                 }
                 if rows.is_empty() {
                     self.on_request_failed(
@@ -1108,7 +1114,7 @@ impl Venue for Woo {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Warning, error);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.seed_backoff
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
@@ -1122,7 +1128,7 @@ impl Venue for Woo {
                 }
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Funding { .. } => cx.log(LogLevel::Warning, error),
+            Pending::Funding { .. } => cx.notice(Level::Warn, code::REQUEST_FAILED, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1289,8 +1295,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("WOO stops re-reading a catalogue with {after} malformed markets"),
         );
     }

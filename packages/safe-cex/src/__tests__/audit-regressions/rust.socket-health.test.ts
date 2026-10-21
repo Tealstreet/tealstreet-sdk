@@ -48,6 +48,11 @@ const setup = async () => {
     wsOpen: () => '[]',
     wsMessage: (socket, text) => {
       if (text === 'deactivate') return JSON.stringify([{ op: 'deactivate' }]);
+      if (text === 'rejected-and-deactivated')
+        return JSON.stringify([
+          { op: 'event', level: 'error', code: 'auth.rejected', message: 'key rejected' },
+          { op: 'deactivate' },
+        ]);
       if (text === 'rejected')
         return JSON.stringify([{ op: 'event', level: 'error', code: 'auth.rejected', message: 'key rejected' }]);
       if (text === 'drop') return JSON.stringify([{ op: 'wsClose', socket }]);
@@ -181,11 +186,22 @@ describe('Rust engine socket health (cutover B5)', () => {
     deliver('private', 'rejected');
     // The first frame proved nothing yet: the same frame rejected the key.
     expect(exchange.authFailureStreak).toBe(1);
+    // Separate frames are separate tasks.
+    await Promise.resolve();
     deliver('public', 'deactivate');
     expect(exchange.authFailureStreak).toBe(2);
 
     exchange.reconnect();
     deliver('private');
     expect(exchange.authFailureStreak).toBe(0);
+  });
+
+  it('one rejection reported as an auth.rejected event and a deactivation counts once', async () => {
+    const { exchange, deliver } = await setup();
+    deliver('public', 'rejected-and-deactivated');
+    expect(exchange.authFailureStreak).toBe(1);
+    await Promise.resolve();
+    deliver('public', 'rejected');
+    expect(exchange.authFailureStreak).toBe(2);
   });
 });
