@@ -234,6 +234,8 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 rules table for signing and private-data eligibility. TS `derivePublicMode`
 evaluates it synchronously before WASM loads; `safe-cex-venues` embeds the same
 file with `include_str!` and evaluates it before credential validation/startup.
+Source delivery/builds (B1) must retain that JSON dependency at the registry's
+include path; compiled engines embed the table.
 The compiled parity matrix covers every registered Rust name across 69 input
 combinations, including signer kinds, public intent and venue-specific rules.
 This preserves existing options and eligibility; it does not add remote signing
