@@ -38,3 +38,22 @@ position-mode ACK financial regressions remain mandatory. Add refused, malformed
 and transport-lost mode ACK controls that never advance the balance write fence.
 When #1662 later integrates, retain its pause gate before any issue timestamp or
 serial mutation and use the balance serial/write revision for auth currentness.
+
+Implementation and verification: ordinary balance now uses current serial plus
+accepted-mode write revision; owned admission remains generation-strict. Every
+issuer records issue time centrally and coalesces within ten seconds. First
+repair deadlines survive notifications, and synchronous failure releases its
+serial before repair. Eight regression groups and the existing mode-ACK race
+controls pass;448 Bitunix/Binance native tests and strict Clippy/format/bans pass.
+Independent implementation and adversarial fixture reviews are clear. Disabled
+mode-ACK revision, signing release and dispatch-time controls each reproduce
+its regression; restoring the reviewed source passes all eight tests. Final
+original-source verification fails seven of eight tests; the preserved
+accepted-mode-ACK control passes before and after the repair. The old
+overlap fixture now creates a real ten-second replacement and an accepted mode
+ACK, retaining free700/uPnL0 and failed/malformed response assertions.
+
+This branch is local/CI-only by user instruction and must remain unmerged.
+#1662 account recovery is separate, with required later source integration and
+fresh CI; #1661's actual profile merge must also be integrated before any later
+merge proposal. No live schema or owner-decision behavior was changed.

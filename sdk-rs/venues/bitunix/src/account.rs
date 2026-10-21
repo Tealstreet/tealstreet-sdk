@@ -95,6 +95,7 @@ pub struct PositionAdmission {
 pub struct Read {
     pub axis: Axis,
     pub generation: u64,
+    pub balance_write_revision: u64,
     pub position_write_revision: u64,
     pub order_write_revision: u64,
     pub serial: u64,
@@ -195,9 +196,10 @@ pub struct AccountState {
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
     pub balance_answered: u64,
-    /// When the tick last issued a balance read.
+    /// When any issuer last dispatched a balance read.
     pub balance_polled_at: f64,
     pub generations: [u64; 3],
+    pub balance_write_revision: u64,
     pub position_write_revision: u64,
     /// Current ordinary or command-owned read; background refresh cannot supersede it.
     pub position_read: Option<(u64, f64)>,
@@ -414,6 +416,13 @@ impl BitunixFutures {
         if self.credentials.is_none() {
             return;
         }
+        if axis == Axis::Balance
+            && after.is_none()
+            && self.account.balance_answered != self.account.serials[0]
+            && cx.now < self.account.balance_polled_at + BALANCE_STALL_MS
+        {
+            return;
+        }
         if axis == Axis::Positions {
             if after.is_none()
                 && let Some((_, issued)) = self.account.position_read
@@ -460,11 +469,15 @@ impl BitunixFutures {
             Axis::Tpsl => 3,
         };
         self.account.serials[slot] += 1;
+        if axis == Axis::Balance {
+            self.account.balance_polled_at = cx.now;
+        }
         let read = Read {
             after,
             serial: self.account.serials[slot],
             axis,
             generation: self.account.generations[axis.index()],
+            balance_write_revision: self.account.balance_write_revision,
             position_write_revision: self.account.position_write_revision,
             order_write_revision: self.account.order_write_revision,
             positions: vec![],
@@ -588,6 +601,10 @@ impl BitunixFutures {
             Pending::Private(read) => {
                 self.position_answered(cx, &read);
                 self.order_answered(cx, &read);
+                if read.axis == Axis::Balance {
+                    self.account.balance_answered = self.account.balance_answered.max(read.serial);
+                    self.debounce(cx, Axis::Balance);
+                }
                 if read.axis == Axis::Positions {
                     self.debounce(cx, Axis::Positions);
                 }
@@ -720,9 +737,7 @@ impl BitunixFutures {
     }
     pub(crate) fn debounce(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         let i = axis.index();
-        if matches!(axis, Axis::Positions | Axis::Orders | Axis::Tpsl)
-            && self.account.timers[i].is_some()
-        {
+        if self.account.timers[i].is_some() {
             return;
         }
         if let Some(t) = self.account.timers[i].take() {
@@ -776,7 +791,6 @@ impl BitunixFutures {
             if self.account.balance_answered == self.account.serials[0]
                 || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS
             {
-                self.account.balance_polled_at = cx.now;
                 self.read_axis(cx, Axis::Balance);
             }
             self.account.count += 1;
@@ -941,7 +955,9 @@ impl BitunixFutures {
         if read.serial != self.account.serials[slot] {
             return;
         }
-        let current = if read.axis == Axis::Positions && read.after.is_none() {
+        let current = if read.axis == Axis::Balance && read.after.is_none() {
+            read.balance_write_revision == self.account.balance_write_revision
+        } else if read.axis == Axis::Positions && read.after.is_none() {
             read.position_write_revision == self.account.position_write_revision
         } else if read.axis.order_slot().is_some() {
             read.order_write_revision == self.account.order_write_revision

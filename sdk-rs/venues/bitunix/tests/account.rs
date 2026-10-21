@@ -735,49 +735,111 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
     )));
 }
 
-fn balance_request(e: &mut TestEngine, s: safe_cex_engine::SocketId) -> safe_cex_engine::RequestId {
-    event(e, s, r#"{"ch":"balance","data":{"available":"900"}}"#);
+fn balance_request(
+    e: &mut TestEngine,
+    s: safe_cex_engine::SocketId,
+    at: f64,
+) -> safe_cex_engine::RequestId {
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"balance","data":{"available":"900"}}"#,
+        },
+    );
+    fire_balance_repair(e, at + 1000.0)
+}
+fn fire_balance_repair(e: &mut TestEngine, at: f64) -> safe_cex_engine::RequestId {
     let timer = e
         .drain_actions()
-        .filter_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                if at_ms == 1100.0 { Some(timer) } else { None }
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == at => Some(timer),
+            _ => None,
         })
-        .next_back()
-        .unwrap();
-    e.handle(1100.0, Event::TimerFired { timer });
-    requests(e).remove(0).id
+        .expect("actual balance repair deadline");
+    e.handle(at, Event::TimerFired { timer });
+    requests(e)
+        .into_iter()
+        .find(|r| r.url.contains("/futures/account?"))
+        .unwrap()
+        .id
 }
 #[test]
-fn newer_socket_and_overlapping_reads_cannot_restore_old_balance() {
+fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
+    use safe_cex_engine::{Command, Response};
     let (mut e, s) = startup();
-    let a = balance_request(&mut e, s);
-    let b = balance_request(&mut e, s);
-    reply(
-        &mut e,
-        b,
-        r#"{"code":0,"data":{"data":[{"marginCoin":"USDT","available":"700","margin":"10","crossUnrealizedPNL":"0","isolationUnrealizedPNL":"0","unrealizedPNL":"999"}]}}"#,
+    let a = balance_request(&mut e, s, 100.0);
+    let b = balance_request(&mut e, s, 10100.0);
+    let body = r#"{"code":0,"data":{"data":[{"marginCoin":"USDT","available":"700","margin":"10","crossUnrealizedPNL":"0","isolationUnrealizedPNL":"0","unrealizedPNL":"999"}]}}"#;
+    e.handle(
+        11101.0,
+        Event::HttpResponse {
+            request: b,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
     );
     assert_eq!(e.store().balance().free, 700.0);
     assert_eq!(e.store().balance().upnl, 0.0);
     reply(&mut e, a, ACCOUNT);
     assert_eq!(e.store().balance().free, 700.0);
-    let a = balance_request(&mut e, s);
-    event(&mut e, s, r#"{"ch":"balance","data":{}}"#);
-    reply(&mut e, a, ACCOUNT);
-    assert_eq!(e.store().balance().free, 700.0);
-    let a = balance_request(&mut e, s);
-    reply(
-        &mut e,
-        a,
-        r#"{"code":10001,"msg":"request too frequently","data":[]}"#,
+    let old = balance_request(&mut e, s, 11200.0);
+    e.store_mut().set_positions(vec![]);
+    e.handle(
+        12201.0,
+        Event::Command(Command::SetPositionMode {
+            command: 92,
+            hedged: false,
+            symbol: None,
+        }),
+    );
+    let write = requests(&mut e).remove(0);
+    e.handle(
+        12202.0,
+        Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":{}}"#,
+            },
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        12203.0,
+        Event::HttpResponse {
+            request: old,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: ACCOUNT,
+            },
+        },
     );
     assert_eq!(e.store().balance().free, 700.0);
-    let a = balance_request(&mut e, s);
-    reply(&mut e, a, r#"{"code":0,"data":{"unexpected":1}}"#);
+    assert!(
+        !e.store().hedged(),
+        "old balance cannot undo accepted mode ACK"
+    );
+    let read = fire_balance_repair(&mut e, 13203.0);
+    e.handle(
+        13204.0,
+        Event::HttpResponse {
+            request: read,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":10001,"msg":"request too frequently","data":[]}"#,
+            },
+        },
+    );
+    assert_eq!(e.store().balance().free, 700.0);
+    let read = fire_balance_repair(&mut e, 14204.0);
+    reply(&mut e, read, r#"{"code":0,"data":{"unexpected":1}}"#);
     assert_eq!(e.store().balance().free, 700.0);
 }
 #[test]

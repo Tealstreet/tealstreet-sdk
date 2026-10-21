@@ -836,3 +836,11 @@ publish; malformed or overflowed coverage cannot establish readiness. Write
 planning/dispatch, responses (including partial cancel ACKs) and cleanup invalidate
 older ordinary reads. Command-owned prerequisites retain global generation fences;
 no write is retried by reconciliation.
+
+Rust ordinary balance reads also retain a current in-flight serial until completion
+or the existing ten-second lost-read bound. Private notifications, refresh and
+reconnect coalesce against that read; notifications retain the first repair
+deadline. WS-only notification overlap cannot discard a valid financial response,
+while accepted position-mode writes fence older reads by a separate revision.
+Late callbacks cannot release replacements, and local signing failure releases
+before ordinary repair. Financial mapping and the500ms polling policy are unchanged.
