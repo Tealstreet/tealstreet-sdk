@@ -54,11 +54,11 @@ Sources: SDK `origin/feat/rust-rewrite` `4b8212be36`; tealstreet-next
 
 ### Rust engine today
 
-- `RustEngineExchange` refuses keyless private accounts at startup outside a
-  short list (`rust.exchange.ts:606-621`), and no engine path forwards an HTTP
-  config or WS auth to a `RemoteSigner`. Coinbase is on that list but still
-  fails, inside `Credentials::new(key, "")` (`sdk-rs/venues/coinbase/src/lib.rs:68`);
-  Orderly fails its base58 key check.
+- No engine path forwards an HTTP config or WS auth to a `RemoteSigner`. A
+  directly built `RustEngineExchange` refuses a keyless remote-signed private
+  account at startup (#1498); before that, Coinbase started and then failed inside
+  `Credentials::new(key, "")` (`sdk-rs/venues/coinbase/src/lib.rs:68`), and
+  Hyperliquid started and rejected every order.
 - **One sans-I/O signer exists: Paradex `payloadSigner`.** The engine parks the
   queued HTTP action as a `PendingSignature`, emits
   `Action::SignPayload { request, payload, timeout_ms }` (max 256 pending,
