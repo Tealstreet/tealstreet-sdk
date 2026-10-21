@@ -467,3 +467,22 @@ independent plan/code/raw reviews, focused checks and full current-head CI.
 Record every raw hash, run the fresh dependency guard separately from merge,
 audit/report actual parents/files and merge pin, then extend the final clock
 assertion and clarify the WEEX client-ID reason in separate follow-ups.
+
+## Final clock coverage and WEEX declaration wording
+
+Batch the two remaining follow-ups into one small harness PR as requested by
+the overseer. Extend the existing WEEX clock assertion to an explicit reviewed
+list of all50 catalog names, assert exact catalog equality, then verify private
+deterministicReplay behavior for each. Preserve the existing WEEX ACK and poll
+tie tests. Polling venues already qualify; add no new clock implementation.
+
+Clarify only the selected nine-key WEEX client-ID reason: current raw rows show
+TS null while Rust retains the recorded caller ID for the same order ID.
+Verify all nine paths and row identities in fresh five-pair evidence; preserve
+the tape SHA, all132 private keys and every other declaration/reason. No
+production, fixture, normalization, validator, comparator or entropy change.
+Use the existing WEEX sweep branch for five private pairs, compare all ten
+complete outputs excluding only measured metrics, and require both mandatory
+cases, zero unexpected/unused keys, independent code/raw reviews and full CI.
+Run the fresh dependency guard separately from merge, audit/report the actual
+merge and finish the sweep. No further priority window is requested.
