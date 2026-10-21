@@ -1830,6 +1830,7 @@ impl BitunixFutures {
                     });
                 }
                 Call::Mode { hedged } => {
+                    self.account.balance_write_revision += 1;
                     self.account.generations[Axis::Balance.index()] += 1;
                     self.account.generations[Axis::Positions.index()] += 1;
                     self.account.position_write_revision += 1;

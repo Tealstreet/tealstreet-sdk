@@ -532,6 +532,14 @@ Remaining resilience and completeness findings are independent of request parity
   in one classified failure, with Unknown sticky across later refusals. Native
   partial/malformed batch regressions cover this; remaining chunks follow the
   existing failure policy rather than blindly resending accepted writes.
+- Medium: ~~balance notifications invalidate every overlapping balance REST read
+  and postpone repair; reconnect/debounce refreshes supersede slow reads~~.
+  Ordinary balance keeps its current serial until completion or the existing
+  ten-second lost-read bound, with issue time recorded at dispatch. WS-only
+  notifications retain the first repair deadline and no longer fence financial
+  progress; accepted position-mode ACKs retain a separate write revision. Late
+  old callbacks cannot release newer reads, and synchronous signing failure
+  releases before ordinary repair. Financial values and500ms polling are unchanged.
 - Medium: ~~account-read failures (auth, IP whitelist) are logged at Warning and
   retried at ~1 Hz~~. Current signed account/settings reads now report selected
   credential/scope evidence from strict native refusals and validated success
