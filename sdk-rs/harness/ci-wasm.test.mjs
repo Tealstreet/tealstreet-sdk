@@ -77,6 +77,19 @@ test('harness-only edits and commits can reuse the same compiled engine', (t) =>
   f.git('commit', '--quiet', '-m', 'harness change');
   assert.doesNotThrow(f.validate);
 });
+for (const committed of [false, true]) {
+  test(`shared construction rules invalidate reuse (${committed ? 'committed' : 'dirty'})`, (t) => {
+    const f = fixture(t);
+    const path = 'packages/safe-cex/src/exchanges/rust/construction-rules.json';
+    mkdirSync(join(f.root, path, '..'), { recursive: true });
+    writeFileSync(join(f.root, path), '{"default":{},"venues":{}}');
+    if (committed) {
+      f.git('add', path);
+      f.git('commit', '--quiet', '-m', 'change shared rules');
+    }
+    assert.throws(f.validate, /dirty or untracked|fingerprint differs/);
+  });
+}
 test('artifact cannot redefine the fixed fingerprint input list', (t) => {
   const f = fixture(t);
   f.metadata.inputs = [];
