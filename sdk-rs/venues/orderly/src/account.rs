@@ -8,6 +8,12 @@ use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Orderly's account reads never poll faster than once a second, however the
+/// host scales the cadence.
+const POLL_FLOOR: safe_cex_engine::PollTimerBounds = safe_cex_engine::PollTimerBounds {
+    minimum_interval_ms: 1000.0,
+    not_before_ms: f64::NEG_INFINITY,
+};
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
@@ -346,17 +352,9 @@ impl Orderly {
             self.sync_setting(cx, &s);
         }
         self.account_poll(cx, true);
-        if self.account.tick.is_none() && self.poll_interval().is_finite() {
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
-        }
-    }
-    pub(crate) fn account_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval: f64) {
-        self.options.tick_interval = Some(safe_cex_engine::engine::bounded_tick_interval(interval));
-        if let Some(timer) = self.account.tick.take() {
-            cx.clear_timer(timer);
-        }
-        if self.account.credentials.is_some() && self.poll_interval().is_finite() {
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+        if self.account.tick.is_none() {
+            self.account.tick =
+                Some(cx.set_poll_timer_with_bounds(self.poll_interval(), POLL_FLOOR));
         }
     }
     fn poll_interval(&self) -> f64 {
@@ -1675,9 +1673,8 @@ impl Orderly {
             self.account.tick = None;
             self.account.ticks = self.account.ticks.wrapping_add(1);
             self.account_poll(cx, self.account.ticks.is_multiple_of(4));
-            if self.poll_interval().is_finite() {
-                self.account.tick = Some(cx.set_timer(self.poll_interval()));
-            }
+            self.account.tick =
+                Some(cx.set_poll_timer_with_bounds(self.poll_interval(), POLL_FLOOR));
             return true;
         }
         match self.account.socket.supervisor.on_timer(cx, timer) {

@@ -5,6 +5,9 @@ use safe_cex_engine::{
     Action, Engine, Event, HttpRequest, LogLevel, Notice, RequestId, Response, SocketId, TimerId,
 };
 use safe_cex_venue_weex::{Options, WeexFutures};
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const NOW: f64 = 1_773_295_700_000.0;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 const NORMAL: &str = r#"[{"orderId":702345678901234600,"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","status":"NEW","origQty":"0.02","executedQty":"0","price":"69500","timeInForce":"POST_ONLY","updateTime":1773295700000}]"#;
@@ -816,6 +819,238 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
     }
 }
 
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 1_501.0);
+    engine.handle(
+        now + 2.0,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 91_500.0);
+    engine.handle(
+        now + 91_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 91_501.0;
+    engine.handle(
+        completed_at,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let (mut e, initial) = started(false);
+    complete(&mut e, &initial, NORMAL, ALGO);
+    let engine = &mut e;
+    let (now, mut reads) = policy_poll_read(engine, NOW, "allPosition");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("accountConfig") {
+                r#"{"dualSidePosition":false,"canTrade":true}"#
+            } else if r.url.contains("symbolConfig") {
+                "[]"
+            } else if r.url.contains("/balance") {
+                r#"[{"asset":"USDT","balance":"100","availableBalance":"90"}]"#
+            } else {
+                "[]"
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
+    let (mut e, initial) = started(false);
+    complete(&mut e, &initial, NORMAL, ALGO);
+    let engine = &mut e;
+    let now = NOW;
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 1_500.0 / POLL_MS,
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
+            _ => None,
+        })
+        .expect("fast account poll");
+    engine.handle(now + 1_500.0, Event::TimerFired { timer });
+    let output: Vec<_> = engine.drain_actions().collect();
+    let reads: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(!reads.is_empty());
+    // Keep any next periodic timer for a loop that rearms before HTTP completes.
+    for r in reads {
+        engine.handle(
+            now + 1_500.0,
+            Event::HttpFailed {
+                request: r.id,
+                error: "account unavailable",
+            },
+        );
+    }
+    engine.drain_actions().for_each(drop);
+    for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
+        engine.handle(
+            now + 1_500.0 + offset,
+            Event::PollScaleChanged {
+                scale: interval_ms / POLL_MS,
+            },
+        );
+        let times: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        if interval_ms.is_infinite() {
+            assert!(times.is_empty());
+        } else {
+            assert_eq!(times, vec![now + 5_500.0]);
+        }
+    }
+}
 fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
     actions
         .iter()
@@ -1062,6 +1297,87 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
     assert!(e.store().order("702345678901234600").is_none());
     assert_eq!(e.store().orders().len(), 3);
 }
+/// Takes this cycle's warnings, then starts the next account cycle.
+fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (
+        logs(&drained, LogLevel::Warning),
+        e.drain_actions().collect(),
+    )
+}
+#[test]
+fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let stored = ["812345678901234500", "812345678901234500__tp"]
+        .map(|id| e.store().order(id).unwrap().clone());
+    let actions = next_cycle(&mut e);
+    let moved = NORMAL.replace(r#""price":"69500""#, r#""price":"69600""#);
+    let normal = moved.replace(
+        "}]",
+        r#"},{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#,
+    );
+    complete(&mut e, &actions, &normal, "[]");
+    let store = e.store();
+    assert_eq!(store.order("702345678901234600").unwrap().price, 69600.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped malformed order row without an ID".to_owned()),
+        "{warnings:?}"
+    );
+    assert!(!warnings.iter().any(|w| w.contains("12345")));
+
+    complete(&mut e, &actions, &moved, "[]");
+    let ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["702345678901234600"]);
+}
+#[test]
+fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit() {
+    let leg = |side: &str, size: &str| {
+        POSITIONS
+            .trim_matches(['[', ']'])
+            .replace(r#""side":"LONG""#, &format!(r#""side":"{side}""#))
+            .replace(
+                r#""separatedMode":"COMBINED""#,
+                r#""separatedMode":"SEPARATED""#,
+            )
+            .replace(r#""size":"0.02""#, &format!(r#""size":"{size}""#))
+    };
+    let (mut e, actions) = started(false);
+    let both = format!("[{},{}]", leg("LONG", "0.02"), leg("SHORT", "0.03"));
+    response(&mut e, request(&actions, "allPosition"), 200, &both);
+    complete_except_positions(&mut e, &actions);
+    let short = e.store().position("BTCUSDT:short").cloned().unwrap();
+    let (_, actions) = warnings_then_next_cycle(&mut e);
+
+    let partial = format!(r#"[{},{{"side":"LONG","size":"7"}}]"#, leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &partial);
+    complete_except_positions(&mut e, &actions);
+    assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 0.05);
+    assert_eq!(e.store().position("BTCUSDT:short"), Some(&short));
+    let (warnings, actions) = warnings_then_next_cycle(&mut e);
+    assert!(
+        warnings.contains(&"WEEX skipped malformed position row without an ID".to_owned()),
+        "{warnings:?}"
+    );
+
+    let long = format!("[{}]", leg("LONG", "0.05"));
+    response(&mut e, request(&actions, "allPosition"), 200, &long);
+    complete_except_positions(&mut e, &actions);
+    assert!(e.store().position("BTCUSDT:short").is_none());
+    assert_eq!(e.store().positions().len(), 1);
+}
 #[test]
 fn plain_limit_order_events_carry_no_trigger_type() {
     let (mut e, actions) = started(true);
@@ -1086,5 +1402,59 @@ fn protective_algo_row_typed_market_keeps_its_working_type() {
     assert_eq!(
         order.trigger_type,
         Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
+    );
+}
+/// Takes this cycle's actions, then starts the next account cycle.
+fn drain_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<Action>, Vec<Action>) {
+    let drained: Vec<_> = e.drain_actions().collect();
+    let timer = drained
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    (drained, e.drain_actions().collect())
+}
+#[test]
+fn startup_position_row_without_identity_is_an_error_logged_once_until_a_clean_snapshot() {
+    let message = "WEEX skipped malformed position row without an ID";
+    let idless = r#"[{"side":"LONG","size":"7"}]"#;
+    let read = |e: &mut Engine<WeexFutures>, actions: &[Action], rows: &str| {
+        response(e, request(actions, "allPosition"), 200, rows);
+        complete_except_positions(e, actions);
+        let (drained, next) = drain_then_next_cycle(e);
+        let errors = logs(&drained, LogLevel::Error);
+        let warnings = logs(&drained, LogLevel::Warning);
+        (
+            errors,
+            warnings.iter().filter(|l| *l == message).count(),
+            next,
+        )
+    };
+    let (mut e, actions) = started(false);
+    let (errors, _, actions) = read(&mut e, &actions, idless);
+    assert!(e.store().loaded().positions);
+    assert_eq!(errors, [message]);
+    // The same skip on the next cycle is not reported again.
+    let (errors, warnings, actions) = read(&mut e, &actions, idless);
+    assert!(errors.is_empty());
+    assert_eq!(warnings, 0);
+
+    let (_, _, actions) = read(&mut e, &actions, "[]");
+    let (errors, _, _) = read(&mut e, &actions, idless);
+    assert_eq!(errors, [message]);
+}
+#[test]
+fn startup_order_row_without_identity_is_an_error_with_no_stored_orders() {
+    let (mut e, actions) = started(false);
+    let idless = r#"[{"symbol":"BTCUSDT","side":"BUY","price":"12345"}]"#;
+    complete(&mut e, &actions, idless, "[]");
+    assert!(e.store().loaded().orders);
+    let (drained, _) = drain_then_next_cycle(&mut e);
+    assert_eq!(
+        logs(&drained, LogLevel::Error),
+        ["WEEX skipped malformed order row without an ID"]
     );
 }

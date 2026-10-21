@@ -601,9 +601,6 @@ impl Venue for Orderly {
         true
     }
 
-    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
-        self.account_tick_interval(cx, interval_ms);
-    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {

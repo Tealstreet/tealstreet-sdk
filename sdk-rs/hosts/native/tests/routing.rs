@@ -1718,6 +1718,7 @@ async fn routed_signed_network_notices(
         let rendered = format!("{notice:?}");
         let payload = match notice {
             Notice::Log { message, .. } => message.clone(),
+            Notice::Event(event) => event.message.clone(),
             Notice::CommandDone { result, .. } => match result {
                 Ok(value) | Err(value) => value.clone(),
             },

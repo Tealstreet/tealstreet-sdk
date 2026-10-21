@@ -1,4 +1,7 @@
 //! Account shapes and semantics from the current official TxFlow API docs.
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 5_000.0;
+
 #[path = "support/account.rs"]
 mod support;
 use safe_cex_engine::{Event, SocketId};
@@ -566,6 +569,129 @@ fn a_successful_rest_setting_fences_older_state_mode_before_publishing_hedge_rai
     );
     assert!(actions.iter().any(|a|matches!(a,safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {command:992,error})if error.message.contains("hedge leverage"))));
 }
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (mut e, _, reads, _) = bootstrap();
+    answer(&mut e, reads);
+    let now = NOW + 1000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            safe_cex_engine::Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [100_000_f64, 1_500.] {
+        e.handle(
+            now,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, safe_cex_engine::Action::Http(_)))
+        );
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, safe_cex_engine::Action::Http(_)))
+        );
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            safe_cex_engine::Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| kind(r) == "clearinghouseState"),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = STATE;
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            safe_cex_engine::Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
 #[test]
 fn account_execution_window_opens_after_the_paced_ticker_seed() {
     let mut e = safe_cex_engine::Engine::new(safe_cex_venue_txflow::TxFlow::new(
