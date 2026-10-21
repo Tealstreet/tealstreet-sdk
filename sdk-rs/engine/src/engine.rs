@@ -587,9 +587,182 @@ struct Incoming {
 const STREAM_PREVIEW_BYTES: usize = 512;
 
 struct PollTimer {
+    logical: TimerId,
     default_interval_ms: f64,
     bounds: PollTimerBounds,
     physical: Option<TimerId>,
+}
+
+/// Host poll policy and the registered polls. Deliberately not generic over a
+/// venue's pending type: every venue in a bundle shares this one copy.
+#[derive(Default)]
+struct Polls {
+    scale: Option<f64>,
+    ceiling_ms: Option<f64>,
+    /// A venue registers only a few polls, kept in registration order.
+    entries: Vec<PollTimer>,
+}
+
+/// The engine timer state a poll change writes to.
+struct TimerSink<'a> {
+    next_id: &'a mut u32,
+    timers: &'a mut HashMap<TimerId, ()>,
+    actions: &'a mut Vec<Action>,
+}
+
+fn next_engine_id(next_id: &mut u32) -> u32 {
+    let id = *next_id;
+    *next_id = next_id.wrapping_add(1).max(1);
+    id
+}
+
+impl TimerSink<'_> {
+    fn clear(&mut self, timer: TimerId) {
+        if self.timers.remove(&timer).is_some() {
+            self.actions.push(Action::ClearTimer { timer });
+        }
+    }
+}
+
+/// A poll's own cadence times the host scale. A slowdown never exceeds the
+/// host's absolute ceiling unless the native cadence is already slower.
+fn poll_interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
+    let scale = scale.unwrap_or(1.);
+    // Only an explicit infinite scale or native cadence pauses; a huge finite
+    // scale overflowing the product is still finite and takes the cap below.
+    if scale == f64::INFINITY || default_ms == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    let interval = (default_ms * scale).min(f64::MAX);
+    let interval = match ceiling_ms {
+        Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
+            interval.min(default_ms.max(ceiling))
+        }
+        _ => interval,
+    };
+    // Host policy cannot flood a venue or overflow a timer; infinity pauses.
+    if interval.is_finite() {
+        interval.clamp(
+            default_ms.min(POLL_POLICY_FLOOR_MS),
+            default_ms.max(POLL_POLICY_CAP_MS),
+        )
+    } else {
+        interval
+    }
+}
+
+impl Polls {
+    fn interval(&self, default_ms: f64) -> f64 {
+        poll_interval_for(default_ms, self.scale, self.ceiling_ms)
+    }
+
+    fn current_interval(&self, logical: TimerId) -> Option<f64> {
+        let poll = self.entries.iter().find(|poll| poll.logical == logical)?;
+        Some(
+            self.interval(poll.default_interval_ms)
+                .max(poll.bounds.minimum_interval_ms),
+        )
+    }
+
+    fn arm(&mut self, now: f64, index: usize, sink: &mut TimerSink<'_>) {
+        let interval = self.interval(self.entries[index].default_interval_ms);
+        let poll = &mut self.entries[index];
+        // Never hand an infinite/invalid deadline to a host. Infinity policy
+        // retains the registration so a finite update can resume it.
+        if !interval.is_finite()
+            || interval <= 0.
+            || !poll.bounds.minimum_interval_ms.is_finite()
+            || poll.bounds.minimum_interval_ms < 0.
+            || poll.bounds.not_before_ms.is_nan()
+        {
+            return;
+        }
+        let at_ms =
+            (now + interval.max(poll.bounds.minimum_interval_ms)).max(poll.bounds.not_before_ms);
+        if !at_ms.is_finite() {
+            return;
+        }
+        let physical = TimerId(next_engine_id(sink.next_id));
+        poll.physical = Some(physical);
+        sink.timers.insert(physical, ());
+        sink.actions.push(Action::SetTimer {
+            timer: physical,
+            at_ms,
+        });
+    }
+
+    fn register(
+        &mut self,
+        now: f64,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+        sink: &mut TimerSink<'_>,
+    ) -> TimerId {
+        let logical = TimerId(next_engine_id(sink.next_id));
+        self.entries.push(PollTimer {
+            logical,
+            default_interval_ms,
+            bounds,
+            physical: None,
+        });
+        self.arm(now, self.entries.len() - 1, sink);
+        logical
+    }
+
+    /// Removes a registration; false when `logical` is not a poll.
+    fn clear(&mut self, logical: TimerId, sink: &mut TimerSink<'_>) -> bool {
+        let Some(index) = self.entries.iter().position(|poll| poll.logical == logical) else {
+            return false;
+        };
+        if let Some(physical) = self.entries.remove(index).physical {
+            sink.clear(physical);
+        }
+        true
+    }
+
+    /// A fired physical timer ends its one-shot registration; returns the
+    /// logical ID the venue knows.
+    fn fired(&mut self, physical: TimerId) -> Option<TimerId> {
+        let index = self
+            .entries
+            .iter()
+            .position(|poll| poll.physical == Some(physical))?;
+        Some(self.entries.remove(index).logical)
+    }
+
+    fn set_policy(
+        &mut self,
+        now: f64,
+        scale: Option<f64>,
+        ceiling_ms: Option<f64>,
+        sink: &mut TimerSink<'_>,
+    ) {
+        let (old_scale, old_ceiling) = (self.scale, self.ceiling_ms);
+        if (old_scale, old_ceiling) == (scale, ceiling_ms) {
+            return;
+        }
+        self.scale = scale;
+        self.ceiling_ms = ceiling_ms;
+        // Registration order keeps action ordering deterministic.
+        for index in 0..self.entries.len() {
+            let poll = &self.entries[index];
+            let old_interval = poll_interval_for(poll.default_interval_ms, old_scale, old_ceiling);
+            let new_interval = poll_interval_for(poll.default_interval_ms, scale, ceiling_ms);
+            if old_interval.is_finite()
+                && old_interval > 0.
+                && new_interval.is_finite()
+                && old_interval.max(poll.bounds.minimum_interval_ms)
+                    == new_interval.max(poll.bounds.minimum_interval_ms)
+            {
+                // An equivalent cadence must not postpone an already due poll.
+                continue;
+            }
+            if let Some(physical) = self.entries[index].physical.take() {
+                sink.clear(physical);
+            }
+            self.arm(now, index, sink);
+        }
+    }
 }
 
 struct Io<P> {
@@ -608,10 +781,7 @@ struct Io<P> {
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
-    poll_scale: Option<f64>,
-    poll_ceiling_ms: Option<f64>,
-    poll_timers: HashMap<TimerId, PollTimer>,
-    poll_physical: HashMap<TimerId, TimerId>,
+    polls: Polls,
     next_id: u32,
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
@@ -640,10 +810,7 @@ impl<P> Default for Io<P> {
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
-            poll_scale: None,
-            poll_ceiling_ms: None,
-            poll_timers: HashMap::new(),
-            poll_physical: HashMap::new(),
+            polls: Polls::default(),
             next_id: 1,
             changed_books: Vec::new(),
             changed_books_active: 0,
@@ -661,105 +828,19 @@ impl<P> Io<P> {
         Some(self.signatures.swap_remove(index).1)
     }
     fn next(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
-        id
+        next_engine_id(&mut self.next_id)
     }
 
-    fn arm_poll(&mut self, now: f64, logical: TimerId) {
-        let poll = &self.poll_timers[&logical];
-        let interval = self.poll_interval(poll.default_interval_ms);
-        // Never hand an infinite/invalid deadline to a host. Infinity policy
-        // retains the registration so a finite update can resume it.
-        if !interval.is_finite()
-            || interval <= 0.
-            || !poll.bounds.minimum_interval_ms.is_finite()
-            || poll.bounds.minimum_interval_ms < 0.
-            || poll.bounds.not_before_ms.is_nan()
-        {
-            return;
-        }
-        let at_ms =
-            (now + interval.max(poll.bounds.minimum_interval_ms)).max(poll.bounds.not_before_ms);
-        if !at_ms.is_finite() {
-            return;
-        }
-        let physical = TimerId(self.next());
-        self.poll_timers.get_mut(&logical).unwrap().physical = Some(physical);
-        self.poll_physical.insert(physical, logical);
-        self.timers.insert(physical, ());
-        self.actions.push(Action::SetTimer {
-            timer: physical,
-            at_ms,
-        });
-    }
-
-    fn clear_physical_timer(&mut self, timer: TimerId) {
-        if self.timers.remove(&timer).is_some() {
-            self.actions.push(Action::ClearTimer { timer });
-        }
-    }
-
-    /// A poll's own cadence times the host scale. A slowdown never exceeds the
-    /// host's absolute ceiling unless the native cadence is already slower.
-    fn poll_interval(&self, default_ms: f64) -> f64 {
-        Self::interval_for(default_ms, self.poll_scale, self.poll_ceiling_ms)
-    }
-
-    fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
-        let scale = scale.unwrap_or(1.);
-        // Only an explicit infinite scale or native cadence pauses; a huge finite
-        // scale overflowing the product is still finite and takes the cap below.
-        if scale == f64::INFINITY || default_ms == f64::INFINITY {
-            return f64::INFINITY;
-        }
-        let interval = (default_ms * scale).min(f64::MAX);
-        let interval = match ceiling_ms {
-            Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
-                interval.min(default_ms.max(ceiling))
-            }
-            _ => interval,
-        };
-        // Host policy cannot flood a venue or overflow a timer; infinity pauses.
-        if interval.is_finite() {
-            interval.clamp(
-                default_ms.min(POLL_POLICY_FLOOR_MS),
-                default_ms.max(POLL_POLICY_CAP_MS),
-            )
-        } else {
-            interval
-        }
-    }
-
-    fn set_poll_policy(&mut self, now: f64, scale: Option<f64>, ceiling_ms: Option<f64>) {
-        let (old_scale, old_ceiling) = (self.poll_scale, self.poll_ceiling_ms);
-        if (old_scale, old_ceiling) == (scale, ceiling_ms) {
-            return;
-        }
-        self.poll_scale = scale;
-        self.poll_ceiling_ms = ceiling_ms;
-        // Sort logical IDs so action ordering is independent of HashMap seeds.
-        let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
-        logicals.sort_unstable_by_key(|timer| timer.0);
-        for logical in logicals {
-            let poll = &self.poll_timers[&logical];
-            let old_interval = Self::interval_for(poll.default_interval_ms, old_scale, old_ceiling);
-            let new_interval = Self::interval_for(poll.default_interval_ms, scale, ceiling_ms);
-            if old_interval.is_finite()
-                && old_interval > 0.
-                && new_interval.is_finite()
-                && old_interval.max(poll.bounds.minimum_interval_ms)
-                    == new_interval.max(poll.bounds.minimum_interval_ms)
-            {
-                // An equivalent cadence must not postpone an already due poll.
-                continue;
-            }
-            if let Some(physical) = self.poll_timers.get_mut(&logical).unwrap().physical.take() {
-                self.poll_physical.remove(&physical);
-                self.clear_physical_timer(physical);
-            }
-            self.arm_poll(now, logical);
-        }
+    /// Splits the poll registry from the timer state it writes to.
+    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
+        (
+            &mut self.polls,
+            TimerSink {
+                next_id: &mut self.next_id,
+                timers: &mut self.timers,
+                actions: &mut self.actions,
+            },
+        )
     }
 }
 
@@ -1068,12 +1149,7 @@ impl<P> Cx<'_, P> {
     /// The interval a registered poll is armed with under the current host
     /// policy (bounded, and infinite while paused).
     pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
-        let poll = self.io.poll_timers.get(&timer)?;
-        Some(
-            self.io
-                .poll_interval(poll.default_interval_ms)
-                .max(poll.bounds.minimum_interval_ms),
-        )
+        self.io.polls.current_interval(timer)
     }
 
     /// Configuration changes rearm from change-time, honoring both the recurring
@@ -1085,27 +1161,15 @@ impl<P> Cx<'_, P> {
         default_interval_ms: f64,
         bounds: PollTimerBounds,
     ) -> TimerId {
-        let logical = TimerId(self.io.next());
-        self.io.poll_timers.insert(
-            logical,
-            PollTimer {
-                default_interval_ms,
-                bounds,
-                physical: None,
-            },
-        );
-        self.io.arm_poll(self.now, logical);
-        logical
+        let now = self.now;
+        let (polls, mut sink) = self.io.polls();
+        polls.register(now, default_interval_ms, bounds, &mut sink)
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        if let Some(poll) = self.io.poll_timers.remove(&timer) {
-            if let Some(physical) = poll.physical {
-                self.io.poll_physical.remove(&physical);
-                self.io.clear_physical_timer(physical);
-            }
-        } else {
-            self.io.clear_physical_timer(timer);
+        let (polls, mut sink) = self.io.polls();
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
         }
     }
 
@@ -1681,14 +1745,16 @@ impl<V: Venue> Engine<V> {
                 if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                let ceiling = cx.io.poll_ceiling_ms;
-                cx.io.set_poll_policy(now, Some(scale), ceiling);
+                let (polls, mut sink) = cx.io.polls();
+                let ceiling = polls.ceiling_ms;
+                polls.set_policy(now, Some(scale), ceiling, &mut sink);
                 self.venue.on_poll_scale(&mut cx, scale)
             }
             Event::PollCeilingChanged { ceiling_ms } => {
                 let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
-                let scale = cx.io.poll_scale;
-                cx.io.set_poll_policy(now, scale, ceiling_ms);
+                let (polls, mut sink) = cx.io.polls();
+                let scale = polls.scale;
+                polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
@@ -1757,12 +1823,7 @@ impl<V: Venue> Engine<V> {
             }
             Event::TimerFired { timer } => {
                 if cx.io.timers.remove(&timer).is_some() {
-                    let logical = if let Some(logical) = cx.io.poll_physical.remove(&timer) {
-                        cx.io.poll_timers.remove(&logical);
-                        logical
-                    } else {
-                        timer
-                    };
+                    let logical = cx.io.polls.fired(timer).unwrap_or(timer);
                     self.venue.on_timer(&mut cx, logical);
                 }
             }
