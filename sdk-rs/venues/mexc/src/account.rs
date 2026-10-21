@@ -1636,21 +1636,17 @@ impl MexcFutures {
         if response.status != 200 || e.success != Some(true) || e.code != 0.0 {
             return None;
         }
-        let valid = match pending {
+        match pending {
             Pending::Account(Request::Mode) => e
                 .data
-                .is_some_and(|d| matches!(serde_json::from_str::<u8>(d.get()), Ok(1 | 2))),
-            // A row the snapshot skipped is malformed data, which never clears a streak.
-            Pending::Account(Request::Snapshot(s)) => {
-                !s.bad
-                    && s.assets.rejected() == 0
-                    && s.positions.rejected() == 0
-                    && s.orders.rejected() == 0
-                    && e.data.is_some()
-            }
-            _ => false,
-        };
-        valid.then_some(Accepted)
+                .is_some_and(|d| matches!(serde_json::from_str::<u8>(d.get()), Ok(1 | 2)))
+                .then_some(Accepted),
+            Pending::Account(Request::Snapshot(_)) => safe_cex_engine::AuthOutcome::accepted_list(
+                response,
+                ArrayAt::EnvelopeField("data"),
+            ),
+            _ => None,
+        }
     }
 }
 
@@ -1678,4 +1674,85 @@ fn auth_rejection(body: &str, read_key: bool) -> Option<VenueError> {
         error = error.venue_message(venue_message);
     }
     Some(error)
+}
+
+#[cfg(test)]
+mod auth_envelopes {
+    use super::*;
+    use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+
+    fn pending(scope: Scope, rejected_rows: bool) -> Pending {
+        let mut snapshot = Snapshot {
+            symbol: None,
+            scope,
+            revision: 0,
+            page: 1,
+            page_count: 0,
+            bad: rejected_rows,
+            orders: SnapshotBuilder::default(),
+            positions: SnapshotBuilder::default(),
+            assets: SnapshotBuilder::default(),
+            full: true,
+            native_ids: vec![],
+        };
+        if rejected_rows {
+            snapshot.orders.reject(None);
+        }
+        Pending::Account(Request::Snapshot(Box::new(snapshot)))
+    }
+
+    fn response(body: &str) -> Response<'_> {
+        Response {
+            status: 200,
+            headers: "",
+            body,
+        }
+    }
+
+    #[test]
+    fn malformed_success_cannot_clear_a_rejected_endpoint_before_a_sibling_succeeds() {
+        for body in [
+            r#"{"success":true,"code":0}"#,
+            r#"{"success":true,"code":0,"data":null}"#,
+            r#"{"success":true,"code":0,"data":{}}"#,
+            r#"{"success":true,"code":0,"data":false}"#,
+        ] {
+            let venue = MexcFutures::new(crate::Options::default());
+            let plan = pending(Scope::Plan, false);
+            let regular = pending(Scope::Regular, false);
+            assert_eq!(
+                venue.account_auth(&plan, &response(r#"{"success":false,"code":701}"#)),
+                Some(Rejected)
+            );
+            assert_eq!(venue.account_auth(&plan, &response(body)), None, "{body}");
+            assert_eq!(
+                venue.account_auth(
+                    &regular,
+                    &response(r#"{"success":true,"code":0,"data":[]}"#)
+                ),
+                None
+            );
+            assert_eq!(
+                venue.account_auth(&plan, &response(r#"{"success":true,"code":0,"data":[]}"#)),
+                Some(Accepted)
+            );
+        }
+    }
+
+    #[test]
+    fn held_or_rejected_rows_do_not_override_typed_envelope_evidence() {
+        let venue = MexcFutures::new(crate::Options::default());
+        let plan = pending(Scope::Plan, true);
+        assert_eq!(
+            venue.account_auth(&plan, &response(r#"{"success":true,"code":0,"data":[]}"#)),
+            Some(Accepted)
+        );
+        assert_eq!(
+            venue.account_auth(
+                &plan,
+                &response(r#"{"success":false,"code":701,"data":[]}"#)
+            ),
+            Some(Rejected)
+        );
+    }
 }

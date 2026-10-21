@@ -18,8 +18,17 @@ payloads, transport routes and subscription behavior retain their semantics.
 A definitive rejection of the credential used by a private account read must
 increase that credential's polling backoff. A later accepted private account
 read may clear that same credential's streak. Public data, unsigned wallet
-lookups, another credential, transport failure, malformed data, rate limiting,
-and unrelated business rejection must not clear or manufacture auth evidence.
+lookups, another credential, transport failure, malformed envelopes or missing
+required envelope data, rate limiting, and unrelated business rejection must not
+clear or manufacture auth evidence.
+
+A parseable signed success envelope with its required envelope-level fields
+proves that the credentials work. Individual row parse/mapping failures,
+uncatalogued markets and held rows do not block Accepted and never produce
+Rejected. They remain data problems handled by the existing row diagnostics and
+financial reducers. A valid empty list is accepted evidence. Validate required
+list shape before grouped auth state changes, so a malformed success cannot
+clear an endpoint rejection before a sibling succeeds.
 
 Use explicit native classifications of typed response fields/status where the
 venue contract establishes their meaning. Never derive authentication results
@@ -107,7 +116,7 @@ and complete response once, immediately before the existing callback:
 
 Do not call it on chunks, HTTP transport failure, invalid UTF-8, truncated or
 invalid streamed JSON, or a pending request already consumed. Venue classifiers
-must also reject malformed/unknown ordinary responses. Do not globally forward
+must also reject malformed/unknown ordinary envelopes. Do not globally forward
 `on_stream_error` into `on_response`: some venues would otherwise accept a
 missing list as an authoritative empty snapshot. Seven crates currently have
 stream-error overrides; the optional core hook avoids adding equivalent
@@ -115,8 +124,8 @@ feedback overrides to the other 19. A stream override recursively invoking its
 own `on_response` must not invoke the core hook again.
 
 A response with its streamed array removed still preserves envelope metadata.
-Classifiers must use that typed metadata and existing pending validation flags;
-they must not require access to rows already streamed and consumed.
+Classifiers use that typed metadata and envelope validity, rather than row
+mapping flags; they must not require access to rows already streamed and consumed.
 
 ### Capture the actual signer at dispatch
 
@@ -318,11 +327,37 @@ WIP/integration; no completed classifier coverage is claimed by them. Logs:
 
 - BingX classifies the final answer of the landing's re-signed reads; a first
   100001 that will be resent is not evidence, and the resend keeps its tag.
-  BingX/WEEX skip undecodable rows individually, so a signed code-0 page is
-  accepted evidence.
+  BingX, MEXC and WEEX share `AuthOutcome::accepted_list`: after typed venue
+  success and existing fences, a valid required list proves acceptance regardless
+  of row mapping failures. Missing/malformed envelope data yields None before
+  MergedScopeAuth changes. Non-list settings keep their typed schemas; see
+  Required behavior above for the single envelope-level rule.
 - Polling policy flips re-arm every poll from the moment of change. If one
   scope alternates accepted/rejected faster than a slower poll's interval, that
   poll can be postponed repeatedly. Anchoring re-arms to each poll's cycle
   start fixes it; not yet done because it shifts every venue policy test's
   expected deadlines.
 
+
+## Envelope evidence consistency follow-up
+
+Implemented rule (overseer decision, 2026-10-21): a valid signed success envelope
+proves credentials regardless of individual row parse/mapping failures, uncatalogued
+markets or held rows. Row diagnostics and financial reducers remain unchanged.
+Malformed envelopes or missing envelope-level required data yield no outcome;
+typed credential rejections still report first.
+
+One pure `AuthOutcome::accepted_list` helper uses the existing ArraySplitter
+and each request's exact selector to validate the required list and surrounding
+JSON, without decoding row fields. BingX, MEXC and WEEX use it after their
+existing typed success/rejection and fence checks, before MergedScopeAuth can
+mutate. Non-list Mode/Metadata validation is preserved. Row-quality auth gates
+are removed; Required behavior and Landing follow-ups now state this same rule.
+
+Regressions: mixed/bad rows still accept credentials while existing financial
+behavior holds; empty lists accept; missing/null/wrong-shaped/truncated required
+data stays inert; malformed success cannot clear a rejected grouped endpoint
+before a sibling succeeds. The PR records the two false-row expectation changes.
+Verification covers all three venues plus Binance, scoped engine auth tests,
+strict Clippy/fmt, independent reviews, full CI and a separate landing guard.
+No new venue classifiers, caller API shapes or explicit network resync.

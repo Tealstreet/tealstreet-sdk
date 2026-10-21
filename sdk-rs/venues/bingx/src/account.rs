@@ -1729,17 +1729,22 @@ impl crate::Bingx {
         if !(200..300).contains(&response.status) || evidence.code != 0 {
             return None;
         }
-        let valid = match request {
-            Request::PositionMode { .. } => {
-                serde_json::from_str::<ModeEnvelope>(response.body).is_ok()
+        match request {
+            Request::PositionMode { .. } => serde_json::from_str::<ModeEnvelope>(response.body)
+                .is_ok()
+                .then_some(Accepted),
+            Request::Balance { .. } | Request::Positions { .. } => {
+                safe_cex_engine::AuthOutcome::accepted_list(
+                    response,
+                    ArrayAt::EnvelopeField("data"),
+                )
             }
-            Request::Balance { failed, .. } => !failed,
-            // Undecodable rows are skipped individually; a signed code-0 page
-            // still proves the credential was accepted.
-            Request::Positions { .. } | Request::OpenOrders { .. } => true,
-            _ => false,
-        };
-        valid.then_some(Accepted)
+            Request::OpenOrders { .. } => safe_cex_engine::AuthOutcome::accepted_list(
+                response,
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+            ),
+            _ => None,
+        }
     }
 }
 
