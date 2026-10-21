@@ -193,6 +193,8 @@ deployed-binary inspection.
 The B11 SDK transport catch-up checks #1666 at `bba1f43126c`; the worker
 envelope, derived mappings and MCP contract below use that actual merge. NX
 forwarding and ingestion evidence remains read-only at `65e086a3c90`.
+The Bitunix balance-progress follow-up checks #1665 at `8f7b0cee3ff`, including
+the currentness predicate shared by financial publication and auth/recovery.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -289,6 +291,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1661 / `391dbe9af` | WASM-only compiler profiles shrink the combined host and selected family builds without changing loader APIs or native profiles. Delivery still depends on the consumer: 28 browser families, combined Node for hosting/MCP, combined web embedded by the compiled CLI, or a deployment-injected Workers/React Native module. See the refreshed packaging inventory below. |
 | #1662 / `501fb664e` | Current Bitunix signed account/settings GETs now supply selected-credential scoped auth evidence. Strict native refusal is distinct from ambiguous failures; grouped order endpoints/settings symbols cannot heal each other. Background reads use bounded backoff and a shared rate pause; a blocked command prerequisite fails once `notSent`, with no write replay. |
 | #1666 / `bba1f4312` | Successful worker replies carry optional request-scoped `data.completeness`; the matching receiver restores the array marker before resolution/observers. SDK derived histories preserve it. Flagged MCP text JSON is `{requestId, rows, completeness}`, while unflagged arrays stay unchanged. Upgrade sender/receiver together and update MCP consumers; NX ingestion/coverage remains open (B11). |
+| #1665 / `8f7b0cee3` | Ordinary Bitunix balance reads can publish current financial state and scoped auth evidence during WS notifications. Reads coalesce around their serial/ten-second dispatch bound; accepted position-mode ACKs fence older responses through a separate write revision. Recovery gates, balance mapping and caller/write-retry APIs stay unchanged. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2431,8 +2434,10 @@ snapshot completeness or initial readiness.
 Regular and TP-SL endpoints share the orders scope while retaining each
 endpoint's refusal; one sibling cannot heal the other. Settings likewise retain
 refusals per symbol, so one successful symbol cannot clear another's rejection.
-Superseded serial/write/generation callbacks cannot heal current auth evidence
-or reset/extend its failure backoff. The SDK already consumes this typed channel for isolated
+Callbacks failing the currentness checks cannot heal current auth evidence
+or reset/extend its failure backoff. Since #1665, ordinary balance reads remain
+current across WS-only generation changes, while serial and accepted-mode-write
+fences still apply. The SDK already consumes this typed channel for isolated
 credential/scope streaks and polling policy; custom hosts must use it rather
 than infer credential state from diagnostic text.
 
@@ -2457,6 +2462,27 @@ retired command or replay a POST. Callers should retain normal typed failure
 handling and let SDK/native read recovery run; no new option, constructor field
 or caller-issued resync is required. This read policy does not add a trading
 retry.
+
+### Bitunix balance progress during notifications (#1665)
+
+Ordinary balance reads now use the current serial and a separate accepted
+position-mode write revision, so current REST balances and scoped credential
+evidence advance despite intervening WS notifications. Notifications retain
+the first one-second repair deadline; they do not replace financial REST state.
+Command-owned admission keeps its stricter generation check. An accepted mode
+ACK fences older balance responses for financial publication, auth evidence and
+recovery resets. Refused, malformed or transport-lost ACKs do not establish an
+accepted mode change.
+
+Ordinary issuers, including reconnect refreshes, coalesce while a balance read
+is younger than ten seconds from its own actual dispatch. Lost-read replacement
+and late old completion/failure keep the newer serial owned. Synchronous signing
+failure releases its serial before ordinary repair, avoiding a fabricated
+ten-second in-flight wait. #1662's retries and shared rate pause still gate
+issuance before request allocation; notification repair cannot bypass an
+outstanding failure backoff. Balance mapping, polling controls, caller signatures
+and write retries stay unchanged. Consumers can see fresher balances and scoped
+auth outcomes under busy private traffic; no caller-issued resync is required.
 
 ### Bitunix private snapshot progress and retention (#1641/#1643/#1645)
 
