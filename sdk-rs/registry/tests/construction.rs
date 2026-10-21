@@ -190,7 +190,8 @@ fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
 
 #[test]
 fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
-    let key = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ";
+    // 31 zero bytes: valid base58, one byte short of an Ed25519 key.
+    let key = "1111111111111111111111111111111";
     let valid = "11111111111111111111111111111111";
     for venue in [
         "orderly",
