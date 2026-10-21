@@ -112,6 +112,7 @@ Initial batch checked landing `3d73437e589`, including the merges after the last
 (#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
 The construction follow-ups check through #1575 at `570d15f3001`, including
 #1563, the #1550 logging merge and #1518's internal failure-path refactor.
+The subsequent #1558 logging-level merge is checked at `e757d8d7990`.
 The following rows record the caller effect, including changes requiring no
 downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
@@ -139,6 +140,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1567 / `d06eabae16` | One shared JSON rules table derives signing/public-mode eligibility synchronously in TS and before native validation/startup. Optional raw `publicMode` carries caller intent; `construction()` adds optional `canSign`/`publicDataOnly`, and the WASM module exports no-I/O `resolveConstruction`. Existing application options and legacy native/harness input remain compatible; the explicit-private Paradex refusal moves into the registry. See [Construction metadata and public mode](#construction-metadata-and-public-mode-1563-1567). |
 | #1518 / `8b115cefd7` | Internal `Cx::done` is success-only and `Cx::fail` owns command failures. Hosts still emit the existing `done` error shape with classified detail; message text is unchanged. No caller edit or new wire revision. |
 | #1575 / `570d15f300` | Rust selects HyroTrader endpoints from optional raw mode/network maps, retaining legacy explicit endpoints when that config is absent. Private non-Paradex `payloadSigner` refusal moves into the registry; WASM registry failures carry JSON `Error.venueError`, which the SDK converts to `ExchangeError`, preserving `unsupported`/`notSent` for that refusal. Factory routing and application options stay unchanged; see [Host construction rules](#host-construction-rules-1575). |
+| #1558 / `e757d8d799` | At migrated retried-read sites, the first failure is Error; repeats with the same digit-normalised message at that site are Warn until 90 s after its last Error, or until the message changes. Text stays stable, reducing repeat toast/Sentry reports while retaining periodic Errors for auth detection. Backpack optional child-leg failures now emit Error instead of Warn. No caller shape or classified-error field changes. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
