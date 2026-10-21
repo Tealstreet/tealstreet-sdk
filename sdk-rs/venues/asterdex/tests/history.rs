@@ -35,7 +35,7 @@ impl Harness {
     }
     fn options(options: Options) -> Self {
         Self {
-            engine: Engine::new(AsterDex::new(options)),
+            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(options)),
             now: 1700000000000.0,
             requests: Vec::new(),
             timers: Vec::new(),

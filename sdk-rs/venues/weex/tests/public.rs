@@ -3,7 +3,7 @@
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId, TimerId};
 use safe_cex_venue_weex::{Options, WeexFutures};
 fn engine() -> Engine<WeexFutures> {
-    Engine::new(WeexFutures::new(Options {
+    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         public_data_only: true,
         ..Options::default()
     }))

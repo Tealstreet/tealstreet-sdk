@@ -209,8 +209,13 @@ fn trigger(value: Option<StopTriggerType>, default: StopTriggerType) -> Result<u
         StopTriggerType::IndexPrice => Err("Bitrue index-price triggers are unsupported".into()),
     }
 }
-fn minted() -> Result<String, String> {
-    Ok(safe_cex_crypto::uuid::uuid()?.chars().take(31).collect())
+fn minted(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    Ok(
+        safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?
+            .chars()
+            .take(31)
+            .collect(),
+    )
 }
 fn caller_id(value: &str) -> bool {
     (1..=31).contains(&value.chars().count())
@@ -465,7 +470,7 @@ impl Bitrue {
             let value = safe_cex_engine::num::adjust(value, market.precision.price);
             positive(value, "rounded attached trigger price")?;
             Ok(Protection {
-                client_order_id: minted()?,
+                client_order_id: minted(cx)?,
                 trigger_type: kind,
                 trigger_price_type: trigger(
                     reference,
@@ -508,7 +513,7 @@ impl Bitrue {
                 .client_order_id
                 .clone()
                 .map(Ok)
-                .unwrap_or_else(minted)?;
+                .unwrap_or_else(|| minted(cx))?;
             let reduce =
                 protective || opts.reduce_only.unwrap_or(false) || opts.close.unwrap_or(false);
             let mut payload = Placement {
@@ -545,7 +550,7 @@ impl Bitrue {
             };
             // Each split is an independent parent, including its protection identities.
             for child in &mut payload.trigger_order_create_params {
-                child.client_order_id = minted()?;
+                child.client_order_id = minted(cx)?;
             }
             if opts.kind == OrderType::Market && !reduce {
                 let ticker = cx

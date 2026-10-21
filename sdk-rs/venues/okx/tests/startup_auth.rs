@@ -125,7 +125,7 @@ fn connected(out: &[Action], suffix: &str) -> Option<SocketId> {
 
 #[test]
 fn transient_config_failures_back_off_and_the_account_still_loads() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let mut config = to_config(&mut engine, &mut rig);
     let failures: [(u16, &str); 7] = [
@@ -190,7 +190,7 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
 
 #[test]
 fn transport_failure_of_config_is_retried() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let config = to_config(&mut engine, &mut rig);
     let Action::Http(request) = &config else {
@@ -210,7 +210,7 @@ fn transport_failure_of_config_is_retried() {
 
 #[test]
 fn rejected_key_fails_startup_once_and_stops_retrying() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let config = to_config(&mut engine, &mut rig);
     respond(
@@ -234,7 +234,7 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
 
 #[test]
 fn invalid_signature_is_final_only_after_one_re_signed_resend() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let config = to_config(&mut engine, &mut rig);
     let sign = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
@@ -251,7 +251,7 @@ fn invalid_signature_is_final_only_after_one_re_signed_resend() {
 
 #[test]
 fn invalid_signature_counts_only_consecutive_answers() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let mut config = to_config(&mut engine, &mut rig);
     let sign = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
@@ -287,7 +287,7 @@ fn invalid_signature_counts_only_consecutive_answers() {
 
 #[test]
 fn rejected_read_only_key_fails_startup_without_deactivating() {
-    let mut engine = Engine::new(Okx::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         read_credentials: Some(ReadCredentials {
             key: "read".into(),
             secret: "read-secret".into(),
@@ -314,7 +314,7 @@ fn rejected_read_only_key_fails_startup_without_deactivating() {
 
 #[test]
 fn invalid_read_only_credentials_fail_startup() {
-    let mut engine = Engine::new(Okx::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         read_credentials: Some(ReadCredentials {
             key: String::new(),
             secret: "read-secret".into(),
@@ -348,7 +348,7 @@ fn to_private_login(engine: &mut Engine<Okx>, rig: &mut Rig) -> SocketId {
 
 #[test]
 fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let private = to_private_login(&mut engine, &mut rig);
     ws(
@@ -366,7 +366,7 @@ fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
 
 #[test]
 fn transient_socket_login_failure_reconnects() {
-    let mut engine = Engine::new(Okx::new(keyed()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
     let mut rig = Rig::default();
     let private = to_private_login(&mut engine, &mut rig);
     ws(
@@ -393,7 +393,7 @@ fn rate_limited_config_read_waits_out_the_rate_limit_window() {
         (418, "", 10_000.),
         (429, "", 10_000.),
     ] {
-        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
         let mut rig = Rig::default();
         let config = to_config(&mut engine, &mut rig);
         respond_with(
@@ -419,7 +419,7 @@ fn rate_limited_config_read_waits_out_the_rate_limit_window() {
 #[test]
 fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
     for code in ["60005", "60024", "60032"] {
-        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
         let mut rig = Rig::default();
         let private = to_private_login(&mut engine, &mut rig);
         ws(
@@ -439,7 +439,7 @@ fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
     for code in [
         "60001", "60003", "60004", "60006", "60007", "60009", "60014", "60023", "60031", "63999",
     ] {
-        let mut engine = Engine::new(Okx::new(keyed()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(keyed()));
         let mut rig = Rig::default();
         let private = to_private_login(&mut engine, &mut rig);
         ws(

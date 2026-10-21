@@ -1,9 +1,9 @@
-use safe_cex_engine::{Action, Engine};
+use safe_cex_engine::Action;
 use safe_cex_venue_backpack::{Backpack, Options};
 
 #[test]
 fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
-    let mut engine = Engine::new(Backpack::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

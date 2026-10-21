@@ -45,7 +45,7 @@ fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AccountReadScope, AuthOutcom
         .collect()
 }
 fn started(read: bool) -> (Engine<WeexFutures>, Vec<Action>) {
-    let mut e = Engine::new(WeexFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {

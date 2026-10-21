@@ -5,6 +5,7 @@
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { createReplayEntropy } from './replay-entropy.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -323,6 +324,8 @@ async function runRust() {
         fills.push(captureRustFill(executed, i));
       }
     },
+  }, {
+    entropy: createReplayEntropy(createHash('sha256').update(tapeBytes).digest('hex')),
   });
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });

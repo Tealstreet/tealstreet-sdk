@@ -9,7 +9,7 @@ const ORDER: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"123","ordType":"limit"
 
 #[test]
 fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
@@ -77,7 +77,7 @@ fn startup() -> (
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
     };
-    let mut e = Engine::new(Okx::new(opts));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(opts));
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -766,7 +766,7 @@ fn undecodable_instrument_row_still_reports_its_exposure() {
 }
 
 fn reports_exposure_on_malformed_instrument(bad: &str) {
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
@@ -835,7 +835,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
         .replace("\"BTC\"", "\"ETH\"");
     let bad = eth.replace("\"lotSz\":\"0.01\"", "\"lotSz\":\"0\"");
-    let mut e = Engine::new(Okx::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
@@ -929,7 +929,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
         r#"{"instId":"ETH-USDT-SWAP","ordId":"9","sz":4}"#,
         r#"{"instId":"ETH-USDT-SWAP","ordId":9,"state":null}"#,
     ] {
-        let mut e = Engine::new(Okx::new(Options {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
             key: Some("test-key".into()),
             secret: Some("test-secret".into()),
             passphrase: Some("test-passphrase".into()),

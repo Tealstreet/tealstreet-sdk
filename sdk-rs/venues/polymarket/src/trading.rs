@@ -261,7 +261,8 @@ impl Polymarket {
         let mut salt = 0u64;
         for _ in 0..4 {
             let mut bytes = [0; 8];
-            getrandom::getrandom(&mut bytes).map_err(|_| "Polymarket salt entropy unavailable")?;
+            cx.fill_signing_entropy(&mut bytes)
+                .map_err(|_| "Polymarket salt entropy unavailable")?;
             salt = u64::from_le_bytes(bytes) & 0x001f_ffff_ffff_ffff;
             if salt != 0 {
                 break;

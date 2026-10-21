@@ -5,7 +5,7 @@ use safe_cex_venue_kucoin::{Kucoin, Options};
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":"200000","data":[{"broken":true},{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100}]}"###;
 fn public_engine() -> Engine<Kucoin> {
-    Engine::new(Kucoin::new(Options {
+    safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
     }))
@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = Engine::new(Kucoin::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         passphrase: Some("scripted-passphrase".into()),

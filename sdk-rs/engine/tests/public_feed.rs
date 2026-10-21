@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::command::{HostInput, decode_host_input};
 use safe_cex_engine::model::{Balance, Limits, Market, MinMax, Position, PositionSide, Precision};
@@ -151,7 +152,7 @@ fn update(json: &str) -> PublicFeedUpdate {
     }
 }
 fn shared() -> Engine<Feeds> {
-    let mut engine = Engine::new(Feeds::default());
+    let mut engine = support::seeded_engine(Feeds::default());
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
@@ -177,7 +178,7 @@ fn shared() -> Engine<Feeds> {
 #[test]
 fn direct_and_disabled_do_not_run_provider_hooks_when_native_tickers_change() {
     for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Disabled] {
-        let mut engine = Engine::new(Feeds::default());
+        let mut engine = support::seeded_engine(Feeds::default());
         engine.set_public_feed_policy(policy).unwrap();
         engine.store_mut().set_markets(vec![market("A")]);
         engine.start(0.);
@@ -204,7 +205,7 @@ fn socket_policy_suppresses_public_roles_on_every_attempt_preserves_same_url_aut
         PublicFeedPolicy::Disabled,
         PublicFeedPolicy::Shared,
     ] {
-        let mut engine = Engine::new(Feeds::default());
+        let mut engine = support::seeded_engine(Feeds::default());
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(0.);
         assert!(
@@ -451,7 +452,7 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
         .is_err()
     );
     for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Disabled] {
-        let mut engine = Engine::new(Feeds::default());
+        let mut engine = support::seeded_engine(Feeds::default());
         engine.set_public_feed_policy(policy).unwrap();
         assert!(
             engine
@@ -465,7 +466,7 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
         engine.store().tickers().is_empty(),
         "rejected payload is atomic"
     );
-    let mut empty = Engine::new(Feeds::default());
+    let mut empty = support::seeded_engine(Feeds::default());
     empty
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
@@ -581,7 +582,7 @@ fn provider_fields_stay_authoritative_after_venue_polls_and_partial_updates() {
 #[test]
 fn non_ticker_packets_do_not_replay_valuation_or_dirty_positions_but_pending_native_quotes_restore()
 {
-    let mut engine = Engine::new(Feeds {
+    let mut engine = support::seeded_engine(Feeds {
         revalue_positions: true,
         ..Default::default()
     });

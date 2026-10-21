@@ -342,8 +342,14 @@ fn valid_client(value: &str) -> bool {
             .parse::<u64>()
             .is_ok_and(|n| n > 0 && n <= i64::MAX as u64)
 }
-fn nonce() -> Result<u32, String> {
-    let entropy = safe_cex_crypto::uuid::uuid()?;
+fn nonce(cx: &Cx<'_, Pending>, signing: bool) -> Result<u32, String> {
+    let entropy = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+        if signing {
+            cx.fill_signing_entropy(bytes)
+        } else {
+            cx.fill_entropy(bytes)
+        }
+    })?;
     Ok(u32::from_be_bytes(
         safe_cex_crypto::ethereum::keccak256(entropy.as_bytes())[..4]
             .try_into()
@@ -854,19 +860,19 @@ impl Grvt {
         if is_market && post_only {
             return Err("GRVT market orders cannot be post-only".into());
         }
-        let n = nonce()?;
+        let n = nonce(cx, true)?;
         let client = if let Some(id) = &opts.client_order_id {
             if !valid_client(id) {
                 return Err("GRVT client order ID must be a canonical integer between 1 and 9223372036854775807".into());
             }
             id.clone()
         } else {
-            let mut generated = n.max(1).to_string();
+            let mut generated = nonce(cx, false)?.max(1).to_string();
             for _ in 0..16 {
                 if !used.contains(&generated) && cx.store.order(&generated).is_none() {
                     break;
                 }
-                generated = nonce()?.max(1).to_string();
+                generated = nonce(cx, false)?.max(1).to_string();
             }
             generated
         };

@@ -1,7 +1,7 @@
 //! Socket liveness and retry through the shared supervisor.
 mod support;
 
-use safe_cex_engine::{Command, Engine, Event, PublicFeedPolicy, SocketId, TimerId};
+use safe_cex_engine::{Command, Event, PublicFeedPolicy, SocketId, TimerId};
 use safe_cex_venue_bybit::{BybitLinear, Options};
 use support::Harness;
 
@@ -201,12 +201,16 @@ fn stable_public_traffic_resets_backoff() {
         h.advance(5_000.0);
         h.message(PUBLIC, TICKER);
     }
+    // Retry entropy can produce a fractional opening time. Cross the stable
+    // threshold explicitly rather than depend on exact floating-point sums.
+    h.advance(1.0);
+    h.message(PUBLIC, TICKER);
     assert_backoff(0, close(&mut h, socket));
 }
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut engine = Engine::new(BybitLinear::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(Options {
         public_data_only: true,
         ..Options::default()
     }));

@@ -30,7 +30,7 @@ impl Harness {
         Self::with_policy(options, PublicFeedPolicy::Direct)
     }
     fn with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(Grvt::new(Options {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
             key: Some("fixture-api-key".into()),
             secret: Some(format!("0x{}", "01".repeat(32))),
             ..options

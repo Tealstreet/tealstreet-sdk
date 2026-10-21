@@ -1,8 +1,8 @@
-use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_engine::{Action, Command, Event, Notice};
 use safe_cex_venue_orderly::{Options, Orderly};
 
 fn fetch_account(options: Options) -> Result<String, String> {
-    let mut engine = Engine::new(Orderly::new(options));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Orderly::new(options));
     engine.handle(0.0, Event::Command(Command::FetchAccount { command: 4 }));
     engine
         .drain_actions()

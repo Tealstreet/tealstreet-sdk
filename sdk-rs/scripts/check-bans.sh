@@ -37,4 +37,8 @@ if [[ -n $hot ]]; then
   ban 'serde_json::Value in engine or venue source' 'serde_json::Value|\bValue::(Object|Array)' $hot
 fi
 
+# Production entropy is supplied only by hosts; formatters and venue signers are pure.
+random_sources=$(ls -d engine/src crypto/src venues/*/src)
+ban 'ambient randomness outside host adapters' 'getrandom::|rand::|uuid::(uuid\(|Uuid)|new_v4\(|\b(OsRng|ThreadRng|thread_rng)\b' $random_sources
+
 exit $status

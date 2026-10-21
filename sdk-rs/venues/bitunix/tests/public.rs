@@ -18,7 +18,7 @@ fn response(e: &mut Engine<BitunixFutures>, r: safe_cex_engine::RequestId, body:
     );
 }
 fn ready() -> (Engine<BitunixFutures>, SocketId) {
-    let mut e = Engine::new(BitunixFutures::new(Options {
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
         public_data_only: true,
         ..Options::default()
     }));
@@ -146,7 +146,8 @@ fn an_authoritative_empty_snapshot_clears_the_consumer_book() {
 }
 #[test]
 fn incomplete_stream_never_commits_a_partial_market_list() {
-    let mut e = Engine::new(BitunixFutures::new(Options::default()));
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
     e.start(0.0);
     let Action::Http(r) = e.drain_actions().next().unwrap() else {
         panic!()
@@ -195,7 +196,8 @@ fn rejects_http_200_failure_envelopes_even_with_an_empty_data_array() {
         r#"{"data":[],"code":10001,"msg":"failure"}"#,
         r#"{"code":0,"data":[]"#,
     ] {
-        let mut e = Engine::new(BitunixFutures::new(Options::default()));
+        let mut e =
+            safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
         e.start(0.0);
         let Action::Http(r) = e.drain_actions().next().unwrap() else {
             panic!()
@@ -207,7 +209,8 @@ fn rejects_http_200_failure_envelopes_even_with_an_empty_data_array() {
 
 #[test]
 fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
-    let mut e = Engine::new(BitunixFutures::new(Options::default()));
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
     e.start(0.0);
     let Action::Http(r) = e.drain_actions().next().unwrap() else {
         panic!()

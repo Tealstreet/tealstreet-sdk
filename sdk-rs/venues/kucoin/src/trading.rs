@@ -313,7 +313,7 @@ impl Kucoin {
         };
         let oid = match &order.client_order_id {
             Some(id) => id.clone(),
-            None => safe_cex_crypto::uuid::uuid()?,
+            None => safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?,
         };
         let price = |n: f64| num::format(num::adjust(n, market.precision.price));
         let (up, down) = if order.side == OrderSide::Buy {

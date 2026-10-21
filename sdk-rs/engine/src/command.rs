@@ -865,7 +865,7 @@ mod tests {
     /// the last one armed, counting the native arm at startup.
     #[cfg(feature = "polling-control")]
     fn armed_after(change: impl FnOnce(&mut crate::Engine<PollVenue>)) -> Vec<f64> {
-        let mut engine = crate::Engine::new(PollVenue);
+        let mut engine = crate::test_support::seeded_engine(PollVenue);
         engine.start(0.0);
         change(&mut engine);
         let armed: Vec<_> = engine

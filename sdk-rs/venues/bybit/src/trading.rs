@@ -1135,6 +1135,7 @@ impl BybitLinear {
                     .as_ref()
                     .map_or_else(|(code, _)| *code == LEVERAGE_NOT_MODIFIED, |_| true) =>
             {
+                self.note_leverage_ack();
                 cx.store.update_setting(&symbol, |s| s.leverage = leverage);
                 cx.store.update_positions(|p| {
                     if p.symbol == symbol {
@@ -1654,7 +1655,9 @@ impl BybitLinear {
             return Err("A limit option needs a price or implied volatility".into());
         }
         let generated = if opts.client_order_id.is_none() {
-            Some(safe_cex_crypto::uuid::uuid()?)
+            Some(safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+                cx.fill_entropy(bytes)
+            })?)
         } else {
             None
         };

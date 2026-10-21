@@ -547,7 +547,8 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
 fn malformed_nonempty_private_secret_fails_locally_before_io() {
     let mut opts = options();
     opts.secret = Some("invalid base64!".into());
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(opts));
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(safe_cex_venue_kraken::KrakenSpot::new(opts));
     e.start(NOW);
     let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(

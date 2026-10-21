@@ -321,7 +321,7 @@ impl Backpack {
         used: &HashSet<u32>,
     ) -> Result<u32, String> {
         if self.trading.next_client == 0 {
-            let random = safe_cex_crypto::uuid::uuid()?;
+            let random = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?;
             self.trading.next_client = u32::from_le_bytes(
                 safe_cex_crypto::sha256(random.as_bytes())[..4]
                     .try_into()

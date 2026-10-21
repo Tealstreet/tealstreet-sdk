@@ -1,6 +1,6 @@
 use super::*;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, Engine, ReadCredentials};
+use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -31,7 +31,7 @@ fn probe(venue: Bitrue) -> ProbeVenue<Bitrue, impl FnMut(&mut Bitrue, &mut Cx<'_
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(probe(Bitrue::new(options())));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Bitrue::new(options())));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()
@@ -74,7 +74,7 @@ fn secondary_get_keeps_primary_mutations() {
 fn invalid_secondary_identity_stops_startup_before_io() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = Engine::new(Bitrue::new(opts));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(opts));
     engine.start(1700000000000.0);
     assert!(
         !engine
@@ -85,7 +85,7 @@ fn invalid_secondary_identity_stops_startup_before_io() {
 
 #[test]
 fn catalog_get_uses_primary_unlimited_client_identity_and_route() {
-    let mut engine = Engine::new(Bitrue::new(options()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(options()));
     engine.start(1700000000000.0);
     let requests: Vec<_> = http_requests(&mut engine)
         .into_iter()

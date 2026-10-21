@@ -50,7 +50,7 @@ impl Harness {
     }
 
     pub fn started_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(BinanceFutures::new(options));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(options));
         engine.set_public_feed_policy(policy).unwrap();
         let mut harness = Self {
             engine,
