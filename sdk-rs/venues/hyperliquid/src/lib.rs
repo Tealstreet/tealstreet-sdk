@@ -1064,6 +1064,8 @@ impl Venue for Hyperliquid {
             safe_cex_engine::Capabilities::NO_HISTORY
         } else {
             safe_cex_engine::Capabilities {
+                position_history: safe_cex_engine::PositionHistory::FillsSymbol,
+                fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
                 ..safe_cex_engine::Capabilities::BASE
             }

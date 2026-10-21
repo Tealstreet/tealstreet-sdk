@@ -618,6 +618,7 @@ impl Venue for Orderly {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            reject_order_history_filters: true,
             cancel_all: safe_cex_engine::CancelAll::Native,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,

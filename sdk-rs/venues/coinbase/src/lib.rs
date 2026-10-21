@@ -118,6 +118,10 @@ impl Venue for Coinbase {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
+            finite_command_numbers: true,
+            finite_history_bounds: true,
+            reject_order_history_filters: true,
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,

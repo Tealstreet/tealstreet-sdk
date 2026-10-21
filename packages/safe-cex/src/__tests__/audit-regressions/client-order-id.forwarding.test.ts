@@ -1,3 +1,4 @@
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -302,6 +303,7 @@ const CASES: Case[] = [
     'clientOrderId',
     async (id) => {
       const exchange = create(OrderlyExchange, 'salsadex');
+      adoptEngineCapabilities(exchange);
       const command = vi.fn(async (_command: { orders: PlaceOrderOpts[] }) => ['99']);
       exchange.host = { command };
       await exchange.placeOrder(limit({ clientOrderId: id }));

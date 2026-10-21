@@ -1321,6 +1321,11 @@ impl Venue for BinanceFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
+                position_history: if self.options.variant == Variant::UsdM {
+                    safe_cex_engine::PositionHistory::FillsSymbol
+                } else {
+                    safe_cex_engine::PositionHistory::Unsupported
+                },
                 client_order_lookup: true,
                 account: safe_cex_engine::AccountLookup::Query,
                 ..safe_cex_engine::Capabilities::BASE

@@ -1090,6 +1090,58 @@ mod tests {
                 ),
                 host_clock: any(&["backpack", "coinbase", "coinbasespot"], venue)
                     || any(&ORDERLY, venue),
+                position_history: match venue {
+                    "kraken" | "bitget" | "bitgetusdc" | "bitgetinverse" => {
+                        safe_cex_engine::PositionHistory::FillsAccount
+                    }
+                    "binance" | "hyperliquid" | "paradex" => {
+                        safe_cex_engine::PositionHistory::FillsSymbol
+                    }
+                    "bybit" | "bybitdemo" | "hyrotrader" => safe_cex_engine::PositionHistory::Bybit,
+                    "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
+                        safe_cex_engine::PositionHistory::Okx
+                    }
+                    "blofin" => safe_cex_engine::PositionHistory::Blofin,
+                    "woo" => safe_cex_engine::PositionHistory::WooOrders,
+                    _ => safe_cex_engine::PositionHistory::Unsupported,
+                },
+                closed_position_format: match venue {
+                    "bybit" | "bybitdemo" | "hyrotrader" | "bybitinverse" => {
+                        safe_cex_engine::ClosedPositionFormat::Bybit
+                    }
+                    "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
+                        safe_cex_engine::ClosedPositionFormat::Okx
+                    }
+                    "blofin" => safe_cex_engine::ClosedPositionFormat::Blofin,
+                    _ => safe_cex_engine::ClosedPositionFormat::Unsupported,
+                },
+                fill_history_time: match venue {
+                    "woo" => safe_cex_engine::FillHistoryTime::NonnegativeSecondsOrMilliseconds,
+                    "apexomni" | "blofin" | "bitrue" | "grvt" | "hyperliquid" | "paradex"
+                    | "lighter" | "lighter-robinhood" | "kraken" | "coinbase" | "coinbasespot" => {
+                        safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds
+                    }
+                    _ => safe_cex_engine::FillHistoryTime::AsProvided,
+                },
+                stp_controls: venue == "asterdex",
+                bybit_execution_controls: any(
+                    &[
+                        "bybit",
+                        "bybitinverse",
+                        "bybitspot",
+                        "bybitdemo",
+                        "hyrotrader",
+                    ],
+                    venue,
+                ),
+                reject_client_slippage: venue == "hyrotrader",
+                finite_command_numbers: any(&["coinbase", "coinbasespot"], venue),
+                finite_history_bounds: any(&["coinbase", "coinbasespot"], venue),
+                reject_order_history_filters: any(&["coinbase", "coinbasespot", "txflow"], venue)
+                    || any(&ORDERLY, venue),
+                public_catalogue_validation: venue == "breakoutprop",
+                isolated_book_subscriptions: venue == "asterdex",
+                inverse_closed_positions: venue == "bybitinverse",
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

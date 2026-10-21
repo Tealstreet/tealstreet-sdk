@@ -660,6 +660,7 @@ impl Venue for Lighter {
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             account_tier: true,
             account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE

@@ -29,7 +29,8 @@ pub mod url;
 pub mod wire;
 
 pub use capabilities::{
-    AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
+    AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
+    MaxLeverage, PositionHistory, QuantityUnits,
 };
 pub use credentials::ReadCredentials;
 pub use engine::{
