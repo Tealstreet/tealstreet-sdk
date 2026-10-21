@@ -91,9 +91,41 @@ events, `getHealth`), #1450 (B5), #1510 and #1531 (payload-signer routing, narro
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
 cannot proceed for the affected venues/hosts until one does.
 
-**Re-run** when a contract PR merges (none pending; the error lane's #1518 is internal): repeat the three scans in
+**Re-run** when a contract PR merges: repeat the three scans in
 [Audit method](#audit-method), then update the Status and Resolving PRs columns
-and the rows that cite that PR.
+and the rows that cite that PR. Open contract work is tracked separately from
+the merged behavior below; in particular #1430's FILLS revision 2 is not landed.
+
+### Contract refresh, 2026-10-21
+
+Checked landing `5b0c16a952e`, including the merges after the last refresh
+(#1549, `00efd136bb6`) and the earlier candidates named in the handoff.
+The following rows record the caller effect, including changes requiring no
+downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
+
+| Merged PR / landing commit | Contract and caller effect |
+| --- | --- |
+| #1476 / `0741419bf2` | Local signing-credential validation moves from TS into `safe-cex-venues`, shared by WASM/native construction. The existing error text and `start()` rejection remain; engine loading now precedes this validation. B2's hosted TS hedge and #1531's payload-signer routing remain in force. |
+| #1519 / `9363852438` | One options blob reaches every venue; each Rust arm consumes its fields. No caller edit. A non-AsterDEX secondary read key without a secret now gets `Secondary read credentials require a nonempty key and secret`, replacing a decode error; AsterDEX keeps its separate read-agent rules. |
+| #1520 / `418e4f6ebc` | Engine capability `hostClock` (CAPABILITIES bit 14) replaces the bridge's virtual-clock name list for Backpack, Coinbase/spot and Orderly. Same corrected signing time; no caller edit. Ship matching engine and reader. |
+| #1529 / `ea39da2a1b` | BloFin historical-order `amount`/`filled` use base units, as fills/open orders already do; unknown-market rows are omitted. The owner-run `historical_orders` backfill remains required before Rust ingestion. |
+| #1531 / `a4d17f8a88` | Only private Bybit/Binance-family `payloadSigner` accounts fall back to TS. Other non-Paradex private Rust accounts refuse the option as `unsupported`/`notSent`; the construction row below already records the MCP effect. |
+| #1542 / `7ee1411110` and #1554 / `f52f08ea65` | Kraken futures returns the available newest ledger page when its 500-row page cannot be traversed, with `history.incomplete`; Binance exhausted income walks also warn. #1554 adds command-correlated, non-enumerable `incomplete: true` to those array results in the JS WASM host. Forwarding and ingestion must preserve/read it (B11). Kraken HTTP failures also retain the venue error code in their text. |
+| #1551 / `c2a36b7ca1` | Binance native stop-limit orders refuse `updateOrder` as `unsupported`/`notSent`, before cancellation, instead of becoming stop-market orders with the wrong trigger. Regular stop-market amend remains supported. Surface the refusal; no new call shape. |
+| #1513 / `084a326abf` | Cancel/amend of a just-acknowledged placement may wait for its order-store row on opted-in venues, up to 10 s before dispatch. Chaser STOP already waits for placement IDs; no caller edit. A timeout still requires reconciliation before retry. |
+| #1527 / `8c1e779021` | A book-cadence frame carrying fills also carries pending store sections; worker/main consumers apply orders before emitting those fills. No reader or FILLS revision change. Venue-delivered execution-before-order ordering remains possible. |
+| #1538 / `c18c30e45e` | First venue batch uses coded log events; duplicate auth notices in one dispatch count once. Native-session/DO validators must accept the event notice contract (#1388). No new `exchange.on` code payload: B9's classified fields remain the host integration. |
+| #1547 / `e8ad6facc1` | Hyperliquid zero TP/SL prices omit that bracket leg; unified/portfolio spot holdings populate `balance.coins` for the margin panel. `currencies` remains unset to preserve sizing. No caller edit. |
+| #1555 / `92a1608191` | Bybit OHLCV with `limit` ignores `from` and returns the newest bars ending at `to`, as TS. Chart/history callers keep the same arguments. |
+| #1546 / `2bd1ef7ae8` and #1556 / `5b0c16a952` | Mobile options/costing and existing production issues are documented in [RUST_MOBILE_B3.md](RUST_MOBILE_B3.md). B3 and the app fixes remain owner items. |
+
+#1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
+headroom), and the #1541/#1544/#1548 replay-clock fixes do not change a
+downstream call shape. They add no cutover edit here. **Pending:** #1430
+adds native account reads and optional fill financials/FILLS revision 2; #1501
+and #1506 change Hyperliquid combined-product/metadata coverage; #1522 changes
+leverage reads. Re-audit those when merged rather than treating their proposed
+contracts as available.
 
 ### Summary: cutover blockers (no new equivalent)
 
