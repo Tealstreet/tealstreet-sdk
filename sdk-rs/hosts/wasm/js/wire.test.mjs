@@ -1047,3 +1047,65 @@ test('market flags carry quantity units in bits 8..12', () => {
   assert.equal(marketQuantityUnits(1 | (3 << 8)), 'contractCount');
   assert.throws(() => marketQuantityUnits(9 << 8), /unknown market quantity units/);
 });
+
+function executionFrame(count) {
+  const data = Math.ceil((4 + count * 12) / 8) * 8;
+  const ids = data + count * 20;
+  const financialAt = Math.ceil((ids + count * 4) / 8) * 8;
+  return withStrings(numericFrame([
+    { kind: SECTION.FILLS, revision: 2, length: financialAt + count * 16, write(view, at) {
+      view.setUint32(at, count, true);
+      for (let i = 0; i < count; i++) {
+        view.setUint32(at + 4 + i * 4, 0, true);
+        view.setUint32(at + 4 + count * 4 + i * 4, NONE, true);
+        view.setUint32(at + 4 + count * 8 + i * 4, i % 2, true);
+        view.setFloat64(at + data + i * 16, 100 + i, true);
+        view.setFloat64(at + data + i * 16 + 8, i + 1, true);
+        view.setUint32(at + data + count * 16 + i * 4, 1, true);
+        view.setUint32(at + ids + i * 4, i === 1 ? NONE : i ? 3 : 2, true);
+        view.setFloat64(at + financialAt + i * 8, i === 1 ? NaN : -i, true);
+        view.setFloat64(at + financialAt + count * 8 + i * 8, i === 1 ? NaN : -i / 10, true);
+      }
+    } },
+    { kind: SECTION.STATUS, length: 16, write(view, at) { view.setUint32(at, 31, true); } },
+  ]), ['native-order', 'DELISTED-PERP', '9007199254740997', 'execution-2']);
+}
+
+test('revision two fills distinguish execution ids from order ids and preserve aligned financial columns', () => {
+  for (const count of [0, 1, 2, 3]) {
+    const frame = executionFrame(count);
+    const rows = frame.fills();
+    assert.equal(frame.first(SECTION.FILLS).revision, 2);
+    assert.equal(rows.count, count);
+    for (let i = 0; i < count; i++) {
+      assert.equal(rows.orderId(i), 'native-order');
+      assert.equal(rows.fillId(i), i === 1 ? undefined : i ? 'execution-2' : '9007199254740997');
+      assert.equal(rows.symbol(i), 'DELISTED-PERP');
+      assert.equal(rows.market[i], NONE);
+      assert.deepEqual([...rows.rows.slice(i * 2, i * 2 + 2)], [100 + i, i + 1]);
+      assert.equal(rows.realizedPnl[i], i === 1 ? NaN : -i);
+      assert.equal(rows.fee[i], i === 1 ? NaN : -i / 10);
+    }
+    assert.equal(frame.status().loaded, 31);
+  }
+});
+
+test('revision two rejects invalid identity refs, truncated columns and unsupported future revisions', () => {
+  const frame = executionFrame(1);
+  const section = frame.first(SECTION.FILLS);
+  new DataView(frame.buffer).setUint32(section.offset + 36, 100, true);
+  assert.throws(() => frame.fills().fillId(0), /invalid string reference/);
+  new DataView(frame.buffer).setUint32(section.offset + 36, NONE, true);
+  assert.equal(frame.fills().fillId(0), undefined);
+  for (const count of [1, 2, 3]) {
+    const valid = executionFrame(count).first(SECTION.FILLS).length;
+    for (const length of [4, 8, valid - 16, valid - 8, valid + 8]) {
+      const malformed = numericFrame([{ kind: SECTION.FILLS, revision: 2, length,
+        write(view, at) { view.setUint32(at, count, true); } }]);
+      assert.throws(() => malformed.fills(), /invalid fill section length|truncated/);
+    }
+  }
+  for (const [kind, revision] of [[SECTION.FILLS, 3], [SECTION.SETTINGS, 2]]) {
+    assert.throws(() => numericFrame([{ kind, revision, length: 0, write() {} }]), /unsupported section/);
+  }
+});

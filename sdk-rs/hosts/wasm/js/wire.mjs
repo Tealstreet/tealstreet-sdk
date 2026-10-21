@@ -198,7 +198,7 @@ export class Frame {
       if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
       const revision = header.getUint16(offset + 2, true);
-      if (KNOWN_SECTIONS.has(kind) && revision > (REVISED_SECTIONS.has(kind) ? 1 : 0)) {
+      if (KNOWN_SECTIONS.has(kind) && revision > (kind === SECTION.FILLS ? 2 : REVISED_SECTIONS.has(kind) ? 1 : 0)) {
         throw new Error(`unsupported section ${kind} revision ${revision}`);
       }
       const length = header.getUint32(offset + 4, true);
@@ -585,21 +585,25 @@ export class Frame {
     const count = rowCount(this, section);
     const data = align8(section.offset + 4 + count * 12);
     const numericEnd = data + count * 16;
-    // Revision 1 appends native symbol refs before the optional aligned tails.
-    const baselineEnd = numericEnd + (section.revision === 1 ? count * 4 : 0);
+    // Revision 1 has optional financial tails; revision 2 explicitly adds
+    // execution refs and always carries the aligned financial columns.
+    const baselineEnd = numericEnd + (section.revision >= 1 ? count * 4 : 0);
     requireEnd(section, baselineEnd);
     const end = section.offset + section.length;
-    const financialAt = align8(baselineEnd);
-    const financials = end !== baselineEnd && end !== financialAt;
+    const idsEnd = baselineEnd + (section.revision === 2 ? count * 4 : 0);
+    const financialAt = align8(idsEnd);
+    const financials = section.revision === 2 || (end !== baselineEnd && end !== financialAt);
     if (financials && end !== financialAt + count * 16) throw new Error('invalid fill section length');
     const orderId = new Uint32Array(buffer, section.offset + 4, count);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const side = new Uint32Array(buffer, section.offset + 4 + count * 8, count);
     const rows = new Float64Array(buffer, data, count * 2);
-    const symbols = section.revision === 1 ? new Uint32Array(buffer, numericEnd, count) : undefined;
+    const symbols = section.revision >= 1 ? new Uint32Array(buffer, numericEnd, count) : undefined;
+    const ids = section.revision === 2 ? new Uint32Array(buffer, baselineEnd, count) : undefined;
     return { count, market, side, rows,
       ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
       orderId: (i) => requiredString(this, orderId[i]),
+      ...(ids && { fillId: (i) => this.string(ids[i]) }),
       ...(financials ? {
         realizedPnl: new Float64Array(buffer, financialAt, count),
         fee: new Float64Array(buffer, financialAt + count * 8, count),

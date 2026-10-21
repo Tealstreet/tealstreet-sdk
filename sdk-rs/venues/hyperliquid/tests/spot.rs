@@ -1168,6 +1168,16 @@ fn spot_fill_frames_keep_native_order_identity_and_each_distinct_execution() {
     }
     // Three u32 columns follow count; the numeric rows begin at the next 8-byte boundary.
     let numbers = (fills + 4 + 2 * 3 * 4).next_multiple_of(8);
+    assert_eq!(
+        u16::from_le_bytes(frame[fills - 6..fills - 4].try_into().unwrap()),
+        2
+    );
+    for (i, expected) in ["12345", "12346"].iter().enumerate() {
+        let index = read(numbers + 2 * 20 + i * 4);
+        let start = read(strings + 4 + index * 4);
+        let end = read(strings + 8 + index * 4);
+        assert_eq!(&frame[text + start..text + end], expected.as_bytes());
+    }
     let amount = |i: usize| {
         f64::from_le_bytes(
             frame[numbers + i * 16 + 8..numbers + i * 16 + 16]
