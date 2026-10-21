@@ -2,9 +2,11 @@ use crate::{
     Orderly, Pending,
     wire::{Id, N, Rest, checked},
 };
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -1120,11 +1122,11 @@ impl Orderly {
             } else {
                 cx.done(
                     job.command,
-                    Ok(if job.collect {
+                    if job.collect {
                         json(&job.ids)
                     } else {
                         "[]".into()
-                    }),
+                    },
                 );
             }
             self.trade_queued(cx);
@@ -1425,7 +1427,7 @@ impl Orderly {
                                 Ok(effective) => effective,
                                 Err(_) => {
                                     // The account write succeeded independently of market metadata.
-                                    cx.log(LogLevel::Warning, format!("Orderly invalid leverage limits for {s}; using confirmed account leverage"));
+                                    cx.notice(Level::Warn, code::SETTING_CAUTION, format!("Orderly invalid leverage limits for {s}; using confirmed account leverage"));
                                     *value
                                 }
                             };
@@ -1488,10 +1490,10 @@ impl Orderly {
                     let job = self.trading.active.take().unwrap();
                     cx.done(
                         job.command,
-                        Ok(json(&Rails {
+                        json(&Rails {
                             buy_leverage: value,
                             sell_leverage: value,
-                        })),
+                        }),
                     );
                     self.trade_queued(cx);
                     return Ok(());

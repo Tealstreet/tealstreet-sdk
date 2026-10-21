@@ -3,8 +3,10 @@ use crate::account::{Axis, NativeOrder};
 use crate::sign::Params;
 use crate::wire::{Num, Str, data};
 use crate::{BitunixFutures, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, Cx, LogLevel, Method, Response, TimerId, num};
+use safe_cex_engine::{Command, Cx, Method, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 const PLACE: &str = "/api/v1/futures/trade/place_order";
@@ -228,8 +230,8 @@ fn split_quantities(
 
 impl BitunixFutures {
     fn reject(&self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
-        cx.log(LogLevel::Error, &error);
-        cx.done(command, Err(error));
+        cx.notice(Level::Error, code::ORDER_REJECTED, &error);
+        cx.fail(command, error);
     }
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut ids = HashSet::new();
@@ -1153,7 +1155,7 @@ impl BitunixFutures {
             let job = self.trading.jobs.remove(&command).unwrap();
             cx.store
                 .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
-            cx.done(command, Ok(text(&job.ids)));
+            cx.done(command, text(&job.ids));
             return;
         };
         if step.delay > 0.0 {
@@ -1386,8 +1388,9 @@ impl BitunixFutures {
                             }
                         }
                         for f in rows.failure_list {
-                            cx.log(
-                                LogLevel::Error,
+                            cx.notice(
+                                Level::Error,
+                                code::ORDER_REJECTED,
                                 format!("{} ({})", f.error_msg, f.error_code.0),
                             );
                         }

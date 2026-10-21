@@ -4,14 +4,16 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -451,10 +453,7 @@ impl Bitrue {
     fn public_read(&mut self, cx: &mut Cx<'_, Pending>, channel: String, request: SocketRead) {
         if self.reads.values().map(Vec::len).sum::<usize>() >= 32 {
             cx.clear_timer(request.timer);
-            cx.done(
-                request.command,
-                Err("Too many Bitrue public requests".into()),
-            );
+            cx.fail(request.command, "Too many Bitrue public requests");
             return;
         }
         let queue = self.reads.entry(channel.clone()).or_default();
@@ -471,11 +470,11 @@ impl Bitrue {
         limit: Option<u32>,
     ) {
         let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-            cx.done(command, Err("Unknown Bitrue market".into()));
+            cx.fail(command, "Unknown Bitrue market");
             return;
         };
         if !self.public.open {
-            cx.done(command, Err("Bitrue public socket not connected".into()));
+            cx.fail(command, "Bitrue public socket not connected");
             return;
         }
         let limit = limit.unwrap_or(100).clamp(1, 300);
@@ -547,7 +546,10 @@ impl Bitrue {
                     }
                 }
             };
-            cx.done(request.command, result);
+            match result {
+                Ok(data) => cx.done(request.command, data),
+                Err(error) => cx.fail(request.command, error),
+            };
         }
         self.reads.retain(|_, v| !v.is_empty());
         self.send_socket_read(cx, &message.channel);
@@ -577,7 +579,7 @@ impl Venue for Bitrue {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            cx.log(LogLevel::Error, error);
+            cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
         self.markets(cx);
@@ -730,10 +732,7 @@ impl Venue for Bitrue {
         for reads in self.reads.drain().map(|(_, v)| v) {
             for read in reads {
                 cx.clear_timer(read.timer);
-                cx.done(
-                    read.command,
-                    Err("Bitrue public socket disconnected".into()),
-                );
+                cx.fail(read.command, "Bitrue public socket disconnected");
             }
         }
         for (symbol, state) in &mut self.books {
@@ -843,7 +842,11 @@ impl Venue for Bitrue {
                 malformed,
             } => {
                 if !(200..300).contains(&response.status) || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Bitrue contracts read failed");
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "Bitrue contracts read failed",
+                    );
                     self.startup_retry.failed(cx, ());
                     return;
                 }
@@ -929,7 +932,11 @@ impl Venue for Bitrue {
         }
         match pending.job {
             Job::Markets { .. } => {
-                cx.log(LogLevel::Warning, format!("Bitrue contracts: {error}"));
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("Bitrue contracts: {error}"),
+                );
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
@@ -1038,7 +1045,11 @@ impl Venue for Bitrue {
                 interval: i,
             } => {
                 if interval(i).is_none() {
-                    cx.log(LogLevel::Error, i.unsupported("Bitrue"));
+                    cx.notice(
+                        Level::Error,
+                        code::COMMAND_UNSUPPORTED,
+                        i.unsupported("Bitrue"),
+                    );
                     return;
                 }
                 if let (Some(symbol), Some(mapped)) =
@@ -1082,22 +1093,22 @@ impl Venue for Bitrue {
                 to_ms,
             } => {
                 let Some(mapped) = interval(i) else {
-                    cx.done(command, Err(i.unsupported("Bitrue")));
+                    cx.fail(command, i.unsupported("Bitrue"));
                     return;
                 };
                 let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-                    cx.done(command, Err("Unknown Bitrue market".into()));
+                    cx.fail(command, "Unknown Bitrue market");
                     return;
                 };
                 if !self.public.open {
-                    cx.done(command, Err("Bitrue public socket not connected".into()));
+                    cx.fail(command, "Bitrue public socket not connected");
                     return;
                 }
                 if from_ms.is_some_and(|v| !v.is_finite())
                     || to_ms.is_some_and(|v| !v.is_finite())
                     || matches!((from_ms,to_ms),(Some(f),Some(t))if f>t)
                 {
-                    cx.done(command, Err("Invalid candle range".into()));
+                    cx.fail(command, "Invalid candle range");
                     return;
                 }
                 let timer = cx.set_timer(5000.0);
@@ -1179,8 +1190,9 @@ fn reread_partial<P>(
         0
     };
     if *stalls == 5 {
-        cx.log(
-            safe_cex_engine::LogLevel::Warning,
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
             format!("Bitrue stops re-reading a catalogue with {after} malformed markets"),
         );
     }

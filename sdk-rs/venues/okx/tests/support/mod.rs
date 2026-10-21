@@ -25,9 +25,9 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
         .drain_actions()
         .map(|action| match action {
             Action::Notice(Notice::CommandFailed { command, error }) => {
-                Action::Notice(Notice::CommandDone {
+                Action::Notice(Notice::CommandFailed {
                     command,
-                    result: Err(error.legacy_text()),
+                    error: error.clone(),
                 })
             }
             action => action,

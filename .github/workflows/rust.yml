@@ -250,6 +250,8 @@ jobs:
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
+      # Five correctness pairs only for the venue's tape-time sweep branch.
+      PRIVATE_REPLAY_RUNS: ${{ (github.head_ref || github.ref_name) == format('wip/harness-tape-time-{0}', matrix.venue) && '5' || '1' }}
     defaults:
       run:
         working-directory: .
@@ -326,7 +328,7 @@ jobs:
         run: yarn rust:test-live-smoke
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
-        run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs 1
+        run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
       - name: Public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: OKX inverse public books (correctness, CPU and memory)
@@ -339,17 +341,17 @@ jobs:
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
           yarn ${{ matrix.private_script }}
-          corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+          corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
       - name: Hyperliquid spot-enabled account and trading (correctness)
         if: matrix.venue == 'hyperliquid'
         run: |
           yarn rust:private-tape-hyperliquid --spot --out sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl
-          corepack yarn -s rust:gate:record --venue hyperliquid --tape sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl --runs 1 --books ''
+          corepack yarn -s rust:gate:record --venue hyperliquid --tape sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
       - name: Lighter testnet deployment signing and replay
         if: matrix.venue == 'lighter' || matrix.venue == 'lighter-robinhood'
         run: |
           yarn rust:private-tape-lighter --venue '${{ matrix.venue }}' --testnet --out sdk-rs/harness/tapes/lighter-testnet-private.jsonl
-          corepack yarn -s rust:gate:record --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --runs 1 --books ''
+          corepack yarn -s rust:gate:record --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |
@@ -361,7 +363,7 @@ jobs:
         run: |
           for venue in binancespot binanceinverse binancepm; do
             yarn "rust:private-tape-$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
       - name: Hyperliquid Spot compiled native account and trading contracts
         if: matrix.venue == 'hyperliquidspot'
@@ -376,13 +378,13 @@ jobs:
         if: matrix.venue == 'asterdex'
         run: |
           yarn rust:private-tape-asterdex-v3
-          corepack yarn -s rust:gate:record --venue asterdex --tape sdk-rs/harness/tapes/asterdex-v3-private.jsonl --runs 1 --books ''
+          corepack yarn -s rust:gate:record --venue asterdex --tape sdk-rs/harness/tapes/asterdex-v3-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
           yarn rust:test-asterdex-parity
       - name: Bitget inverse account and native contract sizing
         if: matrix.venue == 'bitget'
         run: |
           yarn rust:private-tape-bitgetinverse
-          corepack yarn -s rust:gate:record --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --runs 1 --books ''
+          corepack yarn -s rust:gate:record --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
       - name: Bitget UTA ledger and Classic/UTA trailing native contracts
         if: matrix.venue == 'bitget'
         run: yarn rust:test-bitget-parity
@@ -394,7 +396,7 @@ jobs:
         run: |
           for venue in okx okxeu okxdemo okxeudemo; do
             yarn rust:private-tape-okx --venue "$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
 
       - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
@@ -411,7 +413,7 @@ jobs:
         run: |
           for venue in bybitinverse bybitspot bybitdemo hyrotrader; do
             yarn "rust:private-tape-$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
@@ -422,7 +424,7 @@ jobs:
               suffix=''
               if [ "$network" = testnet ]; then extra+=(--testnet); suffix='-testnet'; fi
               yarn rust:private-tape-orderly --venue "$venue" "${extra[@]}"
-              corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --runs 1 --books ''
+              corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
             done
           done
       - name: Coinbase product and CDP algorithm variants (correctness)
@@ -432,13 +434,13 @@ jobs:
             for algorithm in ES256 EdDSA; do
               tape="sdk-rs/harness/tapes/coinbase-$profile-$algorithm-private.jsonl"
               yarn rust:private-tape-coinbase --venue coinbase --profile "$profile" --algorithm "$algorithm" --out "$tape"
-              corepack yarn -s rust:gate:record --venue coinbase --tape "$tape" --runs 1 --books ''
+              corepack yarn -s rust:gate:record --venue coinbase --tape "$tape" --runs "$PRIVATE_REPLAY_RUNS" --books ''
             done
           done
           for algorithm in ES256 EdDSA; do
             tape="sdk-rs/harness/tapes/coinbasespot-spot-$algorithm-private.jsonl"
             yarn rust:private-tape-coinbase --venue coinbasespot --profile spot --algorithm "$algorithm" --out "$tape"
-            corepack yarn -s rust:gate:record --venue coinbasespot --tape "$tape" --runs 1 --books ''
+            corepack yarn -s rust:gate:record --venue coinbasespot --tape "$tape" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
       # Collector steps retain strict FAIL reports so every product runs. Only
       # this mandatory verifier can certify the job; unknown/missing gates fail.

@@ -168,10 +168,7 @@ impl MexcFutures {
     pub fn start_query(&self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("MEXC client-order-ID lookup is unsupported".into()),
-                );
+                cx.fail(command, "MEXC client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -198,10 +195,7 @@ impl MexcFutures {
                     .as_deref()
                     .is_none_or(|k| !k.eq_ignore_ascii_case("FUNDING_FEE"))
                 {
-                    cx.done(
-                        command,
-                        Err("MEXC income supports only kind FUNDING_FEE".into()),
-                    );
+                    cx.fail(command, "MEXC income supports only kind FUNDING_FEE");
                     return;
                 }
                 (Kind::Funding, symbol, None, from_ms, to_ms, limit)
@@ -235,7 +229,7 @@ impl MexcFutures {
             None
         };
         if let Some(error) = error {
-            cx.done(command, Err(error.into()));
+            cx.fail(command, error);
             return;
         }
         let limit = limit.unwrap_or(100) as usize;
@@ -246,7 +240,7 @@ impl MexcFutures {
             pair => pair,
         };
         if window_from.zip(window_to).is_some_and(|(a, b)| a > b) {
-            cx.done(command, Err("Invalid MEXC query time range".into()));
+            cx.fail(command, "Invalid MEXC query time range");
             return;
         }
         let mut windows = VecDeque::new();
@@ -255,7 +249,7 @@ impl MexcFutures {
         } else if let (Some(a), Some(b)) = (window_from, window_to) {
             // Newest first: a limited read stops with the most recent rows.
             let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::NewestFirst, 1000) else {
-                cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
+                cx.fail(command, "MEXC query range exceeds 1000 windows");
                 return;
             };
             windows.extend(tiles.into_iter().map(|(a, b)| (Some(a), Some(b))));
@@ -534,12 +528,12 @@ impl MexcFutures {
                 return;
             }
         }
-        cx.done(
-            r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
-        );
+        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done(r.command, data),
+            Err(error) => cx.fail(r.command, error),
+        };
     }
     pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.done(r.command, Err(error.into()));
+        cx.fail(r.command, error);
     }
 }

@@ -20,7 +20,10 @@ fn result(e: &mut Driver) -> Result<String, String> {
             Action::Notice(Notice::CommandDone {
                 command: 77,
                 result,
-            }) => Some(result),
+            }) => Some(Ok(result)),
+            Action::Notice(Notice::CommandFailed { command: 77, error }) => {
+                Some(Err(error.legacy_text()))
+            }
             _ => None,
         })
         .expect("query completed")
@@ -478,10 +481,10 @@ fn query_preflight_rejects_unsupported_ledgers_ranges_and_noncanonical_ids() {
         ask(&mut e, query);
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 

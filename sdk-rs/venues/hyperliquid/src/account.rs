@@ -1,10 +1,12 @@
 //! Account scopes reconcile independently; a failed read never becomes empty state.
 use crate::{Hyperliquid, Pending, wire::*};
+use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -321,8 +323,9 @@ impl Hyperliquid {
                 && safe_cex_crypto::ethereum::private_key_address(secret)
                     .map_or(true, |actual| !actual.eq_ignore_ascii_case(expected))
             {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::CONFIG_INVALID,
                     "Hyperliquid invalid credentials: private key does not match API wallet",
                 );
             }
@@ -690,8 +693,9 @@ impl Hyperliquid {
                 if self.user().is_some() {
                     self.private_bootstrap(cx);
                 } else {
-                    cx.log(
-                        LogLevel::Error,
+                    cx.notice(
+                        Level::Error,
+                        code::CONFIG_INVALID,
                         "Hyperliquid account identity could not be resolved; re-add this account",
                     );
                 }
@@ -744,8 +748,9 @@ impl Hyperliquid {
                         self.apply_state(cx, &dex, &state, true, Some(settings_revision));
                     }
                 } else {
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::SNAPSHOT_DISCARDED,
                         "Malformed Hyperliquid account state; preserving last snapshot",
                     );
                 }
@@ -876,15 +881,16 @@ impl Hyperliquid {
                             .unknown_warned
                             .insert(format!("order:{}", row.coin.to_ascii_lowercase()))
                         {
-                            cx.log(
-                                LogLevel::Warning,
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
                                 format!("Hyperliquid skipped order {id} on an unknown market"),
                             );
                         }
                         coverage.reject(Some(id));
                     } else {
                         *valid = false;
-                        cx.log(LogLevel::Warning,
+                        cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
                             "Hyperliquid owned order has unavailable market metadata; preserving previous orders");
                     }
                 }
@@ -896,8 +902,9 @@ impl Hyperliquid {
                     let id = serde_json::from_str::<Identity>(item)
                         .ok()
                         .map(|row| row.oid.to_string());
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match &id {
                             Some(id) => format!("Hyperliquid skipped malformed order {id}"),
                             None => "Hyperliquid skipped malformed order without an id".into(),
@@ -943,7 +950,7 @@ impl Hyperliquid {
             Request::Builder => self.account.builder_approved = None,
             Request::Fees => {}
         }
-        cx.log(LogLevel::Warning, error);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.account.asset_retry_timer == Some(timer) {
@@ -978,8 +985,9 @@ impl Hyperliquid {
         }
         if self.account.role_timer == Some(timer) {
             self.account.role_timer = None;
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
                 "Hyperliquid identity resolution timed out",
             );
         }
@@ -1129,8 +1137,9 @@ impl Hyperliquid {
                     let coin = serde_json::from_str::<Identity>(raw.get())
                         .ok()
                         .map(|row| row.position.coin.to_ascii_lowercase());
-                    cx.log(
-                        LogLevel::Warning,
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
                         match &coin {
                             Some(coin) => format!("Hyperliquid skipped malformed position {coin}"),
                             None => "Hyperliquid skipped malformed position without a coin".into(),
@@ -1147,7 +1156,7 @@ impl Hyperliquid {
                 continue;
             }
             if !settled {
-                cx.log(LogLevel::Error,
+                cx.notice(Level::Error, code::SNAPSHOT_DISCARDED,
                     "Hyperliquid owned position has unavailable market metadata; preserving previous account snapshot");
                 return;
             }
@@ -1157,8 +1166,9 @@ impl Hyperliquid {
                 .unknown_warned
                 .insert(format!("position:{coin}"))
             {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
                     format!("Hyperliquid skipped position {coin} on an unknown market"),
                 );
             }
@@ -1367,8 +1377,9 @@ impl Hyperliquid {
     fn warn_unvalued(&mut self, cx: &mut Cx<'_, Pending>, unvalued: bool) {
         if unvalued && !self.account.valuation_warned {
             self.account.valuation_warned = true;
-            cx.log(
-                LogLevel::Warning,
+            cx.notice(
+                Level::Warn,
+                code::VALUATION_UNAVAILABLE,
                 "Hyperliquid collateral token has no valuation market; excluded from USD balance",
             );
         }
@@ -1576,7 +1587,7 @@ impl Hyperliquid {
                     && (b.total != 0.0 || b.hold != 0.0)
                     && (!price.is_finite() || price <= 0.0)
                 {
-                    cx.log(LogLevel::Error,
+                    cx.notice(Level::Error, code::SNAPSHOT_DISCARDED,
                         "Hyperliquid owned spot balance has unavailable valuation; preserving previous account snapshot");
                     return;
                 }
@@ -1647,8 +1658,9 @@ impl Hyperliquid {
             .flatten();
         let Some((equity, hold, unvalued)) = values else {
             if self.account.pending_spot.is_none() {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::VALUATION_UNAVAILABLE,
                     "Hyperliquid collateral valuation unavailable; retaining previous USD balance",
                 );
             }

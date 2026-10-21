@@ -3,10 +3,10 @@ use crate::account::id;
 use crate::sign::Params;
 use crate::wire::RestEnvelope;
 use crate::{Cryptocom, Pending};
+use safe_cex_engine::Level;
+use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Outcome, TimerId, VenueError, num,
-};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, TimerId, VenueError, num};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -336,11 +336,12 @@ impl Cryptocom {
                 return;
             }
             Command::SetPositionMode { command, .. } => {
-                cx.log(
-                    LogLevel::Warning,
+                cx.notice(
+                    Level::Warn,
+                    code::COMMAND_UNSUPPORTED,
                     "Position mode is always hedged on Crypto.com",
                 );
-                cx.done(command, Ok("[]".into()));
+                cx.done(command, "[]".into());
                 return;
             }
             _ => return,
@@ -400,7 +401,7 @@ impl Cryptocom {
                     }
                     cx.fail(command, error);
                 }
-                _ => cx.done(command, Ok(serde_json::to_string(&job.ids).unwrap())),
+                _ => cx.done(command, serde_json::to_string(&job.ids).unwrap()),
             }
         }
     }
