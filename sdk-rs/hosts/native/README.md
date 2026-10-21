@@ -163,7 +163,8 @@ JSON string, as in the WASM host) or `error`; a structured failure adds
 client's pending commands; the server allocates separate internal IDs. Duplicate
 pending IDs and resource-limit failures produce `type: "error"` (with `command`
 where known). Malformed JSON and binary commands produce an error without venue
-side effects. Logs (`type: "log"`, `level`, `message`), `type: "deactivate"`
+side effects. Diagnostics (`type: "event"`, `level: "debug" | "info" | "warn" | "error"`,
+`code`, `message`, optional `fields`), `type: "deactivate"`
 and `type: "startupFailed"` (with `detail`) notices go to all clients of the
 account. Results go only to their requester.
 
@@ -189,3 +190,9 @@ Orphan IDs remain reserved until the venue finishes: disconnect never cancels or
 replays a potentially submitted trading write. A permanently stuck venue job
 therefore continues to occupy a bounded slot. Exhausted internal IDs fail closed
 rather than wrapping. The server never retries client trading commands.
+
+Diagnostic codes are stable; messages are display data. Engine and host-origin
+warnings use the same event envelope. Warn+ is written to stderr without a
+client. Deploy safe-cex-server's event-aware NativeFrameSession before native
+clients rely on Info+ venue events; older sessions reject the envelope. This
+library change does not deploy the server.

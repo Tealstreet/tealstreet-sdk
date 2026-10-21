@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Event, Notice};
+use safe_cex_engine::{Action, Event, Notice, SocketId};
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -53,8 +53,7 @@ fn account_rows_on_a_malformed_market_hold_the_snapshot_and_report_once() {
     let logs: Vec<_> = e
         .drain_actions()
         .filter_map(|a| match a {
-            Action::Notice(Notice::Log { message, .. })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
                 ..
             })) if message.contains("BTC_USDC_PERP") => Some(message),
@@ -683,8 +682,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
-                Action::Notice(Notice::Log { message, .. })
-                | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     message,
                     ..
                 })) if message.contains("stops re-reading") => warned = true,
@@ -806,6 +804,109 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     );
 }
 
+/// Answers one position and order re-read and returns its logs.
+fn reread(e: &mut Driver, socket: SocketId, positions: &str, orders: &str) -> Vec<String> {
+    e.handle(1000.0, Event::WsOpened { socket });
+    for r in requests(e) {
+        if r.url.ends_with("/position") {
+            reply(e, &r, 200, positions);
+        } else if r.url.ends_with("/orders") {
+            reply(e, &r, 200, orders);
+        }
+    }
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) => Some(event.message),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    let row = |list: &str| list[1..list.len() - 1].to_owned();
+    let btc_position = row(&POSITIONS
+        .replace("SOL_USDC_PERP", "BTC_USDC_PERP")
+        .replace("\"5\"", "\"3\""));
+    let btc_order = ORDER
+        .replace("SOL_USDC_PERP", "BTC_USDC_PERP")
+        .replace("\"123\"", "\"456\"");
+    let positions =
+        |sol: &str, btc: &str| format!("[{},{btc}]", row(POSITIONS).replace("\"5\"", sol));
+    let orders = |price: &str, btc: &str| format!("[{},{btc}]", ORDER.replace("\"140\"", price));
+    let (mut e, socket, _, _) = ready_catalogue(
+        MARKETS,
+        &positions("\"5\"", &btc_position),
+        &orders("\"140\"", &btc_order),
+    );
+    let stored_position = e.store().position("BTC_USDC_PERP-long").unwrap().clone();
+    let stored_order = e.store().order("456").unwrap().clone();
+    e.drain_actions().for_each(drop);
+
+    let bad_position = btc_position.replace(r#""entryPrice":"140","#, "");
+    let bad_order = btc_order.replace(r#""side":"Bid","#, "");
+    for round in 0..2 {
+        let logs = reread(
+            &mut e,
+            socket,
+            &positions("\"7\"", &bad_position),
+            &orders("\"141\"", &bad_order),
+        );
+        let store = e.store();
+        assert_eq!(store.position("SOL_USDC_PERP-long").unwrap().contracts, 7.0);
+        assert_eq!(store.position("BTC_USDC_PERP-long"), Some(&stored_position));
+        assert_eq!(store.order("123").unwrap().price, 141.0);
+        assert_eq!(store.order("456"), Some(&stored_order));
+        let skips: Vec<_> = logs.iter().filter(|l| l.contains("skipped")).collect();
+        if round == 0 {
+            assert_eq!(
+                skips,
+                [
+                    "Backpack skipped malformed order row 456",
+                    "Backpack skipped malformed position row BTC_USDC_PERP"
+                ],
+                "{logs:?}"
+            );
+        } else {
+            assert!(skips.is_empty(), "logged once: {logs:?}");
+        }
+        assert!(!logs.iter().any(|l| l.contains('{') || l.contains("140")));
+    }
+
+    let sol_only = POSITIONS.replace("\"5\"", "\"7\"");
+    reread(&mut e, socket, &sol_only, &format!("[{ORDER}]"));
+    let store = e.store();
+    assert_eq!(store.positions().len(), 1);
+    assert!(store.position("BTC_USDC_PERP-long").is_none());
+    assert_eq!(store.orders().len(), 1);
+    assert!(store.order("456").is_none());
+}
+#[test]
+fn undecodable_rows_on_a_malformed_market_still_hold_the_snapshot() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    let position = r#"[{"symbol":"BTC_USDC_PERP","netQuantity":null},{"symbol":"SOL_USDC_PERP","netQuantity":"5","entryPrice":"140","netExposureNotional":"705","pnlUnrealized":"5","estLiquidationPrice":"100"}]"#;
+    for (order, held) in [
+        (
+            r#"{"id":"456","symbol":"BTC_USDC_PERP","quantity":null}"#,
+            true,
+        ),
+        (r#"{"id":456,"symbol":"BTC_USDC_PERP","status":7}"#, true),
+        (
+            r#"{"id":"456","symbol":"BTC_USDC_PERP","status":"Filled","quantity":null}"#,
+            false,
+        ),
+    ] {
+        let (e, _, logs, _) = ready_catalogue(&markets, position, &format!("[{order},{ORDER}]"));
+        let loaded = e.store().loaded();
+        assert_eq!((loaded.positions, loaded.orders), (false, !held), "{order}");
+        assert!(
+            logs.iter()
+                .any(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is held")),
+            "{logs:?}"
+        );
+    }
+}
+
 #[test]
 fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
     for step in ["0", "-0.001"] {
@@ -900,4 +1001,47 @@ fn unproven_missing_quantities_keep_prior_orders_and_never_start_repair() {
             "{case}"
         );
     }
+}
+
+#[test]
+fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair() {
+    let peer = ORDER.replace("\"id\":\"123\"", "\"id\":\"456\"");
+    let (mut e, socket, _, _) = ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER},{peer}]"));
+    let retained = e.store().order("123").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    let mut bad: serde_json::Value = serde_json::from_str(ORDER).unwrap();
+    bad["quantity"] = serde_json::Value::Null;
+    bad["triggerPrice"] = "130".into();
+    bad["triggerQuantity"] = "0".into();
+    for (round, price) in ["141", "142"].into_iter().enumerate() {
+        let good = peer.replace("\"price\":\"140\"", &format!("\"price\":\"{price}\""));
+        e.handle(1000.0, Event::WsOpened { socket });
+        for request in requests(&mut e) {
+            if request.url.ends_with("/position") {
+                reply(&mut e, &request, 200, POSITIONS);
+            } else if request.url.ends_with("/orders") {
+                reply(&mut e, &request, 200, &format!("[{bad},{good}]"));
+            }
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let skipped = actions
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::Event(event))
+                        if event.message == "Backpack skipped malformed order row 123"
+                )
+            })
+            .count();
+        assert_eq!(skipped, usize::from(round == 0), "row rejection logs once");
+        assert_eq!(e.store().order("123"), Some(&retained));
+        assert_eq!(
+            e.store().order("456").unwrap().price,
+            price.parse::<f64>().unwrap()
+        );
+        assert!(!actions.iter().any(|action|matches!(action,Action::Http(request) if request.method!=safe_cex_engine::Method::Get)));
+    }
+    reread(&mut e, socket, POSITIONS, "[]");
+    assert!(e.store().orders().is_empty());
 }

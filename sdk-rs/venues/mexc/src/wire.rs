@@ -241,6 +241,20 @@ pub fn id<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
     })
 }
 
+/// What a private list row that failed to decode still says about its identity.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RowIdentity<'a> {
+    #[serde(borrow)]
+    pub currency: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow, deserialize_with = "id")]
+    pub order_id: Str<'a>,
+    #[serde(borrow, alias = "stopPlanOrderId", deserialize_with = "id")]
+    pub id: Str<'a>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset<'a> {

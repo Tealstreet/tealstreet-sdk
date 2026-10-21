@@ -120,6 +120,11 @@ const canonicalParams = (params, callerIds, options = {}) =>
 
 export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
+  // Historical OKX tapes predate the October 2026 move from 8443 to default TLS.
+  // Alias only the documented socket hosts and channels; keep REST/other ports exact.
+  if (parsed.protocol === 'wss:' && parsed.port === '8443'
+    && ['ws.okx.com', 'wspap.okx.com', 'wseea.okx.com', 'wseeapap.okx.com'].includes(parsed.hostname)
+    && ['/ws/v5/public', '/ws/v5/private', '/ws/v5/business'].includes(parsed.pathname)) parsed.port = '';
   return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds, options)}`;
 };
 

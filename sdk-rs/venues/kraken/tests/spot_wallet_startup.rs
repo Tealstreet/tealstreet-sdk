@@ -1,6 +1,6 @@
 mod spot_support;
 use safe_cex_engine::{
-    Action, Engine, Event, HttpRequest, LogLevel, Notice, SocketChannel, SocketId, model::Balance,
+    Action, Engine, Event, HttpRequest, SocketChannel, SocketId, model::Balance,
 };
 use safe_cex_venue_kraken::KrakenSpot;
 use spot_support::*;
@@ -85,11 +85,7 @@ impl Wallet {
     }
     fn collect(&mut self) {
         for action in self.engine.drain_actions() {
-            if let Action::Notice(Notice::Log {
-                level: LogLevel::Warning,
-                message,
-            })
-            | Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+            if let Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 level: safe_cex_engine::Level::Warn,
                 message,
                 ..

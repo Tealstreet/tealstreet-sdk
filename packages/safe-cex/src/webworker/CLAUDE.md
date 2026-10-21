@@ -398,3 +398,8 @@ Command errors distinguish caller `clientOrderId(s)` from actual native
 `orderCode` stays an exact string in its original namespace. A receipt records
 an identity selected for a write, not venue acknowledgement or proof of
 acceptance; an interruption snapshot may be incomplete while native work lives.
+
+Rust `engine-event` diagnostics use the existing generation-guarded event bridge
+with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
+retain the event for callers migrating in place. Consumers must choose one
+channel per diagnostic to avoid double counting/toasting.

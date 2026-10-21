@@ -946,6 +946,7 @@ impl BybitLinear {
             && let Some(side) = order_side(row.side.as_deref())
         {
             cx.fill(Fill {
+                id: None,
                 order_id: row.order_id.to_string(),
                 symbol: row.symbol.to_string(),
                 side,
@@ -2639,6 +2640,7 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         }
     }
     cx.fill(Fill {
+        id: None,
         order_id: row.order_id.to_string(),
         symbol: row.symbol.to_string(),
         side,
