@@ -568,3 +568,119 @@ Independent API/code/adversarial review is CLEAN; architecture YES. Focused
 engine/Bitunix/Coinbase/Binance native suite passes 1,020 tests. Root typecheck
 44 tasks and lint28 pass (cached). Full CI and authenticated raw/package proof
 remain required before merge. No local release build or replay sweep was run.
+
+
+## Fan-out phase 3: BloFin validated prefix and output preparation
+
+Fresh branch from actual phase-2 #1729
+`6e10b0e8a23dbb8d34f761e8199a83c6068fadb1`. Architecture gate: YES.
+Move BloFin's cumulative prefix checks, capped-decimal arithmetic and public
+rounding into the same engine execution boundary before migrating its consumer.
+Keep this PR to engine execution.rs/num.rs, BloFin account.rs/native account
+tests, and these existing audit/quality/plan docs. No signing/header, history,
+clock, scheduler, host, harness, fixture or manifest change. Kraken Spot remains
+the next separately planned consumer: its rejected-price/cumulative correction
+needs a native RED and explicit retention/seed design before any new ledger.
+
+Add explicit compatibility policies rather than alter current consumers:
+`Arithmetic::DecimalCapped20` preserves native max-input-decimals capped20,
+round-away-from-zero subtraction; `ExecutionRounding::ScaledSignificant15`
+preserves BloFin's existing decimal-factor/round/divide conversion. Engine owns
+checked factor/intermediate/result finiteness and positive public amount/price.
+Preserve current Binary/DecimalRounded/Significant15 behavior and exact scaling
+order. Checked output preparation scales a validated amount in native contract
+units to public base units, rounds at the same native point, and retains its
+unrounded contract-unit quote/quantity anchor. No market lot-size rounding.
+
+Add a pure shared prefix preparation API (concrete shape reviewed before code)
+that distinguishes no-op/regression, missing-quote enrichment at equal quantity,
+valid forward quote observation, and invalid quantity/quote progress. A positive
+quantity cannot carry zero/negative/nonfinite quote; a missing quote remains
+missing. Strict positive delta-quote checks use the selected arithmetic policy.
+BloFin retains its own explicit historical suppression, quiet unknown-prefix
+seeding, startup buffer/census ordering and 500-entry retention. The engine does
+not infer session status, repair behavior, timestamps or public Fill eligibility.
+
+Adopt checked prefix admission in all execution_prefix consumers, then replace
+BloFin's local delta/quote division and output conversions in emit_execution
+with engine preparation. No delivered progress may commit until price division,
+contract scaling and public rounding all pass. A missing historical quote may
+still refresh the baseline without a Fill exactly as native policy specifies;
+historical unpriceable progress remains a quiet floor and never emits history.
+Equal-quantity corrections only enrich a missing quote, not replace known quote.
+
+Before implementation, add separate assertion-RED controls on unchanged actual
+production source: (1) known q1/value1 then live q1.5/average1e308 has a finite
+cumulative quote but overflowing incremental price, and must emit no invalid
+Fill; (2) after discarding the old invalid output, a corrected same q1.5/average
+100 receipt must still emit the .5-contract suffix at price298 once. Use real
+native FILLS decoding and native contract-size scaling, not just fill counts.
+These are source hypotheses until the assertions reproduce them. Also preserve
+startup/history/missing-quote/repeated/terminal controls and test tiny/huge
+rounding/scale boundaries through the engine. Any demonstrated same-contract
+financial repair is covered by the owner's standing approval and is recorded
+individually in the PR and RUST_AUDITS; outside-contract findings are reported.
+
+Run focused engine/BloFin/Binance native tests and strict all-target Clippy/fmt/
+bans with CARGO_BUILD_JOBS=4, plus root typecheck/lint. CI owns release wasm,
+size/timing and full replays. Before final proof integrate actual provider seam
+and any other shared inputs; fresh freeze the full BloFin/Binance CI inventory,
+archive IDs/digests, tested-head fingerprints, all indexed raw outputs except
+metrics, and all ordered gate failure/fixer arrays. No fallback or allowance
+expansion. Independent plan/API/code/adversarial and final artifact/body reviews,
+full green tested-head CI, separate guard/merge and actual merge audit remain
+mandatory. Continue Kraken Spot and the remaining cumulative consumers before
+row reporting and snapshot freshness.
+
+
+Phase-3 native evidence checkpoint: both controls compile and fail on unchanged
+actual6e10 BloFin account.rs (blob ea9e5aee940676ec9d3fe109329fac34a1dd6bb0).
+The first decodes `(inf, 0.0005)` from real FILLS after q1/value1 then
+q1.5/average1e308. The second separately drains that invalid receipt and proves
+the corrected same-quantity `(298, 0.0005)` suffix is lost. These are two controls
+for one demonstrated final-output-validation/consumed-eligibility defect class;
+tests committed36bf7cee998 precede implementation. Standing same-contract owner
+approval applies; the financial findings were reported before production edits.
+
+Concrete API checkpoint before implementation:
+
+- `Cursor::prepare_prefix(previous: Option<Cursor>, quantity, value:
+  Option<f64>, arithmetic) -> Result<Option<Cursor>, Rejection>` validates the
+  supplied quantity/value first, rejects explicit zero quote at positive quantity,
+  and returns no change for valid regression/duplicates. Equal quantity only
+  enriches missing value. A forward report with a known previous quote requires
+  a supplied quote and a strictly positive checked quote difference. A missing
+  previous quote stays explicit and may seed observation progress without Fill.
+  This does not alter `Cursor::seed`, whose existing explicit-zero semantics stay.
+- `Arithmetic::DecimalCapped20` delegates the exact former BloFin subtraction
+  into num.rs; existing Binary/DecimalRounded are untouched. The arithmetic must
+  retain native capped-decimal `.round()` behavior, without new lot adjustment.
+- `ExecutionRounding::ScaledSignificant15` delegates BloFin's existing decimal
+  factor/round/divide conversion into num.rs with checked input/result. Existing
+  formatting-based Significant15 is not replaced or reinterpreted.
+- `Prepared::scaled(scale, rounding)` prepares positive finite public amount and
+  price in the native `delta contracts -> scale -> round` order, keeping its
+  unrounded contract-unit next anchor. No state commit occurs inside preparation.
+- Keep BloFin's tuple map, 500-entry retention and native lifecycle decisions.
+  Its local execution_prefix becomes only a typed engine delegate plus the same
+  three diagnostic mappings (invalid quote, missing quote, nonpositive interval),
+  with no local arithmetic. Live emit uses checked engine prefix/delivery/output
+  preparation before execution_progress and Fill. Historical quiet progress and
+  missing-quote recovery use validated prefix observation without requiring an
+  unused public price; they never emit historical notifications. Equal-quantity
+  enrichment remains quiet. Invalid live output keeps the prior anchor/eligibility.
+  Existing clean() callers outside execution output stay unchanged in this scope.
+
+Independent concrete API review is required before source implementation.
+
+Phase-3 implementation and independent code/adversarial review are CLEAN;
+architecture YES. Engine prefix observation and checked live output are separate.
+BloFin's local prefix wrapper is now an engine delegate plus the same diagnostic
+mappings; its clean wrapper delegates the identical relocated numerical policy
+without changing nonexecution callers. The two original assertion-RED controls
+are GREEN. All812 focused engine/BloFin/Binance native tests, strict all-target
+Clippy, fmt and bans pass; root44-task typecheck and28-task lint pass (cached).
+Actual provider seam #1731 was porcelain-integrated at1b590e62d702 before this
+verification; all seven incoming files are preserved. Remaining shared inputs,
+full CI, exact archived raw/package proof and final independent evidence review
+remain merge gates. No local release build or replay sweep was run.
