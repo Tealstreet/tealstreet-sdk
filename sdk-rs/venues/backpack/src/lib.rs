@@ -1011,7 +1011,7 @@ impl Venue for Backpack {
                     .outcome(safe_cex_engine::Outcome::Unknown);
                 self.trade_failed(cx, request, error)
             }
-            Pending::History(request) => cx.fail(request.command, error),
+            Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books

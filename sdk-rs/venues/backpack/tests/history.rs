@@ -269,7 +269,19 @@ fn invalid_order_side_fails_and_a_repeated_full_page_is_not_silently_truncated()
     reply(&mut e, &r, 200, spot);
     let next = requests(&mut e).pop().unwrap();
     reply(&mut e, &next, 200, spot);
-    assert!(result(&mut e).unwrap_err().contains("incomplete"));
+    // Shared ownership supersedes the old strict repeat rejection: an empty
+    // eligible result still carries a command-owned missing-coverage marker.
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            && matches!(event.fields.as_slice(), [("command", safe_cex_engine::Value::Num(1.0))]))));
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 /// Pins the exact request sequence of an offset-paged read. Paging
@@ -485,6 +497,7 @@ mod owned_history {
         );
         let marker = actions.iter().position(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE)).unwrap();
         let done = actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)).unwrap();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)).count(), 1);
         assert!(marker < done, "coverage precedes success");
         let output = rows(actions, command);
         assert_eq!(output.len(), count);
@@ -638,5 +651,206 @@ mod owned_history {
         partial(&e.drain_actions().collect::<Vec<_>>(), 77, 1);
         fail_page(&mut e, &other, 0);
         typed_failure(&e.drain_actions().collect::<Vec<_>>(), 78);
+    }
+
+    #[test]
+    fn failed_skipped_prefix_cannot_replace_an_admitted_gap_or_diagnostic() {
+        for admitted_skip in [false, true] {
+            let (mut e, _) = ready();
+            let first = query(&mut e, 79, 3);
+            let middle = if admitted_skip {
+                fill(2, SYMBOL).replace("\"0.1\"", "null")
+            } else {
+                fill(2, "SOL_USDC")
+            };
+            respond(
+                &mut e,
+                &first,
+                &format!("[{},{middle},{}]", fill(1, SYMBOL), fill(3, "SOL_USDC")),
+                false,
+            );
+            let next = requests(&mut e).pop().unwrap();
+            let skipped = fill(90, SYMBOL).replace("\"0.1\"", "null");
+            e.handle(
+                2000.,
+                Event::HttpStart {
+                    request: next.id,
+                    status: 200,
+                    headers: "",
+                },
+            );
+            let prefix = format!("[{skipped},{},", fill(999, SYMBOL));
+            e.handle(
+                2000.,
+                Event::HttpChunk {
+                    request: next.id,
+                    data: prefix.as_bytes(),
+                },
+            );
+            e.handle(
+                2000.,
+                Event::HttpFailed {
+                    request: next.id,
+                    error: "later transport loss",
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            partial(&actions, 79, 1);
+            let marker = markers(&actions)[0];
+            if admitted_skip {
+                assert_eq!(
+                    marker.message,
+                    "Backpack history is incomplete: malformed fill rows were skipped"
+                );
+            } else {
+                assert!(marker.message.contains("later transport loss"));
+            }
+            let skipped: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED => {
+                        Some(event.message.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                skipped,
+                if admitted_skip {
+                    vec!["Skipped 1 malformed Backpack fill rows: 2"]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_nonfill_page_retains_prior_output_and_its_eager_diagnostic() {
+        for streamed in [false, true] {
+            let (mut e, _) = ready();
+            ask(
+                &mut e,
+                Query::OrderHistory {
+                    symbol: Some(SYMBOL.into()),
+                    from_ms: Some(0.),
+                    to_ms: None,
+                    limit: Some(2),
+                },
+            );
+            let first = requests(&mut e).pop().unwrap();
+            assert!(first.url.contains("limit=1000"));
+            let outside = ORDER.replace(SYMBOL, "UNLISTED_PERP");
+            let mut page = vec![ORDER.to_owned()];
+            page.extend(std::iter::repeat_n(outside, 999));
+            respond(&mut e, &first, &format!("[{}]", page.join(",")), streamed);
+            let next = requests(&mut e).pop().unwrap();
+            assert!(next.url.contains("offset=1000"));
+            let prefix = ORDER.replace("\"123\"", "\"999\"");
+            let bad = ORDER.replace("Bid", "Unknown");
+            respond(&mut e, &next, &format!("[{prefix},{bad}]"), streamed);
+            let actions: Vec<_> = e.drain_actions().collect();
+            partial(&actions, 1, 1);
+            assert_eq!(rows(&actions, 1)[0]["id"], "123");
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandError { command: 1, message }) if message == "Backpack invalid order side")));
+        }
+    }
+
+    #[test]
+    fn offset_counts_filtered_and_skipped_neighbors_without_losing_valid_rows() {
+        let (mut e, _) = ready();
+        let first = query(&mut e, 80, 3);
+        let bad = fill(2, SYMBOL).replace("\"0.1\"", "null");
+        respond(
+            &mut e,
+            &first,
+            &format!("[{},{bad},{}]", fill(1, "SOL_USDC"), fill(3, SYMBOL)),
+            true,
+        );
+        let next = requests(&mut e).pop().unwrap();
+        assert!(next.url.contains("offset=3"));
+        for header in ["X-API-Key", "X-Broker-Id", "X-Window"] {
+            assert_eq!(
+                first.headers.iter().find(|(name, _)| *name == header),
+                next.headers.iter().find(|(name, _)| *name == header)
+            );
+        }
+        respond(&mut e, &next, &format!("[{}]", fill(4, SYMBOL)), false);
+        let actions: Vec<_> = e.drain_actions().collect();
+        partial(&actions, 80, 2);
+        let output = rows(&actions, 80);
+        assert_eq!(
+            output
+                .iter()
+                .map(|row| row["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["3", "4"]
+        );
+    }
+
+    #[test]
+    fn public_trade_dedupe_limit_and_single_unsigned_request_are_preserved() {
+        let (mut e, _) = ready();
+        ask(
+            &mut e,
+            Query::PublicTrades {
+                symbol: SYMBOL.into(),
+                limit: Some(1),
+            },
+        );
+        let request = requests(&mut e).pop().unwrap();
+        assert!(
+            !request
+                .headers
+                .iter()
+                .any(|(name, _)| *name == "X-Signature")
+        );
+        let trade = r#"{"id":7,"isBuyerMaker":true,"price":"104.12","quantity":"0.1","quoteQuantity":"10.412","timestamp":1792425943313}"#;
+        respond(
+            &mut e,
+            &request,
+            &format!(
+                "[{trade},{trade},{}]",
+                trade.replace("\"id\":7", "\"id\":8")
+            ),
+            true,
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(rows(&actions, 1)[0]["id"], "7");
+        assert_eq!(rows(&actions, 1).len(), 1);
+        assert!(markers(&actions).is_empty());
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+
+    #[test]
+    fn synchronous_setup_refusal_stays_strict_without_http_or_incomplete_success() {
+        let mut e = safe_cex_engine::test_support::seeded_engine(
+            safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
+                public_data_only: true,
+                ..Default::default()
+            }),
+        );
+        e.start(1000.);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.,
+            Event::Command(Command::Query {
+                command: 81,
+                query: Query::Fills {
+                    symbol: None,
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: Some(2),
+                },
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 81, error }) if error.message == "Backpack credentials unavailable")).count(), 1);
+        assert!(markers(&actions).is_empty());
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+        )));
     }
 }

@@ -1395,3 +1395,25 @@ a failed skipped prefix, an admitted skip followed by actual failure, all-skippe
 valid coverage, malformed non-fill after an accepted page, public dedupe/limit,
 and raw offset displacement across spot and malformed-fill neighbors. Strict
 synchronous setup failure must suppress both partial output and owned markers.
+
+Backpack regression-only checkpoint `b33295f3591` leaves production unchanged:
+all twelve existing history controls pass and seven new assertion groups fail on
+the original implementation. Shared owner adoption makes those groups pass. The
+old repeated-full-page strict assertion is explicitly superseded with an owned
+marker/empty-result assertion, preserving its no-silent-truncation purpose.
+Additional controls pin failed-page skip isolation, admitted first-gap retention,
+eager non-fill CommandError with prior accepted rows, raw displacement across
+spot/skipped neighbors, unchanged unsigned public dedupe/limit and strict missing-
+credential setup. Static credentials cannot become invalid midway through a
+healthy native fixture without introducing a test mutation seam; the unchanged
+consuming helper's error arm remains strict after any earlier accepted pages.
+Independent source correctness/adversarial reviews are CLEAN: no engine API,
+account/signing, Context, Store or parallel pagination-policy edits. Final focused
+checks and final tests/caller review precede draft publication.
+
+Backpack final local checks: all 814 focused engine/Backpack/Binance tests pass,
+including 24 Backpack history controls. Touched all-target strict Clippy, fmt,
+banned-pattern checks and diff checks pass. Both final source and tests/docs
+reviews are CLEAN and confirm the shared-owner architecture gate. CI/full
+artifact proof and actual queued dependency integration remain mandatory; no
+local release-WASM, full replay, timing, deployed NX or cutover proof is claimed.

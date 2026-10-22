@@ -1796,3 +1796,14 @@ first actual page failures reject typed and failed-page prefixes stay excluded.
 Shared filtered admission and checked range-stage/native-bound transitions retain
 coverage before output filtering. The strict output cap and single-page Phemex
 history/lookup policies remain; other venue adoption is still open.
+
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.

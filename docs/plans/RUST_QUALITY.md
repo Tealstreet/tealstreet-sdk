@@ -367,3 +367,11 @@ cover first gaps, stage lifecycle, cumulative budgets, filtering after coverage
 and actual native-bound restrictions; concurrent owners and Error-only logging
 stay isolated. Saturation intentionally continues USDC with an owned gap; no
 per-venue completeness emitter or positive deployed-runtime claim is introduced.
+
+Backpack fills/orders/funding/public trades now adopt the existing CursorHistory
+owner for staged admission, typed first failure, accepted-only later recovery and
+command-owned repeat/cap/skipped-fill coverage. The existing engine offset helper
+only computes raw displacement after owner More; no second pagination authority
+or venue marker emitter is introduced. Original-source assertion RED controls
+cover the changed contracts; native shape/filter/units/request order, eager
+non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.
