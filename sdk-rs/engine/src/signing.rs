@@ -138,9 +138,38 @@ pub struct Context {
     pub path: String,
 }
 
+/// Exact canonical time facts, in protocol UTC milliseconds. No implied stamp
+/// for an expiry-only or credential-presentation operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SignReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stamp_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiry_ms: Option<f64>,
+}
+impl SignReceipt {
+    pub fn validate(&self) -> Result<(), SignError> {
+        if [self.stamp_ms, self.expiry_ms]
+            .into_iter()
+            .flatten()
+            .any(|value| {
+                !value.is_finite()
+                    || !(0. ..=9_007_199_254_740_991.).contains(&value)
+                    || value.fract() != 0.
+            })
+            || matches!((self.stamp_ms, self.expiry_ms), (Some(stamp), Some(expiry)) if expiry <= stamp)
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignRequest {
+    pub receipt: SignReceipt,
     pub operations: Vec<Operation>,
     pub context: Context,
 }
@@ -149,6 +178,7 @@ impl SignRequest {
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
     pub fn validate(&self) -> Result<(), SignError> {
+        self.receipt.validate()?;
         if self.operations.is_empty()
             || self.operations.len() > 32
             || [
@@ -203,13 +233,21 @@ impl SignRequest {
 /// Raw operation results in request order. May contain outbound credentials.
 /// Never serialize this as a notice or include provider values in an error.
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct SignResult(pub Vec<Vec<u8>>);
+#[serde(deny_unknown_fields)]
+pub struct SignResult {
+    pub values: Vec<Vec<u8>>,
+    pub receipt: SignReceipt,
+}
+impl SignResult {
+    pub fn new(values: Vec<Vec<u8>>, receipt: SignReceipt) -> Self {
+        Self { values, receipt }
+    }
+}
 
 impl Drop for SignResult {
     fn drop(&mut self) {
         use zeroize::Zeroize;
-        for bytes in &mut self.0 {
+        for bytes in &mut self.values {
             bytes.zeroize();
         }
     }

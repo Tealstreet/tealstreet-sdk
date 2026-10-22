@@ -1429,6 +1429,7 @@ impl<P> Cx<'_, P> {
             Action::Sign {
                 attempt,
                 work: crate::signing::SignRequest {
+                    receipt: Default::default(),
                     operations: Vec::new(),
                     context: Default::default(),
                 },
@@ -1771,6 +1772,17 @@ impl<P> Cx<'_, P> {
     }
 }
 
+/// A final fresh signing release. No clock, I/O or credential values are exposed.
+pub enum SigningTarget<'a, P> {
+    Http {
+        request: RequestId,
+        pending: &'a mut P,
+    },
+    Socket {
+        socket: SocketId,
+    },
+}
+
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
     /// Defer symbol cancellation until placement native identities are known.
@@ -1808,6 +1820,14 @@ pub trait Venue {
         _now: f64,
     ) -> Option<AuthOutcome> {
         None
+    }
+    /// Update only pending metadata using the actual stamp/expiry released.
+    /// This is not evidence of transport delivery or venue acceptance.
+    fn on_signing_receipt(
+        &mut self,
+        _target: SigningTarget<'_, Self::Pending>,
+        _receipt: crate::signing::SignReceipt,
+    ) {
     }
     /// Shared dispatch signing failure, typed before transport. Composite jobs
     /// retain earlier attempt outcomes when projecting this attempted notSent.
@@ -2861,6 +2881,7 @@ impl<V: Venue> Engine<V> {
                 self.io.actions.push(Action::Sign {
                     attempt: next,
                     work: crate::signing::SignRequest {
+                        receipt: Default::default(),
                         operations: Vec::new(),
                         context: Default::default(),
                     },
@@ -2912,7 +2933,30 @@ impl<V: Venue> Engine<V> {
                             now,
                             self.io.protocol_clock.revision(),
                         ) {
-                            Some(Completion::Ready(_, outbound)) => self.io.actions.push(outbound),
+                            Some(Completion::Ready(pending, outbound)) => {
+                                match &outbound {
+                                    Action::Http(http) => {
+                                        if let Some(value) = self.io.pending.get_mut(&http.id) {
+                                            self.venue.on_signing_receipt(
+                                                SigningTarget::Http {
+                                                    request: http.id,
+                                                    pending: &mut value.value,
+                                                },
+                                                pending.receipt,
+                                            );
+                                        }
+                                    }
+                                    Action::WsConnect { socket, .. }
+                                    | Action::WsSend { socket, .. } => {
+                                        self.venue.on_signing_receipt(
+                                            SigningTarget::Socket { socket: *socket },
+                                            pending.receipt,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                                self.io.actions.push(outbound);
+                            }
                             Some(Completion::Stale(mut pending)) => {
                                 pending.timer = TimerId(0);
                                 let next = self.io.signing.next_id();
@@ -3002,6 +3046,7 @@ impl<V: Venue> Engine<V> {
                 queued.push_back(Action::Sign {
                     attempt,
                     work: crate::signing::SignRequest {
+                        receipt: Default::default(),
                         operations: vec![],
                         context: Default::default(),
                     },

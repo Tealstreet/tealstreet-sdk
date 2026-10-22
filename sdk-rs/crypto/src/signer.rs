@@ -162,7 +162,7 @@ impl LocalSigner {
                 PayloadPart::Credential { key } => self.key(key)?.len(),
                 PayloadPart::Result { index, encoding } => {
                     let n = results
-                        .0
+                        .values
                         .get(*index)
                         .ok_or(SignError::InvalidRequest)?
                         .len();
@@ -194,7 +194,10 @@ impl LocalSigner {
                 PayloadPart::Bytes { bytes } => message.extend_from_slice(bytes),
                 PayloadPart::Credential { key } => message.extend_from_slice(self.key(key)?),
                 PayloadPart::Result { index, encoding } => {
-                    let bytes = results.0.get(*index).ok_or(SignError::InvalidRequest)?;
+                    let bytes = results
+                        .values
+                        .get(*index)
+                        .ok_or(SignError::InvalidRequest)?;
                     match encoding {
                         Encoding::Raw => message.extend_from_slice(bytes),
                         Encoding::Hex => {
@@ -221,7 +224,10 @@ impl LocalSigner {
     /// Also used by synchronous local hosts; async providers share the same types.
     pub fn sign_now(&self, request: &SignRequest) -> Result<SignResult, SignError> {
         request.validate()?;
-        let mut result = SignResult(Vec::with_capacity(request.operations.len()));
+        let mut result = SignResult::new(
+            Vec::with_capacity(request.operations.len()),
+            request.receipt,
+        );
         for operation in &request.operations {
             let value = match operation {
                 Operation::Sha256 { payload } => {
@@ -269,7 +275,7 @@ impl LocalSigner {
                     }
                 }
             };
-            result.0.push(value);
+            result.values.push(value);
         }
         Ok(result)
     }
@@ -323,6 +329,10 @@ mod tests {
             let identity = identities.primary.clone().unwrap();
             assert_eq!(identity.require_stable_id(), Ok("account/opaque-17"));
             let request = SignRequest {
+                receipt: safe_cex_engine::signing::SignReceipt {
+                    stamp_ms: Some(1000.),
+                    expiry_ms: Some(2000.),
+                },
                 context: Default::default(),
                 operations: vec![
                     Operation::Present {
@@ -338,9 +348,13 @@ mod tests {
                 ],
             };
             let result = signer.sign_now(&request).unwrap();
-            assert_eq!(result.0[0], vector["payload"].as_str().unwrap().as_bytes());
+            assert_eq!(result.receipt, request.receipt);
             assert_eq!(
-                crate::hex(&result.0[1]),
+                result.values[0],
+                vector["payload"].as_str().unwrap().as_bytes()
+            );
+            assert_eq!(
+                crate::hex(&result.values[1]),
                 vector["signature"].as_str().unwrap(),
                 "{encoding}"
             );
@@ -376,6 +390,7 @@ mod tests {
             first.secondary.as_ref().unwrap().stable_id
         );
         let request = SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![
                 Operation::Present {
@@ -388,7 +403,7 @@ mod tests {
         };
         let result = signer.sign_now(&request).unwrap();
         assert_eq!(
-            result.0,
+            result.values,
             [
                 b"public-identifier".to_vec(),
                 b" public-identifier ".to_vec()
@@ -408,12 +423,16 @@ mod tests {
         let (signer, present) =
             LocalSigner::from_json(r#"{"primary":{"passphrase":""}}"#.into()).unwrap();
         let request = SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![Operation::Present {
                 key: present.primary.unwrap().passphrase.unwrap(),
             }],
         };
-        assert_eq!(signer.sign_now(&request).unwrap().0, [Vec::<u8>::new()]);
+        assert_eq!(
+            signer.sign_now(&request).unwrap().values,
+            [Vec::<u8>::new()]
+        );
     }
 
     #[test]
@@ -473,6 +492,7 @@ mod tests {
         let public = KeyRef("api-key".into());
         signer.insert(public.clone(), b"public-identifier".to_vec());
         let request = SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![
                 Operation::Present {
@@ -491,9 +511,9 @@ mod tests {
             ],
         };
         let result = signer.sign_now(&request).unwrap();
-        assert_eq!(result.0[0], b"public-identifier");
+        assert_eq!(result.values[0], b"public-identifier");
         assert_eq!(
-            crate::hex(&result.0[1]),
+            crate::hex(&result.values[1]),
             crate::hmac_sha256(
                 signer.key(&key).unwrap(),
                 b"apiKey=public-identifier",
@@ -510,6 +530,7 @@ mod tests {
         let api = KeyRef("public".into());
         signer.insert(api.clone(), b"public-identifier".to_vec());
         let request = SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![
                 Operation::Sha256 {
@@ -532,17 +553,18 @@ mod tests {
         };
         let result = signer.sign_now(&request).unwrap();
         let digest = crate::sha256(b"nonce+timestamp+public-identifier");
-        assert_eq!(result.0[0], digest);
+        assert_eq!(result.values[0], digest);
         let mut expected = Sha256::new();
         expected.update(crate::hex(&digest));
         expected.update(signer.key(&key).unwrap());
-        assert_eq!(result.0[1], &expected.finalize()[..]);
+        assert_eq!(result.values[1], &expected.finalize()[..]);
         assert!(!format!("{request:?}{result:?}").contains("public-identifier"));
     }
     #[test]
     fn failed_batch_never_returns_partial_credentials_or_provider_text() {
         let (signer, key) = fixture();
         let request = SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![
                 Operation::Present { key: key.clone() },

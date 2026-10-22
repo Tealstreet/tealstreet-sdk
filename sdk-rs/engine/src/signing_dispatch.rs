@@ -1,5 +1,5 @@
 //! Shared bounded park/resume state for HTTP, WS messages and WS upgrades.
-use crate::signing::{Algorithm, Operation, SignError, SignRequest, SignResult};
+use crate::signing::{Algorithm, Operation, SignError, SignReceipt, SignRequest, SignResult};
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
 use std::collections::HashMap;
 
@@ -51,8 +51,17 @@ pub(crate) struct Pending {
     prepared_at: Option<f64>,
     prepared_revision: Option<u64>,
     expected: Vec<Option<usize>>,
+    pub receipt: SignReceipt,
+    prepared_protocol_at: Option<f64>,
 }
 impl Pending {
+    fn receipt_expired(&self, raw_now: f64) -> bool {
+        self.receipt.expiry_ms.is_some_and(|expiry| {
+            let protocol_now = self.prepared_protocol_at.unwrap_or(f64::NAN)
+                + (raw_now - self.prepared_at.unwrap_or(f64::NAN));
+            !protocol_now.is_finite() || protocol_now >= expiry
+        })
+    }
     pub fn request_id(&self) -> Option<RequestId> {
         match &self.outbound {
             Action::Http(http) => Some(http.id),
@@ -126,7 +135,8 @@ impl Dispatch {
             wipe(&mut action);
             return Some(Completion::Failed(pending, SignError::TimedOut));
         }
-        if pending.prepared_revision != Some(clock_revision)
+        if pending.receipt_expired(now)
+            || pending.prepared_revision != Some(clock_revision)
             || pending
                 .prepared_at
                 .is_some_and(|at| now - at >= pending.step.freshness_ms())
@@ -198,6 +208,8 @@ impl Dispatch {
                 prepared_at: None,
                 prepared_revision: None,
                 expected: vec![],
+                receipt: Default::default(),
+                prepared_protocol_at: None,
             },
         );
         Ok(deadline)
@@ -244,6 +256,17 @@ impl Dispatch {
         p.outbound = p.unsigned.clone();
         let work = p.step.prepare(&mut p.outbound, context)?;
         work.validate()?;
+        // Refuse a non-progressing recipe before an immediate provider can enter
+        // an endless stale/reprepare loop at one unchanged dispatch clock.
+        if work
+            .receipt
+            .expiry_ms
+            .is_some_and(|expiry| expiry <= context.now_ms)
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        p.receipt = work.receipt;
+        p.prepared_protocol_at = Some(context.now_ms);
         p.expected = work
             .operations
             .iter()
@@ -299,16 +322,18 @@ impl Dispatch {
             Ok(result) => result,
             Err(error) => return Some(Completion::Failed(p, error)),
         };
-        if p.prepared_at.is_none()
-            || result.0.len() != p.expected.len()
+        if result.receipt.validate().is_err()
+            || result.receipt != p.receipt
+            || p.prepared_at.is_none()
+            || result.values.len() != p.expected.len()
             || p.expected
                 .iter()
-                .zip(&result.0)
+                .zip(&result.values)
                 .any(|(n, b)| b.len() > 1024 * 1024 || n.is_some_and(|n| b.len() != n))
         {
             return Some(Completion::Failed(p, SignError::InvalidResult));
         }
-        if now - p.prepared_at.unwrap() >= p.step.freshness_ms() {
+        if p.receipt_expired(now) || now - p.prepared_at.unwrap() >= p.step.freshness_ms() {
             return Some(Completion::Stale(p));
         }
         if let Err(error) = p.step.apply(&mut p.outbound, &result) {
@@ -322,6 +347,8 @@ impl Dispatch {
     pub fn retry(&mut self, id: RequestId, mut pending: Pending) {
         pending.prepared_at = None;
         pending.prepared_revision = None;
+        pending.prepared_protocol_at = None;
+        pending.receipt = Default::default();
         self.pending.insert(id, pending);
     }
     pub fn expire(&mut self, timer: TimerId) -> Option<(RequestId, Pending)> {

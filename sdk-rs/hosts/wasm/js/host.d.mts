@@ -245,12 +245,16 @@ export interface LocalIdentityMetadata {
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
+/** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
+export interface SignReceipt { stampMs?: number; expiryMs?: number }
+export interface SignResult { values: number[][]; receipt: SignReceipt }
 export interface SignRequest {
+  receipt: SignReceipt;
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };
 }
 /** Owns secrets. Atomic results are exact raw operation bytes; errors are never logged. */
-export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<number[][]> | number[][];
+export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
   /** Transfer raw engine allocation ownership after successful construction.

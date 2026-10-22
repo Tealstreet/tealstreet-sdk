@@ -98,7 +98,7 @@ engine's independent signing source. Raw staging/deadline/freshness durations an
 clock-revision checks remain in dispatch. `Cx::connect_signed` preserves ordinary
 socket metadata/suppression and stages the upgrade through that same queue.
 
-The next phase adds `SignReceipt { stampMs?, expiryMs? }` to `SignRequest` and
+The provider contract adds `SignReceipt { stampMs?, expiryMs? }` to `SignRequest` and
 structured provider results `{ values, receipt }`. Both fields are independently
 optional: expiry-only and credential-presentation recipes must not invent a signed
 timestamp. Present values must be finite, nonnegative safe integer protocol UTC
@@ -112,3 +112,18 @@ validated receipt only after final fresh release. It can update pending metadata
 not emit recursive I/O. This proves engine release/materialization only, never
 transport send or venue acceptance. Native/WASM/Workers and custom JS providers
 must return the structured result together; no old-array fallback is planned.
+
+Already-expired preparation fails before invoking a provider, avoiding a synchronous
+stale/reprepare loop with a local signer at an unchanged clock. Binance declares
+its actual signed stamp only: `recvWindow` stays a duration under the existing
+freshness policy, including legacy zero/fractional inputs; it is not relabelled
+as an absolute expiry. Real expiry recipes declare their own exact normalized
+UTC-millisecond value. Receipts do not change signed bytes.
+
+SDK caller impact: explicit custom Rust `Signer` implementations and JS/Workers
+`EngineHost` callbacks must return the structured record and echo the declared
+receipt. The default local provider adapts internally; ordinary SDK users do not
+need a new callback. `SigningTarget::Http` exposes the mutable venue pending value
+without its engine timer/deadline; `SigningTarget::Socket` names the released
+authentication action. No callback has `Cx` or credential bytes. Incoming clock,
+scheduler and financial regressions remain intact.

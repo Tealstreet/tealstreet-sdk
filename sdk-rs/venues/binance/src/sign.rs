@@ -89,6 +89,14 @@ impl SignStep for Http {
             http.url.push_str(&query);
         }
         Ok(SignRequest {
+            receipt: if self.signed {
+                safe_cex_engine::signing::SignReceipt {
+                    stamp_ms: Some(now.floor()),
+                    expiry_ms: None,
+                }
+            } else {
+                Default::default()
+            },
             operations,
             context,
         })
@@ -97,10 +105,10 @@ impl SignStep for Http {
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
-        let key = credential(&result.0[0])?;
+        let key = credential(&result.values[0])?;
         if self.signed {
             http.url.push_str("&signature=");
-            http.url.push_str(&hex(&result.0[1]));
+            http.url.push_str(&hex(&result.values[1]));
         }
         http.headers.push(("X-MBX-APIKEY", key.into()));
         Ok(())
@@ -138,6 +146,10 @@ impl SignStep for SpotSubscribe {
         let now = context.now_ms;
         self.timestamp = now.floor();
         Ok(SignRequest {
+            receipt: safe_cex_engine::signing::SignReceipt {
+                stamp_ms: Some(self.timestamp),
+                expiry_ms: None,
+            },
             context: Context {
                 venue: "binancespot".into(),
                 method: "WS".into(),
@@ -184,12 +196,12 @@ impl SignStep for SpotSubscribe {
             method: &'a str,
             params: Params<'a>,
         }
-        let signature = hex(&result.0[1]);
+        let signature = hex(&result.values[1]);
         *text = serde_json::to_string(&Subscription {
             id: &self.id,
             method: "userDataStream.subscribe.signature",
             params: Params {
-                api_key: credential(&result.0[0])?,
+                api_key: credential(&result.values[0])?,
                 recv_window: 5000,
                 timestamp: self.timestamp,
                 signature: &signature,

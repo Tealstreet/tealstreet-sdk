@@ -29,7 +29,7 @@ it('actual WASM requires an injected provider at construction and signs through 
     ownsEngine: true,
     signer: async (work) => {
       batches.push(work);
-      return work.operations.map((operation) => {
+      const values = work.operations.map((operation) => {
         if (operation.kind === 'present') {
           expect(operation.key).toBe(identities.primary.credential);
           return Array.from(new TextEncoder().encode('public-key-only'));
@@ -40,11 +40,13 @@ it('actual WASM requires an injected provider at construction and signs through 
         const bytes = operation.payload.flatMap((part) => part.kind === 'bytes' ? part.bytes : []);
         return Array.from(createHmac('sha256', vector.secret).update(Uint8Array.from(bytes)).digest());
       });
+      return { values, receipt: work.receipt };
     },
   });
   try {
     await expect(host.command({ op: 'fetchAccount' })).resolves.toEqual({ userId: 'account' });
     expect(batches).toHaveLength(1);
+    expect(batches[0].receipt).toEqual({ stampMs: 1700000000000 });
     expect(JSON.stringify(batches)).not.toContain(vector.secret);
     expect(sent).toHaveLength(1);
     const url = new URL(sent[0].url);
@@ -102,6 +104,6 @@ it('actual WASM refuses external-provider override on an unmigrated family', asy
   const { WasmEngine } = await loadNodeEngine();
   const engine = new WasmEngine('bybit', JSON.stringify({ publicDataOnly: true }));
   try {
-    expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: () => [] })).toThrow(/not supported/);
+    expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: (request) => ({ values: [], receipt: request.receipt }) })).toThrow(/not supported/);
   } finally { engine.free?.(); }
 });
