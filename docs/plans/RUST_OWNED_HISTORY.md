@@ -746,3 +746,16 @@ query-accumulated count, not reset per page: preserve its fills-fallback trigger
 lookup and fallback must admit and terminate the validated stage before owner
 finish/restart. Preserve open-lookup stage-budget transition as a nondefinitive
 proof boundary, without introducing a new warning or a second paging counter.
+
+
+The plan review also caught the page-50 cycle edge: suppressing a probe-stage
+budget with want_more=false would bypass the existing cycle-before-budget check.
+Allow a narrow shared `CursorHistory::advance_probe` operation: run the same
+walker/admission/lifecycle path but treat only PageBudget as a probe boundary
+without declaring query-row incompleteness. Repeated cursors still stall before
+the budget; the native lookup still rejects them. Normal advance is unchanged.
+Pin both cases in core/native tests; no native cursor set or replacement pager.
+Preparation rejection gains typed Internal/notSent through the owner, retaining
+its strict no-rows/no-marker behavior. Original source compiles and fails all
+three new typed-first/retained-later/zero-accepted behavioral control groups.
+The existing 22 history/request-sequence controls pass before source changes.
