@@ -20,6 +20,12 @@ const publicCredential = (input: unknown, trim: boolean): string | undefined => 
   return key.length ? key : undefined;
 };
 
+/** Presence selects a mode; malformed configured callbacks still fail validation. */
+export const selectDelegatedSigningMode = (
+  options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>,
+): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
+  : options.payloadSigner !== undefined ? 'payload' : undefined;
+
 /** Trusted setup for aliases admitted by the shared caller policy. This capsule
  * does not enable a venue or retain a local signing secret. Remote authority
  * precedes PayloadSigner; neither can fall back to a local secret.
@@ -33,6 +39,7 @@ export class DelegatedSignerSetup {
   #venue: ExchangeName;
   #publicMode: Readonly<{ requested: boolean | null; remoteSigner: boolean; payloadSigner: boolean; apiKeyIndexPresent: boolean }>;
   readonly intent: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
+  readonly usesPayloadSigner: boolean;
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
@@ -43,8 +50,9 @@ export class DelegatedSignerSetup {
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
+    this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
     const remoteSigner = options.remoteSigner;
-    const payloadSigner = remoteSigner ? undefined : options.payloadSigner;
+    const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
     if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
       || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
@@ -129,7 +137,7 @@ export class DelegatedSignerSetup {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
       return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
-        remoteSigning: true, payloadSigner: this.intent.payloadSigner, publicMode: this.#publicMode }));
+        remoteSigning: true, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();
       throw error;
