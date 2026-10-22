@@ -158,7 +158,7 @@ fn klines_stream_into_candle_frames() {
 
 #[test]
 fn fetched_candles_come_back_oldest_first() {
-    let mut h = Harness::started(safe_cex_venue_bybit::Options {
+    let mut h = Harness::started(support::Options {
         variant: safe_cex_venue_bybit::Variant::Inverse,
         public_data_only: true,
         ..Default::default()
@@ -467,7 +467,7 @@ fn seconds_candles_are_built_from_trades_alone() {
 
 #[test]
 fn a_limited_candle_read_asks_for_the_newest_bars_up_to_to() {
-    let mut h = Harness::started(safe_cex_venue_bybit::Options {
+    let mut h = Harness::started(support::Options {
         variant: safe_cex_venue_bybit::Variant::Inverse,
         public_data_only: true,
         ..Default::default()
@@ -493,7 +493,7 @@ fn a_limited_candle_read_asks_for_the_newest_bars_up_to_to() {
 
 #[test]
 fn a_zero_limit_candle_read_keeps_from_and_the_default_count() {
-    let mut h = Harness::started(safe_cex_venue_bybit::Options {
+    let mut h = Harness::started(support::Options {
         variant: safe_cex_venue_bybit::Variant::Inverse,
         public_data_only: true,
         ..Default::default()
