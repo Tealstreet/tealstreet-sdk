@@ -139,8 +139,10 @@ seven opaque work-builder/import descriptors and four cfg(test) algorithm/fixtur
 matches in Binance sign.rs and Bybit hosted_signing.rs. Independent inspection
 found no new production secret access, holder or cryptographic executor. This
 Bybit update reuses those builders and removes obsolete custody descriptors;
-its complete raw baseline is519, below landed520, with no new fingerprint added
-by the helper reuse. Checker patterns are unchanged in this follow-up.
+its complete raw baseline is517, below landed520, after removing two inherited
+unused WOO account allowances at the overseer's request. The baseline equals the
+actual scan for every path/hash/count, leaving no allowance for either retired
+site. No new fingerprint is added by helper reuse; checker patterns are unchanged.
 
 Focused local checks pass:1,080 native engine/Binance/Bybit/registry/host tests,
 86 SDK tests plus five rule tests, SDK typecheck/lint, Rust strict Clippy/fmt and

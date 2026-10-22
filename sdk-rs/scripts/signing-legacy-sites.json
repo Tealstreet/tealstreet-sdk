@@ -621,10 +621,6 @@
     "d52b3ae1b0690eae15c7aff4c4bf222fa70a0a4304616eaf812cd96cf0dec9e2": 1,
     "fd187deb799ccce1da1116bc46d85ea7eeed1727dd9528fa343bca76f11953e8": 1
   },
-  "venues/woo/src/account.rs": {
-    "5a1bbefbb3f6856a4d0e5874610251a2e8bc32be35bee46f646e9d6b90c63d53": 1,
-    "ff0072095c6499a42120d6159656551d4eb07ba544a0a45ccdab902e0cac19fa": 1
-  },
   "venues/woo/src/lib.rs": {
     "0219bc24bc618541b8bf84b12a617687f15c479a2a90d9a765b85c28878bfd7c": 1,
     "07e753cfc4d1cb0b093aa1747dfecc08d6f784060c425b6c592b9df76f6f26c5": 1,
