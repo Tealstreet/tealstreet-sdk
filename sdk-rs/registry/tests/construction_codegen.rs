@@ -2,6 +2,37 @@
 mod build_support;
 
 #[test]
+fn two_families_declare_owned_presentation_without_enabling_runtime_admission() {
+    for (name, header) in [
+        ("okx", "OK-ACCESS-PASSPHRASE"),
+        ("bitget", "ACCESS-PASSPHRASE"),
+    ] {
+        let json = format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"{name}":{{"remoteSigning":{{"signatureEncoding":"base64","passphraseHeader":"{header}"}}}}}}}}"#
+        );
+        let output = build_support::generate(&json).unwrap();
+        assert!(output.contains("enabled: false"));
+        assert!(output.contains("signature_encoding: SignatureEncoding::Base64"));
+        assert!(output.contains(&format!("passphrase_header: Some(\"{header}\")")));
+    }
+    for declaration in [
+        r#"{"signatureEncoding":"hex-base64"}"#,
+        r#"{"signatureEncoding":true}"#,
+        r#"{"passphraseHeader":""}"#,
+        r#"{"passphraseHeader":"Bad Name"}"#,
+        r#"{"passphraseHeader":"X-Injected\r\n"}"#,
+        r#"{"passphraseHeader":false}"#,
+    ] {
+        let json = format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{declaration}}}}}}}"#
+        );
+        assert!(build_support::generate(&json).is_err(), "{declaration}");
+    }
+    let long = "x".repeat(257);
+    assert!(build_support::generate(&format!(r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"passphraseHeader":"{long}"}}}}}}}}"#)).is_err());
+}
+
+#[test]
 fn distinguishes_fallback_from_empty_conditions_and_escapes_strings() {
     let output = build_support::generate(
         r#"{"default":{"canSign":[["key"]],"privateEligible":[["canSign"]]},"venues":{
@@ -39,15 +70,15 @@ fn delegated_policy_is_declared_once_and_invalid_headers_fail_the_build() {
     .unwrap();
     assert!(
         output.contains(
-            "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[]) }"
+            "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[]), signature_encoding: SignatureEncoding::Hex, passphrase_header: None }"
         )
     );
     assert!(output.contains(
-        "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[\"X-Fixed\"]) }"
+        "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[\"X-Fixed\"]), signature_encoding: SignatureEncoding::Hex, passphrase_header: None }"
     ));
     assert!(
         output
-            .contains("RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: false, protected_headers: None }")
+            .contains("RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: false, protected_headers: None, signature_encoding: SignatureEncoding::Hex, passphrase_header: None }")
     );
     for declaration in [
         r#"{"payloadRestOnly":"true"}"#,
@@ -120,7 +151,7 @@ fn runtime_admission_requires_dispatch_and_complete_shared_policy() {
     let valid =
         r#"{"enabled":true,"payloadSupported":true,"payloadRestOnly":true,"protectedHeaders":[]}"#;
     let generated = generate(r#"{"dispatchSigning":true}"#, valid).unwrap();
-    assert!(generated.contains("RemoteSigningPolicy { enabled: true, payload_supported: true, payload_rest_only: true, protected_headers: Some(&[]) }"));
+    assert!(generated.contains("RemoteSigningPolicy { enabled: true, payload_supported: true, payload_rest_only: true, protected_headers: Some(&[]), signature_encoding: SignatureEncoding::Hex, passphrase_header: None }"));
     assert!(generate("{}", valid).is_err());
     for incomplete in [
         r#"{"enabled":true,"payloadSupported":true,"payloadRestOnly":true}"#,

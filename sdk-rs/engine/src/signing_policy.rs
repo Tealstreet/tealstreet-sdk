@@ -1,6 +1,15 @@
 //! Construction-owned delegated signing choices, separate from account scope.
 use crate::signing_headers::ResultHeaderPolicy;
 
+/// The trusted family declaration selects how raw MAC bytes are presented.
+/// Provider requests/results continue to carry raw bytes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SignatureEncoding {
+    #[default]
+    Hex,
+    Base64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PrivateFeedPolicy {
     #[default]
@@ -23,6 +32,9 @@ pub struct RemoteSigningPolicy {
     pub payload_supported: bool,
     pub payload_rest_only: bool,
     pub protected_headers: Option<&'static [&'static str]>,
+    pub signature_encoding: SignatureEncoding,
+    /// Presentation comes from an owned passphrase ref, never SDK options.
+    pub passphrase_header: Option<&'static str>,
 }
 impl RemoteSigningPolicy {
     pub fn private_feed(self, payload_signer: bool) -> PrivateFeedPolicy {
@@ -61,6 +73,7 @@ mod tests {
             payload_supported: true,
             payload_rest_only: true,
             protected_headers: Some(&[]),
+            ..Default::default()
         };
         assert_eq!(declared.private_feed(false), PrivateFeedPolicy::Streaming);
         assert_eq!(declared.private_feed(true), PrivateFeedPolicy::RestOnly);
