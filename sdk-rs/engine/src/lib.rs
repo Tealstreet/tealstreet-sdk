@@ -23,6 +23,7 @@ mod placement_acks;
 mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
+pub mod request_context;
 pub mod signing;
 mod signing_dispatch;
 pub use signing_dispatch::{DispatchContext, SignStep};

@@ -51,6 +51,14 @@ metadata-only and prove neither transport delivery nor venue acceptance.
 Admission runs after freshness/deadline/preflight checks, before receipt publication.
 Semantic operation class also replaces method inference in the order-lock fence.
 
+Admission distinguishes `Unscheduled`, `Scheduled(validated lease)` and `Denied`.
+The shared scheduler adapter maps `admit == None` to denial, never permission to
+send without a lease. Validate custom lease arithmetic before admission commits;
+there must be no fallible lifecycle check afterward. The release receipt's lease
+is an observation, not a physical HTTP timeout: the scheduler alone owns renewable
+logical-read expiry. Progress on one in-flight leg must not expire a sibling at
+an older lease snapshot. The immutable lifecycle remains the unconditional cap.
+
 ### Release clock projection and pacing
 
 The shared actual-release receipt captures raw scheduling time and protocol UTC
@@ -62,6 +70,8 @@ reprepare expired/stale signatures before release. Phemex's repair `signed_until
 must consume this shared projection rather than copy protocol expiry or maintain
 a venue clock mirror. Test positive/negative calibration offsets and calibration
 changes while signing is parked; preserve raw timeout precedence.
+Keep projected signature validity separate from the response lease: an accepted
+response can arrive after the signature's send window ends.
 
 Venues declare a send group and minimum gap; the shared lifecycle enforces that
 gap at final controllable transport dispatch and advances next-eligible time
@@ -171,3 +181,33 @@ Before wiring, define the freeze point for `request_timeout`; every child retry
 and renewed lease retains the original logical upper bound. Fence streaming
 callbacks before auth/financial reducers and bound retained leg evidence/tombstones.
 Add signed-denial, duplicate-denial, parallel-leg and timeout/response race controls.
+
+## Implementation checkpoints
+
+The first implementation checkpoint adds pure lifecycle, release-projection and
+command-evidence types plus the typed scheduler admission adapter. It changes no
+production request path until the executor/reference migrations below are wired.
+Independent phase review must cover stale preparation/signing tokens, scheduler
+denial, in-flight lease renewal, partial-effect retry refusal and prior-attempt
+uncertainty. Unique checked attempt identities come from the engine registry;
+constructing two independent lifecycle objects is not an identity allocator.
+
+The executor wiring uses one prepared resource in the existing host, not a new
+sender. The engine emits an unsigned HTTP preparation description; asynchronous
+route selection, proxy authorization and HOW connection/authentication complete
+before the host reports readiness with the engine's preparation token. Signing
+then uses the dispatch clock. The host binds the resulting signed packet to its
+prepared resource and performs all fallible synchronous URL/header/body/request
+validation before asking the engine for the final claim. The claim validates
+context/generation, time/revision/freshness, fixed-group pacing and admission; a
+successful claim is followed immediately by the bound transport API handoff.
+
+A pacing wait retains no reservation: another ready attempt may claim first.
+On wake, repeat every claim check; stale packets are discarded and the unsigned
+recipe is prepared and signed again within the original deadline. Bind permits
+to the preparation token and credential route. Host maps own prepared resources
+and in-flight packets, engine maps own immutable context, recipe and evidence;
+neither puts credentials into readiness/permit metadata. Lost resources and
+callbacks are cleaned up on cancellation, timeout and disposal. Native actors
+and JS/Workers use the same synchronous claim contract; no scheduling or route
+authorization await is allowed between a successful claim and API handoff.

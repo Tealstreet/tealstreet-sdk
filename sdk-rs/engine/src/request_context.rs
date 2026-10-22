@@ -1,0 +1,757 @@
+//! Semantic HTTP ownership and the final controllable transport handoff.
+//!
+//! This module owns no requests, credentials, clocks or network executor. A host
+//! prepares its route first; the engine checks a single-use permit immediately
+//! before that prepared executor hands the request to the transport API.
+use crate::signing::{KeyRef, SignReceipt};
+use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Command { id: CommandId, generation: u64 },
+    Background { generation: u64 },
+}
+
+/// Independent of HTTP method: private POST snapshots are still reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operation {
+    Read,
+    Mutation,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RetryPolicy {
+    #[default]
+    Never,
+    ReadFailure,
+    DefinitiveRefusal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetryEvidence {
+    ReadFailure,
+    DefinitiveRefusal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Credential {
+    pub slot: CredentialSlot,
+    pub reference: KeyRef,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pacing {
+    pub group: u32,
+    pub minimum_gap_ms: f64,
+}
+
+/// Immutable across physical retries of a logical leg.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context {
+    owner: Owner,
+    leg: u64,
+    operation: Operation,
+    credential: Option<Credential>,
+    deadline: f64,
+    pacing: Option<Pacing>,
+    retry: RetryPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    Invalid,
+    Capacity,
+    Duplicate,
+    State,
+    TimedOut,
+    Stale,
+    Revoked,
+    RetryForbidden,
+}
+
+impl Context {
+    pub fn new(
+        owner: Owner,
+        leg: u64,
+        operation: Operation,
+        credential: Option<Credential>,
+        created_at: f64,
+        deadline: f64,
+        pacing: Option<Pacing>,
+    ) -> Result<Self, Error> {
+        if !created_at.is_finite()
+            || !deadline.is_finite()
+            || deadline <= created_at
+            || pacing.is_some_and(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+            || credential
+                .as_ref()
+                .is_some_and(|c| c.reference.0.is_empty() || c.reference.0.len() > 256)
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(Self {
+            owner,
+            leg,
+            operation,
+            credential,
+            deadline,
+            pacing,
+            retry: RetryPolicy::Never,
+        })
+    }
+
+    pub fn owner(&self) -> Owner {
+        self.owner
+    }
+    pub fn leg(&self) -> u64 {
+        self.leg
+    }
+    pub fn operation(&self) -> Operation {
+        self.operation
+    }
+    pub fn credential(&self) -> Option<&Credential> {
+        self.credential.as_ref()
+    }
+    pub fn deadline(&self) -> f64 {
+        self.deadline
+    }
+
+    pub fn with_retry(mut self, policy: RetryPolicy) -> Result<Self, Error> {
+        if policy == RetryPolicy::ReadFailure && self.operation != Operation::Read {
+            return Err(Error::RetryForbidden);
+        }
+        self.retry = policy;
+        Ok(self)
+    }
+
+    /// Native refusal evidence comes from a venue codec, never HTTP status or
+    /// exception text. The engine still checks the previous physical attempt.
+    pub fn retry(&self, evidence: RetryEvidence, now: f64) -> Result<Self, Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        if now >= self.deadline {
+            return Err(Error::TimedOut);
+        }
+        if !matches!(
+            (self.retry, evidence),
+            (RetryPolicy::ReadFailure, RetryEvidence::ReadFailure)
+                | (
+                    RetryPolicy::DefinitiveRefusal,
+                    RetryEvidence::DefinitiveRefusal
+                )
+        ) {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(self.clone())
+    }
+}
+
+/// Monotonic engine-issued identity, never a command id alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attempt {
+    pub request: RequestId,
+    pub generation: u64,
+}
+
+/// Opaque host preparation identity. The host retains the route, authorization
+/// and connection; no credential value enters this metadata.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Prepared {
+    pub id: u64,
+    pub expires_at: Option<f64>,
+}
+
+/// One observation supplies both clock domains. Durations remain raw time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReleaseTime {
+    pub raw_ms: f64,
+    pub protocol_ms: f64,
+    pub revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HttpRelease {
+    pub attempt: Attempt,
+    pub time: ReleaseTime,
+    pub signature: SignReceipt,
+    /// Immutable raw lifecycle bound, including preparation and response work.
+    pub deadline: f64,
+    /// Snapshot for observers only, capped by the lifecycle. The scheduler owns
+    /// renewable logical-read expiry; this never installs a physical timeout.
+    pub response_lease: Option<f64>,
+    /// Protocol signature expiry projected onto raw time, for repair scheduling.
+    /// Signature validity is not a bound on when an accepted response may arrive.
+    pub signature_valid_until: Option<f64>,
+}
+
+/// A validated raw lease. Construct before committing custom admission state.
+/// Shared Scheduler admission constructs this only after its checked arithmetic.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResponseLease(f64);
+impl ResponseLease {
+    pub(crate) fn from_scheduler(deadline: f64) -> Self {
+        Self(deadline)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Admission {
+    Unscheduled,
+    Scheduled(ResponseLease),
+    Denied,
+}
+
+impl HttpRelease {
+    pub fn response_lease(&self, deadline: f64) -> Result<ResponseLease, Error> {
+        if !deadline.is_finite() || deadline <= self.time.raw_ms {
+            return Err(Error::Revoked);
+        }
+        Ok(ResponseLease(deadline.min(self.deadline)))
+    }
+    fn new(
+        attempt: Attempt,
+        time: ReleaseTime,
+        signature: SignReceipt,
+        deadline: f64,
+    ) -> Result<Self, Error> {
+        if !time.raw_ms.is_finite() || !time.protocol_ms.is_finite() {
+            return Err(Error::Invalid);
+        }
+        // The raw lifecycle bound wins even when protocol metadata is stale.
+        if time.raw_ms >= deadline {
+            return Err(Error::TimedOut);
+        }
+        signature.validate().map_err(|_| Error::Invalid)?;
+        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
+            let remaining = expiry - time.protocol_ms;
+            let projected = time.raw_ms + remaining;
+            if !remaining.is_finite() || !projected.is_finite() {
+                return Err(Error::Invalid);
+            }
+            if remaining <= 0. {
+                return Err(Error::Stale);
+            }
+            Some(deadline.min(projected))
+        } else {
+            None
+        };
+        if !deadline.is_finite() || deadline <= time.raw_ms {
+            return Err(Error::Invalid);
+        }
+        Ok(Self {
+            attempt,
+            time,
+            signature,
+            deadline,
+            response_lease: None,
+            signature_valid_until,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Permit {
+    attempt: Attempt,
+    preparation: u64,
+    sequence: u64,
+}
+
+/// Returned to asynchronous route/sign work and checked again on completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Preparation {
+    attempt: Attempt,
+    sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum State {
+    Preparing,
+    Prepared(Prepared),
+    Signing(Prepared),
+    Ready(Prepared),
+    Permitted(Prepared, Permit),
+    Released(HttpRelease),
+    Settled(Option<HttpRelease>),
+}
+
+/// One physical attempt. A retry constructs another lifecycle with the same
+/// context; command evidence is retained separately until command sealing.
+pub struct Lifecycle {
+    context: Context,
+    attempt: Attempt,
+    state: State,
+    signature: SignReceipt,
+    signed_revision: Option<u64>,
+    fresh_until: f64,
+    permits: u64,
+    preparation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Claim {
+    Released(HttpRelease),
+    WaitUntil(f64),
+}
+
+impl Lifecycle {
+    pub fn new(context: Context, attempt: Attempt) -> Self {
+        Self {
+            context,
+            attempt,
+            state: State::Preparing,
+            signature: SignReceipt::default(),
+            signed_revision: None,
+            fresh_until: f64::MAX,
+            permits: 0,
+            preparation: 0,
+        }
+    }
+    pub fn context(&self) -> &Context {
+        &self.context
+    }
+    pub fn attempt(&self) -> Attempt {
+        self.attempt
+    }
+
+    pub fn preparation(&self) -> Preparation {
+        Preparation {
+            attempt: self.attempt,
+            sequence: self.preparation,
+        }
+    }
+
+    pub fn prepared(&mut self, token: Preparation, preparation: Prepared) -> Result<(), Error> {
+        if token != self.preparation() {
+            return Err(Error::Revoked);
+        }
+        if self.state != State::Preparing {
+            return Err(Error::State);
+        }
+        if preparation.expires_at.is_some_and(|at| !at.is_finite()) {
+            return Err(Error::Invalid);
+        }
+        self.state = State::Prepared(preparation);
+        Ok(())
+    }
+
+    pub fn begin_signing(&mut self) -> Result<Preparation, Error> {
+        let State::Prepared(route) = self.state else {
+            return Err(Error::State);
+        };
+        self.state = State::Signing(route);
+        Ok(self.preparation())
+    }
+
+    pub fn signed(
+        &mut self,
+        preparation: Preparation,
+        receipt: SignReceipt,
+        revision: u64,
+        fresh_until: f64,
+    ) -> Result<(), Error> {
+        if preparation != self.preparation() {
+            return Err(Error::Revoked);
+        }
+        let State::Signing(route) = self.state else {
+            return Err(Error::State);
+        };
+        receipt.validate().map_err(|_| Error::Invalid)?;
+        if !fresh_until.is_finite() {
+            return Err(Error::Invalid);
+        }
+        self.signature = receipt;
+        self.signed_revision = Some(revision);
+        self.fresh_until = fresh_until;
+        self.state = State::Ready(route);
+        Ok(())
+    }
+
+    pub fn unsigned(&mut self) -> Result<(), Error> {
+        let State::Prepared(route) = self.state else {
+            return Err(Error::State);
+        };
+        self.state = State::Ready(route);
+        Ok(())
+    }
+
+    /// Issuing/delivering a permit consumes neither admission nor pacing.
+    pub fn permit(&mut self) -> Result<Permit, Error> {
+        let State::Ready(route) = self.state else {
+            return Err(Error::State);
+        };
+        self.permits = self.permits.checked_add(1).ok_or(Error::Capacity)?;
+        let permit = Permit {
+            attempt: self.attempt,
+            preparation: route.id,
+            sequence: self.permits,
+        };
+        self.state = State::Permitted(route, permit);
+        Ok(permit)
+    }
+
+    /// Synchronous final claim, immediately followed by prepared transport
+    /// handoff. `admit` is called only after every other fallible check passes.
+    /// A denied/expired request consumes no pacing slot. There are no fallible
+    /// checks after admission commits; its lease must be validated beforehand.
+    pub fn claim(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+    ) -> Result<Claim, Error> {
+        let State::Permitted(route, expected) = self.state else {
+            return Err(Error::State);
+        };
+        if permit != expected {
+            return Err(Error::Revoked);
+        }
+        let mut release =
+            HttpRelease::new(self.attempt, time, self.signature, self.context.deadline)?;
+        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
+            || self.signed_revision.is_some_and(|rev| rev != time.revision)
+            || time.raw_ms >= self.fresh_until
+        {
+            return Err(Error::Stale);
+        }
+        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
+            return if at >= self.context.deadline {
+                Err(Error::TimedOut)
+            } else {
+                Ok(Claim::WaitUntil(at))
+            };
+        }
+        let admission = match admit(&release) {
+            Ok(admission) => admission,
+            Err(error) => {
+                self.state = State::Settled(None);
+                return Err(error);
+            }
+        };
+        match admission {
+            Admission::Unscheduled => {}
+            Admission::Scheduled(lease) => {
+                release.response_lease = Some(release.deadline.min(lease.0))
+            }
+            Admission::Denied => {
+                self.state = State::Settled(None);
+                return Err(Error::Revoked);
+            }
+        }
+        pacing.released(self.context.pacing, time.raw_ms);
+        self.state = State::Released(release);
+        Ok(Claim::Released(release))
+    }
+
+    /// Reprepare after stale route/signature metadata; the old permit becomes
+    /// unusable. The immutable deadline and owner generation are retained.
+    pub fn reprepare(&mut self) -> Result<(), Error> {
+        if !matches!(
+            self.state,
+            State::Prepared(_) | State::Signing(_) | State::Ready(_) | State::Permitted(..)
+        ) {
+            return Err(Error::State);
+        }
+        self.preparation = self.preparation.checked_add(1).ok_or(Error::Capacity)?;
+        self.state = State::Preparing;
+        self.signature = SignReceipt::default();
+        self.signed_revision = None;
+        self.fresh_until = f64::MAX;
+        Ok(())
+    }
+
+    pub fn release(&self) -> Option<HttpRelease> {
+        match self.state {
+            State::Released(release) | State::Settled(Some(release)) => Some(release),
+            _ => None,
+        }
+    }
+
+    /// Returns false for duplicate completion/cancellation. Retained release
+    /// facts let the owner reconcile a late ACK without reopening the command.
+    pub fn settle(&mut self) -> bool {
+        if matches!(self.state, State::Settled(_)) {
+            return false;
+        }
+        self.state = State::Settled(self.release());
+        true
+    }
+
+    pub fn accepts_response(&self) -> bool {
+        matches!(self.state, State::Released(_))
+    }
+
+    /// One deadline also bounds a lost route/sign/provider/permit callback.
+    /// Expiring a released request retains its evidence for late reconciliation.
+    pub fn expire(&mut self, now: f64) -> Result<bool, Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        Ok(now >= self.context.deadline && self.settle())
+    }
+}
+
+/// Fixed set of per-engine send groups. Retiring a request never erases the
+/// previous release timestamp; concurrent ready requests share this registry.
+pub struct SendPacing {
+    groups: Vec<(Pacing, Option<f64>)>,
+}
+impl SendPacing {
+    pub fn new(groups: &[Pacing]) -> Result<Self, Error> {
+        if groups
+            .iter()
+            .any(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+        {
+            return Err(Error::Invalid);
+        }
+        if groups
+            .iter()
+            .enumerate()
+            .any(|(i, group)| groups[..i].iter().any(|p| p.group == group.group))
+        {
+            return Err(Error::Duplicate);
+        }
+        Ok(Self {
+            groups: groups.iter().map(|group| (*group, None)).collect(),
+        })
+    }
+    fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
+        let Some(pacing) = pacing else {
+            return Ok(None);
+        };
+        let last = self
+            .groups
+            .iter()
+            .find(|(group, _)| *group == pacing)
+            .ok_or(Error::Invalid)?
+            .1;
+        Ok(last.and_then(|at| {
+            let eligible = (at + pacing.minimum_gap_ms).min(f64::MAX);
+            (now < eligible).then_some(eligible)
+        }))
+    }
+    fn released(&mut self, pacing: Option<Pacing>, now: f64) {
+        if let Some(pacing) = pacing {
+            // claim checked the fixed registry before invoking admission.
+            if let Some((_, last)) = self.groups.iter_mut().find(|(group, _)| *group == pacing) {
+                *last = Some(now);
+            }
+        }
+    }
+}
+
+/// Native codecs supply definitive facts. HTTP status and exception text are
+/// deliberately absent from this contract.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WriteResult {
+    Accepted { order_ids: Vec<String> },
+    Rejected(VenueError),
+    Failed(VenueError),
+}
+
+struct WriteAttempt {
+    id: RequestId,
+    leg: u64,
+    released: bool,
+    result: Option<WriteResult>,
+}
+
+/// Bounded evidence retained for the whole command, including prior retries.
+/// Registration order is logical planning order, never callback arrival order.
+pub struct CommandWrites {
+    attempts: Vec<WriteAttempt>,
+    capacity: usize,
+    sealed: bool,
+}
+impl CommandWrites {
+    pub fn new(capacity: usize) -> Result<Self, Error> {
+        if capacity == 0 {
+            return Err(Error::Capacity);
+        }
+        Ok(Self {
+            attempts: Vec::new(),
+            capacity,
+            sealed: false,
+        })
+    }
+    pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.attempts.iter().any(|a| a.id == id || a.leg == leg) {
+            return Err(Error::Duplicate);
+        }
+        if self.attempts.len() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        self.attempts.push(WriteAttempt {
+            id,
+            leg,
+            released: false,
+            result: None,
+        });
+        Ok(())
+    }
+
+    /// Only a typed definitive refusal may authorize another write attempt.
+    /// The request context's policy/deadline must also authorize this retry.
+    pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.attempts.iter().any(|a| a.id == id) {
+            return Err(Error::Duplicate);
+        }
+        if self.attempts.len() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        let leg = old.leg;
+        self.attempts.push(WriteAttempt {
+            id,
+            leg,
+            released: false,
+            result: None,
+        });
+        Ok(())
+    }
+    pub fn released(&mut self, id: RequestId) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::Invalid)?;
+        if attempt.released || attempt.result.is_some() {
+            return Err(Error::State);
+        }
+        attempt.released = true;
+        Ok(())
+    }
+    pub fn result(&mut self, id: RequestId, result: WriteResult) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::Invalid)?;
+        if attempt.result.is_some()
+            || (!attempt.released && !matches!(result, WriteResult::Failed(_)))
+        {
+            return Err(Error::State);
+        }
+        attempt.result = Some(result);
+        Ok(())
+    }
+    /// Seal exactly once. A caller's fallback text never chooses the outcome;
+    /// sent-leg errors have priority over pre-send siblings. Earlier release
+    /// evidence survives a signer/transport failure on a newer physical retry.
+    pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.sealed = true;
+        let any_released = self.attempts.iter().any(|a| a.released);
+        let all_rejected = any_released
+            && self
+                .attempts
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.released)
+                .all(|(index, a)| {
+                    matches!(&a.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+                        && !self.attempts[index + 1..]
+                            .iter()
+                            .any(|later| later.leg == a.leg && !later.released)
+                });
+        let error = |a: &WriteAttempt| match &a.result {
+            Some(WriteResult::Rejected(error) | WriteResult::Failed(error)) => Some(error.clone()),
+            _ => None,
+        };
+        // Choose the terminal physical attempt of the earliest logical leg,
+        // preferring legs that reached the venue. Callback order is irrelevant.
+        let terminal = |index: usize, a: &WriteAttempt| {
+            !self.attempts[index + 1..]
+                .iter()
+                .any(|later| later.leg == a.leg)
+        };
+        let select = |sent_only: bool| {
+            self.attempts
+                .iter()
+                .enumerate()
+                .filter(|(index, a)| {
+                    terminal(*index, a)
+                        && (!sent_only
+                            || self
+                                .attempts
+                                .iter()
+                                .any(|other| other.leg == a.leg && other.released))
+                })
+                .filter_map(|(_, a)| error(a).map(|error| (a.leg, error)))
+                .min_by_key(|(leg, _)| *leg)
+                .map(|(_, error)| error)
+        };
+        let mut error = select(true).or_else(|| select(false)).unwrap_or(fallback);
+        error.outcome = Some(if !any_released {
+            Outcome::NotSent
+        } else if all_rejected {
+            Outcome::Rejected
+        } else {
+            Outcome::Unknown
+        });
+        let mut ids = error
+            .partial
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.order_ids.clone());
+        for attempt in &self.attempts {
+            let order_ids = match &attempt.result {
+                Some(WriteResult::Accepted { order_ids }) => Some(order_ids.as_slice()),
+                Some(WriteResult::Rejected(error) | WriteResult::Failed(error)) => {
+                    error.partial.as_ref().map(|p| p.order_ids.as_slice())
+                }
+                None => None,
+            };
+            if let Some(order_ids) = order_ids {
+                for id in order_ids {
+                    if !ids.contains(id) {
+                        ids.push(id.clone());
+                    }
+                }
+            }
+        }
+        if !ids.is_empty() {
+            if let Some(partial) = error.partial.as_mut() {
+                partial.order_ids = ids;
+            } else {
+                error = error.partial_ids(&ids);
+            }
+        }
+        Ok(error)
+    }
+}
+
+fn effects_free(error: &VenueError) -> bool {
+    error
+        .partial
+        .as_ref()
+        .is_none_or(|p| p.order_ids.is_empty())
+}
+
+#[cfg(test)]
+#[path = "request_context_tests.rs"]
+mod tests;
