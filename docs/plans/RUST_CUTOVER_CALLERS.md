@@ -4089,7 +4089,7 @@ ISO/opaque/since cursor request bytes, native IDs, output fields/units, final
 sort/limits, cash/position ledger filtering, public unsigned dispatch and live
 Store isolation are preserved. Kraken Spot is separate and unchanged.
 
-No SDK argument/row-shape change, NX edit or deployed cutover proof is claimed.
-Numeric Completion remains legacy authority; this is not managed Context
-completion. B11 request-scoped incomplete-query ingestion/coverage and typed
-rejection handling remain required. [Scope](RUST_OWNED_HISTORY.md).
+SDK arguments and row shapes are unchanged. Numeric Completion uses legacy
+authority rather than managed Context completion. Callers must ingest command-scoped
+incomplete-query warnings, gate coverage accordingly and handle typed rejection
+as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
