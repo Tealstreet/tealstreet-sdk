@@ -62,7 +62,10 @@ exit, and requires positive structured network-error evidence while resolving or
 fetching packages. Retry only transient HTTP408/429/5xx or recognized transport
 errors, and only when every fatal error qualifies. No retry after linking, build
 or lifecycle activity, on root preinstall hooks, unknown/unstructured fatal data,
-nonstandard exits/signals, integrity, lockfile, engine or script failures. Never
+nonstandard exits/signals, integrity, lockfile, engine or script failures.
+Disable retry for nonstandard lockfile source types: Git prepare scripts may run
+during fetching, outside the ordinary build phase. The current 2,330 resolved entries
+are ordinary HTTP(S) tarballs. Never
 delete node_modules/cache or weaken checksum/frozen-lockfile checks on retry.
 
 Review the plan and implementation independently, including architecture gate:
@@ -73,3 +76,10 @@ Prove old single-shot install red and retry path green on the same injected503.
 Run bootstrap/secret regressions, root checks, shell/YAML/whitespace checks and
 full CI. Freeze/share head promptly, then fresh separate guard and separate merge;
 report actual workflow pin before dependent lanes claim fresh CI.
+
+Follow-up verification: 39 bootstrap/install/secret-scan checks pass, including
+the actual validation→resolve→fetch prefix, unknown/prototype phase labels,
+nonstandard source kinds and original-single-shot RED/retry GREEN. Real isolated
+Yarn 1.22.21 against a local failing/recovering tarball server also proves original
+HTTP 503 rejection and shared-runner recovery on the second install. Root typecheck (44), lint (28) and test (27)
+checks pass from Turbo cache; YAML/whitespace checks pass. Full CI remains required.
