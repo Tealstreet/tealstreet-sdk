@@ -230,8 +230,18 @@ export class EngineHost {
       try { engine[setter](source); }
       catch { throw entropyFailure('Engine entropy must be configured before startup'); }
     }
+    if (engine.requiresExternalSigner?.() && options.signer === undefined)
+      throw new ExchangeError('Engine signing provider is required', { message:'Engine signing provider is required', kind:'invalidInput', outcome:'notSent' });
+    if (options.signer !== undefined) {
+      if (typeof options.signer !== 'function' || typeof engine.useExternalSigner !== 'function')
+        throw new TypeError('Engine requires a callable signing provider');
+      engine.useExternalSigner();
+    }
+    this.signer = options.signer;
+    this.primitiveSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
+    this.ownsEngine = options.ownsEngine === true;
     this.transport = transport;
     this.handlers = handlers;
     this.sockets = new Map();
@@ -492,6 +502,11 @@ export class EngineHost {
       attempt(() => this.transport.clearTimeout(pending.timer));
     }
     this.signings.clear();
+    for (const pending of this.primitiveSignings.values()) {
+      attempt(() => pending.controller.abort());
+      attempt(() => this.transport.clearTimeout(pending.timer));
+    }
+    this.primitiveSignings.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
@@ -499,6 +514,12 @@ export class EngineHost {
     this.wsScratch = undefined;
     this.timers.clear();
     attempt(() => this.transport.dispose?.());
+    // Release provider-owned keys on normal disposal instead of retaining the
+    // wasm allocation (and an injected callback) until garbage collection.
+    this.signer = undefined;
+    const ownsEngine = this.ownsEngine;
+    this.ownsEngine = false;
+    if (ownsEngine) attempt(() => this.engine.free?.());
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
@@ -551,6 +572,39 @@ export class EngineHost {
     } finally {
       this.requests.delete(id);
     }
+  }
+
+  sign(action) {
+    const id = action.attempt;
+    const controller = new AbortController();
+    const finish = (result, code) => {
+      const pending = this.primitiveSignings.get(id);
+      if (!pending || pending.controller !== controller || this.disposed) return;
+      this.primitiveSignings.delete(id);
+      this.transport.clearTimeout(pending.timer);
+      if (code) {
+        controller.abort();
+        this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
+      } else {
+        this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+      }
+    };
+    const timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), action.timeoutMs);
+    this.primitiveSignings.set(id, { controller, timer });
+    Promise.resolve().then(() => {
+      if (controller.signal.aborted || this.disposed) return;
+      if (!this.signer) { finish(undefined, 'unavailable'); return; }
+      return this.signer(action.work, { signal: controller.signal });
+    }).then((result) => {
+      if (controller.signal.aborted || this.disposed) return;
+      if (!Array.isArray(result) || result.length !== action.work.operations.length
+        || result.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
+          || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) {
+        finish(undefined, 'invalidResult');
+        return;
+      }
+      finish(result);
+    }).catch(() => finish(undefined, 'refused'));
   }
 
   signPayload(action) {
@@ -668,6 +722,9 @@ export class EngineHost {
     if (this.disposed) return;
     const { engine, transport } = this;
     switch (action?.op) {
+      case 'sign':
+        this.sign(action);
+        break;
       case 'signPayload':
         this.signPayload(action);
         break;

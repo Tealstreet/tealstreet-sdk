@@ -1,7 +1,7 @@
 //! Rare request/response reads. Results go back as JSON in the command's
 //! completion and never enter the flush frame.
 use crate::account::{order_side, order_type, venue_error};
-use crate::sign::{Query, Signed};
+use crate::sign::Query;
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
@@ -196,6 +196,21 @@ fn nonzero(text: &str) -> Option<f64> {
 }
 
 impl BinanceFutures {
+    pub(crate) fn on_history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Some(InFlight::Income {
+            delay: Some(timer), ..
+        }) = self.history.reads.remove(&request.command)
+        {
+            cx.clear_timer(timer);
+        }
+        cx.fail(request.command, error);
+    }
+
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
         if self.is_spot() || (self.is_inverse() && !matches!(read, Read::PublicTrades { .. })) {
             if matches!(
@@ -387,16 +402,24 @@ impl BinanceFutures {
             .credentials
             .as_ref()
             .expect("lookup credentials checked");
-        let query = query.signed(credentials, cx.now, self.options.recv_window);
         let request = cx.request(
             Method::Get,
-            format!("{}{}?{query}", self.urls.account_rest, self.paths.order),
-            vec![("X-MBX-APIKEY", credentials.key.clone())],
+            format!("{}{}", self.urls.account_rest, self.paths.order),
+            vec![],
             None,
             Pending::History(Request {
                 command,
-                window: (0.0, 0.0),
+                window: (0., 0.),
             }),
+        );
+        cx.sign_http(
+            request,
+            Box::new(crate::sign::Http::new(
+                credentials.clone(),
+                query,
+                self.options.recv_window,
+                true,
+            )),
         );
         cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }

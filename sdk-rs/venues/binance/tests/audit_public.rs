@@ -1,8 +1,9 @@
 //! Audit regressions for public range requests and book recovery.
+use support::Options;
 mod support;
 
 use safe_cex_engine::{Command, Event, wire};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn snapshot_books(h: &mut Harness) -> Vec<Vec<u8>> {

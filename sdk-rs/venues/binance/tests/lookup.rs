@@ -1,7 +1,8 @@
 //! Native query-order identity and authoritative absence; deterministic API schemas.
+use support::Options;
 mod support;
 use safe_cex_engine::{Command, Event, Method, Query};
-use safe_cex_venue_binance::Options;
+
 use serde::Deserialize;
 use support::Harness;
 
