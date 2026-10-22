@@ -462,14 +462,17 @@ those controls pass.
 The journal checkpoint is c27bf397be1 (386 engine tests, strict Clippy/fmt,
 ban and staged secret checks; independent review CLEAN). Mutation queueing remains
 closed. The next checkpoint introduces a bounded codec-only late-response record:
-256 tombstones; 256 KiB body, 16 KiB headers, 8 KiB opaque UTF-8 codec metadata per
-record; 4 MiB aggregate retained bytes. These are integrity bounds, not new network
+256 active captures and tombstones together; 256 KiB body, 16 KiB headers,
+8 KiB opaque UTF-8 codec metadata per record; 4 MiB aggregate retained bytes,
+including in-delivery reservations. These are integrity bounds, not new network
 timeouts. Tombstones expire at original raw deadline + 30 s and never emit timers,
 new requests or retry/auth/command/scheduler actions. Streaming mutations are
 rejected before release; complete raw response bytes are retained from first chunk.
 
 A venue supplies a bounded ReconciliationData codec payload from its pending
-continuation at final release; its default is absent, which refuses managed
+continuation before final admission; capture and capacity validation must precede
+admission, leaving only infallible release metadata assignment afterward. Its
+default is absent, which refuses managed
 mutation release until the adapter declares a reconciliation path. This payload
 must contain only native correlation facts, never outbound URLs, request bodies,
 credentials or signing recipes. The engine retains no generic Pending, HttpRequest
@@ -477,7 +480,9 @@ or SignStep in tombstones. A late complete UTF-8 response consumes the tombstone
 once and calls a separate codec hook with this data and a restricted reconciliation
 view, not Cx. That view exposes read-only Store and revision-fenced order updates;
 it cannot finish commands, clear order locks, authenticate, schedule or retry.
-Any newer Store order mutation invalidates the old response's mutation fence.
+Any newer Store order mutation invalidates the old response's mutation fence;
+the monotonic revision must saturate safely and saturation denies reconciliation.
+Multiple patches in one callback use its initial fence, not a new check per row.
 No late ACK clears order-lock uncertainty. Capacity/size/invalid UTF-8 failures
 retire response state without changing a sealed Unknown outcome.
 
