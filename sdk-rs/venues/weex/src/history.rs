@@ -4,11 +4,12 @@ use crate::sign::encode;
 use crate::wire::{Str, number, optional_number, timestamp};
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
+use safe_cex_engine::history::{Completion, CursorHistory, RangeHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId};
+use safe_cex_engine::paging::{CursorPage, CursorWalk, PageRow, RangeWalk, Step};
+use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -35,12 +36,16 @@ enum Read {
         symbol: Option<String>,
         kind: Option<String>,
         limit: u32,
-        walk: Option<RangeWalk>,
-        rows: Vec<Income>,
+        owner: Box<IncomeHistory>,
         delay: Option<TimerId>,
         deferred: Option<(Option<f64>, Option<f64>)>,
     },
 }
+enum IncomeHistory {
+    Range(RangeHistory<Income>),
+    Single(CursorHistory<Income>),
+}
+
 struct Fetch {
     path: &'static str,
     query: String,
@@ -240,7 +245,9 @@ struct IncomeRow<'a> {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct IncomeMetadata {
+struct IncomeMetadata<'a> {
+    #[serde(default, borrow)]
+    items: Option<&'a serde_json::value::RawValue>,
     has_next_page: Option<bool>,
     next_key: Option<serde::de::IgnoredAny>,
 }
@@ -478,11 +485,25 @@ impl WeexFutures {
                     cx.fail(command, "WEEX income range exceeds chunk budget");
                     return;
                 }
-                let walk = match (from_ms, to_ms) {
-                    (Some(a), Some(b)) if b > a => Some(RangeWalk::new(a, b, INCOME_WINDOW, 100)),
-                    _ => None,
+                let ranged = matches!((from_ms,to_ms),(Some(a),Some(b)) if b>a);
+                let owner = if let (Some(a), Some(b)) = (from_ms, to_ms)
+                    && b > a
+                {
+                    IncomeHistory::Range(RangeHistory::new(
+                        Completion::new(command), RangeWalk::new(a,b,INCOME_WINDOW,100),
+                        |gaps| format!("WEEX income history is INCOMPLETE: {gaps} chunk(s) could not be walked to completion; totals are a lower bound"),
+                        |rows| serde_json::to_string(rows).map_err(|e|VenueError::new(e.to_string())),
+                    ).with_request_budget(INCOME_BUDGET, "WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound"))
+                } else {
+                    IncomeHistory::Single(CursorHistory::new(
+                        Completion::new(command),
+                        CursorWalk::new(1),
+                        |_| "WEEX income history page budget exhausted".into(),
+                        |rows| {
+                            serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string()))
+                        },
+                    ))
                 };
-                let ranged = walk.is_some();
                 self.history.reads.insert(
                     command,
                     Read::Income {
@@ -493,8 +514,7 @@ impl WeexFutures {
                         } else {
                             limit.unwrap_or(100).clamp(1, 100)
                         },
-                        walk,
-                        rows: vec![],
+                        owner: Box::new(owner),
                         delay: None,
                         deferred: None,
                     },
@@ -639,44 +659,54 @@ impl WeexFutures {
             Task::History(request),
             Some(ArrayAt::Field("items")),
         ) {
-            self.history.reads.remove(&command);
-            cx.fail(command, "WEEX history signing unavailable");
+            self.finish_income(
+                cx,
+                command,
+                Err(VenueError::new("WEEX history signing unavailable").outcome(Outcome::NotSent)),
+                true,
+            );
         }
     }
     fn history_next_income(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        let Some(Read::Income {
-            walk: Some(walk),
-            rows,
-            delay,
-            ..
-        }) = self.history.reads.get_mut(&command)
-        else {
+        let Some(Read::Income { owner, delay, .. }) = self.history.reads.get_mut(&command) else {
+            return;
+        };
+        let IncomeHistory::Range(owner) = owner.as_mut() else {
             return;
         };
         if cx.now < self.paused_until {
             *delay = Some(cx.set_timer(self.paused_until - cx.now));
             return;
         }
-        let step = walk.step();
-        if matches!(step, Step::Fetch { .. }) && walk.requests > INCOME_BUDGET {
-            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound", vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
-            let result = income_json(rows);
-            self.history.reads.remove(&command);
-            cx.done(command, result);
-            return;
-        }
-        match step {
+        match owner.step() {
             Step::Fetch { from, to } => {
                 self.history_income_request(cx, command, Some(from), Some(to))
             }
             Step::ChunkDone => *delay = Some(cx.set_timer(PAGE_DELAY)),
-            Step::Finished => {
-                if walk.truncated {
-                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,format!("WEEX income history is INCOMPLETE: {} chunk(s) could not be walked to completion; totals are a lower bound",walk.exhausted_chunks), vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
-                }
-                let result = income_json(rows);
-                self.history.reads.remove(&command);
-                cx.done(command, result);
+            Step::Finished => self.finish_income(cx, command, Ok(()), false),
+        }
+    }
+    fn finish_income(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        result: Result<(), VenueError>,
+        strict: bool,
+    ) {
+        let Some(Read::Income { owner, delay, .. }) = self.history.reads.remove(&command) else {
+            return;
+        };
+        if let Some(timer) = delay {
+            cx.clear_timer(timer);
+        }
+        match (*owner, strict, result) {
+            (IncomeHistory::Range(owner), true, Err(error)) => owner.reject(cx, error),
+            (IncomeHistory::Single(owner), true, Err(error)) => owner.reject(cx, error),
+            (IncomeHistory::Range(owner), _, result) => {
+                owner.finish_with(cx, result, encode_income)
+            }
+            (IncomeHistory::Single(owner), _, result) => {
+                owner.finish_with(cx, result, encode_income)
             }
         }
     }
@@ -841,8 +871,14 @@ impl WeexFutures {
         }
         let has_more = if matches!(request.kind, Kind::Income) {
             match serde_json::from_str::<IncomeMetadata>(response.body) {
-                Ok(metadata) => metadata.has_next_page == Some(true) || metadata.next_key.is_some(),
-                Err(_) => {
+                Ok(metadata)
+                    if metadata
+                        .items
+                        .is_some_and(|list| list.get().trim_start().starts_with('[')) =>
+                {
+                    metadata.has_next_page == Some(true) || metadata.next_key.is_some()
+                }
+                _ => {
                     self.history_failed(cx, request, "malformed WEEX income pagination metadata");
                     return;
                 }
@@ -859,41 +895,42 @@ impl WeexFutures {
                 rows.append(request.rows, seen);
                 self.history_next_list(cx, command);
             }
-            Read::Income {
-                walk, rows, delay, ..
-            } => {
+            Read::Income { owner, delay, .. } => {
                 let Rows::Income(page) = request.rows else {
                     unreachable!("income page");
                 };
-                if has_more {
-                    // Span continuation cannot prove it consumed an advertised
-                    // opaque cursor, even when a repeated page is short.
-                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows", vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]);
-                    if let Some(walk) = walk.as_mut() {
-                        walk.failed();
+                let gap = has_more.then(|| {
+                    "WEEX income history is INCOMPLETE: venue advertises additional cursor rows"
+                        .to_owned()
+                });
+                match owner.as_mut() {
+                    IncomeHistory::Range(owner) => {
+                        for row in page {
+                            let facts = PageRow {
+                                timestamp: row.timestamp,
+                                identity: income_identity(&row),
+                            };
+                            owner.stage(row, facts);
+                        }
+                        owner.accept_page_with_coverage(gap);
+                        *delay = Some(cx.set_timer(PAGE_DELAY));
                     }
-                }
-                if let Some(walk) = walk {
-                    let identities: Vec<_> = page
-                        .iter()
-                        .map(|r| PageRow {
-                            timestamp: r.timestamp,
-                            identity: income_identity(r),
-                        })
-                        .collect();
-                    let fresh = walk.page(
-                        request.window.0.expect("ranged from"),
-                        request.window.1.expect("ranged to"),
-                        &identities,
-                    );
-                    let mut page: Vec<_> = page.into_iter().map(Some).collect();
-                    rows.extend(fresh.into_iter().filter_map(|i| page[i].take()));
-                    *delay = Some(cx.set_timer(PAGE_DELAY));
-                } else {
-                    *rows = page;
-                    let result = income_json(rows);
-                    self.history.reads.remove(&command);
-                    cx.done(command, result);
+                    IncomeHistory::Single(owner) => {
+                        let count = page.len();
+                        for row in page {
+                            owner.stage(row);
+                        }
+                        owner.advance_with_coverage(
+                            CursorPage {
+                                next: None,
+                                rows: count,
+                                fresh: count,
+                                want_more: false,
+                            },
+                            gap,
+                        );
+                        self.finish_income(cx, command, Ok(()), false);
+                    }
                 }
             }
         }
@@ -905,29 +942,9 @@ impl WeexFutures {
         error: &str,
     ) {
         let command = request.command;
-        if let Some(Read::Income {
-            walk: Some(walk),
-            delay,
-            ..
-        }) = self.history.reads.get_mut(&command)
-        {
-            walk.failed();
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
-                format!("WEEX income page failed: {error}; history is INCOMPLETE"),
-                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
-            );
-            *delay = Some(cx.set_timer(PAGE_DELAY));
+        if matches!(self.history.reads.get(&command), Some(Read::Income { .. })) {
+            self.finish_income(cx, command, Err(VenueError::new(error)), false);
         } else if self.history.reads.remove(&command).is_some() {
-            if matches!(request.kind, Kind::Income) {
-                cx.event(
-                    Level::Warn,
-                    code::HISTORY_INCOMPLETE,
-                    "WEEX income history is INCOMPLETE: query failed",
-                    vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
-                );
-            }
             cx.fail(command, error);
         }
     }
@@ -960,4 +977,9 @@ impl WeexFutures {
             false
         }
     }
+}
+
+fn encode_income(mut rows: Vec<Income>) -> Result<String, VenueError> {
+    rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+    serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
 }

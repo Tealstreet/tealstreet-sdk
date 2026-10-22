@@ -1379,11 +1379,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
-- ~~WEEX's five query-associated omissions~~ now carry the actual income query
-  command before retained-row completion or failure, including lifetime/chunk
-  budgets, opaque cursors and read errors. Native ownership/order regressions
-  and a native-verified fixture through host/worker overlapping-client isolation
-  cover the fix; range continuation and failure policy remain intact.
+- ~~WEEX's five query-associated omissions~~ now flow through the shared income
+  owner. First/zero-accepted failures reject typed without a coverage marker;
+  later failures immediately retain only accepted pages with one command-owned
+  marker before success. Valid opaque-cursor gaps and lifetime/chunk budgets
+  retain the first coverage cause until final success. The old failed-chunk
+  continuation policy is superseded. Native-backed host/worker fixture proof now
+  uses accepted-page/later-failure success; fills/orders remain a later slice.
 
 - High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
