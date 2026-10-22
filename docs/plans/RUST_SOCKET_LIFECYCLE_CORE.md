@@ -398,3 +398,10 @@ wired. The future retirement effect consumer can then use the private method
 without reentering lifecycle retirement. This changes no close action, timer,
 health or public suppression behavior and touches no allocator/HTTP dispatch
 region. Verify the existing Supervisor controls and review the exact extraction.
+
+The physical-close extraction passes the existing 14 Supervisor controls and
+strict engine library Clippy. Both independent reviews verify its private body
+is byte-identical to the prior public body, public close delegates once, and no
+reverse call or recursion exists. Signing-cancel/ClearTimer, health and WsClose
+ordering and suppressed-public behavior are preserved. Runtime managed effect
+routing remains the next phase.

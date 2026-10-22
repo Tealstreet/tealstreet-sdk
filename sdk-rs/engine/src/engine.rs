@@ -1260,6 +1260,13 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
+        self.close_socket_transport(socket);
+    }
+
+    /// Physical close and signing cancellation only. Managed lifecycle effects
+    /// use this after revoking the epoch, before native invalidation; public
+    /// close can then enter retirement without recursively invoking itself.
+    fn close_socket_transport(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
