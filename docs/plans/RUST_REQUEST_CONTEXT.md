@@ -690,3 +690,15 @@ provide one Cx.http_write_result_with_reports entry delegating to that same jour
 Test bound failures leave evidence untouched, silence, native batch messages,
 recovered retries, callback order and stale delivery. This same seam serves
 Binance and Bybit, not a venue-specific outcome/reporting implementation.
+
+
+Reporting audit refinements: the 64 KiB message budget applies across the entire
+command journal, including historical attempts, with checked Vec/String capacity
+accounting. Publish terminal reports by original logical-leg order, not the
+physical position of a retried attempt (A, B, retry A must publish A then B).
+Accepted facts cannot carry rejection reports. Explicit empty reports are not
+the default one-message reporting. If bounded reporting is refused, the adapter
+must retry the atomic native-fact write with empty reports, preserving the native
+classification and all partial IDs; it must never drop the fact or panic because
+an oversized diagnostic was supplied. Test this fallback separately from stale
+provenance errors, which must never gain a second authority or numeric fallback.
