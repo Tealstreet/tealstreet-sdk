@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { wasmBudgetError } from './wasm-budget.mjs';
+import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -28,32 +29,17 @@ for (const family of venueFamilies) {
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
     for (const venue of venues) {
-      let error;
-      let instance;
-      try {
-        instance = new engine.WasmEngine(venue, JSON.stringify({ publicDataOnly: true }));
-      } catch (thrown) {
-        error = thrown;
-      }
-      try {
-        if (venueFamily(venue) === family) {
-          assert.doesNotMatch(String(error?.message ?? ''), /unsupported venue/, `${venue} is missing from ${family}`);
-          if (instance && JSON.parse(instance.capabilities()).orderBookQuery) {
-            // All-feature native tests can hide a missing standalone JSON decoder.
-            // This is sans-I/O: returned requests are never dispatched.
-            assert.doesNotThrow(() => instance.command(JSON.stringify({
-              op: 'fetchOrderBook', command: 1, symbol: '__rest_book_ingress_probe__', limit: 1,
-            }), 0), `${venue} advertises a REST book query but its family decoder rejects it`);
-          }
-          if (instance && JSON.parse(instance.capabilities()).scheduleCancel) {
-            // Public-only construction refuses signing after decoding; no transport runs.
-            assert.doesNotThrow(() => instance.command(JSON.stringify({
-              op: 'scheduleCancel', command: 2, time: 5_000,
-            }), 0), `${venue} advertises scheduleCancel but its family decoder rejects it`);
-          }
-        } else assert.match(String(error?.message), /unsupported venue/, `${family} also contains ${venue}`);
-      } finally {
-        instance?.free();
+      if (venueFamily(venue) === family) {
+        for (const [profile, options] of constructionProfiles(venue).entries()) {
+          const label = `${family}/${venue}/profile${profile}`;
+          const proofs = checkAdvertisedCommands(() => new engine.WasmEngine(venue, JSON.stringify(options)), label);
+          // Descriptive coverage only: preconditions/deferred responses are not
+          // positive valid-state handler proof (covered separately by native fixtures).
+          console.log(JSON.stringify({ conformance: label, ingress: proofs.map(({ field, op, evidence }) => ({ field, op, evidence })) }));
+        }
+      } else {
+        assert.throws(() => new engine.WasmEngine(venue, JSON.stringify({ publicDataOnly: true })),
+          /unsupported venue/, `${family} also contains ${venue}`);
       }
     }
   });
