@@ -4059,3 +4059,16 @@ financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
 changes. The 126 final native account compatibility tests pass on unchanged
 pre-migration production, including eleven new controls; this is no defect-RED
 claim. Full CI and a fresh current-head raw proof remain the merge gates.
+
+
+## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
+
+AsterDEX position, GRVT coin/order/position and TxFlow position diagnostics use
+the existing bounded engine Once reporter. Native notice text, severity and
+repeat/re-arm ordering remain. AsterDEX and TxFlow keep early REST per-ID
+forgetting before full snapshot admission, and zero-size rows do not gain a
+per-key rearm. TxFlow retains exact composite/asset/anonymous labels and its
+separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
+coin rearm, filtered order/position rearm and rearming before per-row timestamp
+rejection on a current response. Callers retain the same account data, command
+outcomes, health policy, transports, signing and snapshot/financial authority.

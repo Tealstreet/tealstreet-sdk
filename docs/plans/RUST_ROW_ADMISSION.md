@@ -752,3 +752,32 @@ per-row timestamp/order rejection; a stale whole-response revision does not
 re-arm. TxFlow per-ID early forgetting belongs only to REST row mapping, not
 its WS mapping. Zero-size rows must be tested alongside another rejection so
 a whole clean-response clear cannot mask the absence of per-key forgetting.
+
+
+### AsterDEX/GRVT/TxFlow native implementation checkpoint
+
+The three account reporters now use existing bounded RowReports::default Once.
+Thin log_skip/rearm_skips adapters preserve native call sites and iterators;
+AsterDEX and TxFlow replace exactly their early per-ID remove with forget.
+All whole-response clear sites, messages, severities and identity labels remain.
+GRVT keeps its unfiltered duplicate-coin rearm versus filtered position/order
+identities, and rearm still precedes per-row timestamp rejection in an admitted
+current-revision response. TxFlow composite labels are not split, and WS mapping
+does not gain REST-only early forgetting. No engine API or financial/admission
+change is included.
+
+Nine new native compatibility controls pass within125 original account tests
+(54 AsterDEX,44 GRVT,27 TxFlow) on unchanged actual1782 production before
+migration. Source/test/five-log receipt SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+Earlier helper failures and a test assumption that anonymous rejection permits
+partial rearm were corrected in tests only; the final GRVT timestamp control
+uses a named unrelated rejection so the accepted symbol can rearm. No product
+RED claim. The owner-priority WOO build restore owns the separate stale1782
+CALLERS status-tail cleanup; this slice adds behavior-only caller text.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.

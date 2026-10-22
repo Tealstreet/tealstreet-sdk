@@ -470,3 +470,25 @@ remain required; this slice does not close the remaining reporter inventory.
 Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
 fmt, bans and root checks pass. Both independent implementation reviews confirm
 that only reporter memory/adapters changed in the three production files.
+
+
+### AsterDEX/GRVT/TxFlow native reporter boundaries (2026-10-23)
+
+Three persistent Once memories consume the engine reporter. Nine original-GREEN
+compatibility controls pin native zero-size versus clean-clear behavior, early
+REST forgetting despite a stale snapshot, Once suppression after severity
+changes, composite versus exact-leg labels, anonymous/unlisted-key isolation,
+GRVT accepted/rejected duplicate coins versus filtered order/position rearm,
+non-array retention versus null clean-empty coins, and current-read rearm
+before per-row timestamp rejection. All125 original account tests pass before
+production migration. Hash-bound source/test/log evidence and the remaining
+reporter inventory are documented in RUST_ROW_ADMISSION.md. No new engine API,
+financial reducer, admission/freshness, signing/request/session or history
+policy is changed. Current full CI, artifact proof and separate guard/merge
+remain required for adoption.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
