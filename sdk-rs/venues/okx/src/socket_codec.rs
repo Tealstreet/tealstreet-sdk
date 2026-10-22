@@ -226,10 +226,13 @@ impl Okx {
             LifecycleEvent::Retired { epoch, .. } => {
                 if self.feed_channel(epoch.feed()) == Some(PUBLIC) {
                     for (symbol, state) in &mut self.books {
+                        let published = state.sequence.is_some() || !state.book.is_empty();
                         state.sequence = None;
                         state.recovering = false;
                         state.book.clear();
-                        cx.book_changed(symbol);
+                        if published {
+                            cx.book_changed(symbol);
+                        }
                     }
                 }
             }
@@ -252,14 +255,15 @@ impl Okx {
         emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
     ) -> Result<(), SocketError> {
         let channel = self.feed_channel(feed).ok_or(SocketError::Stale)?;
-        let mut values = items
-            .iter()
-            .map(|i| {
-                serde_json::from_str::<TopicArgs<'_>>(&i.wire_args)
-                    .map(|v| (i, v))
-                    .map_err(|_| SocketError::InvalidInterest)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // The native order is the first market matching either the instrument
+        // or its underlying. Resolve it once, not inside each sort comparison.
+        let mut ordinals = HashMap::new();
+        for (index, market) in store.markets().iter().enumerate() {
+            ordinals.entry(market.id.as_str()).or_insert(index);
+            if let Some(product) = self.products.get(&market.id) {
+                ordinals.entry(product.underlying.as_str()).or_insert(index);
+            }
+        }
         let rank = |v: &TopicArgs<'_>| {
             let name = v.channel;
             let kind = usize::from(v.inst_type == Some("FUTURES"));
@@ -281,16 +285,18 @@ impl Okx {
                 }
             };
             let id = v.inst_id.unwrap_or("");
-            let index = store
-                .markets()
-                .iter()
-                .position(|m| {
-                    m.id == id || self.products.get(&m.id).is_some_and(|p| p.underlying == id)
-                })
-                .unwrap_or(usize::MAX);
+            let index = ordinals.get(id).copied().unwrap_or(usize::MAX);
             (order, index)
         };
-        values.sort_by_key(|(_, v)| rank(v));
+        let mut values = items
+            .iter()
+            .map(|item| {
+                serde_json::from_str::<TopicArgs<'_>>(&item.wire_args)
+                    .map(|value| (item, rank(&value)))
+                    .map_err(|_| SocketError::InvalidInterest)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        values.sort_by_key(|(_, rank)| *rank);
         let mut batch = Vec::new();
         let flush = |batch: &mut Vec<&Interest>,
                      emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>|
@@ -318,8 +324,8 @@ impl Okx {
             batch.clear();
             Ok(())
         };
-        for (item, value) in values {
-            if rank(&value).0 == 100 {
+        for (item, rank) in values {
+            if rank.0 == 100 {
                 flush(&mut batch, emit)?;
                 batch.push(item);
                 flush(&mut batch, emit)?;
@@ -331,5 +337,124 @@ impl Okx {
             }
         }
         flush(&mut batch, emit)
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::*;
+    use safe_cex_engine::test_support::ProbeVenue;
+
+    #[test]
+    fn large_catalog_encoding_preserves_topic_market_and_first_underlying_order() {
+        let probe = ProbeVenue::new(
+            Okx::new(Options::default()),
+            |venue: &mut Okx, cx: &mut Cx<'_, Pending>| {
+                let mut markets = Vec::new();
+                for index in 0..128 {
+                    let id = format!("M{index}");
+                    venue.products.insert(
+                        id.clone(),
+                        Product {
+                            kind: InstrumentType::Swap,
+                            underlying: format!("U{}", index / 2),
+                            settle_ccy: "USDT".into(),
+                        },
+                    );
+                    markets.push(Market {
+                        id,
+                        symbol: format!("S{index}"),
+                        pretty_symbol: None,
+                        base: "B".into(),
+                        quote: "USDT".into(),
+                        active: true,
+                        precision: Precision {
+                            amount: 1.,
+                            price: 0.1,
+                        },
+                        limits: Limits {
+                            amount: MinMax { min: 1., max: 100. },
+                            leverage: MinMax { min: 1., max: 10. },
+                            price: None,
+                        },
+                        contract_size: Some(1.),
+                        is_expiring: None,
+                        is_inverse: None,
+                        is_spot: None,
+                        is_perpetual: Some(true),
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    });
+                }
+                cx.store.set_markets(markets);
+                venue.managed_connect(cx, PUBLIC).unwrap();
+            },
+        );
+        let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+        engine.start(0.);
+        let venue = &engine.venue().venue;
+        let mut interests = venue.desired_socket_interests(engine.store(), PUBLIC);
+        interests.reverse();
+        interests.push(Interest {
+            key: "book".into(),
+            wire_args: r#"{"channel":"books","instId":"M0"}"#.into(),
+        });
+        let mut batches = Vec::new();
+        venue
+            .managed_encode(
+                engine.store(),
+                venue.connections[PUBLIC].feed.unwrap(),
+                true,
+                &interests,
+                &mut |batch| {
+                    batches.push(batch);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let mut actual = Vec::new();
+        for batch in &batches {
+            let args = batch
+                .text
+                .strip_prefix(r#"{"op":"subscribe","args":["#)
+                .unwrap()
+                .strip_suffix("]}")
+                .unwrap();
+            actual.extend(
+                serde_json::from_str::<Vec<TopicArgs<'_>>>(&format!("[{args}]"))
+                    .unwrap()
+                    .into_iter()
+                    .map(|arg| (arg.channel.to_owned(), arg.inst_id.unwrap().to_owned())),
+            );
+        }
+        let mut expected = Vec::new();
+        for topic in [
+            "tickers",
+            "mark-price",
+            "index-tickers",
+            "open-interest",
+            "funding-rate",
+        ] {
+            for index in 0..if topic == "index-tickers" { 64 } else { 128 } {
+                expected.push((
+                    topic.into(),
+                    if topic == "index-tickers" {
+                        format!("U{index}")
+                    } else {
+                        format!("M{index}")
+                    },
+                ));
+            }
+        }
+        expected.push(("books".into(), "M0".into()));
+        assert_eq!(actual, expected);
+        assert_eq!(
+            batches
+                .iter()
+                .map(|batch| batch.covered_keys.len())
+                .collect::<Vec<_>>(),
+            [100, 100, 100, 100, 100, 76, 1]
+        );
     }
 }

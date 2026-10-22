@@ -545,6 +545,11 @@ impl<V: Venue> Engine<V> {
         if !self.io.managed_sockets || self.io.socket_failed {
             return;
         }
+        // Presence only: actual releases below still enforce every epoch,
+        // time, auth and signing barrier. Idle ingress needs no feed allocation.
+        if self.io.socket_after.is_empty() && !self.io.socket_driver.state.has_pending_frames() {
+            return;
+        }
         for feed in self.io.socket_driver.state.feeds() {
             let Some(epoch) = self.io.socket_driver.state.epoch(feed) else {
                 continue;

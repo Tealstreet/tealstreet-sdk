@@ -312,6 +312,11 @@ impl Lifecycle {
             .iter()
             .find_map(|f| f.epoch.filter(|e| e.socket == socket))
     }
+    pub(crate) fn has_pending_frames(&self) -> bool {
+        self.feeds
+            .iter()
+            .any(|feed| !feed.interests.queue.is_empty())
+    }
     pub(crate) fn has_batches(&self, feed: FeedId) -> bool {
         self.feeds
             .get(feed.0)

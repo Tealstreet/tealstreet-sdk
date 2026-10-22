@@ -529,3 +529,15 @@ Architecture gate: corrections to the existing shared socket choke point and
 its pure native wire adapter, not a venue-local authority, clock or allocator.
 Safe-ID widening still waits for actual #1741 as a separate shared PR. The draft
 cannot merge until that dependency and fresh CI/proof pass.
+
+The first correction is reproduced: retirement before first depth was assertion
+RED while the existing published-book clear control was GREEN. Both now pass.
+The guard uses existing sequence/level evidence, preserving loaded empty snapshots
+and nonempty gap recovery. The ordinal cache passes a 128-market reversed-input
+oracle with repeated underlyings, exact native topic/market order, 100-argument
+chunks and singleton books. Engine idle paths now test pending-work presence
+before allocating feed vectors or scanning release authorities; actual release
+checks are unchanged. Both independent correctness and adversarial reviews are
+CLEAR, including idle-to-pending repair/one-shot coverage. The 408-engine / 7-OKX
+unit run passes; the complete four-crate native rerun and fresh CI are pending.
+No performance or complete replay equality is inferred from these local checks.

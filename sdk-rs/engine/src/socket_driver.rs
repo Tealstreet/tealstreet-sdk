@@ -56,6 +56,9 @@ pub(crate) struct Driver {
 
 impl Driver {
     pub(crate) fn frames_ready(&self, now: f64, barrier: impl Fn(SocketId) -> bool) -> bool {
+        if !self.state.has_pending_frames() {
+            return false;
+        }
         self.runtimes.iter().any(|r| {
             self.state.epoch(r.feed).is_some_and(|e| {
                 self.state.ready(e)
