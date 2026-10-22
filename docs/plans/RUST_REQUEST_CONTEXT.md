@@ -1054,3 +1054,11 @@ Test no-ID partial, retry refusal, required release, unknown sibling, bounded
 text/IDs and actual mixed cancel ACK with both Store assertions. A compiled
 misclassification control must fail. Replacement groups/ordinary Bybit/Hyro
 extensions stay out of this PR under the owner's narrowed scope.
+
+KnownPartial implementation-audit correction before final verification: a batch
+codec's first diagnostic must not erase a later unmatched/duplicate/invalid or
+native-unknown row. Keep callback-local uncertainty independent of representative
+text and known effects, then submit Failed/Unknown ahead of KnownPartial when
+ANY sibling remains unresolved. Retain valid cancellation effects; do not undo
+proven native ACKs or infer missing caller-leg success. Test both row-order
+permutations of definitive refusal plus unknown/mismatched/duplicate siblings.
