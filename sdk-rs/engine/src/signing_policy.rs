@@ -17,6 +17,10 @@ impl PrivateFeedPolicy {
 /// Generated from the same per-alias declarations consumed by SDK construction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RemoteSigningPolicy {
+    /// Runtime adoption is separate from the presence of future codec metadata.
+    pub enabled: bool,
+    /// A private PayloadSigner must have a valid REST-only account lifecycle.
+    pub payload_supported: bool,
     pub payload_rest_only: bool,
     pub protected_headers: Option<&'static [&'static str]>,
 }
@@ -53,6 +57,8 @@ mod tests {
             ResultHeaderPolicy::Deny
         );
         let declared = RemoteSigningPolicy {
+            enabled: true,
+            payload_supported: true,
             payload_rest_only: true,
             protected_headers: Some(&[]),
         };

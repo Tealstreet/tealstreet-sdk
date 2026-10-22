@@ -335,3 +335,30 @@ Architecture gate: one trusted setup/provider/host admission path plus declared
 codec policy, not a per-venue signing, scheduling, auth or session service. The
 RequestContext lane retains HTTP release/managed lifecycle ownership; this lane
 owns result headers before bind and construction/feed configuration only.
+
+
+Half-2 declaration/feed verification checkpoint (still no SDK runtime admission):
+`remoteSigning.enabled` now separates adoption from future codec declarations;
+Binance's four aliases are declared enabled, while Bybit stays disabled until
+its native adoption. `payloadSupported` is false for Hyro, true for the other
+eight aliases; the overseer approved typed Unsupported/notSent for private Hyro
+PayloadSigner setup because TS never completes that handshake today. Hyro
+RemoteSigner remains in scope. One generator validates the shared dispatch,
+header and REST-only prerequisites before enabling a declaration. Nine SDK
+admission assertions were observed RED before adding these fields, then GREEN.
+
+A native four-alias regression completes actual account REST reads and asserts
+loaded balance/orders/positions, then fires queued timers through 24 seconds and
+requires continued REST reconciliation with no listen-key/session/subscription
+work. Disabling only the four private-feed guards produces a compiled RED leak;
+both source files were restored byte-for-byte and GREEN reverified. The policy
+remains immutable after startup. Existing fixtures keep default streaming/deny
+policy; no existing assertions were removed.
+
+Local gates pass: 79 focused SDK tests, eight registry code-generation tests, the
+four-alias native feed regression, package typecheck/lint, strict all-target
+Clippy for engine/registry/Binance, format and the signing ratchet. Independent
+reviews clear the declaration-only slice, fixture/test and optional-provider
+type narrowing. These checks do not yet prove keyless SDK setup, actual-WASM
+provider round trips, Bybit feed/header adoption or worker caller migration.
+Those runtime gates and the same-PR caller-contract section remain required.

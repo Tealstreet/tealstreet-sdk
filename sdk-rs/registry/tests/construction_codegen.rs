@@ -39,15 +39,15 @@ fn delegated_policy_is_declared_once_and_invalid_headers_fail_the_build() {
     .unwrap();
     assert!(
         output.contains(
-            "RemoteSigningPolicy { payload_rest_only: true, protected_headers: Some(&[]) }"
+            "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[]) }"
         )
     );
     assert!(output.contains(
-        "RemoteSigningPolicy { payload_rest_only: true, protected_headers: Some(&[\"X-Fixed\"]) }"
+        "RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: true, protected_headers: Some(&[\"X-Fixed\"]) }"
     ));
     assert!(
         output
-            .contains("RemoteSigningPolicy { payload_rest_only: false, protected_headers: None }")
+            .contains("RemoteSigningPolicy { enabled: false, payload_supported: false, payload_rest_only: false, protected_headers: None }")
     );
     for declaration in [
         r#"{"payloadRestOnly":"true"}"#,
@@ -79,6 +79,8 @@ fn all_nine_aliases_share_rest_only_payload_policy_with_declared_precedence() {
         "hyrotrader",
     ] {
         let policy = safe_cex_venues::remote_signing_policy(name);
+        assert_eq!(policy.enabled, name.starts_with("binance"), "{name}");
+        assert_eq!(policy.payload_supported, name != "hyrotrader", "{name}");
         assert_eq!(
             policy.private_feed(true),
             PrivateFeedPolicy::RestOnly,
@@ -106,4 +108,26 @@ fn all_nine_aliases_share_rest_only_payload_policy_with_declared_precedence() {
         safe_cex_venues::remote_signing_policy("unmigrated").header_policy(),
         ResultHeaderPolicy::Deny
     );
+}
+
+#[test]
+fn runtime_admission_requires_dispatch_and_complete_shared_policy() {
+    let generate = |bridge: &str, declaration: &str| {
+        build_support::generate(&format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"bridge":{bridge},"remoteSigning":{declaration}}}}}}}"#
+        ))
+    };
+    let valid =
+        r#"{"enabled":true,"payloadSupported":true,"payloadRestOnly":true,"protectedHeaders":[]}"#;
+    let generated = generate(r#"{"dispatchSigning":true}"#, valid).unwrap();
+    assert!(generated.contains("RemoteSigningPolicy { enabled: true, payload_supported: true, payload_rest_only: true, protected_headers: Some(&[]) }"));
+    assert!(generate("{}", valid).is_err());
+    for incomplete in [
+        r#"{"enabled":true,"payloadSupported":true,"payloadRestOnly":true}"#,
+        r#"{"enabled":true,"payloadSupported":true,"protectedHeaders":[]}"#,
+        r#"{"enabled":"true","protectedHeaders":[]}"#,
+        r#"{"payloadSupported":"true"}"#,
+    ] {
+        assert!(generate(r#"{"dispatchSigning":true}"#, incomplete).is_err());
+    }
 }

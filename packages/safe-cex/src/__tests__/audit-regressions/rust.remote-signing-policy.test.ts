@@ -10,6 +10,12 @@ describe('shared delegated signing declarations', () => {
     expect(policy?.payloadRestOnly).toBe(true);
     expect(policy?.protectedHeaders).toEqual(binance.includes(name) ? [] : ['X-BAPI-SIGN', 'X-BAPI-API-KEY', 'X-BAPI-TIMESTAMP']);
   });
+  it.each([...binance, ...bybit])('%s distinguishes reviewed runtime admission from future codec policy', (name) => {
+    expect(deriveRemoteSigningPolicy(name)).toMatchObject({
+      enabled: binance.includes(name),
+      payloadSupported: name !== 'hyrotrader',
+    });
+  });
   it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
     for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
     for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);

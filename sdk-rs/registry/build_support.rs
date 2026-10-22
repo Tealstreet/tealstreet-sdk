@@ -36,6 +36,8 @@ struct Rule {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 struct RemoteSigningPolicy {
+    enabled: bool,
+    payload_supported: bool,
     payload_rest_only: bool,
     protected_headers: Option<Vec<String>>,
 }
@@ -157,7 +159,9 @@ fn rule(value: &Rule) -> String {
         },
     );
     let remote_signing = format!(
-        "RemoteSigningPolicy {{ payload_rest_only: {}, protected_headers: {protected} }}",
+        "RemoteSigningPolicy {{ enabled: {}, payload_supported: {}, payload_rest_only: {}, protected_headers: {protected} }}",
+        value.remote_signing.enabled,
+        value.remote_signing.payload_supported,
         value.remote_signing.payload_rest_only
     );
     format!(
@@ -173,6 +177,16 @@ pub fn generate(json: &str) -> Result<String, String> {
         return Err("default signing and private conditions are required".into());
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        if policy.remote_signing.enabled
+            && (!policy.bridge.dispatch_signing
+                || policy.remote_signing.protected_headers.is_none()
+                || (policy.remote_signing.payload_supported
+                    && !policy.remote_signing.payload_rest_only))
+        {
+            return Err(
+                "delegated signing requires dispatch, header and private-feed policy".into(),
+            );
+        }
         if let Some(names) = &policy.remote_signing.protected_headers
             && (names.len() > 32
                 || names.iter().any(|name| {

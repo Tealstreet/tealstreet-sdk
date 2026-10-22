@@ -77,8 +77,8 @@ export class DelegatedSignerSetup {
    * disposal without retaining authority or admitting another provider call. */
   readonly signer: Signer = async (request, { signal }) => {
     const provider = this.#provider;
-    if (!provider || this.#abort.signal.aborted || signal.aborted) invalid('Delegated signer setup is disposed or canceled');
-    if (this.#pending.size >= 64) invalid('Delegated signer request limit exceeded');
+    if (!provider || this.#abort.signal.aborted || signal.aborted) return invalid('Delegated signer setup is disposed or canceled');
+    if (this.#pending.size >= 64) return invalid('Delegated signer request limit exceeded');
     const attempt = new AbortController();
     const abort = () => attempt.abort();
     this.#pending.add(attempt);

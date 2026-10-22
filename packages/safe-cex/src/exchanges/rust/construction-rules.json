@@ -21,17 +21,17 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
-    "bybit": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
-    "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
-    "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
-    "binance": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
-    "binancepm": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
-    "binanceinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
-    "binancespot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
+    "bybit": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": false, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": false, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"enabled": false, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "binance": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
+    "binancepm": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
+    "binanceinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
+    "binancespot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
     "kucoinspot": {"bridge": {"spot": true}},
     "hyperliquidspot": {"bridge": {"spot": true}},
     "krakenspot": {"bridge": {"spot": true}},
-    "bybitdemo": {"bridge": {"demo": "always", "dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
-    "hyrotrader": {"bridge": {"demo": "hyroMode", "dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}}
+    "bybitdemo": {"bridge": {"demo": "always", "dispatchSigning": true}, "remoteSigning": {"enabled": false, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "hyrotrader": {"bridge": {"demo": "hyroMode", "dispatchSigning": true}, "remoteSigning": {"enabled": false, "payloadSupported": false, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}}
   }
 }

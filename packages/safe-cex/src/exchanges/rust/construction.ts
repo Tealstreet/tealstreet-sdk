@@ -8,7 +8,12 @@ export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'require
 export type IdentitySetupPolicy = { trimCredential?: boolean; passphrase?: PassphraseSetupPolicy };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
-export type RemoteSigningPolicy = Readonly<{ payloadRestOnly?: boolean; protectedHeaders?: readonly string[] }>;
+export type RemoteSigningPolicy = Readonly<{
+  enabled?: boolean;
+  payloadSupported?: boolean;
+  payloadRestOnly?: boolean;
+  protectedHeaders?: readonly string[];
+}>;
 
 type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
