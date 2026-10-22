@@ -1,35 +1,102 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::url::encode;
+use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::{
     Query,
     model::{OrderStatus, OrderType},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 /// Pages per read before paging that still has a cursor is incomplete.
 const MAX_PAGES: u32 = 100;
 
 pub struct Request {
-    command: CommandId,
     query: Query,
-    rows: Rows,
-    walk: CursorWalk,
+    history: CursorHistory<Mapped>,
     /// Smallest numeric trade id on the current page: the next `after`.
     last_cursor: String,
     received: usize,
     reached_start: bool,
-    seen: HashSet<String>,
     failed: bool,
 }
-enum Rows {
-    Fills(Vec<Execution>),
-    Orders(Vec<HistoricalOrder>),
-    Income(Vec<Income>),
-    Trades(Vec<Trade>),
+enum Mapped {
+    Fill(Execution),
+    Order(HistoricalOrder),
+    Income(Income),
+    Trade(Trade),
 }
+fn missing_finalizer(_: &[Mapped]) -> Result<String, VenueError> {
+    Err(VenueError::new(
+        "BloFin history requires a contextual finalizer",
+    ))
+}
+fn encode_result(query: &Query, rows: Vec<Mapped>) -> Result<String, VenueError> {
+    let mismatch = || VenueError::new("BloFin history result kind mismatch");
+    let result = match query {
+        Query::Fills { limit, .. } => {
+            let mut rows = rows
+                .into_iter()
+                .map(|row| match row {
+                    Mapped::Fill(row) => Ok(row),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+            rows.truncate(limit.unwrap_or(100).clamp(1, 100) as usize);
+            serde_json::to_string(&rows)
+        }
+        Query::OrderHistory { .. } => {
+            let mut rows = rows
+                .into_iter()
+                .map(|row| match row {
+                    Mapped::Order(row) => Ok(row),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+            serde_json::to_string(&rows)
+        }
+        Query::Income { limit, .. } => {
+            let mut rows = rows
+                .into_iter()
+                .map(|row| match row {
+                    Mapped::Income(row) => Ok(row),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+            if let Some(limit) = limit {
+                rows.truncate(*limit as usize);
+            }
+            serde_json::to_string(&rows)
+        }
+        Query::PublicTrades { .. } => {
+            let rows = rows
+                .into_iter()
+                .map(|row| match row {
+                    Mapped::Trade(row) => Ok(row),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            serde_json::to_string(&rows)
+        }
+        Query::OrderByClientId { .. } => return Err(mismatch()),
+    };
+    result.map_err(|error| VenueError::new(error.to_string()))
+}
+impl Request {
+    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        let Self { query, history, .. } = self;
+        history.finish_with(cx, result, |rows| encode_result(&query, rows));
+    }
+    fn reject(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.history.reject(cx, error);
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Row<'a> {
@@ -192,17 +259,25 @@ impl Blofin {
         command: CommandId,
         query: Query,
     ) {
+        let completion = Completion::new(command);
         if !matches!(
             query,
             Query::PublicTrades { .. } | Query::OrderByClientId { .. }
         ) && !self.signed()
         {
-            cx.done(command, "[]".into());
+            completion.finish(cx, Ok("[]".into()));
             return;
         }
         let (symbol, from, to) = match &query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "BloFin client-order-ID lookup is unsupported");
+                completion.finish(
+                    cx,
+                    Err(
+                        VenueError::new("BloFin client-order-ID lookup is unsupported")
+                            .kind(ErrorKind::Unsupported)
+                            .outcome(Outcome::NotSent),
+                    ),
+                );
                 return;
             }
             Query::Fills {
@@ -229,40 +304,42 @@ impl Blofin {
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(f, t)| f > t)
         {
-            cx.fail(command, "Invalid BloFin history time range");
+            completion.finish(
+                cx,
+                Err(VenueError::new("Invalid BloFin history time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent)),
+            );
             return;
         }
         if let Some(s) = symbol
             && cx.store.market(s).is_none()
         {
-            cx.fail(command, format!("Unknown market {s}"));
+            completion.finish(
+                cx,
+                Err(VenueError::new(format!("Unknown market {s}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent)),
+            );
             return;
         }
         if matches!(&query, Query::Fills { symbol: None, .. }) {
-            cx.done(command, "[]".into());
+            completion.finish(cx, Ok("[]".into()));
             return;
         }
-        let rows = match query {
-            Query::OrderByClientId { .. } => {
-                cx.fail(command, "BloFin client-order-ID lookup is unsupported");
-                return;
-            }
-            Query::Fills { .. } => Rows::Fills(vec![]),
-            Query::OrderHistory { .. } => Rows::Orders(vec![]),
-            Query::Income { .. } => Rows::Income(vec![]),
-            Query::PublicTrades { .. } => Rows::Trades(vec![]),
-        };
         self.history_page(
             cx,
             Request {
-                command,
                 query,
-                rows,
-                walk: CursorWalk::new(MAX_PAGES),
+                history: CursorHistory::new(
+                    completion,
+                    CursorWalk::new(MAX_PAGES),
+                    |_| "BloFin income pagination did not finish".into(),
+                    missing_finalizer,
+                ),
                 last_cursor: String::new(),
                 received: 0,
                 reached_start: false,
-                seen: HashSet::new(),
                 failed: false,
             },
         );
@@ -270,9 +347,11 @@ impl Blofin {
     fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let (endpoint, symbol, from, to, limit) = match &request.query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    request.command,
-                    "BloFin client-order-ID lookup is unsupported",
+                request.reject(
+                    cx,
+                    VenueError::new("BloFin client-order-ID lookup is unsupported")
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent),
                 );
                 return;
             }
@@ -338,7 +417,7 @@ impl Blofin {
             params.push(format!("end={}", num::format(to)));
         }
         params.push(format!("limit={limit}"));
-        if let Some(cursor) = request.walk.cursor() {
+        if let Some(cursor) = request.history.cursor() {
             params.push(format!("after={}", encode(cursor)));
         }
         let path = format!("{endpoint}?{}", params.join("&"));
@@ -363,7 +442,7 @@ impl Blofin {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.fail(request.command, e),
+            Err(e) => request.reject(cx, VenueError::new(e)),
         }
     }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -442,12 +521,12 @@ impl Blofin {
             row.trade_id.to_string()
         };
         if id.is_empty()
-            || (!matches!(request.query, Query::Fills { .. }) && !request.seen.insert(id.clone()))
+            || (!matches!(request.query, Query::Fills { .. }) && !request.history.fresh(id.clone()))
         {
             return;
         }
-        match &mut request.rows {
-            Rows::Fills(rows) => {
+        match &request.query {
+            Query::Fills { .. } => {
                 if let Query::Fills {
                     order_id: Some(id), ..
                 } = &request.query
@@ -502,7 +581,7 @@ impl Blofin {
                 if price <= 0.0 || qty <= 0.0 || !matches!(side_value.as_str(), "buy" | "sell") {
                     return;
                 }
-                if !request.seen.insert(id.clone()) {
+                if !request.history.fresh(id.clone()) {
                     return;
                 }
                 let fee = [
@@ -522,7 +601,7 @@ impl Blofin {
                 } else {
                     row.fee_currency.as_ref()
                 };
-                rows.push(Execution {
+                request.history.stage(Mapped::Fill(Execution {
                     id,
                     timestamp: (time / 1000.0).floor(),
                     symbol: symbol.clone(),
@@ -535,9 +614,9 @@ impl Blofin {
                     position_side: (!row.position_side.is_empty())
                         .then(|| position_side(&row.position_side)),
                     realized_pnl: row.fill_pnl.0,
-                });
+                }));
             }
-            Rows::Orders(rows) => {
+            Query::OrderHistory { .. } => {
                 if row.create_time.0 <= 0.0 || !matches!(row.side.as_ref(), "buy" | "sell") {
                     return;
                 }
@@ -545,7 +624,7 @@ impl Blofin {
                 let Some(contract_size) = market.map(|m| m.contract_size.unwrap_or(1.0)) else {
                     return;
                 };
-                rows.push(HistoricalOrder {
+                request.history.stage(Mapped::Order(HistoricalOrder {
                     id,
                     symbol: symbol.clone(),
                     side: side(&row.side),
@@ -567,9 +646,9 @@ impl Blofin {
                     position_side: position_side(&row.position_side),
                     created_time: row.create_time.0,
                     updated_time: nonzero(row.update_time.0),
-                });
+                }));
             }
-            Rows::Income(rows) => {
+            Query::Income { .. } => {
                 for (kind, value, category, suffix) in [
                     ("REALIZED_PNL", row.fill_pnl.0, "realized_pnl", "pnl"),
                     (
@@ -597,7 +676,7 @@ impl Blofin {
                     {
                         continue;
                     }
-                    rows.push(Income {
+                    request.history.stage(Mapped::Income(Income {
                         symbol: symbol.clone(),
                         income_type: kind,
                         income: value,
@@ -606,15 +685,15 @@ impl Blofin {
                         tran_id: format!("{id}:{suffix}"),
                         trade_id: id.clone(),
                         category,
-                    });
+                    }));
                 }
             }
-            Rows::Trades(rows) => {
+            Query::PublicTrades { .. } => {
                 let Some(market) = market else {
                     return;
                 };
                 let qty = account::clean(row.size.0 * market.contract_size.unwrap_or(1.0));
-                rows.push(Trade {
+                request.history.stage(Mapped::Trade(Trade {
                     id,
                     symbol: symbol.clone(),
                     price: row.price.0,
@@ -622,8 +701,9 @@ impl Blofin {
                     quote_qty: qty * row.price.0,
                     timestamp: time,
                     side: side(&row.side),
-                });
+                }));
             }
+            Query::OrderByClientId { .. } => request.failed = true,
         }
     }
     pub(crate) fn history_response(
@@ -632,71 +712,50 @@ impl Blofin {
         mut request: Request,
         response: Response<'_>,
     ) {
-        if let Err(e) = check(&response) {
-            cx.fail(request.command, e);
+        if let Err(error) = check(&response) {
+            request.finish(cx, Err(VenueError::new(error)));
             return;
         }
         if request.failed {
-            cx.fail(request.command, "Malformed BloFin history row");
+            request.finish(cx, Err(VenueError::new("Malformed BloFin history row")));
             return;
         }
-        let (page_limit, enough) = match (&request.query, &request.rows) {
-            (Query::Fills { limit, .. }, Rows::Fills(rows)) => {
+        let (page_limit, enough) = match &request.query {
+            Query::Fills { limit, .. } => {
                 let count = limit.unwrap_or(100).clamp(1, 100) as usize;
-                (count, rows.len() >= count)
+                (
+                    count,
+                    request.history.accepted_len() + request.history.staged_len() >= count,
+                )
             }
-            (Query::Income { .. }, _) => (100, false),
+            Query::Income { .. } => (100, false),
             _ => (usize::MAX, true),
         };
         let want_more = request.received >= page_limit && !request.reached_start && !enough;
-        // A full page must yield its own cursor; without one the read cannot continue.
-        let stuck = want_more && request.last_cursor.is_empty();
+        if want_more && request.last_cursor.is_empty() {
+            request.reject(
+                cx,
+                VenueError::new("BloFin income pagination did not finish"),
+            );
+            return;
+        }
         let page = CursorPage {
             next: Some(std::mem::take(&mut request.last_cursor)),
             rows: request.received,
             fresh: request.received,
             want_more,
         };
-        match request.walk.advance(page) {
-            CursorStep::More(_) if !stuck => {
+        match request.history.advance(page) {
+            CursorStep::More(_) => {
                 request.received = 0;
                 self.history_page(cx, request);
-                return;
             }
-            CursorStep::Done if !stuck => {}
-            _ => {
-                cx.fail(request.command, "BloFin income pagination did not finish");
-                return;
-            }
+            CursorStep::Done => request.finish(cx, Ok(())),
+            CursorStep::Stalled(_) => request.reject(
+                cx,
+                VenueError::new("BloFin income pagination did not finish"),
+            ),
         }
-        let result = match &mut request.rows {
-            Rows::Fills(rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                if let Query::Fills { limit, .. } = &request.query {
-                    rows.truncate(limit.unwrap_or(100).clamp(1, 100) as usize);
-                }
-                serde_json::to_string(rows)
-            }
-            Rows::Orders(rows) => {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                serde_json::to_string(rows)
-            }
-            Rows::Income(rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                if let Query::Income {
-                    limit: Some(limit), ..
-                } = request.query
-                {
-                    rows.truncate(limit as usize);
-                }
-                serde_json::to_string(rows)
-            }
-            Rows::Trades(rows) => serde_json::to_string(rows),
-        };
-        match result.map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(request.command, data),
-            Err(error) => cx.fail(request.command, error),
-        };
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -704,6 +763,6 @@ impl Blofin {
         request: Request,
         error: &str,
     ) {
-        cx.fail(request.command, error);
+        request.finish(cx, Err(VenueError::new(error)));
     }
 }

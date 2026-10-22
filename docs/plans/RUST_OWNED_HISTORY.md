@@ -83,6 +83,52 @@ the adversarial suggestion. This checkpoint is local only with unmerged #1719
 as a reviewed dependency; actual dependency integration and reference regressions
 remain required before publication.
 
+## Next cursor fan-out: BloFin general histories
+
+Fresh `feat/rust-owned-history-blofin` starts from actual signer prerequisites
+`802e9c8c6e9`. It uses the already-landed `CursorHistory` API from #1719,
+not an unmerged range-core API. Develop locally while range reference #1724
+runs CI; integrate its actual shared-engine merge before final proof if it
+lands first. No engine source/export, dispatch, signing, clock, row/account
+reducer, host, fixture, comparator or budget edits in this fan-out.
+
+Replace BloFin general-history accepted vectors, cursor owner and seen-ID set
+with one typed `CursorHistory` bound to the real command. The native adapter
+keeps wire parsing, filtered native time/cursor selection and mapping; its
+contextual finalizer sorts/truncates accepted rows exactly as before. Keep the
+existing request-sequence pins: fills/native per-read cap and filter semantics,
+income cursor selection as smallest unbounded numeric native ID, raw received
+counts driving pagination, one-request orders, unsigned public trades, and all
+current symbol/profile/keyless admission. Income has no new early global limit.
+Derived PnL and fee rows retain compound identity and final limits.
+
+Streamed row prefixes remain staged until the whole HTTP/native/envelope verdict
+is valid. First failure/no accepted mapped rows rejects typed; actual later-page
+failure finishes prior accepted rows with one command-owned incomplete marker,
+including Error-only logging. Failed-prefix rows cannot enter recovery. Native
+paging refusal remains STRICT as before: empty cursor on a full continuing page,
+repeated cursor or budget exhaustion rejects through the owner, never partial
+success. Header/signing preparation failure is also strict even after accepted
+rows; do not reinterpret it as a failed HTTP page or add a resend. Existing
+closed-position owner behavior remains untouched.
+
+Before editing source, pin current successful request sequences and review this
+plan. Add original-RED/core-GREEN first/later native/HTTP/transport/malformed-page
+regressions, accepted-empty/filtered recovery controls, failed-prefix exclusion,
+marker ownership/order at Error-only level, unchanged strict stalls and PnL/fee
+identity/sort/limits. Explicitly supersede the old later-income-rejection test
+only for actual page failure; keep strict pagination-refusal assertions. Preserve
+all unrelated financial-reducer tests and account state. Update caller/audit/
+quality scope without declaring universal fan-out or B11 closed.
+
+Independent correctness/adversarial reviews must answer the architecture gate:
+this adapts a second general-history family to the existing shared completion/
+cursor owner, not a venue-local copy. Focused engine/BloFin/Binance and reference
+Bybit tests, strict Clippy/fmt/bans/links; final shared dependencies integrated,
+full exact-head CI, then separate revert guard, separate merge and actual
+parents/tree proof. Coordinate native-history overlap with signer/clock/rows
+lanes before source changes. No NX edits or remote-signing closure.
+
 ## Contract and sequence
 
 1. Reference PR: engine-owned history completion and cursor paging, exercised by
@@ -447,3 +493,69 @@ summary now explicitly supersedes its old Binance error-plus-empty-success
 contract rather than continuing to recommend it. Fresh focused native/strict
 checks, integration reviews and exact-head CI run from this dependency before
 the separate final guard/merge.
+
+### BloFin general-history local checkpoint
+
+The existing cursor owner now holds all general query completions, staged and
+accepted typed rows, native-ID dedupe, cursor/page state and contextual final
+shaping. Raw received counts/native cursor selection still precede filters;
+fills count accepted plus staged executions, while income expands a deduped
+native trade into distinct PnL/fee rows and retains its final-only output limit.
+Orders and public trades close their one-page cursor stage. No engine source,
+lib, header/sign implementation or financial reducer is edited. Header-preparation
+failure, missing/repeated cursors and page budget remain strict; actual later
+page failure returns only prior accepted rows with owned incompleteness.
+
+Two extra successful request/limit pins were committed and passed before the
+adapter edit (12 total existing/pinned tests). New controls cover nine failure
+forms across all four queries, staged prefix and native-error-after-prefix,
+filtered-only recovery eligibility, PnL/fee identity, concurrent command owners,
+strict header entropy refusal and the actual 100-page budget. The original
+adapter fails the intended typed-first/retained-later/derived-income controls;
+its bytes are restored after the negative run. Corrected 20 history controls
+and 768 engine/BloFin/Binance tests pass, with strict BloFin all-target Clippy,
+fmt and bans. Independent correctness/adversarial source reviews are clean and
+answer the architecture gate: reuse the shared engine owner, no per-venue copy.
+The old later-income-rejection assertion is superseded only for actual page
+failure; strict pagination refusal remains tested.
+
+This remains a local unpublished checkpoint on actual #1721. Integrate actual
+range reference #1724 before final proof, then add the caller/audit/quality catch-up
+on that base to preserve incoming doc sections. No cutover/NX/remote closure.
+
+
+Actual range reference #1724 `22550c4050c33a2f0c0b5bd84b26c027883650e0`
+is real-integrated into this BloFin slice. Its nine incoming paths outside the
+four owned shared docs, and all four reviewed BloFin source/test blobs, remain
+exact; incoming lines in those shared docs are preserved. The only
+conflict was independent added sections in this shared plan; the overseer
+authorized retaining incoming Range blocks then BloFin blocks without rewriting
+or deleting lines, and both original complete documents remain ordered
+subsequences of the resolution. No source/test/contract conflict occurred.
+Caller/audit/quality catch-up is added after that integration, preserving the
+incoming Binance and actual #1721 provider sections. Fresh focused gates and
+independent integration/caller reviews precede exact-head CI and separate guard.
+The financial #1725 hold is respected: this fan-out touches no Binance, engine
+execution/num, WOO or Bitrue source; integrate its actual shared-engine dependency
+if it lands before the final proof.
+
+
+Actual scheduler-policy #1723 `08b9c12f4861237f474578928e8ab606da1e1236`
+landed before publication and is real-integrated conflict-free. Its two incoming
+paths are exact; the reviewed BloFin implementation is unchanged. This is policy
+foundation without runtime adoption, so it adds no caller behavior row. Fresh
+focused/strict checks and CI use this shared-engine dependency. The #1725
+financial window remains independent and is observed before any final guard.
+
+
+A bounded caller review caught admission metadata regression before merge:
+passing unsupported lookup/invalid input through Completion's unclassified
+Internal fallback would mislabel known user errors. Those native admission
+facts now set the existing common VenueError kind/outcome fields explicitly:
+Unsupported/notSent for lookup, InvalidInput/notSent for range/market. No new
+classifier/helper/engine source is added. A four-case admission regression fails
+against frozen 1f3 (Internal instead of Unsupported) and passes corrected code.
+The generic history_failed callback intentionally retains the common Internal
+default because both transport and stream malformed/missing-list callbacks use
+it; a blanket Network label would misclassify decode failures. Caller wording
+records these metadata changes and includes later filtered-fill recovery.
