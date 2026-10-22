@@ -3189,3 +3189,126 @@ Existing account/factory callers add no argument. This is not evidence of a
 particular NX deployment or live signing session. Bybit/Aster protocol-time
 calibration remains separate from this merged ingress change; see
 [RUST_ENGINE_CLOCK.md](RUST_ENGINE_CLOCK.md).
+
+
+### Bybit general-history completion and finalization
+
+Bybit fills, order history, income and public trades now complete through the
+same engine owner. Each response requires a successful `result.list`, decoded
+in full before any of its mapped rows are admitted. A missing/null/malformed
+result or list no longer becomes an empty complete result. Before any accepted
+rows, native/HTTP/transport/parse failures reject with a typed error; after
+accepted rows, a failed page returns only those prior rows with one command-owned
+Warn `history.incomplete` immediately before completion, even at Error-only log
+level. A failed body's valid-looking prefix cannot leak into that result.
+
+The owner retains rows across Bybit's category and seven-day window stages.
+Final sorting, compound income/hedge-leg dedupe and the global caller limit apply
+to accepted rows on both normal and recovered completion. Limits still count
+mapped rows before final dedupe within each category; satisfying a requested
+limit takes precedence over a continued cursor or safety cap. Income's empty
+native list still ends that window. Public trades remain an unsigned single-page
+read, and keyless private history retains the existing no-I/O empty result.
+
+Pagination-policy refusals stay strict: bounded page caps and repeated cursors
+reject rather than manufacture partial success. Non-adjacent cursor cycles now
+reject earlier instead of walking until the page budget. Unbounded order-history
+page caps retain accepted rows with one owned marker across any later windows;
+a subsequent failed page preserves the earlier missing-coverage cause. Encoding
+and owner-lifecycle failures always reject. Method arguments and the B11 transport
+are unchanged; NX still must honor request-scoped incompleteness before marking
+history coverage complete. Other venue histories and background-coverage notices
+remain outside this slice; B11 and global enforcement stay open.
+
+
+## Send-time signer core and trusted bootstrap (#1714)
+
+Actual merge `ad0e6fa1e42` introduces the engine's send-time provider boundary
+with Binance USD-M/PM/COIN-M/Spot as the reference. Standard `ExchangeOptions`
+credential inputs remain accepted by the trusted default adapter, which extracts
+primary/secondary credentials before `BaseExchange`; retained generic
+`exchange.options` and engine-options JSON no longer contain those credentials.
+A one-use setup capsule passes optional raw-WASM constructor argument 3,
+`signerSetupJson`, to the local provider separately. Custom loaders must forward
+that argument; ordinary default-factory callers add no constructor argument.
+Incomplete secondary setup rejects synchronously as `invalidInput`/`notSent`.
+
+**REQUIRED NX trusted bootstrap migration:** pinned NX
+`65e086a3c90` passes `options: exchange.options` into the worker
+(`apps/web/src/controllers/exchangeController/exchangeAccountController.ts:2861`),
+and hosted initialization registers the signing account from those options
+(`apps/web/src/utils/shim/worker/ExchangeServerWorker.ts:1030-1037`;
+`signingHost.ts:77,88,106-117`). Provision provider setup separately in the
+engine-owning realm, including rotation/reload/disposal; never restore credentials
+in generic options. Replace raw `options.key === ''` public/private assumptions
+in `getExchangeAppearsConnected.tsx:45`,
+`getOrFetchPositionsForSymbolSync.ts:30` and `onPositionMetaChange.ts:28` with
+public/signing-state metadata. The old main-thread WS sign-request path
+(controller `:3009-3025`, SDK `exchanges/base.ts`'s `signWsAuth`) must reach the
+provider instead of reading the sanitized `options.secret`. Reload and CLI
+construction from saved account configuration remain trusted setup inputs;
+this static audit does not establish deployed cross-realm behavior.
+
+Raw JS hosts can inject `EngineHost`'s `options.signer`; native trusted callers
+use `Engine::set_signer`, `Host::with_signer` or
+`FrameServer::add_venue_with_signer`. Workers deployments can supply
+`createSigner(state, env, venue) -> { signer, identities }`; only opaque refs
+enter `EngineOptions.signing`, never callback objects in the client command wire.
+`EngineHost.options.ownsEngine` defaults false, preserving raw borrowed callers'
+explicit `free()` duty; managed SDK/Workers hosts set it true. Rust provider setup
+wipes owned buffers; JS releases references without a physical zeroization claim.
+Unmigrated families do not gain provider/ref support from this reference merge.
+
+A provider refusal or signing timeout before dispatch is `notSent`; earlier
+partial/unknown write outcomes stay intact, and a signature is neither an ACK nor
+permission to replay an unknown write. This merge adds no remote HTTP/WS signing
+wire and makes no NX migration or server-held-key deployment claim. External
+remote signing and later family migrations remain required. The legacy raw-input
+adapter is transitional: remove it before TS venue/reference deletion after
+trusted bootstrap adoption. [Current core contract](RUST_SIGNER.md).
+
+
+## Cumulative-fill reference correctness (#1720)
+
+Actual merge `9fc2a7c174ad` introduces shared engine financial preparation for
+Hyro's Bybit adapter and Bitget Classic order-derived fills. Quantity, price and
+next delivery progress are validated before native dedupe/progress commits.
+An unpriced Hyro observation no longer consumes a later corrected cumulative
+fill; an invalid/unpriced Classic observation neither emits a negative-price
+fill nor consumes the corrected report's execution eligibility. Late authoritative
+Classic fills retain the cumulative anchor, preventing a subsequent cumulative
+catch-up from re-emitting an already delivered interval. When cumulative quote
+is missing, Hyro's zero average remains unavailable quote evidence, preserving
+its authorized fallback instead of deriving an inflated price from a fabricated
+zero-value seed. An explicitly supplied cumulative quote of zero stays distinct.
+
+These five repairs intentionally change notifications on the demonstrated bad /
+corrected / late report paths; they are not merely internal refactoring. Existing
+FILLS shape, native identity/duplicate rules, bootstrap-versus-live separation
+and direct Bitget UTA delivery remain. No new SDK method argument or mandatory
+NX handler migration is introduced. Other cumulative-fill consumers still need
+adoption of the shared boundary. [Reference scope and regressions](RUST_CUMULATIVE_FILLS.md).
+
+
+## Shared engine protocol-clock calibration (#1722)
+
+Actual merge `d3e34e6e105` replaces Bybit/Aster local clock offsets with one
+calibration service per engine. Bybit server-time rejections and Aster `/time`
+observations replace that engine's correction; they never accumulate it or
+change another engine. Outbound signing timestamps, absolute expiry and
+time-derived nonces consume calibrated protocol time. Host scheduling time
+still owns timers, admission/preparation age, network deadlines and emitted
+market timestamps; explicit replay/host clocks retain their authority.
+
+A changed calibration revision invalidates pending and materialized signed
+output before release, including stale provider errors. The shared signer
+reprepares immutable unsigned input under a new attempt ID while retaining FIFO
+position and the original host-time deadline; timeout wins. Already transmitted
+requests are never replayed because of calibration. Bybit's existing eligible
+once-only resend and Aster's bounded sync/nonce policies remain.
+
+No SDK/NX constructor argument or caller migration is added. Custom signing
+providers must sign the supplied canonical bytes rather than substitute their
+own wall-clock stamp. This calibration complements #1709's shared SDK ingress;
+it does not restore the retired hostClock capability.
+[Clock domains and regressions](RUST_ENGINE_CLOCK.md).

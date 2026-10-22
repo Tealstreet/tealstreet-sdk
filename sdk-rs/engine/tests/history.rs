@@ -61,6 +61,41 @@ impl Venue for Fixture {
     fn on_response(&mut self, cx: &mut Cx<'_, Read>, read: Read, response: Response<'_>) {
         match read {
             Read::Rows(mut rows) => {
+                if response.body.starts_with("finalizer-") {
+                    let accepted = response.body != "finalizer-first";
+                    if accepted {
+                        for row in ["2", "1", "2"] {
+                            rows.stage(row.into());
+                        }
+                        assert_eq!((rows.accepted_len(), rows.staged_len()), (0, 3));
+                        rows.accept_page();
+                    }
+                    rows.stage("999".into());
+                    assert_eq!(rows.accepted_len(), if accepted { 3 } else { 0 });
+                    assert_eq!(rows.staged_len(), 1);
+                    let calls = std::cell::Cell::new(0);
+                    let limit = 1;
+                    rows.finish_with(
+                        cx,
+                        Err(VenueError::new("failed page").kind(ErrorKind::Network)),
+                        |mut accepted_rows| {
+                            calls.set(calls.get() + 1);
+                            assert!(accepted, "first failure must not invoke finalization");
+                            assert_eq!(accepted_rows, ["2", "1", "2"]);
+                            accepted_rows.sort();
+                            accepted_rows.dedup();
+                            accepted_rows.truncate(limit);
+                            if response.body == "finalizer-encoding" {
+                                Err(VenueError::new("context encoding failed")
+                                    .kind(ErrorKind::Internal))
+                            } else {
+                                Ok(format!("[{}]", accepted_rows.join(",")))
+                            }
+                        },
+                    );
+                    assert_eq!(calls.get(), usize::from(accepted));
+                    return;
+                }
                 if response.body == "later" {
                     rows.stage("1".into());
                     rows.accept_page();
@@ -84,6 +119,52 @@ impl Venue for Fixture {
                 completion.finish(cx, result);
             }
             Read::Cursor(mut history) => {
+                if matches!(
+                    response.body,
+                    "finalizer-policy" | "finalizer-poison" | "finalizer-active"
+                ) {
+                    history.stage("1".into());
+                    assert_eq!(history.accepted_len(), 0);
+                    assert_eq!(history.staged_len(), 1);
+                    assert!(matches!(
+                        history.advance(CursorPage {
+                            next: Some("a".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        }),
+                        CursorStep::More(_)
+                    ));
+                    assert_eq!(history.accepted_len(), 1);
+                    if response.body == "finalizer-policy" {
+                        history.stage("2".into());
+                        assert_eq!(
+                            history.advance(CursorPage {
+                                next: Some("b".into()),
+                                rows: 1,
+                                fresh: 1,
+                                want_more: true,
+                            }),
+                            CursorStep::Stalled(Stall::PageBudget)
+                        );
+                        history.reject(
+                            cx,
+                            VenueError::new("strict pagination policy")
+                                .kind(ErrorKind::InvalidInput),
+                        );
+                    } else {
+                        let result = if response.body == "finalizer-poison" {
+                            let _ignored = history.restart_stage();
+                            Err("later page failure".into())
+                        } else {
+                            Ok(())
+                        };
+                        history.finish_with(cx, result, |_| {
+                            panic!("lifecycle must reject before finalization")
+                        });
+                    }
+                    return;
+                }
                 if matches!(response.body, "restart-stage" | "premature-restart") {
                     assert!(history.fresh("shared".into()));
                     history.stage("1".into());
@@ -520,4 +601,100 @@ fn stage_restart_keeps_owner_rows_and_incomplete_cause_but_not_cursor_or_budget(
             );
         }
     }
+}
+
+#[test]
+fn contextual_finalization_sees_only_accepted_rows_and_encoding_errors_stay_strict() {
+    for body in ["finalizer-first", "finalizer-later", "finalizer-encoding"] {
+        let notices = finalizer_case(body, false);
+        if body == "finalizer-later" {
+            assert_eq!(notices.len(), 2);
+            assert!(matches!(&notices[0], Notice::Event(event)
+                if event.code == code::HISTORY_INCOMPLETE
+                && event.fields == vec![("command", Value::Num(44.0))]));
+            assert!(
+                matches!(&notices[1], Notice::CommandDone { command: 44, result } if result == "[1]")
+            );
+        } else {
+            assert_eq!(notices.len(), 1);
+            let kind = if body == "finalizer-first" {
+                ErrorKind::Network
+            } else {
+                ErrorKind::Internal
+            };
+            assert!(
+                matches!(&notices[0], Notice::CommandFailed { command: 44, error } if error.kind == Some(kind))
+            );
+        }
+    }
+}
+
+#[test]
+fn strict_pagination_rejection_drops_accepted_rows_and_stored_marker() {
+    let notices = finalizer_case("finalizer-policy", true);
+    assert_eq!(notices.len(), 1);
+    assert!(
+        matches!(&notices[0], Notice::CommandFailed { command: 44, error }
+        if error.kind == Some(ErrorKind::InvalidInput) && error.message == "strict pagination policy")
+    );
+}
+
+#[test]
+fn contextual_cursor_finalization_never_runs_after_lifecycle_failure() {
+    for body in ["finalizer-poison", "finalizer-active"] {
+        let notices = finalizer_case(body, true);
+        assert_eq!(notices.len(), 1);
+        assert!(
+            matches!(&notices[0], Notice::CommandFailed { command: 44, error }
+            if error.kind == Some(ErrorKind::Internal))
+        );
+    }
+}
+
+fn finalizer_case(body: &str, cursor: bool) -> Vec<Notice> {
+    let mut engine = support::seeded_engine(Fixture);
+    engine.set_log_level(Level::Error);
+    let query = if cursor {
+        Query::Income {
+            symbol: None,
+            kind: Some("two-pages".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        }
+    } else {
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        }
+    };
+    engine.handle(0., Event::Command(Command::Query { command: 44, query }));
+    let request = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(request) => Some(request.id),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.,
+        Event::HttpResponse {
+            request,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+    engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(notice) => Some(notice),
+            _ => None,
+        })
+        .collect()
 }
