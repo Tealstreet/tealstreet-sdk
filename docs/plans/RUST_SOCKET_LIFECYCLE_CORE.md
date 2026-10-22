@@ -405,3 +405,38 @@ is byte-identical to the prior public body, public close delegates once, and no
 reverse call or recursion exists. Signing-cancel/ClearTimer, health and WsClose
 ordering and suppressed-public behavior are preserved. Runtime managed effect
 routing remains the next phase.
+
+## Live Engine wiring and reference adoption phase
+
+Export the codec-facing lifecycle types and move the staged component tests onto
+those actual modules. Io owns Driver, a managed-mode latch, bounded deferred
+native effects/interests, and proposal IDs. Cx registers feeds, admits connection
+before physical allocation, proposes complete interests, queries epoch/auth and
+retires feeds. Scope driver mutations through a detached borrow, restore it
+before native callbacks, and keep managed mode latched so an empty/detached
+registry never becomes a legacy bypass. No allocator type/helper changes.
+
+Engine admits WS open/text/binary/close before health or native mutation. It
+checks owned timer admission before Io removal; unowned account/poll timers keep
+the existing path. Typed native auth codecs run after current-epoch admission;
+opened/ready/auth/failure/ping/retry/retire/reconnect effects run only after
+registry restoration. Retirement first closes/cancels through the private raw
+seam, then invalidates native owned state, then acknowledges retry. Callback
+failure quarantines. Native group stops revoke all siblings first. Bound effect
+processing and reject recursive work on exhaustion. Subscription proposals are
+bounded and transactional; Engine invokes the pure encoder after borrow restore.
+Final drain alone updates released coverage, after cadence, current epoch,
+Supervisor expiry and signing barriers. Recheck ordinary and signed WS outbound
+and receipt publication; parked retired signing cannot reconnect or emit auth.
+
+Adopt every OKX public/private/business and Bitunix private/futures/ticker role
+together; remove their local Supervisor/open/auth/queue/login-retry ownership,
+retain native codecs and metadata only. Preserve on-open Bitunix recovery,
+first-pong idle, current-text stability, native 20/250ms batches, OKX terminal
+credential codes and private/business group, pong-only liveness, native signing
+and store/history/freshness fences. The six original runtime REDs must turn
+green through the actual Engine hooks, alongside compatibility and parked-signer
+controls. Add caller/audit/quality rows, independent correctness/adversarial
+reviews and draft PR after focused native/strict/SDK checks. Keep #1767 watch;
+#1763 waits actual queued inputs for its next CI/proof. Production allocator
+widening remains a separate post-#1741 PR.
