@@ -1,4 +1,4 @@
-# Shared signer setup normalization policy
+# Shared signer setup field policy
 
 Plan, 2026-10-22. Fresh base: actual shared provider #1731
 `06b321192a65562db61489b2cbcdcfe4fce5d055`. Owner-assigned common core;
@@ -60,3 +60,38 @@ policy override reproduces three behavior RED regressions, restored to GREEN.
 Two SDK RED cases reproduce stale primaryComplete for NEL/ASCII whitespace.
 Independent correctness/adversarial reviews are clean across all13 source/test
 paths. CI/replay proof and actual intervening landing integrations remain open.
+
+
+## Owner extension: required fields and absent-only fallback
+
+The owner assigned required-passphrase validation to this same declarative seam
+before OKX/Bitget adoption. Add a non-secret per-slot passphrase field policy:
+optional (default), requiredForPrivate, or requiredWithPrimaryFallback. Declare
+OKX's four aliases and Bitget's three aliases once in construction-rules.json:
+primary requiredForPrivate, secondary requiredWithPrimaryFallback. This does
+not enable their dispatchSigning admission. Required checks apply only to an
+existing complete effective key+secret slot; no policy creates a slot.
+
+A missing secondary passphrase may resolve to the primary passphrase reference
+inside trusted setup. Explicit empty remains empty and rejects; it never falls
+back. Missing/empty fallback also rejects. Raw publicDataOnly bypasses primary
+required checks, as before; secondary validation remains active even in public
+mode, matching both venues' existing start admission. Partial primary material
+keeps its prior public behavior. No trimming of passphrases, secrets or IDs.
+
+Validate raw material synchronously inside the trusted SDK/native/JSON setup
+path before opaque installation. Keep required/fallback resolution generic,
+including a shared opaque-reference helper for externally provisioned identities:
+refs can prove presence, not nonempty provider bytes, so recipe Present insertion
+still validates material atomically. Local fallback aliases the installed primary
+ref rather than copying passphrase material into a venue. Pass explicit setup
+public/private context through the JSON/WASM path; do not infer it from stripped
+options. Errors remain sanitized invalidInput/notSent; caller objects unchanged
+and owned buffers are wiped on rejection.
+
+RED/GREEN tests cover missing/empty/own/inherited passphrases, primary public
+bypass versus unconditional secondary enforcement, both trusted entry paths,
+opaque fallback, incomplete/absent slots and Unicode/byte preservation. Existing
+MEXC trim/default/custody controls remain. Retitle PR #1738 for the shared field
+policy and rerun focused/strict checks, independent correctness/adversarial
+review and fresh CI. Current source queue #1735 -> #1728 retains priority.
