@@ -1307,3 +1307,77 @@ are corrected, with additional core restriction controls. The range owner is
 boxed inside the native request to keep Pending's enum variants bounded, rather
 than suppressing the strict Clippy size check. This does not change completion
 authority, request wire or the planned physical-release integration boundary.
+
+## Next offset-history fan-out: Backpack
+
+Plan first on fresh `feat/rust-owned-history-backpack` from actual landing
+`4a17998a4d9825dc7de303a23be793b5a7d9cabe` (2026-10-23). Scope is Backpack
+fills, closed orders, funding income and single-page public trades. Avoid active
+OKX/Bitget/BingX signing work, KuCoin's signer hold and Orderly financial reducers.
+Keep the #1760/#1761/#1765 CI watches and respect #1764's exclusive landing window.
+This plan adds no new plan file or index row.
+
+The adapter currently owns accepted output in `Request.rows`, emits numeric
+completion, and rejects all accepted pages on a later HTTP/stream failure or
+repeated/capped offset walk. Adopt a boxed engine `CursorHistory<Row>` with one
+`Completion` for output staging/admission, fifty-page budget, progress checks and
+terminal coverage. No new history-owner type, engine API, managed Context bridge,
+retry loop or venue-local completeness emitter is planned. Touch only Backpack
+`src/history.rs`, the narrow `Pending::History` failure arm in `src/lib.rs`,
+`tests/history.rs`, and the existing caller/AUDITS/QUALITY/OWNED_HISTORY sections.
+Do not change `account.rs`, `sign.rs`, request signing, credentials or Store.
+
+Use the existing raw-page fingerprint as the opaque progress token while the
+native page requires continuation; do not use a monotonically increasing offset
+as evidence that a repeated page progressed. Remove the venue's separate page
+fingerprint set: `CursorWalk` owns repeat detection and the page cap. Preserve
+the existing engine `OffsetWalk` solely for native next-offset arithmetic, invoked
+only after `CursorHistory` admits a valid page and returns More. It cannot
+authorize another request or a terminal outcome; the shared owner makes those
+decisions first. Keep exact raw-row displacement rather than selected output
+count or requested page size. Review this narrow protocol-helper composition
+before implementation; do not introduce a second active pagination authority or
+copy offset arithmetic/stall policy into the venue.
+
+Keep native row decoding, compound fill/order/funding identities, local symbol/
+order/time filters, oldest-time facts, page sizes, native order and output limits.
+The More predicate uses admitted plus staged retained output, preserving current
+limit behavior without admitting a page prefix. Decode into staged rows; accept
+only after HTTP/envelope/stream validation. Actual failure before eligible output
+was accepted rejects typed; after accepted output, finish with only earlier
+accepted pages and one command-owned incomplete Warn before Done, visible at
+Error-only logging. A later failure after only filtered pages still rejects.
+Repeated/capped valid coverage becomes owned incompleteness, including an empty
+result when valid pages contained no eligible output. No result row enters Store.
+
+Preserve malformed-fill isolation and the existing row.skipped diagnostic;
+malformed non-fill rows still invalidate their whole page. A validated page with
+skipped fills supplies a coverage gap to `advance_with_coverage`, rather than
+claiming complete coverage. Stage that gap and skipped-row diagnostic facts with
+the page: failed-page prefixes must not contribute output or an earlier coverage
+cause. Retain only the first admitted gap across subsequent pages. Public trades
+remain unsigned and single-page. Client-ID lookup, unsupported ledger/time/market
+admission, and synchronous signed-setup refusal remain strict and separate;
+preserve the existing consuming signed helper rather than adding a generic
+credential fallback or misclassifying setup refusal as recoverable HTTP loss.
+
+Before production edits, commit original-source assertion controls for typed
+first failure, retained later failure, streamed failed-prefix isolation, empty
+filtered-prefix failure, owned repeat/cap coverage and skipped-fill coverage.
+Pin two concurrent owners, exactly one marker before Done, Error-only delivery,
+49 full pages plus terminal probe versus a full fiftieth page with no fifty-first
+request, and non-adjacent repeated raw pages. Preserve the existing exact offset
+request-sequence control, fractional fill bounds, spot-row filtering, native
+units/IDs/quantity fallback, row-skipped diagnostic and unsigned public trades.
+Document the intentional replacement of the old repeat-page strict rejection.
+
+Independent plan/correctness/adversarial reviews must explicitly answer the
+architecture gate: shared owner adoption with an existing engine offset codec,
+not a per-venue cross-cutting pagination/completion fix. Run focused Backpack,
+engine and Binance native tests, touched all-target Clippy/fmt/bans/diff checks
+with four Cargo jobs. Corepack Yarn only; never bare/Volta yarn, npx or the
+account-policy check. No local release WASM/full replay/size/timing sweep. Before
+landing, integrate actual shared predecessors, obtain exact-head green CI and
+authenticated post-#1762 full raw/package/gate proof, announce the guard window,
+then run a fresh separate porcelain guard and a separate match-head merge. B11
+NX ingestion/coverage and deployed cutover proof remain open.
