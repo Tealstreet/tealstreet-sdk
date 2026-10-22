@@ -479,3 +479,132 @@ formatting, repository bans, root44 typecheck and28 lint tasks pass (root tasks
 cached). Both independent source/caller reviews are CLEAN. Full current-head CI,
 authenticated all-suite raw/ordered-gate comparison and a fresh separate guard
 remain required; this checkpoint is not a merge or replay-evidence claim.
+
+## Grouped and deferred row reporting — phase 2 plan
+
+Phase1 #1769 is actual `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`, with
+all43 applicable checks green on unchanged1be4, separate guard/merge, and an
+actual whole-tree audit matching the green head/trial. Its full proof retains
+strict974/976 FALSE solely for freshly authenticated ApeX/TxFlow TS request
+counts; all488 Rust and all110 ordered gates are unchanged. Persistent memory
+is shared for its first three consumers; grouped/deferred policy and the other
+seventeen bounded source files remain open, including KuCoin Spot `mod.rs`.
+
+This fresh `feat/rust-row-grouped-reporting` starts at actual90dc. The owner
+holds landing merges for RequestContext #1741. Plan, tests and implementation
+may proceed locally; integrate its actual shared inputs before final CI/proof.
+No source migration or merge claim is made by this plan.
+
+The audit identifies two different grouping contracts, not interchangeable
+count rules. Put both explicit collectors in `engine::coverage`, with private
+state and no venue names/messages:
+
+- `RowCount`: count every `add(Option<&str>)`, including duplicate known IDs.
+  Keep the first supplied label exactly. An anonymous first row remains first;
+  `Some("")` stays an empty label, distinct from `None`. Private first-state is
+  `Option<Option<String>>`, where the outer None means no row. `Default`, `add`,
+  `count() -> usize`, `any() -> bool` (native count >0) and
+  `first() -> Option<Option<&str>>` expose the existing Crypto.com policy.
+- `RowKeys`: keep nonempty known IDs uniquely in first-seen order; count every
+  anonymous or empty-ID row separately. `Default`, `add(Option<&str>)`,
+  `ids() -> &[String]`, `anonymous() -> usize`, `count() -> usize`, `any()`
+  expose WOO's existing policy. `into_ids(self) -> Vec<String>` preserves the
+  existing pagination move without cloning strings. No sorting or new limit.
+- Each collector's `summary(format: impl FnOnce(&Self) -> String)
+  -> Option<String>` calls the formatter once only for a native nonempty group.
+  RowCount tests first-state presence, preserving the existing report boundary;
+  RowKeys tests known/anonymous presence. Keep native usize arithmetic rather
+  than silently adding saturation or another financial/coverage counter.
+- `row_summary<P>(cx: &mut Cx<'_, P>, level: Level,
+  summary: Option<String>) -> bool` emits one `row_skipped` for Some and nothing
+  for None. Grouped row count is not the health counter: a summary increments
+  health once at its original site even when host delivery is filtered.
+- `RowReports::report_summary<P>(&mut self, cx: &mut Cx<'_, P>, key: K,
+  level: Level, summary: Option<String>) -> bool` uses the existing repeat path
+  for Some; None forgets only that key and reports nothing. It owns WOO's
+  existing empty-summary re-arm, with no automatic lifecycle/timer policy.
+
+Actual consumers and preserved boundaries:
+
+1. Crypto.com `lib.rs::Skipped` becomes a thin RowCount adapter. Keep `add`,
+   `any` and the exact native summary formatter/placeholder `without an id`.
+   Discovery and account consumers report at their current accepted/read/frame
+   points through `row_summary`; no per-row replacement events or changed level.
+2. WOO `account.rs::Skipped` becomes a thin RowKeys adapter. Keep exact native
+   summary punctuation, order and IDs/anonymous accessors used by retention.
+   `account_skipped` uses report_summary with its existing unbounded ChangedMessage
+   memory. Positions still report before their bad/freshness rejection; joined
+   orders keep their distinct generation/bad/envelope ordering. No admission,
+   healthy-peer, position-mode or financial behavior change.
+3. Bybit `unsupported_logged` adopts unbounded Once RowReports. Keep staging in
+   each native read and flush ONLY at the existing admitted joined-order point,
+   after rejected/fresh-row merging and before Store removal/upsert. Stored-copy
+   lookup, exact Error text, restoring known unsupported rows and emission order
+   stay native. Admitted partial joins still flush unsupported rows; only whole
+   failed, noncurrent or incomplete joins skip flushing. Known-copy restoration
+   stays outside suppression, and mapped/clean rows never re-arm Bybit memory.
+   Add `AccountState::new()` selecting unbounded Once, and replace ONLY the two
+   actual lib.rs construction sites (main account and extra product accounts).
+   Audit all default/reset/move paths; no default bounded reporter may leak into
+   a real Bybit account. Coordinate these narrow constructors/account-reporting
+   fields with RequestContext/signing owners before source edits.
+
+Phase2 scope: engine coverage; Crypto.com lib.rs, WOO account.rs, Bybit account.rs
+and the two lib.rs constructors; focused engine/native tests; existing admission,
+audit, quality and caller docs. No request/pending/Job/Rest/trading authority,
+engine dispatch/Store/token, signing/clock, metadata/history, financial reducers,
+wire payload, comparator, tape or manifest changes. Architecture gate YES:
+grouping, summary-empty/repeat and deferred emission memory are cross-cutting;
+the engine owns those policies while native formatting, identity and final
+admission timing remain native. Two different explicit engine collectors avoid
+forcing WOO's unique-ID count onto Crypto.com's duplicate-inclusive count.
+
+Commit this concrete plan before tests/source; independently audit the API,
+construction paths and architecture first. Native compatibility controls must
+pass original production, not be mislabeled defect REDs: Crypto.com duplicate
+known/anonymous/empty-first labels and exact one-summary health; WOO duplicate
+known IDs, anonymous rows, order, changed summaries and clean re-arm; Bybit
+unsupported diagnostics only after accepted joined snapshots, suppressed repeats
+and healthy/known-row retention after rejected/stale pages. New engine tests pin
+both count policies/first-label distinctions, deferred/empty summary behavior,
+repeat re-arm, exact code/level/message and filtered health. Preserve all existing
+coverage/snapshot/financial controls.
+
+Run focused engine/Crypto.com/WOO/Bybit plus Binance native tests with four Cargo
+jobs, strict all-target Clippy/fmt/bans, root checks and relevant native alias
+fixtures. Independent source/adversarial/caller reviews precede the source
+commit. Use current actual #1741/shared dependencies and post-#1762 all-suite
+CI proof: all488 Rust/full IDs and all ordered gates exact, four standing TS
+classes only with freshly authenticated complete controls. No local release
+WASM/replays/timing, threshold/profile/allowance changes or live captures. On
+full green, announce and run a fresh separate guard, merge separately, audit the
+actual tree/parents and report its pin. Remaining seventeen bounded reporter
+files are later bounded fan-out slices, not closed by this phase.
+
+Phase2 plan/API review checkpoint: both independent correctness and adversarial
+reviews are CLEAN. Preserve WOO retention/page-progress accessors and Bybit extra-
+product account swapping. Original-GREEN compatibility controls precede migration;
+no product defect or RED claim is made. Signing/RequestContext owners explicitly
+cleared these AccountState constructors and accepted-join diagnostic regions.
+
+Phase2 original compatibility checkpoint: all233 selected native account/public/
+product tests pass on byte-identical actual1769 production, including the final
+new stale-join and two-known-ID first-seen-order controls. Both native test/API
+reviews are CLEAN; the consuming RowKeys ID accessor preserves WOO pagination
+move semantics. Early extra-product fixture cadence and an intermediate WOO
+fixture edit were corrected before this exact original-GREEN run; neither is a
+product defect/RED. Native source/test/log hashes are sealed in the local receipt
+`/tmp/codex-row-grouped-original-receipt.json`; CI proof remains pending.
+
+Phase2 implementation checkpoint: the explicit collectors and optional summary
+paths now serve Crypto.com/WOO; Bybit unsupported-order memory uses unbounded
+Once at its unchanged accepted-join boundary. Both real construction paths and
+product-state swaps preserve the policy. All1345 focused five-crate tests pass;
+strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint pass (root
+tasks cached). A Clippy-only test assertion expression was corrected; exactfinal
+233 original controls were rerun with all five original production blobs and
+byte-exact restoration of the migrated source, with receipt
+`/tmp/codex-row-grouped-original-exact-receipt.json`. Both independent source/API/
+caller reviews are CLEAN; repeat-suppressed summary health wording was tightened.
+Actual #1741 integration, current-head full CI and authenticated all-suite raw/
+ordered-gate proof remain required. No merge, live or all-venue closure claim.

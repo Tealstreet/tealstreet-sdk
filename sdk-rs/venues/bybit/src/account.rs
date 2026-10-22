@@ -5,7 +5,7 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::coverage::{RowAdmission, RowRepeat, RowReports, row_skipped};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -198,7 +198,7 @@ struct HyroSnapshot {
 pub struct AccountState {
     started: bool,
     unpriced_tpsl: HashSet<String>,
-    unsupported_logged: HashSet<String>,
+    unsupported_logged: RowReports<String>,
     /// Demo reduce-only repair reads due: order id, symbol, placement time.
     fill_repairs: HashMap<TimerId, (String, String, f64)>,
     /// A Hyro reconciliation read failed in transport or at the venue, not on content.
@@ -248,6 +248,13 @@ pub struct AccountState {
 }
 
 impl AccountState {
+    pub(crate) fn new() -> Self {
+        Self {
+            unsupported_logged: RowReports::unbounded(RowRepeat::Once),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn has_hedged(&self) -> bool {
         self.position_modes.values().any(|hedged| *hedged)
     }
@@ -2669,19 +2676,18 @@ impl BybitLinear {
             {
                 merged.push(order.clone());
             }
-            if self.account.unsupported_logged.insert(id.clone()) {
-                row_skipped(
-                    cx,
-                    Level::Error,
-                    if known.is_some() {
-                        format!(
-                            "Bybit order {id} has an unsupported type; its last known state is kept"
-                        )
-                    } else {
-                        format!("Bybit order {id} has an unsupported type and is not shown")
-                    },
-                );
-            }
+            self.account.unsupported_logged.report(
+                cx,
+                id.clone(),
+                Level::Error,
+                if known.is_some() {
+                    format!(
+                        "Bybit order {id} has an unsupported type; its last known state is kept"
+                    )
+                } else {
+                    format!("Bybit order {id} has an unsupported type and is not shown")
+                },
+            );
         }
         let old: Vec<String> = cx
             .store
