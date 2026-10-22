@@ -3,6 +3,52 @@
 Owner: codex-cxxyqr. Planned from landing `556906286997` (2026-10-22).
 Reference merged in #1710 at `1910baa65a3`; fan-out remains active.
 
+## Next cursor fan-out: BloFin general histories
+
+Fresh `feat/rust-owned-history-blofin` starts from actual signer prerequisites
+`802e9c8c6e9`. It uses the already-landed `CursorHistory` API from #1719,
+not an unmerged range-core API. Develop locally while range reference #1724
+runs CI; integrate its actual shared-engine merge before final proof if it
+lands first. No engine source/export, dispatch, signing, clock, row/account
+reducer, host, fixture, comparator or budget edits in this fan-out.
+
+Replace BloFin general-history accepted vectors, cursor owner and seen-ID set
+with one typed `CursorHistory` bound to the real command. The native adapter
+keeps wire parsing, filtered native time/cursor selection and mapping; its
+contextual finalizer sorts/truncates accepted rows exactly as before. Keep the
+existing request-sequence pins: fills/native per-read cap and filter semantics,
+income cursor selection as smallest unbounded numeric native ID, raw received
+counts driving pagination, one-request orders, unsigned public trades, and all
+current symbol/profile/keyless admission. Income has no new early global limit.
+Derived PnL and fee rows retain compound identity and final limits.
+
+Streamed row prefixes remain staged until the whole HTTP/native/envelope verdict
+is valid. First failure/no accepted mapped rows rejects typed; actual later-page
+failure finishes prior accepted rows with one command-owned incomplete marker,
+including Error-only logging. Failed-prefix rows cannot enter recovery. Native
+paging refusal remains STRICT as before: empty cursor on a full continuing page,
+repeated cursor or budget exhaustion rejects through the owner, never partial
+success. Header/signing preparation failure is also strict even after accepted
+rows; do not reinterpret it as a failed HTTP page or add a resend. Existing
+closed-position owner behavior remains untouched.
+
+Before editing source, pin current successful request sequences and review this
+plan. Add original-RED/core-GREEN first/later native/HTTP/transport/malformed-page
+regressions, accepted-empty/filtered recovery controls, failed-prefix exclusion,
+marker ownership/order at Error-only level, unchanged strict stalls and PnL/fee
+identity/sort/limits. Explicitly supersede the old later-income-rejection test
+only for actual page failure; keep strict pagination-refusal assertions. Preserve
+all unrelated financial-reducer tests and account state. Update caller/audit/
+quality scope without declaring universal fan-out or B11 closed.
+
+Independent correctness/adversarial reviews must answer the architecture gate:
+this adapts a second general-history family to the existing shared completion/
+cursor owner, not a venue-local copy. Focused engine/BloFin/Binance and reference
+Bybit tests, strict Clippy/fmt/bans/links; final shared dependencies integrated,
+full exact-head CI, then separate revert guard, separate merge and actual
+parents/tree proof. Coordinate native-history overlap with signer/clock/rows
+lanes before source changes. No NX edits or remote-signing closure.
+
 ## Contract and sequence
 
 1. Reference PR: engine-owned history completion and cursor paging, exercised by
