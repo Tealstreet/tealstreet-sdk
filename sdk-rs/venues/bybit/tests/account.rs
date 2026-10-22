@@ -6,8 +6,8 @@ use safe_cex_engine::model::{
     MarginType, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, RejectReason,
 };
 use safe_cex_engine::{Command, Event, HttpRequest, Method, Query};
-use safe_cex_venue_bybit::Options;
 use support::Harness;
+use support::Options;
 
 /// "Get Open & Closed Orders", one-way: a limit buy with attached TP/SL.
 /// Native cadence of the venue's recurring account poll; policy scales it.

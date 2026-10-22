@@ -2,8 +2,8 @@
 mod support;
 
 use safe_cex_engine::{Command, Event, wire};
-use safe_cex_venue_bybit::Options;
 use support::Harness;
+use support::Options;
 
 const SNAPSHOT: &str = r#"{"topic":"orderbook.1000.BTCUSDT","type":"snapshot","ts":1687940967465,"data":{"s":"BTCUSDT","b":[["30247.20","1.000"]],"a":[["30248.70","0.250"]],"u":177400506,"seq":66544703341},"cts":1687940967464}"#;
 

@@ -1,8 +1,9 @@
 //! Variant contracts from documented Bybit V5 payloads and Hyro's readiness contract.
 mod support;
 use safe_cex_engine::{Command, Event};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::Harness;
+use support::Options;
 
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"accountType":"UNIFIED","totalEquity":"1100","totalWalletBalance":"1000","totalInitialMargin":"10","totalMaintenanceMargin":"1","totalAvailableBalance":"900","coin":[]}]}}"#;
