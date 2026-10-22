@@ -24,7 +24,7 @@ impl Managed {
 }
 
 impl<P> Cx<'_, P> {
-    /// Queue a semantic, unsigned public read. Private recipes use the signed
+    /// Queue semantic, unsigned HTTP work. Private recipes use the signed
     /// entry point; a missing signing recipe must never send an unsigned account
     /// request. Failure preserves the caller's continuation.
     pub fn request_managed(
@@ -39,7 +39,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
-    /// readiness. Mutations remain gated until command evidence is integrated.
+    /// readiness. Mutations require command authority and a reconciliation codec
+    /// before physical release; the engine owns their write evidence.
     pub fn request_signed_managed(
         &mut self,
         context: Context,
@@ -64,9 +65,7 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
-        if context.operation() != Operation::Read
-            || context.credential().is_some() != step.is_some()
-        {
+        if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
         if self.io.managed_http.len() >= 256 {
@@ -878,6 +877,7 @@ mod tests {
         reconciliations: std::cell::RefCell<Vec<String>>,
         refuse_capture: bool,
         auth_reject: bool,
+        retry_refusal: bool,
         command_calls: Vec<CommandId>,
     }
     const GROUP: Pacing = Pacing {
@@ -990,6 +990,31 @@ mod tests {
                     cx.io.order_response_token.is_none(),
                     "write cannot inherit a prior read fence"
                 );
+                if self.retry_refusal && self.responses == 1 {
+                    cx.http_write_result(
+                        &pending.0,
+                        crate::request_context::WriteResult::Rejected(
+                            VenueError::new("native timestamp refusal").venue_code("10002"),
+                        ),
+                    )
+                    .unwrap();
+                    let context = cx
+                        .http_retry_context(
+                            &pending.0,
+                            crate::request_context::RetryEvidence::DefinitiveRefusal,
+                        )
+                        .unwrap();
+                    cx.request_signed_managed(
+                        context.clone(),
+                        Method::Post,
+                        "https://venue.test/write".into(),
+                        Some("{}".into()),
+                        Box::new(Recipe),
+                        Pending(context),
+                    )
+                    .unwrap();
+                    return;
+                }
                 if self.auth_reject {
                     let error = VenueError::new("native authentication refusal")
                         .kind(ErrorKind::AuthInvalid);
@@ -1578,74 +1603,67 @@ mod tests {
             .unwrap()
     }
 
-    /// White-box fixture for the still-gated mutation lifecycle. This stages the
-    /// same registry/pending objects without opening the production queue API.
+    /// Use the public queue API; inspect only the resulting timer/token.
     fn mutation(
         engine: &mut Engine<Probe>,
         command: CommandId,
         at: f64,
     ) -> (Context, Preparation, TimerId) {
-        let context = Cx {
+        queue_mutation(engine, command, at, false)
+    }
+
+    fn queue_mutation(
+        engine: &mut Engine<Probe>,
+        command: CommandId,
+        at: f64,
+        signed: bool,
+    ) -> (Context, Preparation, TimerId) {
+        let retry = if engine.venue.retry_refusal {
+            RetryPolicy::DefinitiveRefusal
+        } else {
+            RetryPolicy::Never
+        };
+        let mut cx = Cx {
             now: at,
             store: &mut engine.store,
             io: &mut engine.io,
-        }
-        .http_context(
-            Scope::Command(command),
-            Policy {
-                operation: Operation::Mutation,
-                credential: None,
-                timeout_ms: 100,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        )
-        .unwrap();
-        let request = RequestId(engine.io.next());
-        let generation = u64::from(engine.io.next());
-        let timer = TimerId(engine.io.next());
-        engine
-            .io
-            .request_contexts
-            .register_attempt(&context, request, at)
-            .unwrap();
-        let lifecycle = Lifecycle::new(
-            context.clone(),
-            Attempt {
-                request,
-                generation,
-            },
-        );
-        let token = lifecycle.preparation();
-        engine.io.managed_http.insert(
-            request,
-            Managed {
-                lifecycle,
-                original: HttpRequest {
-                    id: request,
-                    method: Method::Post,
-                    route: None,
-                    timeout_ms: Some(100),
-                    url: "https://venue.test/write".into(),
-                    headers: vec![],
-                    signer_headers: vec![],
-                    body: Some("{}".into()),
+        };
+        let context = cx
+            .http_context(
+                Scope::Command(command),
+                Policy {
+                    operation: Operation::Mutation,
+                    credential: signed.then(|| crate::request_context::Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: crate::signing::KeyRef("fixture".into()),
+                    }),
+                    timeout_ms: 100,
+                    pacing: None,
+                    retry,
                 },
-                timer,
-                response_started: false,
-                signing_attempt: None,
-                recipe: None,
-            },
-        );
-        engine.io.pending.insert(
-            request,
-            PendingHttp {
-                value: Pending(context.clone()),
-                auth: None,
-            },
-        );
-        engine.io.timers.insert(timer, ());
-        (context, token, timer)
+            )
+            .unwrap();
+        let request = if signed {
+            cx.request_signed_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/write".into(),
+                Some("{}".into()),
+                Box::new(Recipe),
+                Pending(context.clone()),
+            )
+        } else {
+            cx.request_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/write".into(),
+                Some("{}".into()),
+                Pending(context.clone()),
+            )
+        }
+        .expect("public managed mutation must queue");
+        let managed = cx.io.managed_http.get(&request).unwrap();
+        (context, managed.lifecycle.preparation(), managed.timer)
     }
 
     fn fixture_order(id: &str) -> crate::model::Order {
@@ -2566,38 +2584,235 @@ mod tests {
     }
 
     #[test]
-    fn unsigned_entry_refuses_mutations_until_command_ledger_wiring_preserving_continuation() {
-        let mut io = Io::<Pending>::default();
-        let mut store = Store::default();
-        let mut cx = Cx {
-            now: 0.,
-            io: &mut io,
-            store: &mut store,
-        };
-        let context = cx
-            .http_context(
-                Scope::Command(7),
-                Policy {
-                    operation: Operation::Mutation,
-                    credential: None,
-                    timeout_ms: 1_000,
-                    pacing: None,
-                    retry: RetryPolicy::Never,
-                },
+    fn managed_mutation_requires_matching_credential_recipe_and_preserves_continuation() {
+        for credential in [false, true] {
+            let mut io = Io::<Pending>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 0.,
+                io: &mut io,
+                store: &mut store,
+            };
+            let context = cx
+                .http_context(
+                    Scope::Command(7),
+                    Policy {
+                        operation: Operation::Mutation,
+                        credential: credential.then(|| crate::request_context::Credential {
+                            slot: CredentialSlot::Primary,
+                            reference: crate::signing::KeyRef("fixture".into()),
+                        }),
+                        timeout_ms: 1_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            let result = if credential {
+                cx.request_managed(
+                    context.clone(),
+                    Method::Post,
+                    "https://venue.test/write".into(),
+                    None,
+                    Pending(context.clone()),
+                )
+            } else {
+                cx.request_signed_managed(
+                    context.clone(),
+                    Method::Post,
+                    "https://venue.test/write".into(),
+                    None,
+                    Box::new(Recipe),
+                    Pending(context.clone()),
+                )
+            };
+            assert!(
+                matches!(result, Err((Pending(returned), Error::Invalid)) if returned == context)
+            );
+            assert!(cx.io.pending.is_empty());
+            assert!(cx.io.managed_http.is_empty());
+            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.timers.is_empty());
+            assert!(cx.io.signing.next_work().is_none());
+            cx.fail_context(&context, "recipe mismatch").unwrap();
+            assert!(
+                matches!(cx.io.actions.last(), Some(Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(crate::Outcome::NotSent))
+            );
+        }
+    }
+
+    #[test]
+    fn default_venue_without_reconciliation_codec_cannot_release_a_managed_mutation() {
+        // ProbeVenue deliberately does not override the trait capture hook.
+        let venue = crate::test_support::ProbeVenue::new(Probe::default(), |_, cx| {
+            let context = cx
+                .http_context(
+                    Scope::Command(7),
+                    Policy {
+                        operation: Operation::Mutation,
+                        credential: None,
+                        timeout_ms: 100,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/write".into(),
+                None,
+                Pending(context),
             )
             .unwrap();
-        let result = cx.request_managed(
-            context.clone(),
-            Method::Post,
-            "https://venue.test/write".into(),
-            None,
-            Pending(context.clone()),
+        });
+        let mut engine = crate::test_support::seeded_engine(venue);
+        engine.start(0.);
+        let preparation = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        engine.http_prepared(
+            1.,
+            preparation,
+            Prepared {
+                id: 1,
+                expires_at: None,
+            },
         );
-        assert!(matches!(result, Err((Pending(returned), Error::Invalid)) if returned == context));
-        assert!(cx.io.pending.is_empty());
-        assert!(cx.io.managed_http.is_empty());
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.timers.is_empty());
-        cx.finish_http_context(&context).unwrap();
+        let permit = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
+        assert!(engine.io.pending.is_empty());
+        assert!(engine.io.managed_http.is_empty());
+        assert!(
+            !engine
+                .io
+                .http_responses
+                .contains(preparation.attempt().request)
+        );
+        assert!(
+            engine
+                .drain_actions()
+                .all(|a| !matches!(a, Action::Http(_)))
+        );
+    }
+
+    #[test]
+    fn released_native_refusal_then_retry_preparation_failure_is_unknown_not_not_sent() {
+        for provider in [false, true] {
+            let (mut engine, _) = start(Probe {
+                retry_refusal: true,
+                ..Probe::default()
+            });
+            let (_, first, _) = queue_mutation(&mut engine, 7, 0., true);
+            let (attempt, input) = work(&route(&mut engine, first, 1.));
+            let permit = bound(&signed(&mut engine, 2., attempt, input));
+            assert!(matches!(
+                engine.claim_http(3., permit),
+                Ok(Claim::Released(_))
+            ));
+            engine.handle(
+                4.,
+                Event::HttpResponse {
+                    request: first.attempt().request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "native10002",
+                    },
+                },
+            );
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert!(actions.iter().all(|a| !matches!(
+                a,
+                Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+            )));
+            let retry = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::ManagedHttp(a) => match a.as_ref() {
+                        HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .expect("native refusal staged retry");
+            assert_ne!(retry.attempt(), first.attempt());
+            if provider {
+                let (attempt, _) = work(&route(&mut engine, retry, 5.));
+                engine.handle(
+                    6.,
+                    Event::Signed {
+                        attempt,
+                        result: Err(crate::signing::SignError::Refused),
+                    },
+                );
+            } else {
+                engine.http_preparation_failed(
+                    5.,
+                    retry,
+                    Error::State,
+                    VenueError::new("network lost; error sign"),
+                );
+            }
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+            assert_eq!(engine.venue.releases.len(), 1);
+            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.pending.is_empty());
+        }
+    }
+
+    #[test]
+    fn parked_mutation_provider_refusal_or_deadline_seals_not_sent_once_and_late_success_is_inert()
+    {
+        for timeout in [false, true] {
+            let (mut engine, _) = start(Probe::default());
+            let (_, token, timer) = queue_mutation(&mut engine, 7, 0., true);
+            let (attempt, input) = work(&route(&mut engine, token, 1.));
+            assert!(engine.venue.releases.is_empty());
+            if timeout {
+                engine.handle(100., Event::TimerFired { timer });
+            } else {
+                engine.handle(
+                    2.,
+                    Event::Signed {
+                        attempt,
+                        result: Err(crate::signing::SignError::Refused),
+                    },
+                );
+            }
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::NotSent))).count(), 1);
+            assert!(actions.iter().all(|a| !matches!(a, Action::Http(_)) && !matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
+            assert!(engine.io.pending.is_empty());
+            assert!(engine.io.managed_http.is_empty());
+            assert!(!engine.signing_pending(attempt));
+            assert!(engine.venue.releases.is_empty());
+            assert_eq!(engine.venue.receipts, 0);
+            let late = signed(&mut engine, 101., attempt, input);
+            assert!(late.iter().all(|a| !matches!(
+                a,
+                Action::Http(_)
+                    | Action::ManagedHttp(_)
+                    | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+            )));
+            assert_eq!(engine.venue.receipts, 0);
+        }
     }
 }

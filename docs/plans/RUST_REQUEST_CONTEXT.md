@@ -565,3 +565,16 @@ done_context synchronously; no numeric fallback, state mutation, deadline extens
 or new send permission. Completion remains allowed after the raw deadline where
 the existing logical completion contract allows it. Pin foreign, background,
 retired/reused and old-attempt rejection plus valid post-deadline completion.
+
+
+Activation checkpoint: mutation queueing now uses the public managed entry points;
+all former white-box mutation fixtures use those same APIs. The closed-gate
+control fails at the queue assertion before activation. Restored full engine
+order-lock suite: 420 tests; strict Clippy/fmt/bans and independent review CLEAN
+(architecture No). An unadapted Venue using the default capture hook cannot
+release a mutation. Credential/recipe mismatch preserves continuation and emits
+no resources. Parked engine signing refusal/deadline seals NotSent once, and late
+success emits no Bind/receipt. An actual native-refusal response followed by
+provider or host-preparation failure on the retry seals Unknown from central
+prior-release evidence. These are engine Event/claim controls, not an external
+asynchronous provider or venue replay proof. Reference migrations remain open.
