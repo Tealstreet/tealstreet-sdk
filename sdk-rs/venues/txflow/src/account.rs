@@ -3,6 +3,7 @@
 use crate::{Pending, TxFlow};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -949,9 +950,8 @@ impl TxFlow {
                     if offset >= 200_000 || fills.len() > FILL_CAP {
                         self.account.inflight.remove("fills");
                         self.account.fills_exhausted = true;
-                        cx.notice(
-                            Level::Error,
-                            code::HISTORY_INCOMPLETE,
+                        BackgroundCoverage::Exhausted.report(
+                            cx,
                             "TxFlow execution coverage exhausted; restart account reconciliation",
                         );
                         return;
@@ -980,7 +980,7 @@ impl TxFlow {
                     > FILL_CAP
                 {
                     self.account.fills_exhausted = true;
-                    cx.notice(Level::Error, code::HISTORY_INCOMPLETE,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
+                    BackgroundCoverage::Exhausted.report(cx,"TxFlow execution deduplication capacity exhausted; restart account reconciliation");
                     return;
                 }
                 for f in fills.into_iter().rev() {
@@ -1266,3 +1266,7 @@ impl TxFlow {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/account_coverage.rs"]
+mod account_coverage_tests;

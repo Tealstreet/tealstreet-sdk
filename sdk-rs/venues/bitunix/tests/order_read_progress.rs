@@ -376,6 +376,7 @@ fn superseded_rest_baseline_cannot_consume_a_later_ws_fill() {
 fn unknown_sparse_execution_gets_rest_metadata_without_consuming_its_pending_fill() {
     let (mut e, socket) = seeded();
     let pending = reads(&mut e, socket, 3000.0);
+    e.set_log_level(safe_cex_engine::Level::Error);
     ws(
         &mut e,
         socket,
@@ -384,6 +385,27 @@ fn unknown_sparse_execution_gets_rest_metadata_without_consuming_its_pending_fil
         r#"{"event":"UPDATE","symbol":"BTCUSDT","orderId":"Z","dealAmount":"2"}"#,
     );
     assert!(observed_fills(&mut e).is_empty());
+    let events = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(events[0].message, "Bitunix fill metadata is not reconciled");
+    assert_eq!(
+        events[0].fields,
+        vec![(
+            "scope",
+            safe_cex_engine::Value::Str("account/background".into())
+        )]
+    );
     let metadata = regular("Z", 120, false).replace("\"tradeQty\":\"1\"", "\"tradeQty\":\"2\"");
     finish(
         &mut e,
