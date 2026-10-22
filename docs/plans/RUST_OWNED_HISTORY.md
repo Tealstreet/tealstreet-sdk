@@ -759,3 +759,41 @@ Preparation rejection gains typed Internal/notSent through the owner, retaining
 its strict no-rows/no-marker behavior. Original source compiles and fails all
 three new typed-first/retained-later/zero-accepted behavioral control groups.
 The existing 22 history/request-sequence controls pass before source changes.
+
+
+Paradex implementation checkpoint: one boxed `CursorHistory<Output>` replaces
+local row buffers, cursor owner and direct bounded-cap marker. Boxing only this
+owner avoids enlarging the existing Pending enum beyond the strict Clippy bound;
+no other continuation or account state is boxed/rewritten. Native raw-row counts
+remain cumulative, with unchanged endpoint request pins and final shaping.
+
+The shared proof-stage extension uses the same walker and lifecycle admission,
+without suppressing repeated-cursor detection. Probe stages cannot stage or
+already have admitted result rows in the current stage: misuse poisons completion
+and returns one strict Internal failure. A valid restart preserves prior-stage
+accepted rows and the first omission cause. Direct core and real-completion
+controls cover both staged/admitted misuse, cycle-before-budget and valid prior
+stage preservation. Removing the guard makes the real-completion assertion RED.
+
+All 30 native Paradex history controls pass, including the 22 pre-existing
+successful request/codec/lookup controls. The three original-RED failure groups
+now pass; later-failure controls cover transport, HTTP, native envelope, malformed
+row, truncated JSON and missing-list failures. Native controls also cover
+strict queued JWT/preparation and delegated-signing failure after acceptance,
+page-50 lookup cycle, a matching lookup row inside a failed envelope, capped
+nondefinitive lookup without a new marker, empty traversal fallback and the
+cumulative raw-row no-fallback boundary. Removing the strict preparation routing
+arm produces assertion RED; source is restored before the final checks.
+
+Correctness/adversarial reviews are clean after hardening probe admission. This
+is shared engine enforcement plus native adapter facts, not a venue-specific
+replacement algorithm. No final replay/WASM/live deployment proof is claimed at
+this checkpoint. Other history families and B11 caller coverage remain open.
+
+
+Final local checks at this checkpoint: 1,007 engine/Paradex/Binance/BloFin native
+tests pass, including 30 Paradex history tests; touched-crate strict all-target
+Clippy, fmt, banned-pattern scan and changed-doc relative targets pass. Final
+independent correctness/adversarial reviews are clean. Full exact-head CI and
+shipped-artifact/replay comparison remain required before merge; no local release
+WASM, timing or full replay sweep was run.

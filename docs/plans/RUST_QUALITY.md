@@ -271,3 +271,12 @@ single-page fills, 50/100 page caps and final sorting/limits remain. First-page
 failure rejects typed; later failure returns accepted pages with owned
 incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
+
+
+Paradex histories also reuse CursorHistory for staged/accepted rows, command
+ownership and completeness instead of local row vectors, walker ownership and
+marker emission. Native lookup proof, strict cursor/unbounded-budget refusals
+and fills fallback remain. The shared probe-stage operation preserves cycle and
+lifecycle checks while preventing result-row admission from hiding coverage.
+Queued auth/preparation rejection stays distinct from actual-page recovery.
+[Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.

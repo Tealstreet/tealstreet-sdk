@@ -3441,3 +3441,31 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### Paradex histories: shared cursor owner and accepted-page recovery
+
+Paradex fills (including the native orders-history fallback), historical orders,
+income and public trades now complete through the engine history owner. Actual
+HTTP/native/transport/stream/row/list failure before accepted mapped rows rejects
+with a typed error instead of an unclassified failure. A later failed page now
+returns only validated earlier pages, with one command-owned Warn
+`history.incomplete` before success, including at Error-only logging. Failed-page
+prefixes never reach the result; empty/fully filtered pages do not by themselves
+qualify for partial recovery. The multiplexed transport/decode callback uses the
+shared `internal` fallback, without fabricated native codes or Network evidence.
+
+Client-ID lookup failures, repeated cursors and unbounded page-cap policy
+refusals remain strict even after earlier accepted rows. Queued auth/setup and
+signing refusal stays strict and now reports `internal`/`notSent`; it cannot be
+reinterpreted as a recoverable page failure. A capped open-order lookup remains
+nondefinitive and adds no new warning; only both completed lookup stages can
+prove a definitive miss. A found row in a failed envelope never proves success.
+
+The native 5/50/200 budgets, raw cursor progress, empty-fill traversal fallback,
+public trades' single page, request parameters, native IDs/financial mapping,
+sort/limits, public-only and unknown-symbol no-I/O shapes remain. SDK method
+arguments and result row shapes stay the same. Callers still need B11's
+request-scoped incomplete-query ingestion/coverage and ordinary typed rejection
+handling; no additional NX migration is introduced by this slice.
+[Scope and proof](RUST_OWNED_HISTORY.md).
