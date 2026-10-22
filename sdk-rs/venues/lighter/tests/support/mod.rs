@@ -84,8 +84,16 @@ pub fn ready_tracked(options: Options) -> (Engine<Lighter>, SocketId, Timers) {
     ready_tracked_meta(options, META)
 }
 pub fn ready_tracked_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId, Timers) {
+    ready_engine_meta(
+        safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
+        meta,
+    )
+}
+pub fn ready_engine_meta(
+    mut e: Engine<Lighter>,
+    meta: &str,
+) -> (Engine<Lighter>, SocketId, Timers) {
     let mut timers = Timers::new();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
     e.start(NOW);
     let mut private = None;
     for _ in 0..30 {
