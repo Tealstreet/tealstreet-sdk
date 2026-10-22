@@ -217,8 +217,8 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
         r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex","key":"owned/read/mac"}"#,
         r#"{"kind":"wsAuth","toSign":"x","outputFormat":"raw"}"#,
         r#"{"kind":"wsAuth","toSign":"x","outputFormat":"apexomni-base64"}"#,
-        r#"{"kind":"credential","key":"owned/primary/mac"}"#,
-        r#"{"kind":"present","key":"owned/primary/mac"}"#,
+        r#"{"kind":"credential","key":"ref:owned-primary"}"#,
+        r#"{"kind":"present","key":"ref:owned-primary"}"#,
         r#"{"kind":"http","payload":"x","stampMs":1000,"revision":"7","secondary":true}"#,
         r#"{"kind":"http","payload":"x","stampMs":1000,"revision":7}"#,
     ] {
