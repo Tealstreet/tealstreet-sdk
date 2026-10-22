@@ -330,3 +330,60 @@ fn malformed_presented_credentials_do_not_escape_the_trusted_formatter() {
         assert!(captures.is_empty());
     }
 }
+
+#[test]
+fn http_callback_headers_use_declared_policy_and_never_escape_ws_or_credential_capture() {
+    let (signer, ids) = fixture();
+    for venue in families() {
+        let (work, kind) = hosted_signing::prepare(venue, &ids, http(QUERY)).unwrap();
+        let mut captures = Capture::default();
+        let prepared = captures
+            .prepare_with_policy((work, kind.header_policy()), kind, 100., STAMP, 7, 5000)
+            .unwrap();
+        let mut signed = signer.sign_now(&prepared.work).unwrap();
+        signed.headers = vec![
+            ("X-Proof".into(), "attempt".into()),
+            ("x-bapi-sign".into(), "replace-if-binance".into()),
+            ("x-bapi-recv-window".into(), "1000".into()),
+        ];
+        let (kind, signed) = captures
+            .finish(prepared.id, 101., STAMP + 1., 7, Ok(signed))
+            .unwrap();
+        let output = hosted_signing::finish(kind, &signed).unwrap();
+        let headers = output.headers.unwrap();
+        assert!(
+            headers
+                .iter()
+                .any(|(name, value)| name == "X-Proof" && value == "attempt")
+        );
+        assert_eq!(
+            headers.iter().any(|(name, _)| name == "x-bapi-sign"),
+            venue.starts_with("binance")
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(name, value)| name == "x-bapi-recv-window" && value == "1000")
+        );
+        for input in [
+            Input::Credential {},
+            Input::WsAuth {
+                to_sign: ORIGINAL_WS.into(),
+                output_format: OutputFormat::Hex,
+            },
+        ] {
+            let (work, kind) = hosted_signing::prepare(venue, &ids, input).unwrap();
+            let prepared = captures
+                .prepare_with_policy((work, kind.header_policy()), kind, 100., STAMP, 7, 5000)
+                .unwrap();
+            let mut signed = signer.sign_now(&prepared.work).unwrap();
+            signed.headers = vec![("X-Proof".into(), "must-reject".into())];
+            assert!(
+                captures
+                    .finish(prepared.id, 101., STAMP + 1., 7, Ok(signed))
+                    .is_err()
+            );
+            assert!(captures.is_empty());
+        }
+    }
+}

@@ -131,10 +131,10 @@ it('reports the structured refusal through start and validateAccount', async () 
   expect(io).not.toHaveBeenCalled();
 });
 
-it('routes only TS venues that sign with a payload signer to TS', () => {
+it('routes declared PayloadSigner families to Rust and leaves unadopted admission intact', () => {
   for (const name of ['bybit', 'bybitspot', 'hyrotrader', 'binance', 'binancepm', 'binanceinverse'] as const) {
-    expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(false);
-    expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(false);
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(true);
+    expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', payloadSigner, publicDataOnly: true }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's' }), name).toBe(true);
   }
@@ -149,12 +149,12 @@ describe('factory and worker loaders', () => {
   const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
     ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
 
-  it('createExchange builds the TS venue for Bybit and Binance payload signers', async () => {
+  it('createExchange builds Rust venues for declared Bybit and Binance payload signers', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of ['bybit', 'binance'] as const) {
       const exchange = await createExchange(name, signed());
       try {
-        expect(exchange, name).not.toBeInstanceOf(RustEngineExchange);
+        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
       } finally {
         exchange.dispose();
       }
