@@ -1066,6 +1066,7 @@ struct Io<P> {
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     signing: crate::signing_dispatch::Dispatch,
+    protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
@@ -1108,6 +1109,7 @@ impl<P> Default for Io<P> {
             pending: HashMap::new(),
             signatures: Vec::new(),
             signing: Default::default(),
+            protocol_clock: Default::default(),
             signer: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
@@ -1154,6 +1156,18 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    /// Calibrated venue UTC for outbound timestamps, absolute expiry and
+    /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
+    pub fn protocol_now(&self) -> f64 {
+        self.io.protocol_clock.at(self.now)
+    }
+
+    /// Feed a server-time observation captured at this callback's raw host time.
+    /// Replaces the per-engine correction; invalid observations preserve it.
+    pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
+        self.io.protocol_clock.observe(self.now, server_ms)
+    }
+
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
         self.io.public_feed_policy
     }
@@ -2790,7 +2804,11 @@ impl<V: Venue> Engine<V> {
         result: Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         use crate::signing_dispatch::Completion;
-        let Some(completion) = self.io.signing.finish(attempt, now, result) else {
+        let Some(completion) =
+            self.io
+                .signing
+                .finish(attempt, now, self.io.protocol_clock.revision(), result)
+        else {
             return;
         };
         match completion {
@@ -2864,7 +2882,12 @@ impl<V: Venue> Engine<V> {
             while let Some(action) = queued.pop_front() {
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
-                        match self.io.signing.release(attempt, *outbound, now) {
+                        match self.io.signing.release(
+                            attempt,
+                            *outbound,
+                            now,
+                            self.io.protocol_clock.revision(),
+                        ) {
                             Some(Completion::Ready(_, outbound)) => self.io.actions.push(outbound),
                             Some(Completion::Stale(mut pending)) => {
                                 pending.timer = TimerId(0);
@@ -2895,7 +2918,12 @@ impl<V: Venue> Engine<V> {
                         if !self.io.signing.can_prepare(attempt) {
                             continue;
                         }
-                        let work = match self.io.signing.prepare(attempt, now) {
+                        let work = match self.io.signing.prepare(
+                            attempt,
+                            now,
+                            self.io.protocol_clock.at(now),
+                            self.io.protocol_clock.revision(),
+                        ) {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();

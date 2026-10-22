@@ -135,6 +135,85 @@ fn partial_executions_emit_once_and_do_not_fill_on_algo_trigger_ack() {
     h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"1","actualSize":"1","triggerPrice":"90","holdSide":"long","planType":"loss_plan","status":"triggered"}]}"#);
     assert_eq!(h.engine.take_frame(h.now).map_or(0, fill_count), 0);
 }
+fn delivered_fills(h: &mut Harness) -> Vec<(f64, f64)> {
+    let Some(frame) = h.engine.take_frame(h.now) else {
+        return Vec::new();
+    };
+    let Some((_, payload)) = safe_cex_engine::wire::sections(frame).find(|(kind, _)| *kind == 11)
+    else {
+        return Vec::new();
+    };
+    let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+    let offset = (4 + count * 12 + 7) & !7;
+    (0..count)
+        .map(|index| {
+            let at = offset + index * 16;
+            (
+                f64::from_le_bytes(payload[at..at + 8].try_into().unwrap()),
+                f64::from_le_bytes(payload[at + 8..at + 16].try_into().unwrap()),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn cumulative_preparation_classic_rejects_negative_price_before_execution_dedup() {
+    let mut h = Harness::classic();
+    delivered_fills(&mut h);
+    let invalid = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0.4","accBaseVolume":"0.4","fillPrice":"-1","priceAvg":"99","price":"90","side":"buy","orderType":"limit","status":"partially_filled","tradeId":"correctable-price"}]}"#;
+    h.private_message(invalid);
+    assert!(delivered_fills(&mut h).is_empty());
+    let corrected = invalid.replace("\"fillPrice\":\"-1\"", "\"fillPrice\":\"99\"");
+    h.private_message(&corrected);
+    assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
+    h.private_message(&corrected);
+    assert!(delivered_fills(&mut h).is_empty());
+}
+
+#[test]
+fn cumulative_preparation_classic_correction_uses_pre_observation_delivered_seed() {
+    let mut h = Harness::classic();
+    delivered_fills(&mut h);
+    let unpriced = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","accBaseVolume":"0.4","fillPrice":"0","price":"0","side":"buy","orderType":"market","status":"partially_filled","tradeId":"correctable-cumulative"}]}"#;
+    h.private_message(unpriced);
+    // A display observation is not evidence that a priced Fill was delivered.
+    assert_eq!(h.engine.store().order("1").unwrap().filled, 0.4);
+    delivered_fills(&mut h);
+    let corrected = unpriced.replace("\"fillPrice\":\"0\"", "\"fillPrice\":\"99\"");
+    h.private_message(&corrected);
+    assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
+    h.private_message(&corrected);
+    assert!(delivered_fills(&mut h).is_empty());
+}
+
+#[test]
+fn cumulative_preparation_classic_late_direct_fill_does_not_rewind_prefix() {
+    let mut h = Harness::classic();
+    delivered_fills(&mut h);
+    let execution = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0.4","accBaseVolume":"0.8","fillPrice":"99","price":"90","side":"buy","orderType":"limit","status":"partially_filled","tradeId":"newer"}]}"#;
+    h.private_message(execution);
+    assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
+    let late = execution
+        .replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"0.4\"")
+        .replace("newer", "older");
+    h.private_message(&late);
+    assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
+    let caught_up = execution
+        .replace("\"baseVolume\":\"0.4\",", "")
+        .replace("newer", "cumulative-catchup");
+    h.private_message(&caught_up);
+    assert!(delivered_fills(&mut h).is_empty());
+    h.private_message(&late);
+    assert!(delivered_fills(&mut h).is_empty());
+    let higher = caught_up
+        .replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"1.2\"")
+        .replace("cumulative-catchup", "higher");
+    h.private_message(&higher);
+    assert_eq!(delivered_fills(&mut h), vec![(99.0, 1.2 - 0.8)]);
+    h.private_message(&higher);
+    assert!(delivered_fills(&mut h).is_empty());
+}
+
 fn fill_count(frame: &[u8]) -> u32 {
     let mut at = 16;
     let mut count = 0;
