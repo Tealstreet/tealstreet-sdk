@@ -1,6 +1,7 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, SnapshotBuilder};
+use safe_cex_engine::execution::{Arithmetic, Cursor};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -98,8 +99,8 @@ fn validate_execution_numbers(r: &OrderRow<'_>) -> Result<(), String> {
 }
 
 struct PreparedFill {
-    total: Option<(String, (f64, f64))>,
-    fill: Option<(String, Fill)>,
+    total: Option<(String, Cursor)>,
+    fill: Option<(String, Fill, Cursor)>,
 }
 struct PreparedExecution<'r, 'a> {
     root: Option<(String, OrderStatus, Option<u64>, u64)>,
@@ -231,7 +232,7 @@ pub struct Account {
     position_stamps: HashMap<String, (Option<u64>, u64)>,
     executions: HashSet<String>,
     execution_order: VecDeque<String>,
-    totals: HashMap<String, (f64, f64)>,
+    totals: HashMap<String, Cursor>,
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
     positions_guard: StaleGuard,
@@ -1467,34 +1468,22 @@ impl Orderly {
             .totals
             .get(&order.id)
             .copied()
-            .unwrap_or((0.0, 0.0));
-        let quantity = r
-            .executed_quantity
-            .map_or((filled - previous.0).max(0.0), |n| n.0);
-        let total_value = r.average_executed_price.map_or(0.0, |n| n.0 * filled);
-        let price = r.executed_price.map_or(
-            if quantity > 0.0 {
-                (total_value - previous.1) / quantity
-            } else {
-                0.0
-            },
-            |n| n.0,
-        );
-        if [filled, quantity, total_value]
-            .iter()
-            .any(|n| !n.is_finite())
-            || filled < 0.0
-            || quantity < 0.0
-            || r.average_executed_price.is_some_and(|n| n.0 < 0.0)
-            || r.executed_price.is_some_and(|n| n.0 < 0.0)
-            || (quantity > 0.0 && (price <= 0.0 || !price.is_finite()))
-        {
-            return Err("Orderly invalid execution quantity or price".into());
-        }
-        let total = (filled > previous.0).then(|| (order.id.clone(), (filled, total_value)));
-        if quantity == 0.0 {
+            .unwrap_or_default();
+        let prepared = previous
+            .prepare_observed_average(
+                filled,
+                r.executed_quantity.map(|n| n.0),
+                r.average_executed_price.map(|n| n.0),
+                r.executed_price.map(|n| n.0),
+                Arithmetic::Binary,
+            )
+            .map_err(|_| "Orderly invalid execution quantity or price".to_string())?;
+        let total = prepared
+            .observation()
+            .map(|total| (order.id.clone(), total));
+        let Some(delivery) = prepared.delivery() else {
             return Ok(PreparedFill { total, fill: None });
-        }
+        };
         let event = if !r.trade_id.0.is_empty() {
             format!("trade:{}:{}", order.id, r.trade_id.0)
         } else if !r.match_id.0.is_empty() {
@@ -1511,9 +1500,10 @@ impl Orderly {
                     order_id: order.id.clone(),
                     symbol: order.symbol.clone(),
                     side: order.side,
-                    price,
-                    amount: quantity,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
                 },
+                delivery.next(),
             )),
         })
     }
@@ -1521,7 +1511,7 @@ impl Orderly {
         if let Some((id, total)) = prepared.total {
             self.account.totals.insert(id, total);
         }
-        let Some((event, fill)) = prepared.fill else {
+        let Some((event, fill, next)) = prepared.fill else {
             return;
         };
         if !self.account.executions.insert(event.clone()) {
@@ -1534,7 +1524,13 @@ impl Orderly {
                 .remove(&self.account.execution_order.pop_front().unwrap());
         }
         self.account.positions_revision += 1;
+        let order_id = fill.order_id.clone();
         cx.fill(fill);
+        if let Some(total) = self.account.totals.get_mut(&order_id)
+            && let Some(enriched) = total.enrich_quote(next)
+        {
+            *total = enriched;
+        }
     }
     fn prepare_execution<'r, 'a>(
         &self,
