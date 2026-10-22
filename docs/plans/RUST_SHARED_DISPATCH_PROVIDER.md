@@ -1,6 +1,6 @@
 # Shared dispatch-signing provider feature
 
-Status: implemented locally; extracted from Bybit #1728 at owner request. CI and actual #1726 integration pending.
+Status: implemented locally; extracted from Bybit #1728 at owner request. Final CI/proof and actual #1726 verification pending.
 
 The trusted registry and WASM provider bootstrap currently compiles only with
 Binance. Expose one `dispatch-signing` feature shared by migrated families,
@@ -36,3 +36,11 @@ correctness/adversarial review is clean on the four production files.
 These tests deliberately pin Bybit as an unmigrated negative control at this
 commit; its later migration must update the control with its positive tests.
 There is no new SDK/NX API or persisted identity change in this extraction.
+
+Owner-approved exact-head dependency: frozen #1726
+`289a469c5c371207cebd3f69bad68c045109791e` is preintegrated conflict-free,
+along with actual #1727 `361a4ccafadcf0385d0f708d124596601da83402`.
+The seam may merge only after #1726 lands with that exact reviewed head as
+an ancestor, fresh CI/proof and a separate own-only guard. A changed
+predecessor requires real integration and fresh CI. Bybit #1728 subsequently
+merges actual landing; other family migrations depend on the landed seam.
