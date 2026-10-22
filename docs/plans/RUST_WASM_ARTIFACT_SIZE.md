@@ -118,3 +118,14 @@ Before merging, require the candidate's full matching raw set, unchanged hashes
 except metrics, public CPU/memory gates and the fixed artifact budgets. Compare
 actual stripped bytes; no local release build or threshold adjustment. This
 compiler-only change has no caller API or deployment migration.
+
+## AsterDEX throughput restoration after repeated timing misses
+
+After four owner-counted unrelated public timing misses, restore only the
+AsterDEX family to its effective pre-#1656/#1661 compiler settings: host, engine,
+Aster crate and dependency defaults at level 3. Preserve Binance's historical
+explicit z profile. The family-only venue override leaves combined/native
+profiles and all other 27 family argument arrays unchanged. No budget or
+timing-policy change. Use a fresh post-#1722/#1726 baseline; the old checkpoint's
+evidence is superseded.
+[Plan and complete raw/timing evidence](RUST_ASTERDEX_THROUGHPUT.md).
