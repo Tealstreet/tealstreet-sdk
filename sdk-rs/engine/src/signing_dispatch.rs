@@ -21,6 +21,7 @@ pub(crate) struct Pending {
     pub deadline: f64,
     staged_at: f64,
     prepared_at: Option<f64>,
+    prepared_revision: Option<u64>,
     expected: Vec<Option<usize>>,
 }
 impl Pending {
@@ -82,8 +83,14 @@ impl Dispatch {
     pub fn ready(&mut self, id: RequestId, pending: Pending) {
         self.outbound.insert(id, pending);
     }
-    pub fn release(&mut self, id: RequestId, mut action: Action, now: f64) -> Option<Completion> {
-        let Some(mut pending) = self.outbound.remove(&id) else {
+    pub fn release(
+        &mut self,
+        id: RequestId,
+        mut action: Action,
+        now: f64,
+        clock_revision: u64,
+    ) -> Option<Completion> {
+        let Some(pending) = self.outbound.remove(&id) else {
             wipe(&mut action);
             return None;
         };
@@ -91,12 +98,12 @@ impl Dispatch {
             wipe(&mut action);
             return Some(Completion::Failed(pending, SignError::TimedOut));
         }
-        if pending
-            .prepared_at
-            .is_some_and(|at| now - at >= pending.step.freshness_ms())
+        if pending.prepared_revision != Some(clock_revision)
+            || pending
+                .prepared_at
+                .is_some_and(|at| now - at >= pending.step.freshness_ms())
         {
             wipe(&mut action);
-            pending.prepared_at = None;
             return Some(Completion::Stale(pending));
         }
         if let Action::Http(http) = &mut action
@@ -161,6 +168,7 @@ impl Dispatch {
                 deadline,
                 staged_at: now,
                 prepared_at: None,
+                prepared_revision: None,
                 expected: vec![],
             },
         );
@@ -187,17 +195,26 @@ impl Dispatch {
         p.deadline = p.staged_at + f64::from(timeout.max(1));
         Some((p.timer, p.deadline))
     }
-    pub fn prepare(&mut self, id: RequestId, now: f64) -> Result<SignRequest, SignError> {
+    pub fn prepare(
+        &mut self,
+        id: RequestId,
+        now: f64,
+        protocol_now: f64,
+        clock_revision: u64,
+    ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
             return Err(SignError::TimedOut);
+        }
+        if !protocol_now.is_finite() {
+            return Err(SignError::InvalidRequest);
         }
         if let (Action::Http(original), Action::Http(current)) = (&mut p.unsigned, &p.outbound) {
             original.route = current.route;
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, now)?;
+        let work = p.step.prepare(&mut p.outbound, protocol_now)?;
         work.validate()?;
         p.expected = work
             .operations
@@ -217,6 +234,7 @@ impl Dispatch {
             })
             .collect();
         p.prepared_at = Some(now);
+        p.prepared_revision = Some(clock_revision);
         Ok(work)
     }
     pub fn timeout_ms(&self, id: RequestId, now: f64) -> u32 {
@@ -228,6 +246,7 @@ impl Dispatch {
         &mut self,
         id: RequestId,
         now: f64,
+        clock_revision: u64,
         result: Result<SignResult, SignError>,
     ) -> Option<Completion> {
         // Duplicate/unsolicited success cannot consume an unprepared attempt.
@@ -240,11 +259,14 @@ impl Dispatch {
             return None;
         }
         let mut p = self.pending.remove(&id)?;
-        let result = if !now.is_finite() || now >= p.deadline {
-            Err(SignError::TimedOut)
-        } else {
-            result
-        };
+        if !now.is_finite() || now >= p.deadline {
+            return Some(Completion::Failed(p, SignError::TimedOut));
+        }
+        // A stale provider error belongs to the old canonical payload too.
+        // Reprepare with a new attempt identity before interpreting any result.
+        if p.prepared_revision.is_some_and(|at| at != clock_revision) {
+            return Some(Completion::Stale(p));
+        }
         let result = match result {
             Ok(result) => result,
             Err(error) => return Some(Completion::Failed(p, error)),
@@ -271,6 +293,7 @@ impl Dispatch {
     }
     pub fn retry(&mut self, id: RequestId, mut pending: Pending) {
         pending.prepared_at = None;
+        pending.prepared_revision = None;
         self.pending.insert(id, pending);
     }
     pub fn expire(&mut self, timer: TimerId) -> Option<(RequestId, Pending)> {
