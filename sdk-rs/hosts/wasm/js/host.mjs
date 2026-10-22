@@ -591,6 +591,7 @@ export class EngineHost {
   }
 
   sign(action) {
+    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const expectedReceipt = signingReceipt(action.work.receipt);
     const id = action.attempt;
     const controller = new AbortController();

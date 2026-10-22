@@ -37,7 +37,17 @@ export class ManagedHttp {
   execute(action) {
     const token = action.preparation;
     if (typeof token !== 'string') throw new Error('Invalid HTTP preparation token');
-    if (action.phase === 'cancel') { this.cancel(token); return; }
+    if (action.phase === 'cancel') {
+      if (action.signing !== undefined) {
+        const pending = this.host.primitiveSignings.get(action.signing);
+        if (pending) {
+          this.host.primitiveSignings.delete(action.signing);
+          this.host.transport.clearTimeout(pending.timer);
+          pending.controller.abort();
+        }
+      }
+      this.cancel(token); return;
+    }
     if (action.phase === 'prepare') { void this.prepare(action); return; }
     if (action.phase !== 'bind') throw new Error('Invalid managed HTTP phase');
     const resource = this.resources.get(token);

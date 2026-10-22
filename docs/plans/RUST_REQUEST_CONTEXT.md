@@ -305,3 +305,21 @@ original deadline and protocol-revision replacement, duplicate/late completion,
 receipt publication at claim, cancellation of a hung primitive provider, and the
 native parked-provider/fast-ACK 450 ms final-handoff probe. Legacy WS signing and
 its subscription sequencing stay on the same Dispatch; no second signing queue.
+
+The signed-read checkpoint reserves the existing Dispatch sequence at creation,
+prepares only after route readiness, retains an unsigned recipe through binding,
+and publishes receipts at claim. Independent HTTP route/provider completion may
+race, while the existing signed-WS/plain-subscription barrier stays ordered.
+A read-only signingPending query prevents delayed host work from restarting a
+retired provider. Cancellation aborts the exact primitive attempt and ignores
+late success; native host shutdown also aborts parked providers.
+
+Its native parked-primitive-provider probe records physical handoffs at 700 ms
+and 1150 ms despite a fast ACK. A fault control discarding release-group pacing
+fails that assertion (two sends before the second gap); restored code passes.
+Additional controls cover calibration replacement/new provider IDs, original
+raw-deadline precedence, signature receipts only at claim, mixed HTTP/WS order,
+retirement, and invalid recipe versus capacity errors with continuations intact.
+Independent checkpoint review is clean. Mutations, central command aggregation,
+late-write reconciliation, SDK proxy/HOW preparation, venue references and the
+legacy-call ratchet still remain before PR readiness.

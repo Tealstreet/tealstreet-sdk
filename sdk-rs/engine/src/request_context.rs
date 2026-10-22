@@ -221,6 +221,7 @@ pub enum HttpAction {
     },
     Cancel {
         preparation: Preparation,
+        signing: Option<RequestId>,
     },
 }
 

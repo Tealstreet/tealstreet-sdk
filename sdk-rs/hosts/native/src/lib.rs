@@ -89,6 +89,7 @@ pub struct Host<V: Venue, T: Transport> {
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
     timers: HashMap<TimerId, AbortHandle>,
     managed_http: managed_http::Requests,
+    signing_tasks: HashMap<RequestId, managed_http::Task>,
     clock: fn() -> f64,
 }
 
@@ -103,6 +104,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             sockets: HashMap::new(),
             timers: HashMap::new(),
             managed_http: Default::default(),
+            signing_tasks: HashMap::new(),
             clock: now_ms,
         }
     }
@@ -175,6 +177,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
     fn stop(&mut self) {
         self.inbox.close();
         self.managed_http.clear();
+        self.signing_tasks.clear();
         self.sockets.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
@@ -247,6 +250,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 },
             ),
             HostEvent::Signed(attempt, result) => {
+                self.signing_tasks.remove(&attempt);
                 engine.handle(now, Event::Signed { attempt, result })
             }
             HostEvent::PayloadSigned(request, result) => engine.handle(
@@ -319,9 +323,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     work,
                     timeout_ms,
                 } => {
+                    if !self.engine.signing_pending(attempt) {
+                        continue;
+                    }
                     let signer = self.engine.signer();
                     let events = self.events.clone();
-                    tokio::spawn(async move {
+                    let task = tokio::spawn(async move {
                         use safe_cex_engine::signing::SignError;
                         if events.is_closed() {
                             return;
@@ -339,6 +346,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         };
                         let _ = events.send(HostEvent::Signed(attempt, result));
                     });
+                    self.signing_tasks
+                        .insert(attempt, managed_http::Task(task.abort_handle()));
                 }
                 Action::SignPayload {
                     request,

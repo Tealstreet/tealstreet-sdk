@@ -58,6 +58,9 @@ trait AnyEngine {
         Err(entropy_configuration_error())
     }
 
+    fn signing_pending(&self, _: RequestId) -> bool {
+        false
+    }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
     }
@@ -120,6 +123,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
         }
     }
 
+    fn signing_pending(&self, attempt: RequestId) -> bool {
+        Engine::signing_pending(self, attempt)
+    }
     fn http_preparation_pending(
         &self,
         token: safe_cex_engine::request_context::Preparation,

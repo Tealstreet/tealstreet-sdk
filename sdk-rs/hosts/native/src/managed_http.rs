@@ -4,7 +4,7 @@ use safe_cex_engine::VenueError;
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Permit, Preparation, Prepared};
 
 /// Dropping any generation cancels only its own asynchronous work.
-struct Task(AbortHandle);
+pub(super) struct Task(pub(super) AbortHandle);
 impl Drop for Task {
     fn drop(&mut self) {
         self.0.abort();
@@ -131,7 +131,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     Err(error) => self.fail_http_preparation(preparation, error),
                 }
             }
-            HttpAction::Cancel { preparation } => {
+            HttpAction::Cancel {
+                preparation,
+                signing,
+            } => {
+                if let Some(attempt) = signing {
+                    self.signing_tasks.remove(&attempt);
+                }
                 let request = preparation.attempt().request;
                 if self
                     .managed_http

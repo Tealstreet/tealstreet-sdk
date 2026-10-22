@@ -120,6 +120,30 @@ test('throwing post-handoff diagnostics cannot strand a rejected response or bec
   r.host.dispose();
 });
 
+test('managed retirement aborts the exact primitive provider and ignores its late result', async () => {
+  let finish, signal;
+  const events = [], timers = new Map();
+  const host = new EngineHost({ useExternalSigner() {}, signed() { events.push('signed'); return ''; }, signFailed() { events.push('failed'); return ''; } }, {
+    now: () => 0, setTimeout(fn) { timers.set(1, fn); return 1; }, clearTimeout(id) { timers.delete(id); },
+  }, {}, { signer: (_, context) => { signal = context.signal; return new Promise((resolve) => { finish = resolve; }); } });
+  host.execute({ op: 'sign', attempt: 7, work: { receipt: {}, context: {}, operations: [{ kind: 'present', key: 'fixture' }] }, timeoutMs: 1000 });
+  await tick(); assert.equal(signal.aborted, false); assert.equal(host.primitiveSignings.size, 1);
+  host.execute({ ...cancel, signing: 7 });
+  assert.equal(signal.aborted, true); assert.equal(host.primitiveSignings.size, 0); assert.equal(timers.size, 0);
+  finish({ receipt: {}, values: [[1]] }); await tick();
+  assert.deepEqual(events, []);
+  host.dispose();
+});
+
+test('a delayed sign action cannot restart a provider after engine retirement', async () => {
+  let calls = 0;
+  const host = new EngineHost({ useExternalSigner() {}, signingPending: () => false }, {
+    now: () => 0, setTimeout() { assert.fail('no retired timer'); }, clearTimeout() {},
+  }, {}, { signer: () => { calls++; return { values: [], receipt: {} }; } });
+  host.execute({ op: 'sign', attempt: 7, work: { receipt: {}, operations: [] }, timeoutMs: 1000 });
+  await tick(); assert.equal(calls, 0); assert.equal(host.primitiveSignings.size, 0); host.dispose();
+});
+
 test('default fetch validates before handoff and invokes fetch synchronously exactly once', async () => {
   const calls = [];
   const request = { ...packet, headers: {}, signal: new AbortController().signal };

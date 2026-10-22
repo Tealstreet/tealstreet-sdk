@@ -57,6 +57,8 @@ pub(super) enum HttpPhaseOut<'a> {
     },
     Cancel {
         preparation: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signing: Option<u32>,
     },
 }
 
@@ -85,8 +87,12 @@ impl<'a> From<&'a HttpAction> for HttpPhaseOut<'a> {
                 permit: permit.to_wire(),
                 packet: HttpPacket::from(request),
             },
-            HttpAction::Cancel { preparation } => Self::Cancel {
+            HttpAction::Cancel {
+                preparation,
+                signing,
+            } => Self::Cancel {
                 preparation: preparation.to_wire(),
+                signing: signing.map(|id| id.0),
             },
         }
     }
@@ -109,6 +115,11 @@ enum ClaimOut {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    #[wasm_bindgen(js_name = signingPending)]
+    pub fn signing_pending(&self, attempt: u32) -> bool {
+        self.inner.signing_pending(RequestId(attempt))
+    }
+
     #[wasm_bindgen(js_name = httpPreparationPending)]
     pub fn http_preparation_pending(&self, preparation: &str) -> bool {
         Preparation::from_wire(preparation)
@@ -203,7 +214,10 @@ mod tests {
                 permit: Permit::from_wire(permit_text).unwrap(),
                 request,
             },
-            HttpAction::Cancel { preparation },
+            HttpAction::Cancel {
+                preparation,
+                signing: None,
+            },
         ]
         .map(|a| Action::ManagedHttp(Box::new(a)));
         let rows: serde_json::Value = serde_json::from_str(&encode(&actions)).unwrap();

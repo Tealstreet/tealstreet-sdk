@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 struct Pending(Context);
 #[derive(Default)]
 struct Probe {
+    signed: bool,
     responses: usize,
     failures: usize,
     releases: Vec<HttpRelease>,
@@ -33,7 +34,12 @@ impl Venue for Probe {
                     Scope::Background,
                     Policy {
                         operation: Operation::Read,
-                        credential: None,
+                        credential: self.signed.then(|| {
+                            safe_cex_engine::request_context::Credential {
+                                slot: safe_cex_engine::CredentialSlot::Primary,
+                                reference: safe_cex_engine::signing::KeyRef("fixture".into()),
+                            }
+                        }),
                         timeout_ms: 5_000,
                         pacing: Some(Pacing {
                             group: 1,
@@ -43,13 +49,24 @@ impl Venue for Probe {
                     },
                 )
                 .unwrap();
-            cx.request_managed(
-                context.clone(),
-                Method::Post,
-                "https://venue.test/read".into(),
-                Some("{}".into()),
-                Pending(context),
-            )
+            if self.signed {
+                cx.request_signed_managed(
+                    context.clone(),
+                    Method::Post,
+                    "https://venue.test/read".into(),
+                    Some("{}".into()),
+                    Box::new(Recipe),
+                    Pending(context),
+                )
+            } else {
+                cx.request_managed(
+                    context.clone(),
+                    Method::Post,
+                    "https://venue.test/read".into(),
+                    Some("{}".into()),
+                    Pending(context),
+                )
+            }
             .unwrap();
         }
     }
@@ -312,4 +329,200 @@ async fn unsupported_custom_transport_is_typed_not_sent_without_legacy_fallback(
     assert!(host.engine.venue().releases.is_empty());
     assert!(host.managed_http.resources.is_empty());
     host.stop();
+}
+
+struct Recipe;
+impl safe_cex_engine::SignStep for Recipe {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        context: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        Ok(safe_cex_engine::signing::SignRequest {
+            receipt: safe_cex_engine::signing::SignReceipt {
+                stamp_ms: Some(context.stamp_ms()),
+                expiry_ms: None,
+            },
+            context: Default::default(),
+            operations: vec![safe_cex_engine::signing::Operation::Present {
+                key: safe_cex_engine::signing::KeyRef("fixture".into()),
+            }],
+        })
+    }
+    fn apply(
+        &mut self,
+        outbound: &mut Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(safe_cex_engine::signing::SignError::InvalidRequest);
+        };
+        assert_eq!(result.values, [b"value".to_vec()]);
+        http.signer_headers
+            .push(("x-credential".into(), "value".into()));
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        10_000.
+    }
+}
+struct ParkedSigner {
+    gates: Mutex<Vec<oneshot::Receiver<()>>>,
+    started: AtomicUsize,
+    dropped: Arc<AtomicUsize>,
+}
+struct ProviderGuard(Arc<AtomicUsize>);
+impl Drop for ProviderGuard {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+impl safe_cex_engine::signing::Signer for ParkedSigner {
+    fn sign(
+        &self,
+        work: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        let gate = self.gates.lock().unwrap().remove(0);
+        self.started.fetch_add(1, Ordering::SeqCst);
+        let guard = ProviderGuard(self.dropped.clone());
+        Box::pin(async move {
+            let _guard = guard;
+            gate.await
+                .map_err(|_| safe_cex_engine::signing::SignError::Unavailable)?;
+            Ok(safe_cex_engine::signing::SignResult {
+                values: vec![b"value".to_vec()],
+                receipt: work.receipt,
+            })
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn parked_primitive_provider_fast_ack_and_second_provider_keep_450ms_physical_gap() {
+    static START: OnceLock<tokio::time::Instant> = OnceLock::new();
+    START.set(tokio::time::Instant::now()).unwrap();
+    fn clock() -> u64 {
+        START.get().unwrap().elapsed().as_millis() as u64
+    }
+    let (route1, route_rx1) = oneshot::channel();
+    let (route2, route_rx2) = oneshot::channel();
+    let (provider1, provider_rx1) = oneshot::channel();
+    let (provider2, provider_rx2) = oneshot::channel();
+    let signer = Arc::new(ParkedSigner {
+        gates: Mutex::new(vec![provider_rx1, provider_rx2]),
+        started: AtomicUsize::new(0),
+        dropped: Arc::default(),
+    });
+    let sent = Handoffs::default();
+    let mut host = Host::new(
+        safe_cex_engine::test_support::seeded_engine(Probe {
+            signed: true,
+            ..Probe::default()
+        }),
+        ControlledTransport {
+            gates: Mutex::new(vec![route_rx1, route_rx2]),
+            sent: sent.clone(),
+            discarded: Arc::default(),
+            clock,
+        },
+    )
+    .with_signer(signer.clone())
+    .unwrap();
+    host.clock = || clock() as f64;
+    host.engine.start(0.);
+    host.execute(&mut |_| {});
+    route1.send(()).unwrap();
+    let first = ready(&mut host).await;
+    tokio::task::yield_now().await;
+    route2.send(()).unwrap();
+    let second = ready(&mut host).await;
+    tokio::task::yield_now().await;
+    assert_eq!(signer.started.load(Ordering::SeqCst), 2);
+    assert!(sent.lock().unwrap().is_empty());
+    assert!(host.engine.venue().releases.is_empty());
+    tokio::time::advance(Duration::from_millis(700)).await;
+    provider2.send(()).unwrap();
+    let event = host.inbox.recv().await.unwrap();
+    assert!(matches!(event, HostEvent::Signed(..)));
+    host.dispatch(event);
+    host.execute(&mut |_| {});
+    assert_eq!(
+        sent.lock().unwrap().as_slice(),
+        [(second.attempt().request, 700)]
+    );
+    response(&mut host).await;
+    tokio::time::advance(Duration::from_millis(1)).await;
+    provider1.send(()).unwrap();
+    let event = host.inbox.recv().await.unwrap();
+    assert!(matches!(event, HostEvent::Signed(..)));
+    host.dispatch(event);
+    host.execute(&mut |_| {});
+    assert_eq!(sent.lock().unwrap().len(), 1);
+    tokio::time::advance(Duration::from_millis(448)).await;
+    assert!(host.inbox.try_recv().is_err());
+    tokio::time::advance(Duration::from_millis(1)).await;
+    let event = host.inbox.recv().await.unwrap();
+    assert!(matches!(event, HostEvent::HttpWake(..)));
+    assert_eq!(clock(), 1_150);
+    host.dispatch(event);
+    host.execute(&mut |_| {});
+    assert_eq!(
+        sent.lock().unwrap().as_slice(),
+        [
+            (second.attempt().request, 700),
+            (first.attempt().request, 1_150)
+        ]
+    );
+    response(&mut host).await;
+    assert_eq!(host.engine.venue().responses, 2);
+    assert_eq!(host.engine.venue().failures, 0);
+    assert_eq!(signer.dropped.load(Ordering::SeqCst), 2);
+    assert!(host.signing_tasks.is_empty());
+    assert!(host.managed_http.resources.is_empty());
+    host.stop();
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_native_host_aborts_parked_signers_and_prepared_routes_without_sending() {
+    let (route1, route_rx1) = oneshot::channel();
+    let (route2, route_rx2) = oneshot::channel();
+    let (_provider1, provider_rx1) = oneshot::channel();
+    let (_provider2, provider_rx2) = oneshot::channel();
+    let signer = Arc::new(ParkedSigner {
+        gates: Mutex::new(vec![provider_rx1, provider_rx2]),
+        started: AtomicUsize::new(0),
+        dropped: Arc::default(),
+    });
+    let sent = Handoffs::default();
+    let mut host = Host::new(
+        safe_cex_engine::test_support::seeded_engine(Probe {
+            signed: true,
+            ..Probe::default()
+        }),
+        ControlledTransport {
+            gates: Mutex::new(vec![route_rx1, route_rx2]),
+            sent: sent.clone(),
+            discarded: Arc::default(),
+            clock: || 0,
+        },
+    )
+    .with_signer(signer.clone())
+    .unwrap();
+    host.clock = || 0.;
+    host.engine.start(0.);
+    host.execute(&mut |_| {});
+    route1.send(()).unwrap();
+    ready(&mut host).await;
+    tokio::task::yield_now().await;
+    route2.send(()).unwrap();
+    ready(&mut host).await;
+    tokio::task::yield_now().await;
+    assert_eq!(signer.started.load(Ordering::SeqCst), 2);
+    assert_eq!(host.signing_tasks.len(), 2);
+    host.stop();
+    tokio::task::yield_now().await;
+    assert_eq!(signer.dropped.load(Ordering::SeqCst), 2);
+    assert!(host.signing_tasks.is_empty());
+    assert!(host.managed_http.resources.is_empty());
+    assert!(sent.lock().unwrap().is_empty());
 }

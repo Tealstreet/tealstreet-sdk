@@ -10,6 +10,8 @@ pub(super) struct Managed {
     original: HttpRequest,
     timer: TimerId,
     response_started: bool,
+    signing_attempt: Option<RequestId>,
+    recipe: Option<crate::signing_dispatch::Pending>,
 }
 
 impl<P> Cx<'_, P> {
@@ -24,10 +26,38 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(context, method, url, body, None, pending)
+    }
+
+    /// Retain an unsigned recipe at creation; canonicalisation waits for route
+    /// readiness. Mutations remain gated until command evidence is integrated.
+    pub fn request_signed_managed(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(context, method, url, body, Some(step), pending)
+    }
+
+    fn queue_managed(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Option<Box<dyn crate::SignStep>>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
-        if context.credential().is_some() || context.operation() != Operation::Read {
+        if context.operation() != Operation::Read
+            || context.credential().is_some() != step.is_some()
+        {
             return Err((pending, Error::Invalid));
         }
         if self.io.managed_http.len() >= 256 {
@@ -46,6 +76,28 @@ impl<P> Cx<'_, P> {
             signer_headers: vec![],
             body,
         };
+        let signing_attempt = if let Some(step) = step {
+            let attempt = self.io.signing.next_id();
+            if let Err(error) = self.io.signing.stage_managed(
+                attempt,
+                Action::Http(http.clone()),
+                step,
+                self.now,
+                context.deadline(),
+            ) {
+                return Err((
+                    pending,
+                    if error == crate::signing::SignError::InvalidRequest {
+                        Error::Invalid
+                    } else {
+                        Error::Capacity
+                    },
+                ));
+            }
+            Some(attempt)
+        } else {
+            None
+        };
         let intent = context.routing_intent();
         let deadline = context.deadline();
         let lifecycle = Lifecycle::new(
@@ -63,6 +115,8 @@ impl<P> Cx<'_, P> {
                 original: http.clone(),
                 timer,
                 response_started: false,
+                signing_attempt,
+                recipe: None,
             },
         );
         self.io.pending.insert(
@@ -140,6 +194,7 @@ impl<P> Io<P> {
 
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
+        self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
             timer: managed.timer,
@@ -147,6 +202,7 @@ impl<P> Io<P> {
         self.actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: managed.lifecycle.preparation(),
+                signing: managed.signing_attempt,
             })));
         Some(managed)
     }
@@ -185,7 +241,27 @@ impl<V: Venue> Engine<V> {
             .io
             .request_contexts
             .validate(managed.lifecycle.context(), now)
-            .and_then(|()| managed.lifecycle.prepared(token, prepared))
+            .and_then(|()| managed.lifecycle.prepared(token, prepared));
+        if prepared_result.is_ok()
+            && let Some(attempt) = managed.signing_attempt
+        {
+            let ready = managed.lifecycle.begin_signing().and_then(|_| {
+                self.io
+                    .signing
+                    .activate_managed(attempt)
+                    .map_err(|_| Error::State)
+            });
+            if let Err(error) = ready {
+                self.http_preparation_failed(
+                    now,
+                    token,
+                    error,
+                    VenueError::new("HTTP signing preparation failed"),
+                );
+            }
+            return;
+        }
+        let prepared_result = prepared_result
             .and_then(|()| managed.lifecycle.unsigned())
             .and_then(|()| managed.lifecycle.permit());
         match prepared_result {
@@ -204,6 +280,77 @@ impl<V: Venue> Engine<V> {
                 error,
                 VenueError::new("HTTP preparation is no longer valid"),
             ),
+        }
+    }
+
+    pub(super) fn managed_sign_completed(
+        &mut self,
+        now: f64,
+        completion: crate::signing_dispatch::Completion,
+    ) {
+        use crate::signing_dispatch::Completion;
+        let (pending, mut outbound, error, stale) = match completion {
+            Completion::Ready(pending, outbound) => (pending, Some(outbound), None, false),
+            Completion::Stale(pending) => (pending, None, None, true),
+            Completion::Failed(pending, error) => (pending, None, Some(error), false),
+        };
+        let Some(request) = pending.request_id() else {
+            return;
+        };
+        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+            if let Some(action) = outbound.as_mut() {
+                crate::signing_dispatch::wipe(action);
+            }
+            return;
+        };
+        let token = managed.lifecycle.preparation();
+        if let Some(error) = error {
+            let reason = if error == crate::signing::SignError::TimedOut {
+                Error::TimedOut
+            } else {
+                Error::State
+            };
+            self.http_preparation_failed(now, token, reason, error.venue_error());
+            return;
+        }
+        if stale {
+            managed.recipe = Some(pending);
+            self.reprepare_http(now, token);
+            return;
+        }
+        let prepared = self
+            .io
+            .request_contexts
+            .validate(managed.lifecycle.context(), now)
+            .and_then(|()| pending.managed_freshness().ok_or(Error::State))
+            .and_then(|(revision, until)| {
+                managed
+                    .lifecycle
+                    .signed(token, pending.receipt, revision, until)
+            })
+            .and_then(|()| managed.lifecycle.permit());
+        match (prepared, outbound) {
+            (Ok(permit), Some(Action::Http(packet))) if packet.id == request => {
+                managed.recipe = Some(pending);
+                self.io
+                    .actions
+                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
+                        preparation: token,
+                        permit,
+                        request: packet,
+                    })));
+            }
+            (result, mut outbound) => {
+                if let Some(action) = outbound.as_mut() {
+                    crate::signing_dispatch::wipe(action);
+                }
+                self.http_preparation_failed(
+                    now,
+                    token,
+                    result.err().unwrap_or(Error::Invalid),
+                    VenueError::new("HTTP signing result is no longer valid"),
+                );
+            }
         }
     }
 
@@ -292,6 +439,8 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_http_release(&mut pending.value, release)
                 });
         if let Ok(Claim::Released(release)) = result {
+            managed.recipe = None;
+            managed.signing_attempt = None;
             #[cfg(feature = "order-locks")]
             {
                 if managed.lifecycle.context().operation() == Operation::Mutation {
@@ -342,10 +491,21 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
+        let old_signing = managed.signing_attempt;
+        if let Some(recipe) = managed
+            .recipe
+            .take()
+            .or_else(|| self.io.signing.remove_request(request))
+        {
+            let next = self.io.signing.next_id();
+            self.io.signing.retry(next, recipe);
+            managed.signing_attempt = Some(next);
+        }
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: token,
+                signing: old_signing,
             })));
         let mut http = managed.original.clone();
         http.timeout_ms = Some(
@@ -467,6 +627,7 @@ mod tests {
         releases: Vec<HttpRelease>,
         receipts: usize,
         finish_in_item: Option<bool>,
+        signed: bool,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -485,22 +646,35 @@ mod tests {
                         scope,
                         Policy {
                             operation: Operation::Read,
-                            credential: None,
+                            credential: self.signed.then(|| crate::request_context::Credential {
+                                slot: CredentialSlot::Primary,
+                                reference: crate::signing::KeyRef("fixture".into()),
+                            }),
                             timeout_ms: 1_000,
                             pacing: Some(GROUP),
                             retry: RetryPolicy::Never,
                         },
                     )
                     .unwrap();
-                let request = cx
-                    .request_managed(
+                let request = if self.signed {
+                    cx.request_signed_managed(
+                        context.clone(),
+                        Method::Post,
+                        "https://venue.test/read".into(),
+                        Some("{}".into()),
+                        Box::new(Recipe),
+                        Pending(context),
+                    )
+                } else {
+                    cx.request_managed(
                         context.clone(),
                         Method::Post,
                         "https://venue.test/read".into(),
                         Some("{}".into()),
                         Pending(context),
                     )
-                    .unwrap();
+                }
+                .unwrap();
                 cx.stream_response(request, ArrayAt::Root);
             }
         }
@@ -567,6 +741,495 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    struct Recipe;
+    impl crate::SignStep for Recipe {
+        fn prepare(
+            &mut self,
+            outbound: &mut Action,
+            context: &crate::DispatchContext<'_>,
+        ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            let Action::Http(http) = outbound else {
+                return Err(crate::signing::SignError::InvalidRequest);
+            };
+            http.url = format!("https://venue.test/read?stamp={}", context.stamp_ms());
+            Ok(crate::signing::SignRequest {
+                receipt: crate::signing::SignReceipt {
+                    stamp_ms: Some(context.stamp_ms()),
+                    expiry_ms: Some(context.stamp_ms() + 3_000.),
+                },
+                context: Default::default(),
+                operations: vec![crate::signing::Operation::Present {
+                    key: crate::signing::KeyRef("fixture".into()),
+                }],
+            })
+        }
+        fn apply(
+            &mut self,
+            outbound: &mut Action,
+            result: &crate::signing::SignResult,
+        ) -> Result<(), crate::signing::SignError> {
+            let Action::Http(http) = outbound else {
+                return Err(crate::signing::SignError::InvalidRequest);
+            };
+            http.signer_headers.push((
+                "x-credential".into(),
+                String::from_utf8(result.values[0].clone())
+                    .map_err(|_| crate::signing::SignError::InvalidResult)?,
+            ));
+            Ok(())
+        }
+        fn freshness_ms(&self) -> f64 {
+            3_000.
+        }
+    }
+
+    fn route(engine: &mut Engine<Probe>, token: Preparation, at: f64) -> Vec<Action> {
+        engine.http_prepared(
+            at,
+            token,
+            Prepared {
+                id: u64::from(token.attempt().request.0),
+                expires_at: None,
+            },
+        );
+        engine.drain_actions().collect()
+    }
+    fn work(actions: &[Action]) -> (RequestId, crate::signing::SignRequest) {
+        actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Sign { attempt, work, .. } => Some((*attempt, work.clone())),
+                _ => None,
+            })
+            .expect("signing work after route readiness")
+    }
+    fn signed(
+        engine: &mut Engine<Probe>,
+        at: f64,
+        attempt: RequestId,
+        work: crate::signing::SignRequest,
+    ) -> Vec<Action> {
+        engine.handle(
+            at,
+            Event::Signed {
+                attempt,
+                result: Ok(crate::signing::SignResult {
+                    values: vec![b"value".to_vec()],
+                    receipt: work.receipt,
+                }),
+            },
+        );
+        engine.drain_actions().collect()
+    }
+    fn bound(actions: &[Action]) -> Permit {
+        actions
+            .iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert_eq!(
+                            request.signer_headers,
+                            [("x-credential".into(), "value".into())]
+                        );
+                        Some(*permit)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("bound signed packet")
+    }
+
+    struct WsRecipe;
+    impl crate::SignStep for WsRecipe {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            Ok(crate::signing::SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![crate::signing::Operation::Present {
+                    key: crate::signing::KeyRef("fixture".into()),
+                }],
+            })
+        }
+        fn apply(
+            &mut self,
+            outbound: &mut Action,
+            _: &crate::signing::SignResult,
+        ) -> Result<(), crate::signing::SignError> {
+            let Action::WsSend { text, .. } = outbound else {
+                return Err(crate::signing::SignError::InvalidRequest);
+            };
+            *text = "signed auth".into();
+            Ok(())
+        }
+        fn freshness_ms(&self) -> f64 {
+            3_000.
+        }
+    }
+
+    #[test]
+    fn managed_http_keeps_signed_ws_and_plain_subscription_barriers_with_cancellation() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            signed: true,
+            ..Probe::default()
+        });
+        let socket = SocketId(99);
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.send_signed(socket, "auth".into(), Box::new(WsRecipe));
+            cx.send(socket, "subscription");
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: Some(crate::request_context::Credential {
+                            slot: CredentialSlot::Primary,
+                            reference: crate::signing::KeyRef("fixture".into()),
+                        }),
+                        timeout_ms: 1_000,
+                        pacing: Some(GROUP),
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_signed_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/read".into(),
+                None,
+                Box::new(Recipe),
+                Pending(context),
+            )
+            .unwrap();
+        }
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, Action::Sign { .. } | Action::WsSend { .. }))
+        );
+        let third = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        // C is ready, but cannot cross signed WS + subscription sequence.
+        assert!(route(&mut engine, third, 1.).is_empty());
+        let (second, input) = work(&route(&mut engine, tokens[1], 2.));
+        let actions = signed(&mut engine, 3., second, input);
+        bound(&actions);
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, Action::Sign { .. } | Action::WsSend { .. }))
+        );
+        let (first, _) = work(&route(&mut engine, tokens[0], 4.));
+        let context = engine
+            .io
+            .pending
+            .get(&tokens[0].attempt().request)
+            .unwrap()
+            .value
+            .0
+            .clone();
+        {
+            let mut cx = Cx {
+                now: 5.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.finish_http_context(&context).unwrap();
+        }
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { signing: Some(id), .. } if *id == first))));
+        let (ws, input) = work(&actions);
+        assert_ne!(ws, second);
+        assert_ne!(ws, first);
+        let actions = signed(&mut engine, 6., ws, input);
+        let auth = actions
+            .iter()
+            .position(|a| matches!(a, Action::WsSend { text, .. } if text == "signed auth"))
+            .unwrap();
+        let subscription = actions
+            .iter()
+            .position(|a| matches!(a, Action::WsSend { text, .. } if text == "subscription"))
+            .unwrap();
+        let after = actions
+            .iter()
+            .position(|a| matches!(a, Action::Sign { .. }))
+            .unwrap();
+        assert!(auth < subscription && subscription < after);
+        // Ready B keeps only its original unsigned recipe, never presented bytes.
+        let b = engine
+            .io
+            .managed_http
+            .get(&tokens[1].attempt().request)
+            .unwrap();
+        assert!(b.original.signer_headers.is_empty());
+        let Action::Http(unsigned) = &b.recipe.as_ref().unwrap().outbound else {
+            panic!("HTTP recipe");
+        };
+        assert!(unsigned.signer_headers.is_empty());
+        assert!(!unsigned.url.contains("stamp="));
+    }
+
+    #[test]
+    fn invalid_recipe_and_full_signing_queue_preserve_continuation_without_resources() {
+        struct Invalid;
+        impl crate::SignStep for Invalid {
+            fn prepare(
+                &mut self,
+                _: &mut Action,
+                _: &crate::DispatchContext<'_>,
+            ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+                panic!("invalid recipe must fail before preparation");
+            }
+            fn apply(
+                &mut self,
+                _: &mut Action,
+                _: &crate::signing::SignResult,
+            ) -> Result<(), crate::signing::SignError> {
+                panic!("invalid recipe");
+            }
+            fn freshness_ms(&self) -> f64 {
+                f64::NAN
+            }
+        }
+        for full in [false, true] {
+            let mut engine = crate::test_support::seeded_engine(Probe::default());
+            if full {
+                for n in 0..256 {
+                    let id = engine.io.signing.next_id();
+                    engine
+                        .io
+                        .signing
+                        .stage(
+                            id,
+                            Action::Http(HttpRequest {
+                                id: RequestId(10_000 + n),
+                                method: Method::Get,
+                                route: None,
+                                timeout_ms: None,
+                                url: "https://venue.test/read".into(),
+                                headers: vec![],
+                                signer_headers: vec![],
+                                body: None,
+                            }),
+                            Box::new(Recipe),
+                            TimerId(0),
+                            0.,
+                        )
+                        .unwrap();
+                }
+            }
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: Some(crate::request_context::Credential {
+                            slot: CredentialSlot::Primary,
+                            reference: crate::signing::KeyRef("fixture".into()),
+                        }),
+                        timeout_ms: 1_000,
+                        pacing: Some(GROUP),
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            let step: Box<dyn crate::SignStep> = if full {
+                Box::new(Recipe)
+            } else {
+                Box::new(Invalid)
+            };
+            let result = cx.request_signed_managed(
+                context.clone(),
+                Method::Get,
+                "https://venue.test/read".into(),
+                None,
+                step,
+                Pending(context.clone()),
+            );
+            let expected = if full {
+                Error::Capacity
+            } else {
+                Error::Invalid
+            };
+            assert!(
+                matches!(result, Err((Pending(returned), error)) if error == expected && returned == context)
+            );
+            assert!(cx.io.pending.is_empty());
+            assert!(cx.io.managed_http.is_empty());
+            assert!(cx.io.timers.is_empty());
+            assert!(cx.io.actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn signed_reads_wait_for_routes_and_parked_provider_does_not_block_independent_ready_http() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            signed: true,
+            ..Probe::default()
+        });
+        assert!(engine.io.signing.next_work().is_none());
+        // Later route/provider can complete first; neither consumes admission.
+        let (second, second_work) = work(&route(&mut engine, tokens[1], 100.));
+        let (first, first_work) = work(&route(&mut engine, tokens[0], 101.));
+        assert_eq!(first_work.receipt.stamp_ms, Some(101.));
+        let second_packet = signed(&mut engine, 700., second, second_work);
+        let second_permit = bound(&second_packet);
+        assert_eq!(engine.venue().receipts, 0);
+        assert!(matches!(
+            engine.claim_http(700., second_permit),
+            Ok(Claim::Released(_))
+        ));
+        assert_eq!(engine.venue().receipts, 1);
+        response(&mut engine, tokens[1], 700.);
+        let first_packet = signed(&mut engine, 701., first, first_work);
+        let first_permit = bound(&first_packet);
+        assert_eq!(engine.claim_http(701., first_permit), Err(Error::TimedOut));
+        // The original 1000ms bound wins over a 1150ms pacing wake.
+        assert_eq!(engine.venue().releases.len(), 1);
+        assert_eq!(
+            engine.venue().failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+    }
+
+    #[test]
+    fn calibration_change_reprepares_with_new_provider_id_and_same_original_deadline() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let old = tokens[0];
+        let (attempt, input) = work(&route(&mut engine, old, 100.));
+        let permit = bound(&signed(&mut engine, 101., attempt, input.clone()));
+        assert!(engine.io.protocol_clock.observe(102., 602.));
+        assert_eq!(engine.claim_http(102., permit), Err(Error::Stale));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, signing: Some(id) } if *preparation == old && *id == attempt))));
+        let next = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        assert_eq!(request.timeout_ms, Some(898));
+                        Some(*preparation)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(old, next);
+        assert!(signed(&mut engine, 103., attempt, input).iter().all(|a| !matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
+        let (new_attempt, input) = work(&route(&mut engine, next, 104.));
+        assert_ne!(new_attempt, attempt);
+        assert_eq!(input.receipt.stamp_ms, Some(604.));
+        let permit = bound(&signed(&mut engine, 105., new_attempt, input));
+        let Ok(Claim::Released(release)) = engine.claim_http(106., permit) else {
+            panic!("fresh release");
+        };
+        assert_eq!(release.time.raw_ms, 106.);
+        assert_eq!(release.time.protocol_ms, 606.);
+        assert_eq!(release.signature.stamp_ms, Some(604.));
+        assert_eq!(release.signature_valid_until, Some(1000.));
+        assert_eq!(engine.venue().receipts, 1);
+    }
+
+    #[test]
+    fn unsolicited_provider_failure_before_route_preparation_cannot_retire_a_managed_read() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let attempt = engine
+            .io
+            .managed_http
+            .get(&tokens[0].attempt().request)
+            .unwrap()
+            .signing_attempt
+            .unwrap();
+        assert!(!engine.signing_pending(attempt));
+        engine.handle(
+            1.,
+            Event::Signed {
+                attempt,
+                result: Err(crate::signing::SignError::Refused),
+            },
+        );
+        assert!(engine.http_preparation_pending(tokens[0]));
+        assert!(engine.venue().failures.is_empty());
+        let (id, input) = work(&route(&mut engine, tokens[0], 2.));
+        assert_eq!(id, attempt);
+        assert!(engine.signing_pending(id));
+        let permit = bound(&signed(&mut engine, 3., id, input));
+        assert!(!engine.signing_pending(id));
+        assert!(matches!(
+            engine.claim_http(4., permit),
+            Ok(Claim::Released(_))
+        ));
+    }
+
+    #[test]
+    fn cancelled_hung_signed_read_emits_provider_cancellation_and_late_success_cannot_escape() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            command: Some(7),
+            ..Probe::default()
+        });
+        let (attempt, input) = work(&route(&mut engine, tokens[0], 10.));
+        engine.handle(
+            11.,
+            Event::Command(Command::FetchLeverage {
+                command: 7,
+                symbol: "X".into(),
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { signing: Some(id), .. } if *id == attempt))));
+        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.signing.next_work().is_none());
+        let late = signed(&mut engine, 12., attempt, input);
+        assert!(
+            late.iter()
+                .all(|a| !matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        assert_eq!(engine.venue().receipts, 0);
+        assert_eq!(engine.venue().responses, 0);
     }
 
     fn start(probe: Probe) -> (Engine<Probe>, Vec<Preparation>) {
@@ -713,7 +1376,7 @@ mod tests {
             actions
                 .iter()
                 .any(|action| matches!(action, Action::ManagedHttp(action)
-            if matches!(**action, HttpAction::Cancel {preparation} if preparation == old)))
+            if matches!(**action, HttpAction::Cancel {preparation, ..} if preparation == old)))
         );
         let replacement = actions
             .into_iter()

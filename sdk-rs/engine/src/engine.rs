@@ -2365,7 +2365,9 @@ impl<V: Venue> Engine<V> {
             _ => None,
         };
         if let Event::Signed { attempt, result } = event {
-            self.sign_completed(now, attempt, result);
+            if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
+                self.sign_completed(now, attempt, result);
+            }
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -2932,6 +2934,14 @@ impl<V: Venue> Engine<V> {
         else {
             return;
         };
+        if match &completion {
+            Completion::Ready(pending, _)
+            | Completion::Stale(pending)
+            | Completion::Failed(pending, _) => pending.managed,
+        } {
+            self.managed_sign_completed(now, completion);
+            return;
+        }
         match completion {
             Completion::Ready(pending, outbound) => {
                 if pending.timer.0 != 0 {
@@ -2978,6 +2988,12 @@ impl<V: Venue> Engine<V> {
 
     /// Hosts call this with their canonical engine clock immediately before a
     /// delayed drain. Normal event-driven drains use the current event time.
+    /// Provider work may have been drained before its owner was retired.
+    /// Hosts check this before starting any delayed primitive operation.
+    pub fn signing_pending(&self, attempt: RequestId) -> bool {
+        self.io.signing.signature_pending(attempt)
+    }
+
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.io.dispatch_now = now;
     }
@@ -3098,7 +3114,9 @@ impl<V: Venue> Engine<V> {
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
-                            if self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0) {
+                            if !self.io.signing.is_managed(attempt)
+                                && self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0)
+                            {
                                 let timer = TimerId(self.io.next());
                                 if let Some(at_ms) = self.io.signing.arm(attempt, timer) {
                                     self.io.actions.push(Action::SetTimer { timer, at_ms });
