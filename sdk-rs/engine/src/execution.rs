@@ -7,6 +7,7 @@ use crate::num;
 pub enum Arithmetic {
     Binary,
     DecimalRounded,
+    DecimalCapped20,
 }
 
 impl Arithmetic {
@@ -14,6 +15,7 @@ impl Arithmetic {
         finite(match self {
             Self::Binary => a - b,
             Self::DecimalRounded => num::decimal_subtract(a, b),
+            Self::DecimalCapped20 => num::decimal_subtract_capped20(a, b),
         })
     }
 }
@@ -71,6 +73,21 @@ pub struct Prepared {
 }
 
 impl Prepared {
+    /// Scale only the public amount; cumulative anchors remain in native units.
+    pub fn scaled(self, scale: f64, rounding: ExecutionRounding) -> Result<Self, Rejection> {
+        let amount = scaled_quantity(self.amount, scale, rounding)?;
+        let price = rounding.apply(self.price)?;
+        if amount <= 0.0 {
+            return Err(Rejection::InvalidQuantity);
+        }
+        positive_price(price)?;
+        Ok(Self {
+            amount,
+            price,
+            ..self
+        })
+    }
+
     /// Round only the public execution. Its cumulative anchor retains the
     /// native unrounded quantity and quote for the next report.
     pub fn rounded(self, rounding: ExecutionRounding) -> Result<Self, Rejection> {
@@ -102,6 +119,35 @@ impl Prepared {
 }
 
 impl Cursor {
+    /// Admit an observation without deciding whether it represents a live Fill.
+    /// Missing historical quote and native lifecycle decisions remain explicit.
+    pub fn prepare_prefix(
+        previous: Option<Self>,
+        quantity: f64,
+        value: Option<f64>,
+        arithmetic: Arithmetic,
+    ) -> Result<Option<Self>, Rejection> {
+        let next = Self::seed(quantity, value)?;
+        if quantity > 0.0 && value == Some(0.0) {
+            return Err(Rejection::InvalidValue);
+        }
+        if let Some(previous) = previous {
+            if quantity <= previous.quantity {
+                return Ok((quantity == previous.quantity
+                    && previous.value.is_none()
+                    && value.is_some())
+                .then_some(next));
+            }
+            if let Some(previous_value) = previous.value {
+                let value = value.ok_or(Rejection::Unpriced)?;
+                if arithmetic.subtract(value, previous_value)? <= 0.0 {
+                    return Err(Rejection::ValueRegressed);
+                }
+            }
+        }
+        Ok(Some(next))
+    }
+
     /// Bind an average to its cumulative quantity, or extend the historical
     /// quote with a native-authorized direct price for the new suffix only.
     pub fn prepare_average(
@@ -412,6 +458,7 @@ impl ObservedProgress {
 pub enum ExecutionRounding {
     Binary,
     Significant15,
+    ScaledSignificant15,
 }
 
 impl ExecutionRounding {
@@ -420,6 +467,7 @@ impl ExecutionRounding {
         finite(match self {
             Self::Binary => value,
             Self::Significant15 => num::significant15(value),
+            Self::ScaledSignificant15 => num::significant15_scaled(value),
         })
     }
 }
@@ -667,6 +715,171 @@ mod tests {
             .unwrap()
             .commit()
             .map(|delivery| (delivery.price(), delivery.amount()))
+    }
+
+    #[test]
+    fn prefix_observation_preserves_missing_only_enrichment_and_quiet_history() {
+        let missing = Cursor::seed(1.0, None).unwrap();
+        let known = Cursor::seed(1.0, Some(100.0)).unwrap();
+        let policy = Arithmetic::DecimalCapped20;
+        assert_eq!(
+            Cursor::prepare_prefix(Some(missing), 1.0, Some(100.0), policy),
+            Ok(Some(known))
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(known), 1.0, Some(200.0), policy),
+            Ok(None)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(known), 0.5, Some(50.0), policy),
+            Ok(None)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(known), 2.0, None, policy),
+            Err(Rejection::Unpriced)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(known), 2.0, Some(100.0), policy),
+            Err(Rejection::ValueRegressed)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(known), 1.0, Some(f64::INFINITY), policy),
+            Err(Rejection::InvalidValue)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(None, 1.0, Some(0.0), policy),
+            Err(Rejection::InvalidValue)
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(None, 0.0, Some(0.0), policy),
+            Ok(Some(Cursor::seed(0.0, Some(0.0)).unwrap()))
+        );
+        assert_eq!(
+            Cursor::prepare_prefix(Some(missing), 2.0, Some(200.0), policy),
+            Ok(Some(Cursor::seed(2.0, Some(200.0)).unwrap()))
+        );
+    }
+
+    #[test]
+    fn finite_prefix_observation_does_not_authorize_an_overflowing_public_price() {
+        let previous = Cursor::seed(1.0, Some(1.0)).unwrap();
+        let next = Cursor::prepare_prefix(
+            Some(previous),
+            1.5,
+            Some(1.5e308),
+            Arithmetic::DecimalCapped20,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(next.quantity(), 1.5);
+        assert_eq!(next.value(), Some(1.5e308));
+        assert_eq!(
+            previous.prepare(
+                Report::Cumulative {
+                    quantity: 1.5,
+                    price: CumulativePrice::Value {
+                        cumulative: Some(1.5e308),
+                        fallback: None
+                    },
+                },
+                Arithmetic::DecimalCapped20
+            ),
+            Err(Rejection::NonFiniteArithmetic)
+        );
+        let corrected = previous
+            .prepare(
+                Report::Cumulative {
+                    quantity: 1.5,
+                    price: CumulativePrice::Value {
+                        cumulative: Some(150.0),
+                        fallback: None,
+                    },
+                },
+                Arithmetic::DecimalCapped20,
+            )
+            .unwrap()
+            .unwrap()
+            .scaled(0.001, ExecutionRounding::ScaledSignificant15)
+            .unwrap();
+        assert_eq!((corrected.price(), corrected.amount()), (298.0, 0.0005));
+        assert_eq!(corrected.next(), Cursor::seed(1.5, Some(150.0)).unwrap());
+    }
+
+    #[test]
+    fn capped_decimal_and_scaled_output_keep_native_anchors_and_reject_bad_outputs() {
+        let next_quantity = 0.30000000000000004;
+        let prepared = Cursor::default()
+            .prepare(
+                Report::Cumulative {
+                    quantity: next_quantity,
+                    price: CumulativePrice::Value {
+                        cumulative: Some(36.0),
+                        fallback: None,
+                    },
+                },
+                Arithmetic::DecimalCapped20,
+            )
+            .unwrap()
+            .unwrap();
+        let scaled = prepared
+            .scaled(0.001, ExecutionRounding::ScaledSignificant15)
+            .unwrap();
+        assert_eq!((scaled.price(), scaled.amount()), (120.0, 0.0003));
+        assert_eq!(scaled.next(), prepared.next());
+        assert_eq!(scaled.next().quantity(), next_quantity);
+        for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                prepared
+                    .scaled(scale, ExecutionRounding::ScaledSignificant15)
+                    .is_err()
+            );
+        }
+        let large = Cursor::default()
+            .prepare(
+                Report::Last {
+                    amount: 2.0,
+                    cumulative: None,
+                    price: 100.0,
+                },
+                Arithmetic::Binary,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            large
+                .scaled(f64::MAX, ExecutionRounding::ScaledSignificant15)
+                .is_err()
+        );
+        let tiny_price = Cursor::default()
+            .prepare(
+                Report::Last {
+                    amount: 1.0,
+                    cumulative: None,
+                    price: 1e-310,
+                },
+                Arithmetic::Binary,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            tiny_price
+                .scaled(1.0, ExecutionRounding::ScaledSignificant15)
+                .is_err()
+        );
+        let tiny_prefix = Cursor::seed(1e-21, Some(1.0)).unwrap();
+        assert_eq!(
+            tiny_prefix.prepare(
+                Report::Cumulative {
+                    quantity: 2e-21,
+                    price: CumulativePrice::Value {
+                        cumulative: Some(2.0),
+                        fallback: None
+                    },
+                },
+                Arithmetic::DecimalCapped20
+            ),
+            Err(Rejection::InvalidQuantity)
+        );
     }
 
     #[test]
