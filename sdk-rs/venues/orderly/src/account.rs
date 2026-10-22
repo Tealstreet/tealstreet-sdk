@@ -2,7 +2,7 @@ use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, SnapshotBuilder};
 use safe_cex_engine::fence::StaleGuard;
-use safe_cex_engine::json::{self, ArrayAt};
+use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick as SocketTick;
@@ -65,9 +65,76 @@ struct MappedOrder<'r, 'a> {
     timestamp: Option<u64>,
 }
 
+/// Validate native wire economics before any terminal or fill bookkeeping.
+fn validate_execution_numbers(r: &OrderRow<'_>) -> Result<(), String> {
+    fn walk(r: &OrderRow<'_>, depth: usize, nodes: &mut usize) -> Result<(), String> {
+        *nodes += 1;
+        if depth > 8 || *nodes > 1000 {
+            return Err("Orderly algo tree exceeds depth or node limit".into());
+        }
+        if [r.price, r.quantity]
+            .iter()
+            .any(|n| !n.is_finite() || *n < 0.0)
+            || [
+                r.total_executed_quantity,
+                r.executed,
+                r.executed_quantity,
+                r.executed_price,
+                r.average_executed_price,
+                r.trigger_price,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|n| !n.0.is_finite() || n.0 < 0.0)
+        {
+            return Err("Orderly invalid execution quantity or price".into());
+        }
+        for child in &r.child_orders {
+            walk(child, depth + 1, nodes)?;
+        }
+        Ok(())
+    }
+    walk(r, 0, &mut 0)
+}
+
+struct PreparedFill {
+    total: Option<(String, (f64, f64))>,
+    fill: Option<(String, Fill)>,
+}
+struct PreparedExecution<'r, 'a> {
+    root: Option<(String, OrderStatus, Option<u64>, u64)>,
+    rows: PreparedRows<'r, 'a>,
+}
+enum PreparedRows<'r, 'a> {
+    Sparse {
+        order: Box<Order>,
+        fill: Option<PreparedFill>,
+        seq: Option<u64>,
+        timestamp: u64,
+    },
+    Mapped(Vec<(MappedOrder<'r, 'a>, Option<PreparedFill>)>),
+    StaleSparse,
+}
+
 /// Stored positions carry the unified symbol, which keeps any broker suffix.
 fn position_key(native: &str) -> String {
     symbol(native).unwrap_or_else(|| native.into())
+}
+fn position_identity(item: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+        #[serde(alias = "marginMode", default, borrow)]
+        margin_mode: &'a str,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    let symbol = symbol(row.symbol)?;
+    Some(if row.margin_mode == "ISOLATED" {
+        format!("{symbol}:isolated")
+    } else {
+        symbol
+    })
 }
 /// The root id of an order row too malformed to parse.
 fn order_key(item: &str, algo: bool) -> Option<String> {
@@ -1390,7 +1457,7 @@ impl Orderly {
             self.account.totals.remove(&id);
         }
     }
-    fn execution(&mut self, cx: &mut Cx<'_, Pending>, r: &OrderRow<'_>, order: &Order) {
+    fn prepare_fill(&self, r: &OrderRow<'_>, order: &Order) -> Result<PreparedFill, String> {
         let filled = r
             .total_executed_quantity
             .or(r.executed)
@@ -1413,13 +1480,20 @@ impl Orderly {
             },
             |n| n.0,
         );
-        if filled > previous.0 {
-            self.account
-                .totals
-                .insert(order.id.clone(), (filled, total_value));
+        if [filled, quantity, total_value]
+            .iter()
+            .any(|n| !n.is_finite())
+            || filled < 0.0
+            || quantity < 0.0
+            || r.average_executed_price.is_some_and(|n| n.0 < 0.0)
+            || r.executed_price.is_some_and(|n| n.0 < 0.0)
+            || (quantity > 0.0 && (price <= 0.0 || !price.is_finite()))
+        {
+            return Err("Orderly invalid execution quantity or price".into());
         }
-        if quantity <= 0.0 || price <= 0.0 || !price.is_finite() {
-            return;
+        let total = (filled > previous.0).then(|| (order.id.clone(), (filled, total_value)));
+        if quantity == 0.0 {
+            return Ok(PreparedFill { total, fill: None });
         }
         let event = if !r.trade_id.0.is_empty() {
             format!("trade:{}:{}", order.id, r.trade_id.0)
@@ -1427,6 +1501,28 @@ impl Orderly {
             format!("match:{}:{}", order.id, r.match_id.0)
         } else {
             format!("cumulative:{}:{}", order.id, filled)
+        };
+        Ok(PreparedFill {
+            total,
+            fill: Some((
+                event,
+                Fill {
+                    id: None,
+                    order_id: order.id.clone(),
+                    symbol: order.symbol.clone(),
+                    side: order.side,
+                    price,
+                    amount: quantity,
+                },
+            )),
+        })
+    }
+    fn commit_fill(&mut self, cx: &mut Cx<'_, Pending>, prepared: PreparedFill) {
+        if let Some((id, total)) = prepared.total {
+            self.account.totals.insert(id, total);
+        }
+        let Some((event, fill)) = prepared.fill else {
+            return;
         };
         if !self.account.executions.insert(event.clone()) {
             return;
@@ -1438,22 +1534,25 @@ impl Orderly {
                 .remove(&self.account.execution_order.pop_front().unwrap());
         }
         self.account.positions_revision += 1;
-        cx.fill(Fill {
-            id: None,
-            order_id: order.id.clone(),
-            symbol: order.symbol.clone(),
-            side: order.side,
-            price,
-            amount: quantity,
-        });
+        cx.fill(fill);
     }
-    fn execution_row(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        r: &OrderRow<'_>,
+    fn prepare_execution<'r, 'a>(
+        &self,
+        cx: &Cx<'_, Pending>,
+        r: &'r OrderRow<'a>,
         algo: bool,
         ts: u64,
-    ) -> Result<(), String> {
+    ) -> Result<PreparedExecution<'r, 'a>, String> {
+        validate_execution_numbers(r)?;
+        if algo {
+            if (r.algo_order_id.0.is_empty() || r.algo_order_id.0 == "0")
+                && (r.root_algo_order_id.0.is_empty() || r.root_algo_order_id.0 == "0")
+            {
+                return Err("Orderly missing algo root identity".into());
+            }
+            self.validate_execution_identity(cx, r)?;
+        }
+        let mut root = None;
         if algo {
             let raw_status = if matches!(
                 r.root_algo_status.as_ref(),
@@ -1486,22 +1585,7 @@ impl Orderly {
                     let key = format!("root:{parent}");
                     let timestamp = r.timestamp.unwrap_or(ts);
                     if stamp_newer(self.account.order_stamps.get(&key), r.seq, timestamp) {
-                        self.account
-                            .order_stamps
-                            .insert(key.clone(), (r.seq, timestamp));
-                        self.terminal_order(&key);
-                        self.account.order_revisions[1] += 1;
-                        let ids: Vec<_> = cx
-                            .store
-                            .orders()
-                            .iter()
-                            .filter(|o| o.parent_id.as_deref() == Some(parent.as_str()))
-                            .map(|o| o.id.clone())
-                            .collect();
-                        for id in ids {
-                            self.terminal_order(&id);
-                            cx.store.update_order(&id, |o| o.status = final_status);
-                        }
+                        root = Some((parent.clone(), final_status, r.seq, timestamp));
                     }
                 }
             }
@@ -1533,22 +1617,29 @@ impl Orderly {
             }
             let timestamp = r.timestamp.unwrap_or(ts);
             if stamp_newer(self.account.order_stamps.get(&order.id), r.seq, timestamp) {
-                if let Some(total) = r.total_executed_quantity.or(r.executed) {
+                let fill = if let Some(total) = r.total_executed_quantity.or(r.executed) {
                     order.filled = order.filled.max(total.0);
                     order.remaining = (order.amount - order.filled).max(0.0);
-                    self.execution(cx, r, &order);
-                }
+                    Some(self.prepare_fill(r, &order)?)
+                } else {
+                    None
+                };
                 order.status = final_status;
                 order.last_update = cx.now;
-                self.account
-                    .order_stamps
-                    .insert(order.id.clone(), (r.seq, timestamp));
-                self.account.order_revisions[1] += 1;
-                self.terminal_order(&order.id);
-                self.account.proofs.remove(&order.id);
-                cx.store.upsert_order(order);
+                return Ok(PreparedExecution {
+                    root,
+                    rows: PreparedRows::Sparse {
+                        order: Box::new(order),
+                        fill,
+                        seq: r.seq,
+                        timestamp,
+                    },
+                });
             }
-            return Ok(());
+            return Ok(PreparedExecution {
+                root,
+                rows: PreparedRows::StaleSparse,
+            });
         }
         let mut unknown = vec![];
         let orders = self.orders(cx, r, algo, &mut unknown)?;
@@ -1557,10 +1648,10 @@ impl Orderly {
                 "Orderly working order market unavailable; preserving previous orders".into(),
             );
         }
+        let mut prepared = Vec::with_capacity(orders.len());
         for mapped in orders {
-            let order = mapped.order;
             let row = mapped.row;
-            if matches!(
+            let fill = if matches!(
                 if algo && !row.algo_status.is_empty() {
                     row.algo_status.as_ref()
                 } else {
@@ -1568,7 +1659,137 @@ impl Orderly {
                 },
                 "PARTIAL_FILLED" | "PARTIALLY_FILLED" | "FILLED"
             ) {
-                self.execution(cx, row, &order);
+                Some(self.prepare_fill(row, &mapped.order)?)
+            } else {
+                None
+            };
+            prepared.push((mapped, fill));
+        }
+        Ok(PreparedExecution {
+            root,
+            rows: PreparedRows::Mapped(prepared),
+        })
+    }
+
+    // Native sparse/root identity validation is pure. A root cascade may not run
+    // before a supplied child identity, side or nested tree has been validated.
+    fn validate_execution_identity(
+        &self,
+        cx: &Cx<'_, Pending>,
+        r: &OrderRow<'_>,
+    ) -> Result<(), String> {
+        fn walk(
+            cx: &Cx<'_, Pending>,
+            r: &OrderRow<'_>,
+            parent: Option<&str>,
+            native: Option<&str>,
+            depth: usize,
+            nodes: &mut usize,
+        ) -> Result<(), String> {
+            *nodes += 1;
+            if depth > 8 || *nodes > 1000 {
+                return Err("Orderly algo tree exceeds depth or node limit".into());
+            }
+            let bound_parent = parent.or_else(|| {
+                (!r.root_algo_order_id.0.is_empty() && r.root_algo_order_id.0 != "0")
+                    .then_some(r.root_algo_order_id.0.as_str())
+            });
+            let parent = bound_parent.or_else(|| {
+                (!r.algo_order_id.0.is_empty() && r.algo_order_id.0 != "0")
+                    .then_some(r.algo_order_id.0.as_str())
+            });
+            if !r.root_algo_order_id.0.is_empty()
+                && r.root_algo_order_id.0 != "0"
+                && Some(r.root_algo_order_id.0.as_str()) != parent
+            {
+                return Err("Orderly conflicting algo root identity".into());
+            }
+            if !r.side.is_empty() {
+                side(&r.side)?;
+            }
+            if !r.symbol.is_empty() {
+                let unified = symbol(&r.symbol).ok_or("Orderly invalid algo symbol identity")?;
+                if cx
+                    .store
+                    .orders()
+                    .iter()
+                    .any(|old| old.parent_id.as_deref() == parent && old.symbol != unified)
+                {
+                    return Err("Orderly algo symbol identity mismatch".into());
+                }
+            }
+            let native = native.or((!r.symbol.is_empty()).then_some(r.symbol.as_ref()));
+            if !r.symbol.is_empty() && Some(r.symbol.as_ref()) != native {
+                return Err("Orderly algo symbol identity mismatch".into());
+            }
+            if let Some(old) = cx.store.orders().iter().find(|o| o.id == r.algo_order_id.0)
+                && ((bound_parent.is_some() && old.parent_id.as_deref() != bound_parent)
+                    || (!r.symbol.is_empty()
+                        && symbol(&r.symbol).as_deref() != Some(old.symbol.as_str()))
+                    || (!r.side.is_empty() && side(&r.side)? != old.side))
+            {
+                return Err("Orderly terminal child identity mismatch".into());
+            }
+            for child in &r.child_orders {
+                walk(cx, child, parent, native, depth + 1, nodes)?;
+            }
+            Ok(())
+        }
+        walk(cx, r, None, None, 0, &mut 0)
+    }
+
+    fn commit_execution(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        prepared: PreparedExecution<'_, '_>,
+        algo: bool,
+        ts: u64,
+    ) {
+        if let Some((parent, final_status, seq, timestamp)) = prepared.root {
+            let key = format!("root:{parent}");
+            self.account
+                .order_stamps
+                .insert(key.clone(), (seq, timestamp));
+            self.terminal_order(&key);
+            self.account.order_revisions[1] += 1;
+            let ids: Vec<_> = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| o.parent_id.as_deref() == Some(parent.as_str()))
+                .map(|o| o.id.clone())
+                .collect();
+            for id in ids {
+                self.terminal_order(&id);
+                cx.store.update_order(&id, |o| o.status = final_status);
+            }
+        }
+        let rows = match prepared.rows {
+            PreparedRows::StaleSparse => return,
+            PreparedRows::Sparse {
+                order,
+                fill,
+                seq,
+                timestamp,
+            } => {
+                if let Some(fill) = fill {
+                    self.commit_fill(cx, fill);
+                }
+                self.account
+                    .order_stamps
+                    .insert(order.id.clone(), (seq, timestamp));
+                self.account.order_revisions[1] += 1;
+                self.terminal_order(&order.id);
+                self.account.proofs.remove(&order.id);
+                cx.store.upsert_order(*order);
+                return;
+            }
+            PreparedRows::Mapped(rows) => rows,
+        };
+        for (mapped, fill) in rows {
+            let order = mapped.order;
+            if let Some(fill) = fill {
+                self.commit_fill(cx, fill);
             }
             let timestamp = mapped.timestamp.unwrap_or(ts);
             if !stamp_newer(
@@ -1594,7 +1815,6 @@ impl Orderly {
             self.account.proofs.insert(order.id.clone(), mapped.proof);
             cx.store.upsert_order(order);
         }
-        Ok(())
     }
     pub(crate) fn private_message(
         &mut self,
@@ -1665,26 +1885,64 @@ impl Orderly {
         match env.topic.as_ref() {
             "executionreport" | "algoexecutionreportv2" => {
                 let algo = env.topic == "algoexecutionreportv2";
-                if data.get().starts_with('[') {
-                    let mut result = Ok(());
-                    json::each::<OrderRow<'_>>(data.get(), |r| {
-                        if result.is_ok() {
-                            result = self.execution_row(cx, &r, algo, env.ts);
-                        }
-                    })
-                    .map_err(|e| e.to_string())?;
-                    result?;
+                let rows: Vec<&serde_json::value::RawValue> = if data.get().starts_with('[') {
+                    serde_json::from_str(data.get()).map_err(|e| e.to_string())?
+                } else if data.get().starts_with('{') {
+                    vec![data]
                 } else {
-                    let r: OrderRow<'_> =
-                        serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
-                    self.execution_row(cx, &r, algo, env.ts)?;
+                    return Err("Orderly execution container must be an object or array".into());
+                };
+                let mut admission = RowAdmission::<String>::default();
+                for raw in rows {
+                    let row: OrderRow<'_> = match serde_json::from_str(raw.get()) {
+                        Ok(row) => row,
+                        Err(error) => {
+                            admission.skip(
+                                cx,
+                                order_key(raw.get(), algo),
+                                Level::Warn,
+                                format!("Orderly skipped execution row: {error}"),
+                            );
+                            continue;
+                        }
+                    };
+                    let prepared = self.prepare_execution(cx, &row, algo, env.ts);
+                    let message = prepared.as_ref().err().cloned().unwrap_or_default();
+                    if let Some(prepared) = admission.admit(
+                        cx,
+                        prepared.map_err(|_| order_key(raw.get(), algo)),
+                        Level::Warn,
+                        message,
+                    ) {
+                        self.commit_execution(cx, prepared, algo, env.ts);
+                    }
                 }
             }
             "position" => {
                 let push: PositionPush<'_> =
                     serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
-                for r in push.positions {
-                    if let Some(p) = self.position(cx, &r)? {
+                let mut admission = RowAdmission::<String>::default();
+                for raw in push.positions {
+                    let r: PositionRow<'_> = match serde_json::from_str(raw.get()) {
+                        Ok(row) => row,
+                        Err(error) => {
+                            admission.skip(
+                                cx,
+                                position_identity(raw.get()),
+                                Level::Warn,
+                                format!("Orderly skipped position row: {error}"),
+                            );
+                            continue;
+                        }
+                    };
+                    let mapped = self.position(cx, &r);
+                    let message = mapped.as_ref().err().cloned().unwrap_or_default();
+                    if let Some(Some(p)) = admission.admit(
+                        cx,
+                        mapped.map_err(|_| position_identity(raw.get())),
+                        Level::Warn,
+                        message,
+                    ) {
                         let ts = r.timestamp.unwrap_or(env.ts);
                         if stamp_newer(self.account.position_stamps.get(&p.id), r.seq, ts) {
                             self.account

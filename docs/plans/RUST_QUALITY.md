@@ -162,9 +162,12 @@ Medium:
    compatibility alias. Bybit and Bitunix use the shared collector without
    changing their scoped freshness/lineage rules. Existing helpers' presence
    does not prove every keyed REST/WS call site is migrated: Bitget existing
-   REST/WS and Orderly REST now use shared admission/reporting; Orderly typed WS
-   arrays and the remaining inventory are follow-up phases. Snapshot commits
-   retain the
+   REST/WS and Orderly REST/WS now use shared admission/reporting. Orderly WS
+   validates complete containers, prepares each native row without mutation and
+   admits it before root/fill/store effects, so bad rows preserve their copy while
+   healthy peers commit. Remaining keyed consumers still need inventory/fan-out;
+   validated cumulative-fill preparation/commit is an explicit later engine-helper
+   follow-on, not twelve independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
