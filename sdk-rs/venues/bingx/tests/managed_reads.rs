@@ -342,3 +342,82 @@ fn managed_identity_original_deadline_retires_late_results() {
     );
     assert!(completions(&mut engine).is_empty());
 }
+
+fn candle_market() -> safe_cex_engine::model::Market {
+    safe_cex_engine::model::Market {
+        id: "BTC-USDT".into(),
+        symbol: "BTCUSDT".into(),
+        pretty_symbol: None,
+        base: "BTC".into(),
+        quote: "USDT".into(),
+        active: true,
+        precision: safe_cex_engine::model::Precision {
+            amount: 0.001,
+            price: 0.1,
+        },
+        limits: safe_cex_engine::model::Limits {
+            amount: safe_cex_engine::model::MinMax {
+                min: 0.001,
+                max: 10.0,
+            },
+            leverage: safe_cex_engine::model::MinMax {
+                min: 1.0,
+                max: 100.0,
+            },
+            price: None,
+        },
+        contract_size: None,
+        is_expiring: None,
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: Some(true),
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }
+}
+fn candle_preparation() -> (Engine<Bingx>, safe_cex_engine::request_context::Preparation) {
+    let mut engine = engine();
+    engine.store_mut().set_markets(vec![candle_market()]);
+    engine.handle(
+        1_000.,
+        Event::Command(Command::FetchCandles {
+            command: 42,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(2),
+            from_ms: None,
+            to_ms: Some(120_000.),
+        }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let prepare = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((*preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("actual candle builder must prepare managed transport before provider");
+    assert_eq!(
+        prepare.1.url,
+        "https://open-api.bingx.com/openApi/swap/v3/quote/klines"
+    );
+    assert!(prepare.1.signer_headers.is_empty());
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Sign { .. } | Action::Http(_)))
+    );
+    (engine, prepare.0)
+}
+#[test]
+fn credentialed_candle_builder_prepares_managed_transport_before_signing() {
+    let _ = candle_preparation();
+}
