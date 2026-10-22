@@ -123,3 +123,40 @@ test('explicit market selection cannot treat a BTC or ETH quote as a dollar noti
   assert.equal(smokeOrder(market, book, { notionalKnown: true }).timeInForce, 'PostOnly');
   assert.equal(smokeOrder(market, book, { notionalKnown: true }, false).timeInForce, undefined);
 });
+
+test('managed smoke fence validates final packet before bind and cancels refusal', async () => {
+  let canceled = 0, bound = 0, sent = 0;
+  const resource = { expiresAt: 100,
+    cancel() { canceled++; },
+    bind() { bound++; return { ready: () => true, dispatch: () => { sent++; } }; },
+  };
+  const live = { prepareHttp: () => resource };
+  const transport = fencedTransport(live, { allowUrl: (url) => url === 'https://test.example/allowed',
+    validateRequest: (packet) => assert.equal(packet.headers.proof, 'signed') });
+  const prepared = await transport.prepareHttp({ method: 'POST', url: 'https://test.example/allowed' });
+  assert.equal(prepared.expiresAt, 100);
+  assert.throws(() => prepared.bind({ method: 'POST', url: 'https://test.example/refused', headers: { proof: 'signed' } }), /http-endpoint-refused/);
+  assert.equal(canceled, 1);
+  assert.equal(bound, 0);
+  assert.equal(sent, 0);
+  assert.equal(fencedTransport({}, { allowUrl: () => true }).prepareHttp, undefined);
+});
+
+test('managed smoke fence preserves receivers and validates signed data once before dispatch', async () => {
+  const events = [];
+  const bound = { ready() { assert.equal(this, bound); return true; }, cancel() { assert.equal(this, bound); events.push('bound-cancel'); },
+    dispatch() { assert.equal(this, bound); events.push('send'); return 'response'; } };
+  const resource = { cancel() { assert.equal(this, resource); events.push('prepare-cancel'); },
+    bind(packet) { assert.equal(this, resource); assert.equal(packet.headers.proof, 'signed'); events.push('bind'); return bound; } };
+  const live = { prepareHttp() { assert.equal(this, live); return resource; } };
+  const transport = fencedTransport(live, { allowUrl: () => true,
+    validateRequest: (packet) => { assert.equal(packet.headers.proof, 'signed'); events.push('validate'); } });
+  const prepared = await transport.prepareHttp({ url: 'https://test.example', method: 'POST' });
+  const ready = prepared.bind({ url: 'https://test.example?stamp=1', method: 'POST', headers: { proof: 'signed' } });
+  assert.equal(ready.ready(), true);
+  assert.deepEqual(events, ['validate', 'bind']);
+  assert.equal(ready.dispatch(), 'response');
+  assert.deepEqual(events, ['validate', 'bind', 'send']);
+  ready.cancel(); prepared.cancel();
+  assert.deepEqual(events.slice(-2), ['bound-cancel', 'prepare-cancel']);
+});
