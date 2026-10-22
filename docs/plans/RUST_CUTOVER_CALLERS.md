@@ -213,6 +213,8 @@ WEEX #1690 (`2ff8452aa53`) and Hyperliquid #1693 (`fa960d9cfcf`), closing
 the listed SDK-method gaps without closing separate caller or owner work.
 The fee-subject catch-up checks Hyperliquid #1701 (`b1510f267c7`) at its
 actual merge; harness-only #1698 adds no caller contract row.
+The browser warning catch-up checks #1703 (`0888c62bdf8`); informational
+median warnings do not change production loaders or caller APIs.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -317,7 +319,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1680 / `6e14b6a0e` | Backpack adds unsigned request-owned REST `fetchOrderBook` and advertises the capability. Native queries need no market seed, credentials or subscription; caller limit is ignored, lexical price IDs and native side order remain, `total` is zero and no update ID is returned. Standalone JSON admission uses the precise shared book-command feature. |
 | #1681 / `3db712f04` | Standalone MEXC family builds now admit JSON `fetchOrderBook`, matching their existing capability and native REST implementation. Mapper, limits, base-unit scaling, signing/auth and rate policy are unchanged. The existing family-artifact gate now probes actual JSON admission for advertised queries without dispatching I/O. |
 | #1685 / `84f150c76` | Crypto.com adds an independent unsigned live/UAT REST book query at fixed depth50, ignoring caller limit. It retains native order, lexical price IDs, zero quantities and `total: 0`; only the first returned book is mapped and no update ID is exposed. Typed public failures settle their owner without account-auth or subscription changes. |
-| #1688 / `b6cb612bc` | Adds landing-push/manual-dispatch Chrome DedicatedWorker module-readiness observations for 28 production family-loader paths plus a combined-web diagnostic, three fresh processes/profiles each. Measurement integrity errors fail; no latency threshold is imposed. No production API/default-loader or mandatory NX caller change is added, and B1 delivery remains open. |
+| #1688 / `b6cb612bc` | Adds landing-push/manual-dispatch Chrome DedicatedWorker module-readiness observations for 28 production family-loader paths plus a combined-web diagnostic, three fresh processes/profiles each. Measurement integrity errors fail; #1703 adds informational median warnings without a timing-failure gate. No production API/default-loader or mandatory NX caller change is added, and B1 delivery remains open. |
 | #1686 / `850bc25e5` | GRVT adds an unsigned request-owned MDG REST book query. Known markets POST `{i: nativeId, d: 50}` to `/lite/v1/book`, correcting the TS request against the official schema; caller limit is ignored. Unknown markets resolve an owned empty book without HTTP. Full/lite aliases retain native order and cumulative base-amount totals, without IDs/version or decimal rescaling. Query failures do not refresh the private session. |
 | #1687 / `90df20d2f` | Paradex adds unsigned request-owned REST books on live/testnet roots with encoded raw symbols, default depth20 and explicit caller depth unchanged. Native order, duplicates and zero quantities remain; each level's `total` is price × amount in quote units, not cumulative. No IDs/version, scaling or subscription publication is added. |
 | #1690 / `2ff8452aa` | WEEX adds an owned unsigned Contract V3 REST book query, default limit200 and explicit limit unchanged. Native order, null-coalesced aliases, cumulative base-amount totals and exact string `lastUpdateId` remain; no contractVal scaling or level IDs. Strict malformed financial/version parsing rejects atomically. Shared GET pause may defer a new owner without retrying the failed owner. |
@@ -1138,7 +1140,7 @@ and fixed budgets stay unchanged. Poseidon is a separate Go WASM artifact,
 outside these Rust compiler settings. This inventory does not certify which
 binaries NX has deployed. Details: [RUST_WASM_ARTIFACT_SIZE.md](RUST_WASM_ARTIFACT_SIZE.md).
 
-### Chrome module-readiness observations (#1688)
+### Chrome module-readiness observations (#1688, #1703)
 
 The measurement job and its asset uploads run only on landing pushes to
 `feat/rust-rewrite` or manual `workflow_dispatch`, and are skipped on PR events.
@@ -1147,7 +1149,18 @@ before standalone overwrite, checking source/run/build-input fingerprints and
 JS/WASM hashes. Three fresh Chrome processes/profiles per asset load the
 production family loader for 28 families; combined web is a separate diagnostic.
 Missing assets, browser errors, wrong WASM fetches and incomplete samples fail;
-there is no latency threshold.
+latency never fails the job. #1703 adds informational warnings when the
+unrounded `moduleReadyMs` median is strictly above 75 ms for a family or
+125 ms for combined web. Completed reports retain `raw.json.warnings` (empty
+when none exceed the limits); escaped GitHub warning annotations carry the
+same source/run and runner/runtime cohort. Individual sample, bootstrap,
+Chrome-launch and end-to-end timings have no warning threshold.
+
+A hard timing gate remains a separate decision, to revisit only after ten
+additional complete landing reports beyond the frozen three recorded in
+[the browser plan](RUST_BROWSER_COLD_START.md#warning-only-follow-up-plan),
+with runner/browser cohorts reviewed. Dispatches and skipped/cancelled runs
+do not count. This does not change production budgets or caller readiness.
 
 The [first own-head dispatch](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39686838626)
 passed at `371804a425f`, with 29 assets and 87 complete worker samples. Its
