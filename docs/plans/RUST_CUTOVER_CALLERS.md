@@ -4087,6 +4087,6 @@ neighbors. Query limits, page sizes, native row order, ID/quantity/fee/time unit
 fractional bounds, filtering and unsigned public trades stay unchanged. Setup
 refusal in the existing consuming signed helper stays strict and separate;
 client-ID lookup and unsupported-ledger/time/market admission are unchanged.
-There is no history Store publication, new SDK argument/row shape, NX edit or
-deployed-runtime claim. B11's required request-scoped incomplete-query ingestion,
-coverage gating and typed rejection handling remain open. [Scope](RUST_OWNED_HISTORY.md).
+There is no history Store publication or new SDK argument/row shape. Callers must
+ingest command-scoped incomplete-query warnings, gate coverage accordingly and
+handle typed rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
