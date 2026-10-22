@@ -173,3 +173,43 @@ other family, combined settings, family driver and native Cargo profiles match
 the actual bridge baseline. Shell syntax passes without invoking a build.
 Independent concrete source/argument review is CLEAN. Fresh adjusted CI and
 artifact evidence remain required; no old all-size guard is valid for this head.
+
+## KuCoin Spot landing trigger: restore speed defaults
+
+Owner trigger on actual #1746 `3f0e3e450b2`: landing Rust run
+39769642794 reports KuCoin Spot public steady CPU TS 342.9 ms versus Rust
+311.4 ms, approximately 1.101x. The unchanged 10% CPU-saving objective
+requires Rust <= 0.9 * TS (ratio >= 1.111...), so the gate missed. The earlier two passing samples do not override this observed loss
+of safe margin. This follow-up implements the existing measured exception
+rule; no gate, budget, threshold, comparator or JSON parsing change.
+
+Concrete source: in central `sdk-rs/harness/build.sh`, apply the common
+`wasm_profile_args` only when family is neither `asterdex` nor `kucoinspot`.
+Preserve Aster's explicit level-3 venue override, global serde_json level 3,
+all explicit package overrides, and WOO's selected common size defaults.
+Only the KCS family stops receiving the eight shared size arguments.
+Its complete arguments must match actual pre-#1746 hosted-bridge landing
+`5743c485d44e348e3d29039c4ebe83f6a78f0186`; every other alias, combined
+driver and native Cargo profile must remain byte-identical to actual #1746.
+
+Commit this plan before source, independently review the one shared policy
+condition and all 39 alias argument captures without invoking local builds.
+Then push a fresh small PR. Use exact-head green CI and authenticated KCS
+public/private raw comparison, all package hashes and per-target size budget
+evidence. Require web/node KCS WASM byte hashes to equal that actual
+pre-#1746 baseline; other families retain identical build arguments.
+No local WASM/replay/size run. Architecture gate: shared build-profile policy
+implementing the measured speed exception rule, no per-venue parser fix.
+
+Queue: actual Bybit #1728 first, this restoration next, BingX #1749 then
+real-integrates the new build fingerprint and refreshes its final proof.
+Any overlapping landing dependency change requires genuine integration and
+fresh CI; guard and merge remain separate calls, followed by actual merge
+parents/tree/preservation verification and overseer notification.
+
+Owner also authorizes pre-integrating frozen reviewed Bybit
+`31035f3f09a71e5fb29d1083c217512972e5f9ec` for parallel CI; actual
+unchanged Bybit landing remains mandatory before the fresh separate guard.
+If those new covered source inputs move KCS bytes away from the pre-#1746
+baseline, report that explicitly and block for evidence/disposition; never
+substitute a different baseline or claim byte identity from arguments alone.
