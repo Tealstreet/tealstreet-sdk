@@ -234,3 +234,22 @@ functional release, strict later-page history/provider refusal, stale account
 reservation/session cleanup, both metadata-stage failures, and the temporary
 session-only fingerprint. Hosted admission remains disabled. Architecture gate:
 codec/owner adapters consume shared provider/lifecycle/evidence APIs only.
+
+### First managed builder slice
+
+Exact reviewed #1780 `ea9924f9523` is preintegrated at `7f62bd5b603` under
+owner authorization; actual #1780 remains a merge prerequisite. Start with
+credentialed startup quotes, independent identity and background account snapshot
+reads: each has one engine-issued 20s Read Context, selected credential routing,
+original-deadline one-signature retry and retained native pending owner. Signed
+holds that Context through preparation, response/stream/refusal and terminal
+cleanup; it does not mint authority on retry. Native account revision and auth
+classification remain unchanged. Metadata's paired root and command writes are
+the following slice, not accidentally swept into this single-owner conversion.
+
+The owner also extended the same single temporary provider stage to history:
+exactly one physical `sign_http` site, still overall inventory shrink. History
+remains explicitly legacy-owned until the shared Completion bridge and read-only
+validator are actual; no invented root bound or numeric-command continuation.
+Keep session/history conversion targets in the body and remove the temporary
+stage when both shared boundaries are adopted. Hosted admission remains off.
