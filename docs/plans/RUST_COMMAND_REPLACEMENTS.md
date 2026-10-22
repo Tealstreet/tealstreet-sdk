@@ -296,3 +296,15 @@ GREEN. Other previously listed authority/atomicity controls and final phase audi
 remain pending; no ordinary Bybit production migration or publication claim.
 Priority returns to #1741 after its fresh Binance CI failure; this branch stays
 local and unpublished.
+
+Local continuation after core502caee: genuine conflict-free integration retains
+the actual Phemex history core and prepared-wrapper fixes. Add public-bridge
+acceptance controls for absent callback Delivery, another physical request's
+Delivery and Never-policy parents. Each refusal must preserve the exact live
+parent context, journal latest attempt, pending count and queued actions, with
+no child authority. The absent-delivery refusal must not burn IDs; validated
+attempts may burn monotonic IDs but may never reuse them. A correct definitive
+refusal must still admit children after a wrong callback was denied. These are
+coverage controls, not a claimed new production bug. Signed parked-provider,
+stale permit and full atomicity controls remain pending. Keep core CI watching
+and return for actual #1764 integration; no publication before actual #1741.
