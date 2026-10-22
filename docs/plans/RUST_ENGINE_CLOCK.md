@@ -35,9 +35,17 @@ its dispatch preparation continues to consume `Cx.now: f64` epoch milliseconds.
 
 Owner decision: PR2 follows the actual signer-core merge. Add one engine
 clock-calibration service fed by Bybit 10002 server observations and Aster `/time`
-observations; delete their venue-local offsets. Signing reads the engine clock at
-send. Explicitly document and replay-test the resulting timer/output-domain
-change. PR1 preserves these existing protocol paths and adds no calibration.
+observations; delete their venue-local offsets. The service has two explicit views:
+`Cx.now` remains host scheduling time for timers, deadlines, pauses and frame/book
+timestamps; calibrated venue protocol time supplies outbound signing timestamps,
+recvWindow/expiry and time-based nonces. Replace the correction with server time
+minus raw host observation time, never accumulate it or share it across engines.
+A fresh observation must affect a resend or queue drain in that same callback.
+The signer captures protocol time at dispatch while admission, preparation age
+and timeout comparisons retain host time. The agreed proposed accessors are
+`Cx.protocol_now()` and `Cx.observe_protocol_time(server_ms)`; final implementation
+follows the actual signer-core API. Regress unchanged timer/output domains and
+exact tape-clock signatures. PR1 preserves existing calibration and adds none.
 
 No change to the `Cx.now` accessor or primitive Signer clock stamping: signer
 primitives sign exact bytes and do not sample independent wall time. Coordinate
