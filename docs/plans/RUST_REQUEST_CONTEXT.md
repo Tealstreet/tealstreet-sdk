@@ -1217,3 +1217,9 @@ SDK fixtures, with no production fallback or protocol change. Re-run MCP type/
 lint/unit tests and the existing helper controls locally; fresh CI must prove the
 actual recorded ticker test. The failed run has no Binance replay ledger/package
 and cannot serve as final proof. No timing retry or assertion relaxation.
+
+MCP fixture follow-up local verification: MCP35 tests and existing preparation
+helper3 tests pass; MCP typecheck/lint pass. Independent review confirms only
+the shared hook wiring changed and the real ticker test's assertions, timeout,
+clock/socket/polling logic remain exact. Architecture gate No (reuse of the
+shared test transport seam). Fresh rebuilt-WASM CI still owns recovery proof.
