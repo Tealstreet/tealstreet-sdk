@@ -1551,3 +1551,14 @@ all-target Clippy/fmt/bans/diff checks pass. Independent plan, correctness,
 adversarial source/delta and final tests/docs reviews are CLEAN. Actual #1741
 must be genuinely integrated before draft/final CI; none of these local receipts
 claims new shared-core compatibility or deployed runtime coverage.
+
+Actual #1741 integration was conflict-free and preserved all four reviewed
+source/test blobs and the entire incoming unowned tree; integrated native suite
+passes 1,100 tests. Its exact lexical inventory needs the owner-authorized
+follow-on: prune KuCoin history 20->13 and funding 15->9 legacy sites, and spot
+22->20 with the same GET call re-expressed only to carry HistoryRows. Record the
+full exact spot old/new maps in existing HISTORY_BOOTSTRAPS and hash-pin the
+transition in checker controls; preserve every other map and all checker logic.
+The funding cursor formatting is factored through a tuple to avoid two false
+macro matches on the local identifier `request`, without changing cursor bytes.
+No new HTTP site, recipe, headers, signing or broad exemption is authorized.
