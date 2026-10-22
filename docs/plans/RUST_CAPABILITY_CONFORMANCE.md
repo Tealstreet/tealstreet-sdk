@@ -57,3 +57,13 @@ adversarial review must answer: this is one cross-family CI contract checker,
 not another per-venue cross-cutting implementation. Preserve current capability
 values, production API/default loaders and caller behavior. Document each phase's
 actual proof limits and keep remaining handler coverage open until exercised.
+
+
+Plan review clarification: validate field types and closed enum values as well as
+unknown fields. Probe a fresh instance for each command, because raw HTTP actions
+do not carry a command owner and startup requests must never count as handler
+proof. Classify legitimate precondition failures as ingress-only and empty or
+deferred output as unproven, never positive dispatch. Native fixture data may be
+venue-specific codec/state data but must not duplicate capability expectations.
+The MEXC mutation proof must rebuild the isolated feature graph and retain normal
+artifact proof; a combined artifact is not a substitute.
