@@ -1830,3 +1830,15 @@ existing retries and session refresh. Order-filtered fill totals, setup/session
 refusals and lookup proofs remain strict; native identity ledgers/units/request
 sequences are unchanged. Other adapters, managed completion and NX B11 coverage
 remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Crypto.com owned-history fan-out
+
+~~Crypto.com history output retention and numeric completion are venue-local
+alongside nanosecond continuation state.~~ Existing CursorHistory now owns page
+admission and command-owned finalization, reusing the shared staged-page reset.
+First/zero-accepted actual failure rejects typed; later actual loss retains prior
+accepted rows only. Exact cursor proof refusals stay strict. Native time bounds,
+identity rollback, mixed retry counter, pacing, public duplicates and ranged
+income limits remain. Other adapters and B11 runtime coverage stay open.
+[Scope](RUST_OWNED_HISTORY.md).

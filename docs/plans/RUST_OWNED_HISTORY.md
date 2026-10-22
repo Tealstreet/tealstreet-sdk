@@ -1399,3 +1399,95 @@ that staged-page discard does not roll back direct shared fresh observations;
 GRVT keeps retryable identity facts local until admission. First-kind telemetry,
 strict filtered/session proofs and B11 limits are recorded in the caller doc.
 Full artifact CI/proof and actual queued predecessors remain required.
+
+## Next cursor fan-out: Crypto.com exact-nanosecond histories
+
+Plan first on fresh `feat/rust-owned-history-cryptocom` from actual capability
+landing `4c4df7c99dc` (2026-10-22), outside OKX/Bitget/BingX signer work. Replace
+Crypto.com's local accepted rows/completion with one boxed CursorHistory owner
+for fills, closed orders, income and public trades. Preserve unsupported lookup,
+initial credential/range admission and effective-zero-limit/equal-bound no-I/O. No account,
+signing, dispatch, RequestContext, metadata, Store or host edits.
+
+Keep native exact u64 nanosecond bounds and oldest+1 exclusive-end translation,
+method/key pacing and deferred timer order. Do not convert native cursors through
+f64. Feed cursor strings/facts to the shared walker only after a whole valid page.
+Use the existing native stopping rules: requested output limit, empty page,
+short repeated-identity page and exhausted time range. Missing exact cursor proof
+when continuation is required, and a non-decreasing inclusive boundary, remain
+strict policy refusals even after accepted rows; they cannot claim complete
+pagination. Do not invent a 50-page policy absent from this venue: use the shared
+walker's representable page ceiling as a fail-closed limit, with native monotonic
+bounds providing ordinary progress. Public trades remain one unsigned GET with
+native order/duplicates and count cap; ranged income keeps its existing no-output
+cap when both bounds are supplied.
+
+Stage output in the shared owner; retain native page identity facts separately
+until admission/retry. On terminal actual HTTP/native/decode/transport loss before
+eligible accepted rows, reject typed. After accepted rows, recover only those rows
+with one command-owned incomplete Warn before success, including Error-only
+logging. A malformed or failed response prefix is never admitted. Keep exact
+current-page retries: one 40101 retry, otherwise three transport retries, unchanged
+1000ms delay and shared method pacing. They discard staged output and roll back
+only native page identities; accepted rows, cursor/budget and first coverage cause
+survive. Reuse #1760's small shared discard API after explicit stack/region
+coordination rather than adding a second reset implementation. Actual #1760 and
+other shared predecessors must be integrated before final proof/merge.
+
+Commit failing-first controls on original source before production edits: typed
+first/zero-eligible failure, later HTTP/native/malformed-page failure, exhausted
+stream retries excluding all prefixes, retry success preserving exact bounds and
+IDs, concurrent owners at Error-only logging, income partial recovery and public
+single-page failure. Preserve fee sign, timestamp units, large IDs, fractional
+millisecond bounds, overlap dedupe, requested limit/output order, transfer/session
+settlement mapping, missing-cursor policy and independent method budgets. Inspect
+callback origins before assigning a kind: multiplexed transport/decode errors
+must not all become Network. No new signing capability/argument or NX handler.
+
+Independent plan/correctness/adversarial reviews must answer the architecture
+gate: existing shared CursorHistory/Completion and reusable discard adoption,
+not another venue pager, marker emitter or row-retention policy. Focused
+engine/Crypto.com/Binance tests plus strict touched Clippy/fmt/bans locally with
+four Cargo jobs; no release WASM/replay/size/timing sweep. Update caller/AUDITS/
+QUALITY scope, publish draft CI and watches, integrate actual dependencies under
+the owner queue, then exact-head CI/proof, announcement, separate guard and
+separate merge. Keep #1758/#1760 watches; no B11/runtime/cutover closure.
+
+Crypto.com plan review is CLEAN with exact preservation constraints: do not
+enable generic no-new-row/empty stalls, because a full duplicate page may still
+advance its older bound and only a short repeated page proves exhaustion. Run
+strict nanosecond/nonadvance checks only when continuation is needed, after that
+short-page stop rule. Keep the single mixed retry counter (40101 below one,
+other transport below three), and 1000ms continuation/retry timers distinct from
+per-method pacing. Public successful queries remain one page with duplicates,
+while their existing retries stay intact. The representable page ceiling is a
+strict policy refusal, not a new normal 50-page bound. account::signed is a
+synchronous validated-credential helper with no fallible signing callback, so
+no account/signing edits are required. Owner explicitly authorized exact stack
+on reviewed #1760 `ba960f9b7e8`; genuine integration `73b500095be` preserves all
+unowned blobs and the original regression blob. The sole independent-section
+plan-doc conflict preserves incoming GRVT then Crypto.com verbatim, with block
+hashes/base subsequence and no conflict markers. Actual #1760 remains required.
+
+
+Crypto.com local implementation receipt: original regression-only
+`a45c3c6ce5d` has 12 existing controls GREEN and five new assertion-RED groups.
+Shared CursorHistory adoption makes those groups GREEN. Native short-duplicate
+stop precedence, full-duplicate older-bound progress, strict later cursor proof,
+public duplicate/unsigned retry, both mixed retry orders, accepted/new-ID rollback
+and explicitly bounded income with more than the requested output limit are
+pinned. The effective-limit qualifier matters: explicitly ranged income already
+ignores caller output limits, including zero, while other zero-limit queries
+return without I/O. The source uses no new core API and preserves the approved
+#1760 exact stack; no account/signing/Completion edits. Independent correctness
+and adversarial source reviews are CLEAN; final controls/docs review, CI and
+actual queued dependency integration remain before final guard/merge.
+
+
+Crypto.com final local checks: 756 full focused engine/Crypto.com/Binance tests
+passed before the final three controls; all 26 final Crypto.com history tests
+pass, including accepted/new-ID retry rollback, both mixed retry orders and
+unsigned public retry. Final strict all-target Clippy, fmt, banned patterns and
+diff checks pass. Independent source and final tests/docs correctness/adversarial
+reviews are CLEAN. No new core source is added beyond the approved #1760 stack;
+actual predecessor ancestry, final CI/proof and separate guard/merge remain.
