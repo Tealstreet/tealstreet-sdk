@@ -728,3 +728,17 @@ Only a prepared delivery contributes Fill price/amount. Zero/no-growth returns
 remain quiet, and snapshot/nontrade lifecycle rows bypass financial delivery
 preparation exactly as before. Keep native identity and final dedup staging.
 No shared API extension, new ledger or seed/retention reinterpretation is needed.
+
+Phase-4 implementation uses the existing engine API without an extension or
+new ledger. All four independently executed original-source assertions are now
+GREEN (zero-price, negative-price, retained final row and same-batch correction),
+with both healthy-peer orders checked. Two extra compatibility controls keep
+zero/no-growth observations quiet without creating a delivery backlog and let
+unused snapshot/lifecycle prices retain native behavior. All 844 focused
+engine/Kraken/Binance native tests pass; root typecheck44 and lint28 pass with
+cache hits; strict all-target Clippy, fmt and bans pass too. Independent
+code/adversarial review is CLEAN, architecture YES. No signing, clock, scheduler,
+history, caller API/FILLS layout, fixture, allowance or comparator changes.
+Independent docs review, actual shared-input integration and full CI/raw/package proof remain
+merge gates. The proof must cover both Kraken/Spot jobs sharing the crate plus
+Binance; freeze exact current inventories rather than assume a count.

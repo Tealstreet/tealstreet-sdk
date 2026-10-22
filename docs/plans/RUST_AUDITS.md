@@ -154,7 +154,10 @@ High:
   controls preserve historical quotes, equal-endpoint corrections and native
   Spot/INTX/CFM quantity units. BloFin also uses checked prefix admission,
   capped-decimal arithmetic and scaled public-output preparation before live
-  progress commits. BingX, AsterDEX, Kraken Spot, Orderly and the KuCoin Spot
+  progress commits. Kraken Spot now prepares direct/cumulative trade delivery
+  through the same helper before row state commits, preserving native IDs,
+  explicit last quantities and independent lifecycle observations. BingX,
+  AsterDEX, Orderly and the KuCoin Spot
   fallback still need adoption before
   row reporting and snapshot freshness. ApeX cumulative events still never
   emit public fills; synthetic history remains distinct. No live capture claim.
@@ -1132,6 +1135,18 @@ native authoritative state; neither observation alone demonstrates a defect.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
+- ~~Spot cumulative-only trades with zero/negative prices commit displayed
+  progress without a Fill, losing same-quantity corrections; an invalid final
+  trade can also poison native time, terminal status and order provenance.~~
+  Existing `engine::execution::Cursor::prepare` validates direct/last evidence
+  before any row/fence/dedup effects. Four original-source assertion-RED controls
+  cover zero and negative prices independently, retained final-row state and
+  same-ID correction within a batch; decoded correction delivery is .5@100.
+  Healthy peers and accepted-row ordering remain independent. Zero/no-growth,
+  snapshots and separate lifecycle observations retain native policy; no
+  independent delivery ledger or recovery after a valid terminal lifecycle is
+  promised. Full native engine/Kraken/Binance verification passes (844 tests).
+  [Scope and remaining cumulative fan-out](RUST_CUMULATIVE_FILLS.md).
 - ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);

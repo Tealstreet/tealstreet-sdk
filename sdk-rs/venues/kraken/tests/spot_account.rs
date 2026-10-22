@@ -593,6 +593,64 @@ fn rejected_trade_same_batch_correction_uses_the_last_accepted_row() {
 }
 
 #[test]
+fn zero_quantity_and_no_growth_keep_native_observation_without_a_backlog() {
+    let (mut e, _, private) = ready(false);
+    let socket = private.unwrap();
+    e.take_frame(NOW);
+    for (row, filled) in [
+        (
+            r#"{"order_id":"O-100","exec_type":"trade","cum_qty":0.5,"last_price":0,"timestamp":"2023-11-14T22:13:21Z"}"#,
+            0.5,
+        ),
+        (
+            r#"{"order_id":"O-100","exec_type":"trade","cum_qty":1,"last_qty":0,"last_price":0,"timestamp":"2023-11-14T22:13:22Z"}"#,
+            1.,
+        ),
+    ] {
+        message(
+            &mut e,
+            socket,
+            &format!(r#"{{"channel":"executions","type":"update","data":[{row}]}}"#),
+        );
+        assert!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])).is_empty());
+        assert_eq!(e.store().order("O-100").unwrap().filled, filled);
+    }
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"trade","cum_qty":1.5,"last_price":100,"timestamp":"2023-11-14T22:13:23Z"}]}"#,
+    );
+    assert_eq!(
+        prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])),
+        vec![(100., 0.5)]
+    );
+}
+
+#[test]
+fn unused_snapshot_and_lifecycle_prices_do_not_require_live_delivery_validation() {
+    let (mut e, _, private) = ready(false);
+    let socket = private.unwrap();
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","order_qty":2,"exec_type":"trade","cum_qty":1,"last_price":0,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().filled, 1.);
+    assert!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])).is_empty());
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"filled","cum_qty":2,"last_price":0,"timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Closed
+    );
+    assert!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])).is_empty());
+}
+
+#[test]
 fn cumulative_fallback_progress_uses_the_previous_row_in_the_same_batch() {
     let (mut e, _, private) = ready(false);
     e.take_frame(NOW);
