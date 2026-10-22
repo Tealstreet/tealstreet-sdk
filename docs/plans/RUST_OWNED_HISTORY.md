@@ -681,3 +681,57 @@ Bitunix history tests; strict all-target Clippy and formatting pass. Correctness
 review confirms unchanged raw progress/filter ordering and seeded request bounds.
 Full CI and the current owner merge queue still apply; this is not a landing or
 deployed-runtime claim.
+
+
+## Next fan-out: Paradex cursor histories
+
+Plan from actual `2c5c5f6987f35cafc0e272282e54da37c0a66d4f`. Metadata #1747
+and conformance #1737 remain separate drafts; keep #1747's CI watch running.
+Bybit and Kraken Spot stay outside this slice. Paradex still owns CursorWalk,
+query row vectors and its bounded page-cap marker in history.rs.
+
+Adopt the existing `CursorHistory` for fills (including the native orders-history
+fallback), historical orders, income, public trades and client-ID lookup. Use
+one typed row enum and one completion owner across endpoint stages; schema
+mapping remains native. Stage each page until HTTP/envelope/stream validation
+succeeds. Actual failure before accepted mapped rows rejects typed; later actual
+page failure returns only accepted earlier rows with one command-owned incomplete
+Warn before successful completion, including Error-only logging. No failed prefix
+may enter the finalizer. A valid empty or fully filtered page does not itself
+qualify for partial recovery. Preserve the shared Internal fallback for callbacks
+which multiplex transport and decoding rather than inventing Network evidence.
+
+Keep endpoint selection and query parameters, 5/50/200 page budgets, defaults and
+clamps, raw-row/cursor progress, existing native ID dedupe/filter order, final
+sort/limits and single-page public trades. Preserve empty-page traversal, fills'
+empty-last-page fallback and one-page aggregate fallback. Carry the same owner
+through the fallback; no reset of accepted rows, dedupe or missing-coverage state.
+If needed, expose only CursorHistory's read-only page count delegated to its
+existing walker, to retain the native fallback trigger without a second counter
+or pagination policy. No new pager/completion/scheduler algorithm.
+
+Client-ID lookup remains strict on actual failures, cursor cycles and incomplete
+proof; partial histories must never become a definitive miss. Preserve exhaust-
+open-orders-before-history, early found-order completion, bounded nondefinitive
+miss and complete-miss proof. Strict unbounded budget/cursor-policy refusals also
+remain strict even after accepted rows; bounded page-cap success retains its
+existing marker/message. Auth/preparation admission remains strict: do not
+reinterpret refusal as an HTTP-page failure or add auth/retry behavior. Keep raw
+public-only/keyless/unknown-symbol no-I/O shapes and existing admission messages.
+
+Before implementation, run preservation request-sequence tests and commit new
+original-RED controls for typed first failure and accepted-page recovery after
+later HTTP/native/transport/malformed/missing-list failures. Cover failed-prefix
+exclusion, zero accepted rows, Error-only marker ownership/order, concurrent
+owners, fallback stage ownership and strict lookup/cursor/budget behavior. Existing
+successful codec, request pin, ledger and lookup tests remain. Update caller/
+audit/quality notes for the changed general-history failure contract only; B11,
+all-family enforcement and deployed NX proof remain open.
+
+Coordinate history.rs ownership with signer/clock/row lanes before source edits.
+No financial reducer, row admission, signing/dispatch/request, host, clock,
+metadata, feature/harness/workflow, comparator or budget changes. Focused engine/
+Paradex/Binance plus history reference tests, strict Clippy/fmt and independent
+plan/correctness/adversarial review; architecture gate must state this reuses the
+shared engine owner rather than adding per-venue policy. Integrate actual shared
+dependencies before final CI/proof, then normal queue and separate guard/merge.
