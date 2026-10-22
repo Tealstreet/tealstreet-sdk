@@ -100,3 +100,18 @@ streams rows once, skips unknown fields, and uses the engine numeric policy and
 short-decimal fast path. All eleven decoded ticker numeric fields are consumed.
 No semantics-preserving unused-field shortcut has been demonstrated; report
 experiment results before selecting any change.
+
+## Scope superseded before adoption
+
+The initial Bitget-only candidate `d1b2ccae9845110e4588cd52462ca32ce54c06c1`
+is historical, not the selected policy. Its first nine-pair CI result measured
+TS/Rust steady CPU 463.199/411.473 ms on baseline versus 461.766/389.646 ms
+on candidate; optimized wasm grew from 1,045,083 to 1,063,838 bytes. USDC
+measured 4.522/3.060 ms versus 4.474/2.737 ms. Both public gates passed.
+This is one baseline/candidate CI pair, without a broad statistical claim.
+
+The owner applied the architecture gate: shared JSON parsing must use one
+all-family policy rather than another one-off override. Follow the committed
+[shared JSON profile plan](RUST_JSON_WASM_PROFILE.md). The Bitget-only branch
+condition will be removed. Native profiles, thresholds and budgets stay fixed;
+all-family CPU/size/raw evidence determines whether the new policy is adopted.
