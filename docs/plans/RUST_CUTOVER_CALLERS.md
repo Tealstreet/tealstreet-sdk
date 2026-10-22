@@ -4026,3 +4026,23 @@ lookup's scalar completion and admission errors. No SDK argument or history row
 shape changes. Existing B11 request-scoped incomplete ingestion/coverage and typed
 rejection handling remain required; this native/shared-owner scope does not close
 B11, managed Context migration or deployed runtime proof. [Scope](RUST_OWNED_HISTORY.md).
+
+## Static public headers during managed HTTP preparation
+
+Trusted Rust `SignStep` implementations can declare static noncredential HTTP
+headers through `unsigned_http_headers`; the default remains empty. The engine
+validates and snapshots this declaration once before managed preparation or
+request/attempt/timer allocation, preserving native order through route/signing
+refresh. Invalid declarations return the original pending value and typed
+`Invalid`, without publishing preparation, timers or signing work. Credential,
+passphrase and signature headers remain provider/apply-owned; this declaration
+does not grant callback-header authority or change the external signing wire.
+
+BingX's public SOURCE/Content-Type declaration is shared with its existing
+legacy renderer, whose signed order remains SOURCE, APIKEY, Content-Type. The
+prerequisite's managed test uses a synthetic recipe; it does not admit BingX or
+WEEX production managed requests, provider construction or hosted signing. Those
+family migrations must consume actual shared APIs, preserve semantic Context
+ownership and carry their own caller acceptance. Existing SDK callers need no
+new option, credential transfer or persisted identity mapping for this additive
+header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).

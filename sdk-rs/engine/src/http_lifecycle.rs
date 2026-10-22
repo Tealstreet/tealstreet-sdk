@@ -75,6 +75,18 @@ impl<P> Cx<'_, P> {
         if self.io.managed_http.len() >= 256 {
             return Err((pending, Error::Capacity));
         }
+        // Public codec declarations are captured exactly once. Validate borrowed
+        // bytes before allocating IDs or publishing any preparation resource.
+        let headers = step
+            .as_ref()
+            .map_or(&[][..], |step| step.unsigned_http_headers());
+        if crate::signing_headers::validate_unsigned(headers).is_err() {
+            return Err((pending, Error::Invalid));
+        }
+        let headers = headers
+            .iter()
+            .map(|&(name, value)| (name, value.to_owned()))
+            .collect();
         let request = RequestId(self.io.next());
         let generation = u64::from(self.io.next());
         let timer = TimerId(self.io.next());
@@ -84,7 +96,7 @@ impl<P> Cx<'_, P> {
             route: None,
             timeout_ms: Some((context.deadline() - self.now).ceil().max(1.) as u32),
             url,
-            headers: vec![],
+            headers,
             signer_headers: vec![],
             body,
         };

@@ -61,3 +61,22 @@ full recipe into this shared change merely to claim production adoption.
 Architecture gate: this extends one engine managed-HTTP ingress choke point.
 Venue constants describe native public bytes; they do not implement admission,
 signing custody, header permissions or release policy.
+
+## Local checkpoint evidence
+
+Both independent plan/API and source reviews are CLEAR. The default-only API
+and regression checkpoint `5306944be89` reproduces two assertion failures on the
+unchanged queue, with the empty-declaration control passing. Projection corrects
+both without changing those assertions. Seven engine controls cover ordering,
+route snapshot reuse, invalid final pairs, exact UTF-8 byte/count/aggregate bounds,
+original pending/no-allocation refusal, early context/mode refusal and full
+managed capacity. The latter uses an existing valid read Context because
+creating a 257th Context reaches that separate registry's bound first; the
+earlier fixture failure remains retained and is not a production failure claim.
+
+Two BingX tests pin independent native header vectors across GET/POST/PUT/DELETE
+and use the explicitly synthetic managed recipe with the shared declaration.
+Focused engine/BingX/Binance all-target tests pass 1,027 tests; strict Clippy and
+fmt and bans pass. Full CI, authenticated replay/package proof and actual family managed
+adoption remain pending; this records no size, performance or runtime-cutover
+claim.
