@@ -102,6 +102,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | KuCoin futures Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [venue-ports/KUCOIN.md](venue-ports/KUCOIN.md) |
 | Lighter Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [LIGHTER_RUST_PORT.md](LIGHTER_RUST_PORT.md) |
 | Lighter deployment and signing variants | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [LIGHTER_VARIANTS_PORT.md](LIGHTER_VARIANTS_PORT.md) |
+| Master merge blockers | Open cutover checklist | Before Sam approves the single landing → master merge. | [RUST_MASTER_MERGE_BLOCKERS.md](RUST_MASTER_MERGE_BLOCKERS.md) |
 | MEXC futures port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_MEXC_PROGRESS.md](RUST_MEXC_PROGRESS.md) |
 | MEXC, Bitrue and BloFin audit repairs | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_VENUE_HIGHS_A_PROGRESS.md](RUST_VENUE_HIGHS_A_PROGRESS.md) |
 | Navigation | Current index | Finding the relevant plan, contract or historical evidence. | [README.md](README.md) |
