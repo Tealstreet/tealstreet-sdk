@@ -1219,7 +1219,10 @@ Public streams carry periodic snapshots. Hyro candles use authoritative kline vo
 and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's
 trade-derived candle path is unchanged. Orderbook snapshot/delta and ticker parsing
 remain shared, but Hyro public endpoints are the venue source of truth for this
-adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback.
+adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback. Hyro's
+public WS rejects oversized subscribe batches with `at most 32 topics per
+connection`; keep shared Bybit public subscribe chunking below that limit for
+tickers and kline bulk subscriptions.
 
 Configure the web build before enabling the connector:
 
