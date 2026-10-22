@@ -47,3 +47,45 @@ Concrete policy review: CLEAN before implementation, with combined evidence
 limited as stated above. Current baseline is actual Kraken Spot merge #1742
 `07bb7f04d568a07f17a907e89224e511018100f1`; fresh exact-head CI and
 complete evidence precede any adoption.
+
+## Phase 1 landed; Phase 2 concrete probe
+
+Phase 1 merged as #1744 at
+`2c5c5f6987f35cafc0e272282e54da37c0a66d4f`. Exact green candidate
+`740390bdf946b5fddde89645d0f273c479243b57` passed all43 applicable checks,
+all28 web/node family budgets, and an independently authenticated976-output
+comparison (488 Rust,304 stable groups,110 ordered gates). Full proof and
+per-family/42-public-workload matrices are in #1744. The global policy is
+selected; the earlier Bitget-only condition never landed. WOO's already-level3
+JSON path did not establish a margin repair.
+
+Fresh Phase2 starts from that actual pin. Before source edits, independently
+review this plan and the concrete argument change. Replace only the conditional
+that excludes WOO/KuCoinSpot/Aster from wasm_profile_args with one unconditional
+application for all standalone families. Keep the shared serde_json=3 policy,
+all explicit venue package overrides and combined/native settings unchanged.
+Consequences are explicit: WOO inherits venue levelz; KuCoinSpot retains the
+existing package-kucoin level3 override; Aster retains its existing explicit
+venue level3 override. Host/engine/inherited dependency size profiles become
+uniform across families. Add no new exception or per-venue parser.
+
+Capture before/after all39 aliases and combined without building: only the
+three named standalone families may gain the existing shared-size argument
+array. Other family arguments and combined must be identical. Run shell syntax
+and appropriate focused checks; CI owns release builds, all28 family budgets
+and all32 replay suites. Authenticate exact actual-landing baseline and candidate
+fingerprints, package hashes, every976 raw output and110 ordered diagnostics;
+exclude only top-level metrics. Keep combined evidence limited to unchanged
+settings plus ordinary build/size/SDK checks. WOO, KuCoinSpot and Aster public
+CPU/memory results must be individually reported with raw samples, including
+runner variation. No local replay or release build is authorized.
+
+This is a distinct candidate, not a claim that all exceptions can be removed.
+If any unchanged budget/objective fails, preserve complete available diagnostics
+and report the per-family result for an owner policy decision. Do not invent a
+one-off fallback, normalize differences or relax thresholds. Because #1745's
+hosted bridge is already receiving actual1744 integration/fresh proof, coordinate
+merge order before landing another build-input change; keep this probe in CI
+without forcing an unannounced dependency race. Normal integration/trial rules,
+independent evidence review, a fresh separate guard and a separate exact-head
+merge remain required for any selected follow-up.
