@@ -494,3 +494,25 @@ fn array_shaped_login_is_neither_acceptance_nor_auth_recovery_evidence() {
         assert!(h.sent.iter().any(|(_, s)| s.contains("subscribe")));
     }
 }
+
+#[test]
+fn retirement_before_first_depth_does_not_materialize_an_empty_consumer_book() {
+    let mut h = Harness::public();
+    h.open("/public");
+    h.event(Event::Command(Command::SubscribeOrderBook { symbol: "BTCUSDT".into() }));
+    h.engine.take_frame(h.now);
+    h.close("/public");
+    assert!(h.engine.take_market_frame(h.now).is_none(), "a never-published subscription must not create a BOOK clear frame");
+}
+
+#[test]
+fn retirement_of_a_loaded_book_still_publishes_an_immediate_clear() {
+    let mut h = Harness::public();
+    let socket = h.open("/public");
+    h.event(Event::Command(Command::SubscribeOrderBook { symbol: "BTCUSDT".into() }));
+    h.message(socket, r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{"seqId":100,"prevSeqId":-1,"bids":[["39999","5","0","1"]],"asks":[["40001","7","0","1"]]}]}"#);
+    h.engine.take_frame(h.now);
+    h.close("/public");
+    let frame = h.engine.take_market_frame(h.now).expect("published book retirement must reach its consumer");
+    assert!(safe_cex_engine::wire::sections(frame).any(|(kind, _)| kind == safe_cex_engine::wire::section::BOOK));
+}
