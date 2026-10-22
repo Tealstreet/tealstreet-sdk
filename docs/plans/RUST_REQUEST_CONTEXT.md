@@ -803,3 +803,40 @@ String/Vec capacities, exhausted-text markers, no-release/partial/Unknown joins,
 retry refusal, and unchanged ordinary result/partial schema. Add compiled fault
 controls for optimistic success and erased prior retained IDs. Native Binance
 count-mismatched batches must reject before iterating/retaining their rows.
+
+
+Evidence-budget review refinements: caps count retained entries, including
+duplicates and historical attempts, not a separate unbounded unique-ID index.
+Overflow is monotonic; an affected released leg cannot regain retry/success by
+later callbacks. Include an explicit bounded ID-overflow diagnostic in the final
+error even if the representative error came from another native refusal. Preserve
+logical representative selection and ordinary under-budget outputs. At overload,
+retention follows admission/arrival order, so do not promise callback-order-equal
+truncated text or retained prefixes. Normalize genuinely new fallback partial IDs
+and text against remaining budget; never charge already-retained facts a second
+time when selecting/merging the final result. Reserve fixed marker overhead from
+the configured attempt bound, including one terminal fallback.
+
+
+Binance write checkpoint `654b4b58201`: root/child Contexts, same-bound managed
+signing, native facts and terminal reports now use the engine journal. Remove
+reached/effective and native first-error retention; retain only native stop control
+and dynamic amendment planning errors. Shared ingress rejects duplicate live
+managed command IDs before ACK/venue bookkeeping; completed IDs remain reusable.
+Original-RED controls cover report selection/order, gateway benign-code bypass,
+duplicate job replacement, overly broad batch continuation and count-mismatched
+accepted IDs. The seven new adapter tests pass, including late Unknown/no Store
+mutation and fresh ID reuse. Full Binance 272-test run passed before the last
+count guard; all 73 affected library/account/ACK/new controls pass afterward.
+Engine checks passed 435 tests with order locks and 418 without them; strict
+three-crate Clippy/fmt, bans and independent checkpoint review CLEAN / No.
+
+Declared caller/raw changes: an ACK at or after the immutable request deadline
+is Unknown and reconciles through reads (the order may exist), where TS reported
+success. Preserve the original two-poll PM fixture clocks and Store/native
+assertions; only its exact-deadline success outcome changes. A known mixed native
+batch continues later independent lots but completes with the existing partial
+error/accepted-ID contract instead of optimistic whole-command success. Native
+reports and representative error follow logical plan order, not callback arrival.
+No final integrated CI/raw proof, read/Bybit migration or full evidence-memory
+claim is made by this checkpoint.
