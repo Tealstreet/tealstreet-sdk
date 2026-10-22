@@ -1215,7 +1215,7 @@ The current income adapter keeps separate `RangeWalk`, page, accepted rows and
 numeric command fields. Failure of a later page/currency discards accepted
 ledger rows, and a saturated range rejects its entire result. Replace these
 parallel states with one `RangeHistory<Income>` and `Completion`, retained across
-USDT/USDC stages through the core's checked stage restart. Stage decoded rows
+USDT/USDC stages through an additive checked shared range-stage restart. Stage decoded rows
 until the full page validates; feed native timestamp/identity coverage into the
 shared pager before applying the existing time/type filter. Failed page prefixes
 must never enter accepted results. Preserve occurrence identities, running-balance
@@ -1251,3 +1251,28 @@ builder ownership with the signer lane before editing; this slice does not
 change engine dispatch, RequestContext, execution, row admission or metadata.
 Merge only after #1737 and any then-current owner queue dependencies, with fresh
 integration/proof and a separate announced guard and match-head merge.
+
+
+Phemex plan audit refinement: `RangeHistory` currently lacks the cursor owner's
+stage restart and filtered-admission operations. Add these to the engine core
+before venue adoption. A checked `restart_stage(RangeWalk)` must require finished
+state with no active fetch, staged rows/facts or lifecycle error, fold the old
+walk's coverage gap into the same Completion, retain accepted rows and first gap,
+and preserve the cumulative request budget across stages. Never construct a new
+command owner for the second currency. Add shared lifecycle/coverage/budget tests.
+
+Add shared `accept_page_where` filtering after the pager has observed every
+validated native timestamp/identity. Only selected rows satisfying the output
+predicate enter accepted rows; `accepted_len` must exclude filtered rows. A
+query whose earlier pages produced no eligible output still rejects on failure,
+not an empty partial success. The venue must not keep a parallel accepted vector
+or use placeholder Option rows to inflate acceptance. Engine tests must pin
+filter-before-retention/after-coverage semantics and rejected-page prefix
+isolation. The adapter remains responsible only for native decoding and its
+existing time/type predicate, final sort/truncate and currency selection.
+
+Both methods are additive shared owner operations, not a Phemex pager fork.
+Coordinate `engine/history.rs` with the managed Completion bridge; RequestContext
+authority stays outside this slice. Signer API inspection found current Phemex
+header construction infallible; do not invent a new sign-failure callback or
+change request builders. The signing lane confirmed these regions are clear.
