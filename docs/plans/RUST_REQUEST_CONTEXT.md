@@ -865,3 +865,15 @@ full native quota plus matching fallback IDs, repeated known IDs, one genuinely
 new overflowing fallback ID, report-refusal atomicity, exhausted UTF-8 text, and
 historical retry accounting. Independent evidence review: CLEAN; architecture
 gate No (one engine evidence policy).
+
+Provisional-CI integration follow-up: the native entropy probe still drains only
+legacy Action::Http, so drive it through the existing prepared_actions fixture
+to capture client IDs after the real final claim, preserving every entropy
+assertion. Four actual-WASM fixture transports implement only request(); give
+them one shared test-only immediate prepare/bind adapter which invokes their
+existing request callback only at physical dispatch, respects cancellation and
+single use, and snapshots the bound packet. Preserve all signing, accepted-ID,
+cancel/stream race and worker/main forwarding assertions. Test the adapter's
+no-send-before-release, override selection and once/cancellation properties;
+production transports must still fail closed when prepare support is missing.
+The provisional native/WASM failures are required fixes, not timing exceptions.
