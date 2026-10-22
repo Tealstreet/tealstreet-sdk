@@ -118,14 +118,14 @@ describe('trusted delegated signer setup capsule', () => {
     setup.dispose();
   });
 
-  it('keeps captured callback and feed intent despite mutated options or forged engine JSON', () => {
+  it('keeps captured callback, selected feed mode and raw intent despite mutated options or forged engine JSON', () => {
     const input = options({ remoteSigner: remote(), publicDataOnly: false });
     const setup = new DelegatedSignerSetup('binance', input);
     Object.assign(input, { remoteSigner: undefined, payloadSigner: undefined, publicDataOnly: true });
     const { config } = construct(setup, 'binance', JSON.stringify({ payloadSigner: false, remoteSigning: false,
       publicMode: { requested: true, payloadSigner: false, remoteSigner: false } }));
     expect(setup.intent).toEqual({ remoteSigner: true, payloadSigner: true });
-    expect(config).toMatchObject({ remoteSigning: true, payloadSigner: true,
+    expect(config).toMatchObject({ remoteSigning: true, payloadSigner: false,
       publicMode: { requested: false, payloadSigner: true, remoteSigner: true } });
     setup.dispose();
   });
