@@ -1800,6 +1800,140 @@ mod tests {
         }
     }
 
+    fn cumulative_engine() -> safe_cex_engine::Engine<PlacementVenue> {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(PlacementVenue::default());
+        engine.start(0.0);
+        engine.drain_actions().for_each(drop);
+        engine.take_market_frame(0.0);
+        let event = execution_event("123", "seed", Some(0.0), 0.0, 100.0, "NEW");
+        deliver_execution(&mut engine, 1.0, &event);
+        engine
+    }
+
+    fn execution_event(
+        id: &str,
+        trade: &str,
+        cumulative: Option<f64>,
+        last: f64,
+        price: f64,
+        status: &str,
+    ) -> String {
+        let mut row = serde_json::json!({
+            "i": id, "t": trade, "s": "BTC-USDT", "o": "LIMIT", "S": "BUY",
+            "X": status, "q": "2", "l": last.to_string(), "L": "0", "ap": "0",
+            "p": price.to_string()
+        });
+        if let Some(cumulative) = cumulative {
+            row["z"] = serde_json::Value::String(cumulative.to_string());
+        }
+        serde_json::json!({"e": "ORDER_TRADE_UPDATE", "o": row}).to_string()
+    }
+
+    fn deliver_execution(
+        engine: &mut safe_cex_engine::Engine<PlacementVenue>,
+        now: f64,
+        event: &str,
+    ) -> Option<(f64, f64)> {
+        engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: event,
+            },
+        );
+        let frame = engine.take_market_frame(now)?;
+        let (_, fills) = wire::sections(frame).find(|(kind, _)| *kind == wire::section::FILLS)?;
+        assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 1);
+        Some((
+            f64::from_le_bytes(fills[16..24].try_into().unwrap()),
+            f64::from_le_bytes(fills[24..32].try_into().unwrap()),
+        ))
+    }
+
+    #[test]
+    fn cumulative_zero_selected_price_does_not_emit_fill() {
+        let mut engine = cumulative_engine();
+        let event = execution_event("123", "bad", Some(0.5), 0.5, 0.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &event), None);
+    }
+
+    #[test]
+    fn cumulative_negative_selected_price_does_not_emit_fill() {
+        let mut engine = cumulative_engine();
+        let event = execution_event("123", "bad", Some(0.5), 0.5, -1.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &event), None);
+    }
+
+    #[test]
+    fn cumulative_invalid_price_retains_corrected_trade_and_healthy_peer() {
+        let mut engine = cumulative_engine();
+        let invalid = execution_event("123", "retry", Some(0.5), 0.5, 0.0, "PARTIALLY_FILLED");
+        // Deliberately drain without asserting, so original source reaches the recovery check.
+        deliver_execution(&mut engine, 2.0, &invalid);
+        let peer = execution_event("124", "peer", Some(0.25), 0.25, 60.0, "PARTIALLY_FILLED");
+        assert_eq!(
+            deliver_execution(&mut engine, 3.0, &peer),
+            Some((60.0, 0.25))
+        );
+        let corrected = execution_event("123", "retry", Some(0.5), 0.5, 100.0, "PARTIALLY_FILLED");
+        assert_eq!(
+            deliver_execution(&mut engine, 4.0, &corrected),
+            Some((100.0, 0.5))
+        );
+    }
+
+    #[test]
+    fn cumulative_invalid_terminal_price_retains_stored_partial() {
+        let mut engine = cumulative_engine();
+        let partial = execution_event(
+            "123",
+            "partial",
+            Some(0.25),
+            0.25,
+            100.0,
+            "PARTIALLY_FILLED",
+        );
+        assert_eq!(
+            deliver_execution(&mut engine, 2.0, &partial),
+            Some((100.0, 0.25))
+        );
+        let before = engine.store().order("123").unwrap().clone();
+        let invalid = execution_event("123", "terminal", Some(2.0), 1.75, 0.0, "FILLED");
+        deliver_execution(&mut engine, 3.0, &invalid);
+        let after = engine.store().order("123").unwrap();
+        assert_eq!(after.filled, before.filled);
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.last_update, before.last_update);
+    }
+
+    #[test]
+    fn cumulative_unused_bad_last_price_keeps_selected_fallback() {
+        let mut engine = cumulative_engine();
+        let mut event: serde_json::Value = serde_json::from_str(&execution_event(
+            "123",
+            "fallback",
+            Some(0.5),
+            0.5,
+            100.0,
+            "PARTIALLY_FILLED",
+        ))
+        .unwrap();
+        event["o"]["L"] = serde_json::json!("-1");
+        assert_eq!(
+            deliver_execution(&mut engine, 2.0, &event.to_string()),
+            Some((100.0, 0.5))
+        );
+    }
+
+    #[test]
+    fn cumulative_valid_zero_growth_still_remembers_trade_identity() {
+        let mut engine = cumulative_engine();
+        let zero = execution_event("123", "quiet", Some(0.0), 0.5, 0.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &zero), None);
+        let repeated = execution_event("123", "quiet", None, 0.5, 100.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 3.0, &repeated), None);
+    }
+
     #[test]
     fn placement_acknowledgements_do_not_suppress_first_stream_execution() {
         for (kind, status, cumulative) in [
