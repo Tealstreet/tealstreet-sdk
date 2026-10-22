@@ -1202,3 +1202,52 @@ preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f
 which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
 Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
 separate guard/merge remain required; no landing/deployment claim.
+
+## Phemex income range ownership (planned)
+
+Start from actual #1756 `5f6488c7664`. This slice adopts the existing shared
+`RangeHistory` owner for `venues/phemex/src/income.rs`; it adds no pager policy or
+venue-local marker emitter. Single-page fills/orders/trades and client-ID lookup
+remain outside this bounded slice. No signing format, request path, credential
+selection, rate-pause behavior or financial Store mutation changes.
+
+The current income adapter keeps separate `RangeWalk`, page, accepted rows and
+numeric command fields. Failure of a later page/currency discards accepted
+ledger rows, and a saturated range rejects its entire result. Replace these
+parallel states with one `RangeHistory<Income>` and `Completion`, retained across
+USDT/USDC stages through the core's checked stage restart. Stage decoded rows
+until the full page validates; feed native timestamp/identity coverage into the
+shared pager before applying the existing time/type filter. Failed page prefixes
+must never enter accepted results. Preserve occurrence identities, running-balance
+components, ordering, optional result truncation, limits, probes and both
+settlement currencies. No new offset paging or endpoint behavior is invented.
+
+Before implementation, add behavior assertions that fail on current source:
+first-page transport/HTTP/malformed failure rejects with a typed error and no
+success/marker; later-page or second-currency failure retains only accepted
+rows, emits exactly one command-owned incomplete Warn, then completes. Cover
+streamed failed-page prefixes, two simultaneous command owners and Error-only
+logging. Saturated-timestamp coverage must become a shared-owned incomplete
+success with accepted rows rather than an empty complete result or total loss.
+Existing successful short/full-page, duplicate identities, type filtering,
+window boundaries, both currencies, rate deferral and strict admission controls
+remain. Explicit construction/signing/serialization refusals stay terminal and
+must not become recoverable pages; classify only facts the failure callback
+actually provides, preserving native details where available.
+
+Plan audit must check the current `RangeHistory` stage API, Phemex request/sign
+failure call graph and test helpers before production changes. Add or adapt
+focused assertion tests first and retain original-red logs. Then implement the
+shared-owner adapter, run focused engine/Phemex/Binance native tests and strict
+checks with Cargo concurrency four, and obtain correctness/adversarial reviews.
+Use Corepack Yarn only; never run the account-policy check. No local release
+WASM, full replay or timing matrix. CI and source-bound artifact proof own those
+gates. Document the caller-visible retained-partial/typed-first-failure contract
+and supersede the historical all-or-nothing test expectation explicitly.
+
+Architecture gate: adoption of one engine-owned range/completion policy by a
+new family, not a per-venue fix of a cross-cutting concern. Coordinate request
+builder ownership with the signer lane before editing; this slice does not
+change engine dispatch, RequestContext, execution, row admission or metadata.
+Merge only after #1737 and any then-current owner queue dependencies, with fresh
+integration/proof and a separate announced guard and match-head merge.
