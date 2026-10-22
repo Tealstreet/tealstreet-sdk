@@ -90,7 +90,7 @@ describe('trusted local signer setup', () => {
     expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('bybit', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('okx', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {
@@ -117,7 +117,7 @@ describe('trusted local signer setup', () => {
 });
 
 
-it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot'] as const)(
+it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'] as const)(
   '%s retains private intent without putting credentials in generic exchange or worker options',
   (venue) => {
     const input = options();

@@ -2,8 +2,9 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
-import { afterEach, beforeAll, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
 
+import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
 import { deriveBridgeConstruction } from '../../exchanges/rust/construction';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
@@ -14,9 +15,23 @@ const PRIMARY_KEY = 'hosted-primary-key';
 const PRIMARY_SECRET = 'hosted-primary-secret';
 const SECONDARY_SECRET = 'hosted-secondary-secret';
 const ALIASES = ['binance', 'binancepm', 'binanceinverse', 'binancespot'] as const;
+const BYBIT_ALIASES = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'] as const;
+type HostedAlias = typeof ALIASES[number] | typeof BYBIT_ALIASES[number];
 const live: RustEngineExchange[] = [];
+const hyroOrigins = [
+  HYROTRADER_SIMULATOR_URL,
+  HYROTRADER_SIMULATOR_WS_URL.public.linear,
+  HYROTRADER_SIMULATOR_WS_URL.private,
+];
+const originalHyroOrigins = hyroOrigins.map((origins) => ({ ...origins }));
 
-beforeAll(() => setWasmEngineLoader(loadNodeEngine));
+beforeAll(() => {
+  setWasmEngineLoader(loadNodeEngine);
+  // Supply actual SDK endpoint configuration, without depending on CI secrets/env.
+  const urls = ['https://hyro-fixture.invalid', 'wss://hyro-fixture.invalid/public', 'wss://hyro-fixture.invalid/private'];
+  hyroOrigins.forEach((origins, index) => Object.assign(origins, { livenet: urls[index], testnet: urls[index] }));
+});
+afterAll(() => hyroOrigins.forEach((origins, index) => Object.assign(origins, originalHyroOrigins[index])));
 afterEach(() => {
   live.splice(0).forEach((exchange) => exchange.dispose());
   setRustEngineTransport();
@@ -24,7 +39,7 @@ afterEach(() => {
 
 const mac = (payload: string) => createHmac('sha256', PRIMARY_SECRET).update(payload).digest('hex');
 
-const fixture = (name: typeof ALIASES[number] = 'binance', overrides: Partial<ExchangeOptions> = {}) => {
+const fixture = (name: HostedAlias = 'binance', overrides: Partial<ExchangeOptions> = {}) => {
   const io: string[] = [];
   const transport: Transport = {
     now: () => STAMP,
@@ -50,7 +65,7 @@ const fixture = (name: typeof ALIASES[number] = 'binance', overrides: Partial<Ex
 };
 
 const http = (
-  exchangeName: typeof ALIASES[number],
+  exchangeName: HostedAlias,
   config: Partial<NonNullable<RemoteSignerRequest['config']>> = {},
 ): RemoteSignerRequest => ({
   id: 'http-capture',
@@ -187,12 +202,87 @@ it('actual WASM signing errors and disposal settle without exposing secrets, iss
   expect(io).toEqual([]);
 });
 
-it('actual WASM keeps Bybit provider admission closed until its separate migration lands', async () => {
-  expect(deriveBridgeConstruction('bybit', { key: '', secret: '' }).dispatchSigning).toBe(false);
-  const { WasmEngine } = await loadNodeEngine();
-  expect(() => new WasmEngine('bybit', '{}', JSON.stringify({
-    primary: { key: PRIMARY_KEY, secret: PRIMARY_SECRET },
-  }))).toThrow();
+it.each(BYBIT_ALIASES)('actual WASM %s captures exact primary HTTP and original WS bytes through the owned provider', async (name) => {
+  const { exchange, input, original, store, io } = fixture(name, {
+    bybitSiteId: 'BRA_BTL',
+    extra: { recvWindow: 8_765, hyrotraderMode: 'demo' },
+  });
+  expect(deriveBridgeConstruction(name, input).dispatchSigning).toBe(true);
+  expect(exchange.isDemo).toBe(name === 'bybitdemo' || name === 'hyrotrader');
+  expect(exchange.hasStarted).toBe(false);
+  for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase', 'localSigner'])
+    expect(exchange.options).not.toHaveProperty(field);
+
+  const baseURL = name === 'hyrotrader' ? 'https://hyro-fixture.invalid'
+    : name === 'bybitdemo' ? 'https://api-demo.bybit.com' : 'https://api.bybit.com';
+  const get = http(name, {
+    baseURL, url: '/v5/order/realtime',
+    params: { category: 'linear', symbol: 'BTC USDT', ids: ['a+b', 'x/y'] },
+    headers: { 'X-Extra': 'keep', 'X-BAPI-SIGN': 'stale', 'X-BAPI-API-KEY': 'stale', 'X-BAPI-TIMESTAMP': '1' },
+  });
+  const getBefore = structuredClone(get);
+  const signedGet = await exchange.signHttpRequest(get);
+  expect(signedGet.error).toBeUndefined();
+  expect(signedGet.id).toBe(get.id);
+  const requestId = signedGet.config?.params?.requestId;
+  expect(requestId).toEqual(expect.any(String));
+  expect(requestId).not.toBe('');
+  // Independent literal qs grammar; do not use the production serializer as oracle.
+  const query = `category=linear&symbol=BTC%20USDT&ids%5B0%5D=a%2Bb&ids%5B1%5D=x%2Fy&requestId=${encodeURIComponent(String(requestId))}`;
+  expect(signedGet.config?.params).toEqual({
+    category: 'linear', symbol: 'BTC USDT', ids: ['a+b', 'x/y'], requestId,
+  });
+  expect(Object.keys(signedGet.config!.params!)).toEqual(['category', 'symbol', 'ids', 'requestId']);
+  expect(signedGet.config?.headers).toMatchObject({
+    'X-Extra': 'keep', 'X-Referer': 'Tealstreet',
+    'X-BAPI-API-KEY': PRIMARY_KEY, 'X-BAPI-TIMESTAMP': `${STAMP}`,
+    'X-BAPI-RECV-WINDOW': '8765',
+    'X-BAPI-SIGN': mac(`${STAMP}${PRIMARY_KEY}8765${query}`),
+  });
+  expect(signedGet.config?.headers['X-BAPI-SIGN']).not.toBe(
+    createHmac('sha256', SECONDARY_SECRET).update(`${STAMP}hosted-secondary-key8765${query}`).digest('hex'),
+  );
+  if (name === 'bybit' || name === 'bybitinverse' || name === 'bybitspot')
+    expect(signedGet.config?.headers['x-site-id']).toBe('BRA_BTL');
+  else expect(signedGet.config?.headers).not.toHaveProperty('x-site-id');
+  expect(signedGet.config?.url).toBe('/v5/order/realtime');
+  expect(signedGet.config?.data).toBeUndefined();
+
+  const body = '{"symbol":"BTCUSDT","qty":"0.0100","memo":"é/+%"}';
+  const post = http(name, {
+    method: 'POST', baseURL, url: '/v5/order/create', data: body, params: { ignoredForMac: 'query' },
+  });
+  const postBefore = structuredClone(post);
+  const signedPost = await exchange.signHttpRequest(post);
+  expect(signedPost.error).toBeUndefined();
+  expect(signedPost.config?.data).toBe(body);
+  expect(signedPost.config?.headers).toMatchObject({
+    'X-BAPI-API-KEY': PRIMARY_KEY,
+    'X-BAPI-SIGN': mac(`${STAMP}${PRIMARY_KEY}8765${body}`),
+  });
+
+  // The caller expiry is deliberately different from native stamp+10s.
+  const toSign = 'GET/realtime1700999999999';
+  const bytes = createHmac('sha256', PRIMARY_SECRET).update(toSign).digest();
+  for (const outputFormat of ['hex', 'base64', 'hex-base64'] as const) {
+    const expected = outputFormat === 'hex' ? bytes.toString('hex')
+      : outputFormat === 'base64' ? bytes.toString('base64')
+        : Buffer.from(bytes.toString('hex')).toString('base64');
+    const ws: RemoteSignerRequest = {
+      id: `bybit-${name}-${outputFormat}`, type: 'ws-auth', exchangeName: name,
+      wsAuth: { toSign, outputFormat },
+    };
+    const wsBefore = structuredClone(ws);
+    await expect(exchange.signWsAuth(ws)).resolves.toEqual({ id: ws.id, wsAuthSignature: expected });
+    expect(ws).toEqual(wsBefore);
+  }
+  expect(get).toEqual(getBefore);
+  expect(post).toEqual(postBefore);
+  expect(input).toEqual(original);
+  expect(io).toEqual([]);
+  expect(exchange.hasStarted).toBe(false);
+  expect(store.markets).toEqual([]);
+  expect(Object.values(store.loaded).some(Boolean)).toBe(false);
 });
 
 it('actual WASM refuses WS capture without provider credentials and does not manufacture an HTTP signature', async () => {

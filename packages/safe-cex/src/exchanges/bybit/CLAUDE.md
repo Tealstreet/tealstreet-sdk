@@ -69,6 +69,15 @@ shared exchange skips. `bybit` and `bybitinverse` load them in `start()` via
 
 ## Authentication
 
+### Rust signer custody
+
+Rust Bybit variants use opaque primary/secondary identities and the engine's
+send-time Signer for REST, opposite-environment diagnostics and static private
+socket authentication. Trusted setup consumes raw credentials before venue
+construction; secondary GET routing and primary writes/socket login remain.
+Protocol clock calibration affects canonical stamping; raw timers stay unchanged.
+This does not add a transient session-token service or a remote provider bootstrap.
+
 ### REST API Signing (`bybit.api.ts`)
 
 Authentication uses HMAC-SHA256 with the following process:

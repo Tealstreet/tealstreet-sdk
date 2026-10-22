@@ -714,7 +714,7 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["bybit", "okx", "hyperliquid", "orderly"] {
+    for venue in ["okx", "hyperliquid", "orderly"] {
         assert_eq!(
             rejected(
                 venue,
@@ -726,8 +726,18 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
 }
 
 #[test]
-fn binance_opaque_refs_require_an_injected_provider_before_construction() {
-    for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
+fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
+    for venue in [
+        "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
+        "bybit",
+        "bybitinverse",
+        "bybitspot",
+        "bybitdemo",
+        "hyrotrader",
+    ] {
         let error = rejected(
             venue,
             r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#,
