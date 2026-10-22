@@ -1876,3 +1876,97 @@ fn deferred_snapshot_rejections_report_coded_errors_once() {
         }
     }
 }
+
+fn execution_prices_and_amounts(e: &mut Engine<Coinbase>) -> Vec<(f64, f64)> {
+    let Some(frame) = e.take_market_frame(100000.0) else {
+        return vec![];
+    };
+    let Some((_, payload)) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+    else {
+        return vec![];
+    };
+    let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+    let values = (4 + count * 12).next_multiple_of(8);
+    (0..count)
+        .map(|i| {
+            let offset = values + i * 16;
+            (
+                f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap()),
+                f64::from_le_bytes(payload[offset + 8..offset + 16].try_into().unwrap()),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn cumulative_quote_prices_and_equal_endpoint_corrections_preserve_native_units() {
+    for (kind, spot, nonunit_intx, native_scale) in [
+        ("DEFAULT", true, false, 1),
+        ("INTX", false, false, 1),
+        ("INTX", false, true, 1),
+        ("DEFAULT", false, false, 100),
+    ] {
+        let mut s = Session::new(kind, spot);
+        if nonunit_intx {
+            s.products =
+                Some(INTX.replace("\"contract_size\":\"1\"", "\"contract_size\":\"0.01\""));
+        }
+        let mut s = s.ready();
+        let product = if spot {
+            "BTC-USD"
+        } else if kind == "INTX" {
+            "BTC-PERP-INTX"
+        } else {
+            "BTC-CDE"
+        };
+        let row = |filled: usize, average: &str| {
+            let mut row = user_order(
+                "quote-progress",
+                product,
+                "OPEN",
+                &(filled * native_scale).to_string(),
+                &((4 - filled) * native_scale).to_string(),
+            )
+            .replace(
+                "\"avg_price\":\"100\"",
+                &format!("\"avg_price\":\"{average}\""),
+            );
+            if spot {
+                row.pop();
+                row.push_str(r#","order_configuration":{"limit_limit_gtc":{"base_size":"4","limit_price":"100"}}}"#);
+            }
+            row
+        };
+        s.message(0, "snapshot", &format!("[{}]", row(1, "100")));
+        assert!(execution_prices_and_amounts(&mut s.e).is_empty());
+        s.message(1, "update", &format!("[{}]", row(2, "110")));
+        assert_eq!(execution_prices_and_amounts(&mut s.e), [(120.0, 1.0)]);
+        // An equal-quantity receipt refreshes the quote without redelivering.
+        s.message(2, "update", &format!("[{}]", row(2, "115")));
+        assert!(execution_prices_and_amounts(&mut s.e).is_empty());
+        s.message(3, "update", &format!("[{}]", row(3, "120")));
+        s.message(4, "update", &format!("[{}]", row(3, "120")));
+        assert_eq!(execution_prices_and_amounts(&mut s.e), [(130.0, 1.0)]);
+        assert_eq!(s.e.store().order("quote-progress").unwrap().filled, 3.0);
+    }
+}
+
+#[test]
+fn invalid_incremental_quote_preserves_eligibility_for_its_corrected_receipt() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = |filled: &str, average: &str| {
+        user_order("quote-retry", "BTC-PERP-INTX", "OPEN", filled, "2").replace(
+            "\"avg_price\":\"100\"",
+            &format!("\"avg_price\":\"{average}\""),
+        )
+    };
+    s.message(0, "snapshot", &format!("[{}]", row("1", "100")));
+    assert!(execution_prices_and_amounts(&mut s.e).is_empty());
+    s.message(1, "update", &format!("[{}]", row("2", "40")));
+    assert!(execution_prices_and_amounts(&mut s.e).is_empty());
+    assert_eq!(s.e.store().order("quote-retry").unwrap().filled, 1.0);
+    s.message(2, "update", &format!("[{}]", row("2", "110")));
+    s.message(3, "update", &format!("[{}]", row("2", "110")));
+    assert_eq!(execution_prices_and_amounts(&mut s.e), [(120.0, 1.0)]);
+}
