@@ -371,3 +371,272 @@ fn null_ordinary_or_unproven_trigger_history_fails_instead_of_returning_zero_amo
         assert!(result(&mut e).is_err());
     }
 }
+
+mod owned_history {
+    use super::*;
+    use safe_cex_engine::{ErrorKind, HttpRequest, Level, LogEvent, Value, log::code};
+
+    fn fill(id: u64, symbol: &str) -> String {
+        format!(
+            r#"{{"orderId":"123","symbol":"{symbol}","side":"Bid","price":"141","quantity":"2","fee":"0.1","feeSymbol":"USDC","tradeId":{id},"timestamp":"2025-12-15T13:28:00Z"}}"#
+        )
+    }
+    fn query(e: &mut Driver, command: u32, limit: u32) -> HttpRequest {
+        e.handle(
+            2000.,
+            Event::Command(Command::Query {
+                command,
+                query: Query::Fills {
+                    symbol: None,
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: Some(limit),
+                },
+            }),
+        );
+        requests(e).pop().expect("history request")
+    }
+    fn respond(e: &mut Driver, r: &HttpRequest, body: &str, streamed: bool) {
+        if streamed {
+            e.handle(
+                2000.,
+                Event::HttpStart {
+                    request: r.id,
+                    status: 200,
+                    headers: "",
+                },
+            );
+            e.handle(
+                2000.,
+                Event::HttpChunk {
+                    request: r.id,
+                    data: body.as_bytes(),
+                },
+            );
+            e.handle(2000., Event::HttpEnd { request: r.id });
+        } else {
+            reply(e, r, 200, body);
+        }
+    }
+    fn fail_page(e: &mut Driver, r: &HttpRequest, mode: u8) {
+        let prefix = fill(999, SYMBOL);
+        match mode {
+            0 => reply(e, r, 503, &format!("[{prefix}]")),
+            1 => {
+                e.handle(
+                    2000.,
+                    Event::HttpStart {
+                        request: r.id,
+                        status: 200,
+                        headers: "",
+                    },
+                );
+                let chunk = format!("[{prefix},");
+                e.handle(
+                    2000.,
+                    Event::HttpChunk {
+                        request: r.id,
+                        data: chunk.as_bytes(),
+                    },
+                );
+                e.handle(
+                    2000.,
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "fixture history transport loss",
+                    },
+                );
+            }
+            2 => respond(e, r, &format!("[{prefix},"), true),
+            _ => unreachable!(),
+        }
+    }
+    fn markers(actions: &[Action]) -> Vec<&LogEvent> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+    fn rows(actions: &[Action], command: u32) -> Vec<serde_json::Value> {
+        let result = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: id,
+                    result,
+                }) if *id == command => Some(result),
+                _ => None,
+            })
+            .expect("accepted history rows resolve");
+        serde_json::from_str(result).unwrap()
+    }
+    fn partial(actions: &[Action], command: u32, count: usize) {
+        let notices = markers(actions);
+        assert_eq!(notices.len(), 1, "exactly one owned marker: {actions:?}");
+        assert_eq!(notices[0].level, Level::Warn);
+        assert!(
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(command))
+        );
+        let marker = actions.iter().position(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE)).unwrap();
+        let done = actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)).unwrap();
+        assert!(marker < done, "coverage precedes success");
+        let output = rows(actions, command);
+        assert_eq!(output.len(), count);
+        assert!(
+            output.iter().all(|row| row["id"] != "999"),
+            "failed prefix excluded"
+        );
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+        )));
+    }
+    fn typed_failure(actions: &[Action], command: u32) {
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].kind, Some(ErrorKind::Internal));
+        assert!(markers(actions).is_empty());
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+        )));
+    }
+
+    #[test]
+    fn first_http_stream_and_decode_failures_reject_typed_without_success() {
+        for mode in 0..3 {
+            let (mut e, _) = ready();
+            let r = query(&mut e, 71, 2);
+            fail_page(&mut e, &r, mode);
+            typed_failure(&e.drain_actions().collect::<Vec<_>>(), 71);
+        }
+    }
+
+    #[test]
+    fn later_failures_retain_only_validated_pages_at_error_level() {
+        for mode in 0..3 {
+            for streamed in [false, true] {
+                let (mut e, _) = ready();
+                e.set_log_level(Level::Error);
+                let r = query(&mut e, 72, 2);
+                respond(
+                    &mut e,
+                    &r,
+                    &format!("[{},{}]", fill(1, SYMBOL), fill(2, "SOL_USDC")),
+                    streamed,
+                );
+                let next = requests(&mut e).pop().unwrap();
+                assert!(next.url.contains("offset=2"));
+                fail_page(&mut e, &next, mode);
+                partial(&e.drain_actions().collect::<Vec<_>>(), 72, 1);
+                assert!(e.store().orders().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn filtered_pages_cannot_authorize_an_empty_partial_after_actual_failure() {
+        let (mut e, _) = ready();
+        let r = query(&mut e, 73, 1);
+        respond(&mut e, &r, &format!("[{}]", fill(1, "SOL_USDC")), true);
+        let next = requests(&mut e).pop().unwrap();
+        fail_page(&mut e, &next, 1);
+        typed_failure(&e.drain_actions().collect::<Vec<_>>(), 73);
+    }
+
+    #[test]
+    fn repeated_valid_raw_page_is_owned_incomplete_even_with_no_eligible_rows() {
+        let (mut e, _) = ready();
+        e.set_log_level(Level::Error);
+        let r = query(&mut e, 74, 1);
+        let first = format!("[{}]", fill(1, "SOL_USDC"));
+        respond(&mut e, &r, &first, false);
+        let second = requests(&mut e).pop().unwrap();
+        respond(&mut e, &second, &format!("[{}]", fill(2, "SOL_USDC")), true);
+        let third = requests(&mut e).pop().unwrap();
+        assert!(third.url.contains("offset=2"));
+        respond(&mut e, &third, &first, false);
+        partial(&e.drain_actions().collect::<Vec<_>>(), 74, 0);
+    }
+
+    #[test]
+    fn skipped_fills_keep_valid_peers_and_report_an_owned_coverage_gap() {
+        for all_skipped in [false, true] {
+            let (mut e, _) = ready();
+            let r = query(&mut e, 75, 10);
+            let bad = fill(2, SYMBOL).replace("\"0.1\"", "null");
+            let body = if all_skipped {
+                format!("[{bad}]")
+            } else {
+                format!("[{},{}]", fill(1, SYMBOL), bad)
+            };
+            respond(&mut e, &r, &body, true);
+            let actions: Vec<_> = e.drain_actions().collect();
+            partial(&actions, 75, usize::from(!all_skipped));
+            assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED && event.message == "Skipped 1 malformed Backpack fill rows: 2")).count(), 1);
+        }
+    }
+
+    #[test]
+    fn fifty_page_cap_is_owned_and_a_fiftieth_empty_probe_is_complete() {
+        for full_last in [false, true] {
+            let (mut e, _) = ready();
+            let mut r = query(&mut e, 76, 1);
+            for i in 0..50 {
+                if i > 0 {
+                    assert!(r.url.contains(&format!("offset={i}&")));
+                }
+                let body = if i == 49 && !full_last {
+                    "[]".into()
+                } else {
+                    format!("[{}]", fill(i + 1, "SOL_USDC"))
+                };
+                respond(&mut e, &r, &body, i % 2 == 0);
+                if i < 49 {
+                    r = requests(&mut e).pop().expect("next native offset");
+                }
+            }
+            let actions: Vec<_> = e.drain_actions().collect();
+            if full_last {
+                partial(&actions, 76, 0);
+            } else {
+                assert!(rows(&actions, 76).is_empty());
+                assert!(markers(&actions).is_empty());
+                assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_query_markers_never_attach_to_the_other_owner() {
+        let (mut e, _) = ready();
+        e.set_log_level(Level::Error);
+        let first = query(&mut e, 77, 2);
+        let other = query(&mut e, 78, 1);
+        respond(
+            &mut e,
+            &first,
+            &format!("[{},{}]", fill(1, SYMBOL), fill(2, "SOL_USDC")),
+            true,
+        );
+        let next = requests(&mut e).pop().unwrap();
+        fail_page(&mut e, &next, 1);
+        partial(&e.drain_actions().collect::<Vec<_>>(), 77, 1);
+        fail_page(&mut e, &other, 0);
+        typed_failure(&e.drain_actions().collect::<Vec<_>>(), 78);
+    }
+}
