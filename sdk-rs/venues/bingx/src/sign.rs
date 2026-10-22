@@ -1,4 +1,6 @@
 //! Sorted HMAC query signing; POST parameters retain their native JSON types.
+#[path = "sign/dispatch.rs"]
+pub mod dispatch;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
@@ -96,6 +98,16 @@ impl Params {
                 self = self.str("signature", &signature);
             }
         }
+        self.render(method, path, headers)
+    }
+
+    /// Native wire shape, shared by legacy construction and dispatch recipes.
+    fn render(
+        self,
+        method: Method,
+        path: &str,
+        mut headers: Vec<(&'static str, String)>,
+    ) -> RequestParts {
         let url = format!("{}{path}", crate::paths::REST);
         if method == Method::Post {
             headers.push(("Content-Type", "application/json".into()));

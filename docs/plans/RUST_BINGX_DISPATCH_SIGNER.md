@@ -56,3 +56,22 @@ Architecture gate: existing engine SignStep/provider/setup adoption. No new
 per-venue cross-cutting concern; WOO pacing was reported rather than patched.
 Settings/store freshness, row admission, financial execution and metadata owner
 work remain intact and coordinated with their lanes.
+
+## Native recipe checkpoint
+
+The additive `sign::dispatch::Http` recipe stages opaque provider refs and uses
+the existing typed renderer. Production builders remain on their old path until
+the next checkpoint; this commit does not claim custody migration or readiness.
+The five dispatch tests cover native method/body parity, Present-only listen
+requests, changed-intent rejection before provider work, malformed provider
+results, and stale-result reprepare with old-attempt suppression. BingX/Binance
+native gates and strict checks pass. Independent correctness and adversarial
+source reviews found no blocker; the latter's missing negative controls were
+added before committing.
+
+Owner approved the existing `job.effective/error/ids` migration adapter: a prior
+sent leg must never become wholly NotSent; uncertainty stays Unknown. Add RED
+cases without new state flags or ledgers, and identify the BingX finalizer as a
+RequestContext consolidation target in the PR body. Account signer cleanup must
+compare the existing in-flight revision before clearing a latch. The separate
+unmerged metadata core is not inherited, and its publication fences stay intact.
