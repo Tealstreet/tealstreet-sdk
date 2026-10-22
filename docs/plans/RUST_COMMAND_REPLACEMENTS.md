@@ -437,3 +437,70 @@ owner still admits a child. Independent final correctness/adversarial review
 CLEAN, architecture No. Test-only; ordinary Bybit remains unchanged and its
 original gateway regression is still intentionally RED. No publication/PR or
 whole-phase completion claim. Return to1741 for actual1763 integration/freshCI.
+
+
+## Shared response-proof guard before the ordinary Bybit reference
+
+Owner decision (2026-10-22): generic HTTP408/5xx uncertainty is engine policy,
+not a native venue code table. Extend this local follow-on before ordinary Bybit
+adoption; migrate Binance too, removing its local generic status predicate.
+This is the first slice of error classification, not the full classification
+fan-out. No change to draft #1741's source/scope; no publication before it lands.
+Local integration78fa7b5558310efff4b1544acaf2bcbf16f8421c preserves all5305
+entries from core57582 and the local replacement work, including the README
+rows proved by reversing each exact insertion independently.
+
+Verified seam: engine/http_lifecycle.rs currently completes bounded managed
+mutation custody, then calls Venue::on_response with mutable Cx/Store. A shared
+predicate called inside that callback would be too late. Place the decision
+before that callback and before account-auth observation. Apply it to both
+complete-response and streamed custody, and to retained late responses; ordinary
+managed reads and unmanaged work remain explicitly separate. Define unproven as
+HTTP408 or500..=599 (reject invalid status at existing integrity ingress rather
+than silently assigning it a native success meaning). Confirm the existing
+status contract during review; do not broaden this slice to429 or native codes.
+
+Proposed authority split, to audit before implementing:
+
+- One engine response-proof type/decision owns whether native mutation decoding
+  receives normal Cx authority. Unproven replies never enter on_response or a
+  Store-capable reconciliation callback. Transport loss/malformed collection
+  already enter shared Failed evidence; preserve those rails.
+- A read-only native evidence hook receives &self, pending correlation and the
+  bounded response, plus an engine-owned bounded evidence writer. It may retain
+  exact validated native IDs and native diagnostics, never assign caller legs,
+  update Store/ownership/auth, return a definitive Rejected, or grant replay.
+  The hook defaults to no evidence; oversize/over-cap IDs seal conservative
+  Unknown without truncating IDs. It must not allocate an unbounded Vec first.
+- Keep native planning cleanup distinct from decoding: a notification without
+  Cx/Store/response may discard the affected command's remaining native plan.
+  The engine records unresolved sent evidence, revokes further command work and
+  projects the shared journal, retaining already-known IDs/facts from siblings.
+  Audit this termination contract against Binance amendment and ordinary Bybit
+  mode/fallback plans before freezing the hook: no leaked jobs, unresolved
+  owner retention, fabricated successful siblings or duplicate terminal events.
+  If per-leg continuation is needed, extend shared lifecycle authority instead
+  of handing the unproven codec a mutable Store or adding a venue finalizer.
+- Late unproven responses remain evidence-only even when their freshness fence
+  is current. They never acquire patch authority or reopen a sealed command.
+  Bound custody and all raw deadline/generation/attempt checks stay unchanged.
+  Financial-token late patching remains its separately planned follow-on.
+
+Acceptance starts with a hostile engine fixture whose normal response callback
+would mutate Store: both408 and500/503 must bypass it for direct and split
+responses. Verify native-looking success, already-gone/refused and malformed
+bodies, accepted earlier sibling plus unproven later sibling, callback order,
+wrong/stale generation, deadline boundary, late ACK, exact evidence IDs and
+bounded overflow. Journal result must be Unknown, no Store/ownership patch,
+no native auth success, no effects-free retry, and original raw deadline and
+release count unchanged. Positive200 accepted/refused/known-partial controls
+must retain their original assertions.
+
+Then run the same boundary through real Binance and ordinary Bybit native
+ACK paths (including Bybit benign cancellation and10002/10004 retry cases).
+Remove duplicated408/5xx predicates only after shared-path regressions are
+assertion-RED on the original core and GREEN on the guard. Preserve legacy
+Hyro semantics explicitly; no all-family closure. Run focused engine/Binance/
+Bybit tests, strict Clippy/fmt, ratchet/bans and independent correctness plus
+adversarial review at each checkpoint. Architecture gate: No; one engine
+proof/authority branch, with native evidence codecs in two different families.
