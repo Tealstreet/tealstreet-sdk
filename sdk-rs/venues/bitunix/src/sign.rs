@@ -71,7 +71,7 @@ pub fn headers(
     now: f64,
 ) -> Result<Vec<(&'static str, String)>, String> {
     let nonce = uuid_with_entropy(fill)?;
-    let timestamp = num::format(now.floor());
+    let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
     let sign = signature(c, &nonce, &timestamp, &params.signing(), body);
     Ok(vec![
         ("api-key", c.key.clone()),

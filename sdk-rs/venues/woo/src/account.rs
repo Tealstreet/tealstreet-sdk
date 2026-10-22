@@ -732,30 +732,9 @@ impl Woo {
         c.open = true;
         c.ping_at = cx.now;
         self.account.supervisor.opened(cx);
-        let Some(secret) = self.options.secret.as_deref() else {
+        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
             return true;
         };
-        let sign = crate::sign::signature(secret, &format!("|{}", num::format(cx.now)));
-        #[derive(serde::Serialize)]
-        struct Auth<'a> {
-            event: &'a str,
-            params: AuthParams<'a>,
-        }
-        #[derive(serde::Serialize)]
-        struct AuthParams<'a> {
-            apikey: &'a str,
-            sign: String,
-            timestamp: f64,
-        }
-        let text = serde_json::to_string(&Auth {
-            event: "auth",
-            params: AuthParams {
-                apikey: self.options.key.as_deref().unwrap_or(""),
-                sign,
-                timestamp: cx.now,
-            },
-        })
-        .unwrap();
         cx.send(socket, text);
         self.account_refresh(cx);
         true

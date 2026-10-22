@@ -1507,3 +1507,28 @@ fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
     assert!(!e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID)));
     assert_eq!(e.store().positions().len(), 1);
 }
+
+#[test]
+fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
+    let (mut e, socket, _, _) = start();
+    e.drain_actions().for_each(drop);
+    e.handle(1700000000000.875, Event::WsOpened { socket });
+    let auth = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("timestamp") => {
+                Some(serde_json::from_str::<serde_json::Value>(&text).unwrap())
+            }
+            _ => None,
+        })
+        .expect("auth frame");
+    assert_eq!(auth["params"]["timestamp"], 1700000000000.0);
+    assert_eq!(
+        auth["params"]["sign"],
+        safe_cex_crypto::hmac_sha256(
+            b"replay-secret",
+            b"|1700000000000",
+            safe_cex_crypto::Encoding::Hex
+        )
+    );
+}

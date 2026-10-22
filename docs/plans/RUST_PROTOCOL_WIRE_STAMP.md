@@ -29,3 +29,26 @@ This shared correction lands after #1723 and before RequestContext.
 Architecture gate: this fixes a cross-cutting clock policy in one engine helper;
 venue changes only select that policy at their existing timestamp boundary.
 No provider/setup feature-guard changes and no NX API changes are planned.
+
+## Re-verified timestamp inventory
+
+| Existing boundary | Before this correction | Action |
+| --- | --- | --- |
+| MEXC REST Request-Time/preimage; WS reqTime/preimage | Fractional f64 formatting | Shared floor, same stamp in wire and canonical bytes |
+| WOO private WS timestamp/preimage | Fractional f64 formatting | Shared floor, same stamp in wire and canonical bytes |
+| Backpack REST preimage/header and WS preimage/argument | Nearest-integer `.0` formatting | Shared floor before formatting/signing |
+| Binance, Bybit, Aster, BingX, Bitget, Bitunix, BloFin, WOO REST, WEEX, ApeX current-ms, OKX ISO input | Existing floor | Select shared helper; retain signatures at integer time |
+| KuCoin, Orderly, Crypto.com | Existing integer cast | Shared floor before existing cast; preserve validation and wire type |
+| Kraken | Validated integer milliseconds scaled to monotonic nonce | Shared floor inside existing validation; retain scale/domain/sequence |
+| Phemex, Coinbase, ApeX legacy auth, OKX/Bitget WS | Explicit seconds/expiry grammar | Preserve grammar and conversion; no duration changes |
+| Hyperliquid, TxFlow, GRVT, Paradex, Lighter, Polymarket, Bitrue | Typed integer nonce/stamp or separate expiry/session logic | No fractional wire correction identified; retain nonce/domain semantics |
+| Lighter ping/pong, Bitunix ping | Unsigned heartbeat timestamp | Outside signing recipe correction; unchanged |
+| MEXC stop-plan start/end and history query bounds | Business query ranges | Unchanged; not signing timestamps |
+
+TS controls remain executable and unchanged: MEXC REST `mexc.api.ts` and WS
+`mexc.ws-private.ts`, WOO `woo.ws-private.ts`, and Backpack
+`backpack.signing.ts` use `virtualClock.getCurrentTimeMs()` for signing. Its
+production source is `Date.now() + offsetMs`; an injected fractional tape clock
+can still expose fractions in TS. A declared Rust integer correction does not
+claim fractional-tape TS equality. CI archive receipts normalize certain auth
+fields; native preimage/wire regressions separately establish the exact stamp.
