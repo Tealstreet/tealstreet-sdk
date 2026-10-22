@@ -1424,3 +1424,13 @@ the variable token request). That is not new physical HTTP/completion work;
 freeze it exactly and leave the conservative parser unchanged. Net scanner
 counts still shrink1271->1264. Explicit reverse-transition rejection was added
 to every history-pair adversarial control before checker edits. Architecture No.
+
+Exact transition table checkpoint: all12 inventory controls pass after adding
+only the two pinned pairs. Independent final audit verifies every surrounding
+source byte, parser/enforcement AST and older pair unchanged. Manifest stays
+unchanged at1271 until actual source integration; no complete bans/ready claim.
+Crypto's conservative match is not a new physical call/site kind. Source
+preservation receipt: /tmp/codex-1741-history1760-61-checker-preservation.json.
+After actual1767 merges, real-integrate the actual stack once, write only the
+two exact landed manifest maps, prove total1264 and all151 other maps exact,
+then rerun scoped checks/full CI and fresh post1762 ordered-gate proof.
