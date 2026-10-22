@@ -297,3 +297,10 @@ for malformed HTTP-200 and body-less 503 responses. Removed the new metadata
 assignment instead of adding a venue-local classifier; the first-page matrix
 now asserts no fabricated venueCode. Typed Internal/Network behavior and the
 existing message remain. Fresh focused checks and final-head CI are required.
+
+
+Scheduler #1717 actual `faf799268857` landed before the history guard and is now
+real-integrated without conflicts. All five incoming paths and six reviewed
+history source/test files are preserved byte-for-byte; no scheduler/history
+source interaction is introduced by this merge. Fresh focused checks and CI run
+from this shared-engine dependency; earlier `e68e7c0d4b5` CI is not merge proof.
