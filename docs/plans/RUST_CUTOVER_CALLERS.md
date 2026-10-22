@@ -4085,5 +4085,6 @@ retry policy remain unchanged. Initial consuming signing refusal and existing
 wrapper-to-history error-message flattening retain their separate legacy paths;
 this slice does not claim new typed signing provenance. Unsupported axes and
 public-only/missing-market empty admission remain unchanged. No live Store
-publication, SDK argument or managed Context migration is added. B11 caller
-coverage, other adapters and runtime proof remain separate. [Scope](RUST_OWNED_HISTORY.md).
+publication, SDK argument or managed Context migration is added. Callers must
+handle rejected history as unavailable and consume live cache separately when
+needed. [Scope](RUST_OWNED_HISTORY.md).
