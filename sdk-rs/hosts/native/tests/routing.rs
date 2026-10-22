@@ -2,6 +2,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 // Tungstenite fixes the server callback error type to an owned HTTP response.
 #![allow(clippy::result_large_err)]
+#[path = "support/prepared.rs"]
+mod prepared;
 
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{Command, HttpRequest, Method, Notice, RequestId, SocketId};
@@ -1710,7 +1712,45 @@ struct NoticeNetwork {
     signed_url: String,
     account_route: bool,
 }
+impl NoticeNetwork {
+    fn mapped(mut request: HttpRequest, signed_url: &str, account_route: bool) -> HttpRequest {
+        request.url = signed_url.into();
+        if account_route {
+            request.route = None;
+        }
+        request
+            .headers
+            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
+        request
+    }
+}
 impl Transport for NoticeNetwork {
+    fn prepare_http(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> safe_cex_native::HttpPrepareFuture {
+        let boundary = prepared::Boundary::new(&request);
+        let network = self.network.clone();
+        let signed_url = self.signed_url.clone();
+        let account_route = self.account_route;
+        // These cases explicitly exercise account proxy authorization even
+        // though the test venue's source request is public startup/candles.
+        let intent = if account_route {
+            safe_cex_engine::request_context::RoutingIntent::Primary
+        } else {
+            intent
+        };
+        let resource =
+            network.prepare_http(Self::mapped(request, &signed_url, account_route), intent);
+        Box::pin(async move {
+            let boundary = boundary?;
+            let resource = resource.await?;
+            Ok(boundary.bind_with(move |packet| {
+                resource.bind(Self::mapped(packet, &signed_url, account_route))
+            }))
+        })
+    }
     fn connect(
         &self,
         _: SocketId,
@@ -1720,15 +1760,11 @@ impl Transport for NoticeNetwork {
         // This test exercises real HTTP failures without opening exchange sockets.
         mpsc::unbounded_channel().0
     }
-    fn request(&self, mut request: HttpRequest, events: safe_cex_native::Events) {
-        request.url.clone_from(&self.signed_url);
-        if self.account_route {
-            request.route = None;
-        }
-        request
-            .headers
-            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
-        self.network.request(request, events);
+    fn request(&self, request: HttpRequest, events: safe_cex_native::Events) {
+        self.network.request(
+            Self::mapped(request, &self.signed_url, self.account_route),
+            events,
+        );
     }
 }
 

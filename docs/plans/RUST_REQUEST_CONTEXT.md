@@ -1366,3 +1366,18 @@ Timeout failures must abort AND await the spawned host; timing out an owned
 JoinHandle would detach it. Bound/cancel drop emits no response. Static errors
 and custom Debug must not print packets. Independent plan review CLEAN,
 architecture No; exact15s runtime timeout is reproduced, not a compilation delay.
+
+Native fixture correction verification: the exact old compiled host test times
+out after15 runtime seconds at a0; after explicit preparation adoption, the
+rebuilt host binary's four tests (three shared binder controls plus original host
+integration) pass in0.06s total. All six native binaries pass113tests under30s
+process-group runtime limits each: entropy3, host4, routing37, native unit44,
+server19, signing6. Original startup/book/frame/chunk/sleep and all routing
+connection/body/token/HOW security assertions remain intact. Strict native
+all-target Clippy and formatting pass. Independent final review CLEAN verified
+all current fixture source hashes and result log hashes against
+/tmp/codex-1741-native-final-suite-receipt.json (SHA256 c42209b2a3a3b3a24c6f1e50fabe928ad734ce1a70b070a7fc860d2972db4d62).
+Architecture No; no production Unsupported fallback or executor change. This
+resolves the demonstrated fixture hang; cancelled a0 CI/proof stays historical.
+Fresh actual dependency integration and green full CI/raw/package evidence
+remain required before merge.
