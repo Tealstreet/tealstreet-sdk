@@ -1108,6 +1108,68 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
+    mod shared_dispatch_provider {
+        use super::super::ExternalSigner;
+        use safe_cex_engine::signing::{
+            Context, KeyRef, Operation, SignError, SignRequest, Signer,
+        };
+
+        #[test]
+        fn external_marker_never_materializes_credentials_or_signatures() {
+            let signer = ExternalSigner;
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Context::default(),
+                operations: vec![Operation::Present {
+                    key: KeyRef("opaque-test-credential".into()),
+                }],
+            };
+            assert!(!signer.immediate());
+            assert!(signer.sign_ready(&request).is_none());
+            // The host fulfils Action::Sign. Accidentally polling the marker
+            // must retain its existing closed failure, never expose material.
+            let mut future = signer.sign(request);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(matches!(
+                std::future::Future::poll(future.as_mut(), &mut context),
+                std::task::Poll::Ready(Err(SignError::Unavailable))
+            ));
+        }
+
+        #[cfg(feature = "bitunix")]
+        #[test]
+        fn shared_provider_feature_does_not_adopt_unmigrated_public_bitunix() {
+            let Ok(mut engine) =
+                super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
+            else {
+                panic!("public Bitunix setup must remain native-safe and successful");
+            };
+            assert!(!engine.dispatch_signing);
+            assert!(!engine.requires_external_signer());
+            #[derive(serde::Deserialize)]
+            struct Outbound {
+                op: String,
+                url: Option<String>,
+            }
+            let actions: Vec<Outbound> = serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| {
+                action.op == "http"
+                    && action
+                        .url
+                        .as_deref()
+                        .is_some_and(|url| url.contains("/api/v1/futures/market/"))
+            }));
+            assert!(actions.iter().all(|action| {
+                !matches!(
+                    action.op.as_str(),
+                    "sign" | "signPayload" | "signedOutbound"
+                )
+            }));
+            assert!(!engine.requires_external_signer());
+        }
+    }
+
     /// Each venue's record equals the name lists `rust.exchange.ts` used before
     /// the engine reported it.
     #[cfg(all(

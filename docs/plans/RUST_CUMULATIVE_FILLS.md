@@ -480,3 +480,91 @@ matching CI packages authenticated; input fingerprint
 4c5563177dfe72b68f7236071197db7e8ba1ea90e828783b654dced427b2249e.
 Fresh exact-head CI/full candidate proof and final independent preservation/
 evidence reviews remain required before a separate guard and merge.
+
+
+## Fan-out phase 2: cumulative quote admission (plan before implementation)
+
+Fresh branch from actual phase-1 merge #1725
+`64bc8d60147b1b1063dc34dfe7af5d6f5ed87e26`. Architecture gate: YES.
+Bitunix and Coinbase(+spot) still derive cumulative quantity/quote deltas in
+account adapters. Extend the existing engine path before their adoption; keep
+all native identity, bootstrap, metadata repair, stream retention and scheduling.
+No signing, dispatch, clock, scheduler, history, host or harness source changes.
+
+Add `Cursor::prepare_average(quantity, average: Option<f64>, fallback:
+Option<f64>, arithmetic) -> Result<Option<Prepared>, Rejection>` to execution.rs.
+A supplied average binds a checked average-times-cumulative-quantity quote.
+Without an average, an explicitly authorized direct price binds checked
+previous-quote + delta-quantity * price; a missing historical quote remains
+missing, never fabricated zero. Subtraction/division/next-anchor construction
+then use the same existing Cursor preparation. Validate only pricing actually
+used; a no-growth report remains a no-op and regressing quantity remains an
+explicit rejection. No fallback across an invalid supplied average or overflow.
+Do not change the semantics of existing `CumulativePrice::Value` consumers.
+
+Add `Prepared::rounded(ExecutionRounding)` to validate rounded amount/price
+while retaining the exact unrounded next anchor. Reuse Significant15 (the exact
+existing `.14e` parser), then remove Bitunix's local clean_float copy. Bitunix
+still selects its native positive average or authorized explicit/parent price,
+retains separate pending-execution metadata, and commits the next tuple only
+after a valid side and prepared delivery. REST/recovery seeding and TPSL paths
+remain unchanged. Coinbase uses no fallback and binary arithmetic, retaining its
+missing-baseline versus invalid-value diagnostics and poll policy, unknown/live
+bootstrap, terminal precedence, stream totals/values and bounded FIFO. Its
+admitted live quote comes from the prepared anchor rather than recomputation.
+Any baseline-only path that needs checked average binding uses the same engine
+method or seed_with_average; do not let a rejected delivery advance a baseline.
+
+First tests are compatibility controls on unchanged production source, plus
+engine tests introduced with the API implementation: Bitunix mixed historical
+average and direct-price fallback, later average reconciliation, invalid-price
+same-quantity correction and duplicate; Coinbase nonuniform cumulative average
+prices/quantities for INTX and Spot, missing quote recovery, no-fill snapshot,
+invalid cumulative quote followed by correction. Existing native replayable
+controls must continue to pass. A newly demonstrated same-contract financial
+defect gets its own original-RED/core-GREEN assertion and explicit PR/AUDITS
+record under the owner's standing approval; unproven source suspicions are not
+claimed as repairs. All changes outside this financial contract are deferred.
+
+Run engine+Bitunix+Coinbase+Binance focused native tests, strict all-target touched
+Clippy/fmt/bans and root typecheck/lint with CARGO_BUILD_JOBS=4. CI owns all release
+wasm, size, timing and complete replays. Freeze Bitunix/Coinbase(+spot)/Binance
+workload inventory from the current workflow/catalog; authenticate both archive
+IDs/digests and exact source fingerprints without fallback. Compare all indexed
+raw outputs except top-level metrics and all ordered gate failures/fixers;
+public timing is the ordinary CI gate. Any deliberate raw difference requires
+exact documented evidence, never an allowance expansion.
+
+Independent plan, API/code/adversarial, preservation and final artifact/body
+reviews precede full-green exact-head CI, separate fresh guard and separate
+merge. Integrate actual shared dependencies before final proof, including the
+queued #1726 request-stamp core when landed. Notify the signer lane before
+account.rs overlap; Bitunix balance scheduler adoption remains separate from WS
+execution admission. Later BloFin/Kraken Spot then BingX/AsterDEX/KuCoin Spot and
+Orderly cumulative consumers precede reporting and snapshot freshness work.
+
+Independent phase-2 plan audit at fbd4e288b4a is CLEAN to start native controls.
+Before API code: Bitunix keeps `(previous_quote + delta*fallback - previous_quote)
+/ delta`, then Significant15 on emitted price/amount only; next anchor is
+unrounded. Coinbase equal quantity is only a Fill no-op: it still refreshes a
+checked equal-endpoint quote and native terminal/display state. Preserve its
+separate missing historical quote warning/poll versus invalid incremental value
+warning/poll; never reconstruct the former from the current average. Add equal-
+endpoint average correction and non-unit INTX quantity-scale coverage. Engine
+preparation errors must never consume native execution eligibility.
+
+Phase-2 implementation extends the engine first and adopts it in Bitunix and
+Coinbase live fills. Three engine controls cover historical average/direct quote
+mixing, rounded outputs with exact anchors, and invalid/missing/overflow/equal/
+regressing evidence. Two native Coinbase controls cover cumulative VWAP and
+equal-endpoint correction across Spot, INTX (unit and non-unit contract metadata)
+and CFM (non-unit quantity conversion), plus invalid incremental value retry and
+duplicates. These pass on unchanged production source before implementation:
+compatibility evidence, not new production-defect claims. Initial test fixture
+omitted Spot sizing provenance and was corrected with typed base-size metadata;
+that fixture failure is not an original-RED production claim.
+
+Independent API/code/adversarial review is CLEAN; architecture YES. Focused
+engine/Bitunix/Coinbase/Binance native suite passes 1,020 tests. Root typecheck
+44 tasks and lint28 pass (cached). Full CI and authenticated raw/package proof
+remain required before merge. No local release build or replay sweep was run.
