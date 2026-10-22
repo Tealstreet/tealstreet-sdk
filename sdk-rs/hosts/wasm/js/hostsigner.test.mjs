@@ -35,6 +35,83 @@ test('injected signer sees opaque refs and context, returns one atomic batch', a
   r.host.dispose();
 });
 
+test('bounded callback headers cross the same signed result without a side map', async () => {
+  const result = { values: [[1, 2, 3]], receipt: work.receipt, headers: [['X-Proof', 'é'], ['x-proof', 'last']] };
+  const r = rig(() => result);
+  r.host.execute(action);
+  await tick();
+  assert.deepEqual(r.events, [['installed'], ['signed', 7, JSON.stringify(result), 1234]]);
+  assert.equal(r.host.primitiveSignings.size, 0);
+  assert.equal(r.timers.size, 0);
+  r.host.dispose();
+});
+
+test('malformed callback headers fail before crossing into native signing', async () => {
+  for (const headers of [null, {}, Array(1), [['X']], [['X', 'value', 'extra']], [['Bad Name', 'value']],
+    [['X', 'value\r\nInjected: true']], [['X', '\0']], [['X', '\ud800']],
+    [['X'.repeat(257), 'value']], [['X', 'x'.repeat(8193)]],
+    Array.from({ length: 33 }, () => ['X', 'value']),
+    Array.from({ length: 4 }, () => ['X', 'é'.repeat(4096)])]) {
+    const r = rig(() => ({ values: [[1]], receipt: work.receipt, headers }));
+    r.host.execute(action);
+    await tick();
+    assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
+    assert.equal(r.timers.size, 0);
+    r.host.dispose();
+  }
+});
+
+test('a timed-out provider cannot deliver late callback headers', async () => {
+  let complete;
+  const r = rig(() => new Promise((resolve) => { complete = resolve; }));
+  r.host.execute(action);
+  await tick();
+  [...r.timers.values()][0]();
+  complete({ values: [[1]], receipt: work.receipt, headers: [['X-Proof', 'late']] });
+  await tick();
+  assert.deepEqual(r.events, [['installed'], ['failed', 7, 'timedOut', 1234]]);
+  assert.equal(r.host.primitiveSignings.size, 0);
+  r.host.dispose();
+});
+
+test('result copying rejects sparse bytes and ignores provider array method overrides', async () => {
+  for (const values of [Array(1), [Array(1)], [[1, , 3]]]) {
+    values.some = () => false;
+    values.map = () => [[1]];
+    const r = rig(() => ({ values, receipt: work.receipt }));
+    r.host.execute(action);
+    await tick();
+    assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
+    r.host.dispose();
+  }
+  const values = [[1, 2, 3]];
+  values.some = values.map = values[0].some = () => { throw new Error('provider array method must not run'); };
+  const r = rig(() => ({ values, receipt: work.receipt }));
+  r.host.execute(action);
+  await tick();
+  assert.deepEqual(JSON.parse(r.events[1][2]), { values: [[1, 2, 3]], receipt: work.receipt });
+  r.host.dispose();
+});
+
+test('callback headers are snapshotted once and array iterators cannot replace pairs', async () => {
+  let reads = 0;
+  const pair = ['X-Proof', 'bounded'];
+  pair[Symbol.iterator] = () => { throw new Error('provider iterator must not run'); };
+  const raw = {
+    values: [[1]], receipt: work.receipt,
+    get headers() {
+      reads++;
+      return reads === 1 ? [pair] : Array.from({ length: 33 }, () => ['X-Proof', 'swapped']);
+    },
+  };
+  const r = rig(() => raw);
+  r.host.execute(action);
+  await tick();
+  assert.equal(reads, 1);
+  assert.deepEqual(JSON.parse(r.events[1][2]), { values: [[1]], receipt: work.receipt, headers: [['X-Proof', 'bounded']] });
+  r.host.dispose();
+});
+
 test('hung signer times out, aborts and ignores a late completion', async () => {
   let complete;
   let signal;
