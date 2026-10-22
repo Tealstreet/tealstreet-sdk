@@ -359,3 +359,12 @@ facts publish only after whole-page admission and final success; no native
 HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
 is an owned gap, with no new paging algorithm. Income remains the prior slice;
 other families and caller/deployment proof remain open.
+
+Hyperliquid perp histories now adopt the existing engine CursorHistory owner for
+staged admission, page budget, stage restart, retention gaps and terminal marker
+ownership. No history-local HISTORY_INCOMPLETE emitter remains. Actual first or
+zero-eligible failure rejects typed; later actual loss excludes failed prefixes
+and retains only accepted output. Inclusive timestamp/native-identity progress
+and final order-transition folding preserve native behavior; mixed income keeps
+its first gap through funding. Spot and lookup remain separate legacy paths;
+other families, managed completion and B11/deployment proof remain open.

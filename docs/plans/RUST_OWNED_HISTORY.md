@@ -1276,3 +1276,27 @@ existing queue reservations. Clock/row owners confirm no concrete Hyperliquid
 source overlap. Existing full-overlap test's strict rejection is an explicitly
 superseded general-query contract: retain its assertion of missing coverage and
 add accepted-row/owned-marker assertions rather than silently dropping the test.
+
+Hyperliquid original regression-only `e2255a5140a` records 11 existing tests
+GREEN and six new assertion-RED groups before production edits. Existing shared
+CursorHistory adoption makes all 17 pass. Accepted output is held only by the
+shared owner; native inclusive timestamp/identity facts feed its pager, and order
+transitions fold only in the admitted-output encoder. The prior full-overlap
+strict-failure assertion is explicitly superseded with retained-row/owned-gap
+assertions. No engine API, lib/account reducer, signing or Context edits. Both
+independent source reviews are CLEAN and confirm the architecture gate. Additional
+controls pin zero-income native progress/typed rejection, order-fold-before-filter,
+first cap gap through funding failure, and full-inclusive first-gap retention
+through successful or failed funding. A valid coverage-only cap may return owned
+incomplete empty output; actual failure still requires eligible accepted output
+for recovery. All 873 focused engine/Hyperliquid/Binance tests passed before the
+last two review-requested controls; final history/strict gates and tests/docs
+review precede publication. Actual #1762 integration and fresh post-sort-baseline
+CI/proof remain required before final guard; all prior history CI watches continue.
+
+Hyperliquid final local receipt: all 22 history tests pass, including both final
+review suggestions. Strict all-target Clippy, fmt, bans and diff checks pass.
+Both independent final tests/docs reviews are CLEAN; source remains the reviewed
+shared-owner adoption. No local release-WASM, full replay or timing run. Final
+publication integrates actual #1762; fresh CI and post-sort-baseline proof remain
+required, alongside the existing queued history merge order.
