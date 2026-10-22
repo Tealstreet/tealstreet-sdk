@@ -266,3 +266,14 @@ Then prove a valid smaller group still admits. Real engine tests cover old
 preparation/permit/retry/fact/diagnostic callbacks, no-delivery root after cleanup
 and exact child credential/pacing/deadline bounds. Cleanup remains once-only.
 Independent plan review CLEAN with these constraints, architecture No.
+
+Local registry WIP checkpoint before returning to the core dependency: the
+context-bearing atomic bridge and exact-root retention compile, and all13
+replacement tests pass (five registry controls plus eight pure journal tests).
+Coverage includes invalid nth policy, foreign/sibling/expired delivery, active
+context and journal capacity rollback, unchanged native parent fact on refusal,
+shortened child bounds, superseded delivery versus logical root completion and
+checked allocator exhaustion. This is not the completed registry phase: real
+Engine prepare/bind/final-claim controls and final independent audit remain
+pending. No ordinary Bybit production edit, push or PR; its original gateway
+regression remains intentionally RED. Priority switches to #1741 as #1757 lands.

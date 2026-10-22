@@ -215,6 +215,9 @@ impl Context {
     pub fn deadline(&self) -> f64 {
         self.deadline
     }
+    pub(crate) fn pacing(&self) -> Option<Pacing> {
+        self.pacing
+    }
 
     pub fn with_retry(mut self, policy: RetryPolicy) -> Result<Self, Error> {
         if policy == RetryPolicy::ReadFailure && self.operation != Operation::Read {
@@ -1006,6 +1009,12 @@ impl CommandWrites {
         self.legs
             .iter()
             .any(|entry| entry.id == leg && !entry.superseded)
+    }
+
+    pub(crate) fn superseded(&self, leg: u64) -> bool {
+        self.legs
+            .iter()
+            .any(|entry| entry.id == leg && entry.superseded)
     }
 
     fn terminal(&self, attempt: &WriteAttempt) -> bool {
