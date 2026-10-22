@@ -20,6 +20,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/install-yarn/**'
   pull_request:
     paths:
       - 'sdk-rs/**'
@@ -27,6 +28,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/install-yarn/**'
 
 permissions:
   contents: read
@@ -123,6 +125,7 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
+        id: yarn
       - uses: actions/cache@v6
         with:
           path: |
@@ -142,7 +145,11 @@ jobs:
           fi
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
-      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Build every venue family package
         run: corepack yarn rust:build-wasm --families
       - name: Load every family and check venue isolation and size
@@ -176,7 +183,12 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
-      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - uses: actions/download-artifact@v8
         with:
           pattern: browser-wasm-*
@@ -316,6 +328,7 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
+        id: yarn
       - uses: actions/cache@v6
         with:
           path: |
@@ -333,7 +346,11 @@ jobs:
           fi
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
-      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Rust book delta wire through the JS decoder and SDK
         if: matrix.venue == 'binance'
         run: corepack yarn rust:test-frame-wire

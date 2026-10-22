@@ -1106,6 +1106,20 @@ Futures matches TS on nearly every input; no high regression.
 
 ### Orderly and TxFlow (already default to Rust)
 TxFlow loses nothing (master TS was a placeholder).
+- ~~High (Orderly WS): one malformed position/execution row starves later healthy
+  rows; terminal algo effects can cancel cached siblings before a bad child is
+  rejected; an invalid execution price advances the cumulative watermark and
+  loses a later corrected fill.~~ Complete raw-container validation and native
+  pure preparation now precede shared engine RowAdmission and all terminal/fill
+  commits. Known rejected rows retain state, unknown identity never grants
+  absence, healthy neighbors progress and each bad native row reports once.
+  Regressions cover root-only symbol and inherited-parent binding, sparse/root
+  controls, sequence fences, cumulative correction and structural inertness.
+  This introduces no caller API change. Shared cumulative execution preparation
+  across eleven public-Fill crates plus ApeX synthetic-history progress is
+  separately assigned to the next engine cumulative-fill choke point before the
+  reporting/fan-out and snapshot-token phases. ApeX cumulative reports do not
+  emit public Fill. This Orderly repair does not claim the other paths are fixed.
 - ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
 - Low: ~~one bad market row or unknown order row fails closed~~ (stale:

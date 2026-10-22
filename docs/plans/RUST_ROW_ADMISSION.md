@@ -221,3 +221,139 @@ that evidence is historical. Fresh integrated-head CI/raw comparison is required
 against source-equivalent #1710 CI `39710315859` (head `8dce0521f7e`). The owner
 granted #1711 a source priority window through this refresh; release on actual
 verified merge. This changes sequencing/evidence only, not row behavior.
+
+
+## Phase 2 merged receipt
+
+Actual #1711 `bd1a69072c7edf66ea78107c62bb96bd162c17c8`, frozen green head
+`ce72f589e42f0e8aa7acee440e033dbe6f66119d`, Rust CI `39711922765`.
+All43 applicable checks succeeded; browser PR job intentionally skipped. Fresh
+184/184 complete outputs (92 Rust,29 workloads,72 stable groups) equal the
+source-equivalent actual #1710 baseline CI `39710315859`, excluding only
+top-level metrics. Full identities/requests/receipts/checkpoints and ordered
+diagnostics are unchanged:6 PASS/23 known FAIL. Independent raw/body review
+CLEAN; separate exact-four-file guard preceded separate merge. Actual parents
+[1910baa65a3,ce72f589e42] and whole tree match; incoming files preserved.
+Corepack's initial registry HTTP503 failed before tests; the unchanged-head
+retry succeeded. No gate was waived.
+
+## Phase 3: Orderly keyed WS admission
+
+Base actual #1711 `bd1a69072c7e`; fresh branch
+`feat/rust-row-admission-orderly-ws`. Commit/review this plan before tests/code.
+Finish this and every remaining keyed admission consumer before the snapshot
+freshness token. Use existing engine `RowAdmission`; no local rejection
+collector, copied shared policy, frame-wide conflict rule or new repair loop.
+
+Validate the complete envelope and raw container before financial effects.
+PositionPush will hold borrowed RawValue elements; execution data accepts one
+object or a complete raw array. Broken JSON, wrong list/container types and
+duplicate required wrapper fields stay structural/inert. Decode/map each row
+once, recover native identity if possible, then engine-admit it. A rejected row
+retains its current copy; healthy neighbors continue. Process deltas sequentially
+in native order so accepted earlier updates are visible to later same-ID rows;
+a valid row can heal a rejection, and a later rejection retains the accepted row.
+
+Split execution preparation from mutation. Pure native preparation validates
+all fallible mapping and supplied root/symbol/child identities and returns an
+owned sparse-terminal or borrowed-row mapped decision. Only engine-admitted
+decisions may commit root stamps/tombstones, child states, proofs/revisions or
+execution bookkeeping. Legitimate sparse leaves and empty root-container
+controls remain valid without fabricated working economics. Reject a malformed
+native nested tree as one row, with one coded row.skipped diagnostic.
+
+Preserve normal mapped execution processing before display freshness, so late
+fills survive; sparse terminal executions retain their separate existing stamp
+gate. Preserve root cascades, BRACKET boundaries, source stamps, amend/margin
+proofs, terminal caches and bounded reconciliation. Position mapping stays pure;
+only admitted rows update stamps/revision/store. Unknown identity never grants
+absence; explicit valid zero/terminal semantics remain native. No synthetic
+fills, global rejection revision increments or per-row network repair.
+
+A separate read-only finding at account.rs1393-1430 writes a cumulative execution
+watermark before validating execution price. First demonstrate actual fill loss
+with a native RED control on original source, then report cause/scope and obtain
+the architecture decision before changing that helper. Do not silently widen
+this migration into a new fill contract or per-venue financial policy.
+
+Likely files: Orderly account.rs, wire.rs, tests/account.rs, this existing plan
+and quality/audit ledger. No signer/request/dispatch/host/SDK/clock, fixtures,
+manifest, normalizer, workflow or caller contract changes. If a general staging
+policy proves necessary, stop/report and extend the engine first.
+
+RED controls: malformed first/middle/last position and normal/algo execution
+rows, decode and mapping errors with healthy later peers; malformed terminal
+root with invalid child identity/side must preserve siblings/proofs/tombstones
+and permit a later lower-sequence valid report; same-ID valid/invalid ordering;
+structural-container inertness; no fabricated fills/writes; row.skipped once.
+Retain existing root-before-children/cascade, sparse/BRACKET, late/duplicate-fill
+and stale-order regressions. Old-source failures must be assertions, not compile
+errors. Verify focused Orderly+Binance native tests (engine if changed), strict
+Clippy/fmt/bans and root typecheck/lint with CARGO_BUILD_JOBS=4. CI owns release,
+size, timing and strict full replays. Archived Orderly15+Binance9 =24 cases/138
+outputs/69 Rust, complete IDs/requests/receipts/checkpoints/ordered diagnostics,
+only top metrics excluded. Healthy fixtures should be byte-identical; any
+intended change needs exact reviewed fix evidence, never wider allowances.
+
+Independent plan/code/adversarial/final evidence reviews answer the architecture
+gate. Full green exact head, fresh guard and separate merge, actual merge audit
+and Aimux report. No live capture or local release/replay/load/timing sweep.
+
+
+Phase-3 independent plan review CLEAN at `be4228c19c6` before tests/code.
+Owner approved the demonstrated Orderly financial validation in this phase:
+validate supplied quantities/prices before root/total/dedup effects, then engine
+admission. Native original-source control loses a0.25 cumulative-only corrected
+fill after an invalid price consumed its watermark. Ten new admission tests run
+on actual #1711 source compile and yield nine assertion failures and one passing
+structural control; the reviewed implementation passes all35 account tests.
+Two adversarial follow-ups separately proved wrong-symbol root-only cascades and
+inherited foreign-parent rebinding RED before repair. Lower-sequence valid roots
+and absent-symbol/root-before-children controls remain accepted.
+
+Architecture follow-on decision: independent read-only inventory found twelve
+Rust venue crates deriving incremental quantity from cumulative deltas, including
+Orderly (eleven others: Bitunix, Bybit/Hyro, Bitget, Coinbase, WOO, BloFin, BingX,
+Bitrue, ApeX, AsterDEX and Kraken Spot). KuCoin Spot also has an unsubtracted
+cumulative-size fallback; Binance uses cumulative progress for dedup but emits
+direct last quantity; OKX emits direct fill size. Therefore validated cumulative
+preparation/commit is cross-cutting and belongs in one engine helper folded into
+the later snapshot commit/freshness-token work. Do not fix those other venues
+individually here. Hyro/ApeX/Bitget validation-order candidates are source-only
+findings, not RED-proven financial defects. This approved Orderly native repair
+does not establish a new shared fill contract or finish that follow-on.
+
+Final local phase-3 readiness:400 Orderly/Binance native tests pass, including
+37 account tests and explicit normal late-unique-fill versus sparse-terminal
+stamp-gate controls. Strict touched-crate all-target Clippy/fmt/bans,44 root
+typecheck and28 lint tasks pass. Independent code/adversarial review CLEAN;
+architecture answer No for this approved shared-boundary adoption. Full exact-
+head CI, current dependency integration and all138 archived outputs remain
+pending; local results do not claim them or complete the other keyed consumers.
+
+Latest owner sequencing decision (supersedes the earlier bundled-helper order):
+after this Orderly WS PR, build the cumulative-fill derivation engine choke point
+first, proving source-only financial-loss candidates before repairs; then extend
+persistent row reporting and migrate its remaining consumers; finally implement
+the snapshot commit/freshness token. The twelve-crate inventory includes eleven
+public cumulative-derived Fill paths plus ApeX synthetic execution/history
+progress; ApeX cumulative orders intentionally do not emit public Fill. Preserve
+that settled distinction and do not fabricate a public-fill RED claim there.
+
+Dependency refresh: actual infra #1713 `04bec2ac52ff295ad94f912145269feefc142197`
+was integrated by clean porcelain merge `134bcf0ec797`. All eight incoming files
+and six owned-file blobs were preserved; exact six-file scope against landing.
+Initial head `148c941fed6` suffered four unrelated Corepack registry503 failures
+before replay; its complete Orderly48-output comparison is unchanged. Initial
+CI is historical iteration evidence; final actual clock/workflow dependencies,
+full green head and complete138-output proof still gate merge.
+
+Clock refresh: actual #1709 `6f815755c37de240d1a87bfec6edc1e4d4c8b614`
+was integrated by clean porcelain merge `3a80a651c8b7`. Exact six-file scope
+survives against that landing: all nonshared incoming/owned blobs and both quality
+hunks are preserved, with the three reviewed source/test blobs unchanged. Final
+proof baseline is clock CI `39714718741`, head `07cd88601774`, whose tree equals
+the actual clock merge. Owner queue is history #1712 first, then this PR; signer
+and install-retry infra follow-up hold. The owner permits a clean trial against
+actual #1712 only if its real diff and dependency review show no overlap with
+this change; otherwise integrate it and refresh normally. No general waiver.

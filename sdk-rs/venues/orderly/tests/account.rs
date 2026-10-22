@@ -1187,3 +1187,372 @@ fn skipped_position_rows_keep_the_balance_updating() {
         (2500.0, 6500.0, 8000.0)
     );
 }
+
+fn skipped_rows(out: &[Action]) -> usize {
+    out.iter()
+        .filter(|a| {
+            matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::ROW_SKIPPED)
+        })
+        .count()
+}
+
+#[test]
+fn ws_admission_positions_isolates_bad_rows_in_every_array_slot() {
+    for bad in [
+        r#"{"symbol":"PERP_BTC_USDC","positionQty":"broken","marginMode":"ISOLATED","seq":100}"#,
+        r#"{"symbol":"PERP_BTC_USDC","positionQty":3,"marginMode":"INVALID","seq":100}"#,
+        r#"{"positionQty":3,"marginMode":"CROSS","seq":100}"#,
+    ] {
+        for slot in 0..3 {
+            let (mut e, socket) = ready();
+            actions(&mut e);
+            let isolated = e
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.id == "BTCUSDC:isolated")
+                .unwrap()
+                .clone();
+            let mut rows = vec![
+                r#"{"symbol":"PERP_BTC_USDC","positionQty":2,"averageOpenPrice":50000,"markPrice":51000,"marginMode":"CROSS","seq":10}"#,
+                r#"{"symbol":"PERP_ETH_USDC","positionQty":3,"averageOpenPrice":2000,"markPrice":2100,"marginMode":"CROSS","seq":10}"#,
+            ];
+            rows.insert(slot, bad);
+            ws(
+                &mut e,
+                socket,
+                &format!(
+                    r#"{{"topic":"position","ts":3000,"data":{{"positions":[{}]}}}}"#,
+                    rows.join(",")
+                ),
+            );
+            assert_eq!(
+                e.store()
+                    .positions()
+                    .iter()
+                    .find(|p| p.id == "ETHUSDC")
+                    .map(|p| p.contracts),
+                Some(3.0),
+                "slot{slot}: {bad}"
+            );
+            assert_eq!(
+                e.store()
+                    .positions()
+                    .iter()
+                    .find(|p| p.id == "BTCUSDC")
+                    .unwrap()
+                    .contracts,
+                2.0
+            );
+            assert_eq!(
+                e.store()
+                    .positions()
+                    .iter()
+                    .find(|p| p.id == "BTCUSDC:isolated")
+                    .unwrap(),
+                &isolated
+            );
+            assert_eq!(skipped_rows(&actions(&mut e)), 1);
+            assert!(fill_amounts(&mut e).is_empty());
+        }
+    }
+}
+
+#[test]
+fn ws_admission_executions_isolates_bad_rows_in_every_array_slot() {
+    for algo in [false, true] {
+        let topic = if algo {
+            "algoexecutionreportv2"
+        } else {
+            "executionreport"
+        };
+        let id = if algo { "algoOrderId" } else { "orderId" };
+        let fields = if algo {
+            r#", "algoType":"STOP_LOSS","triggerPrice":49000"#
+        } else {
+            ""
+        };
+        let good = |n, price| {
+            format!(
+                r#"{{"{id}":{n},"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":{price},"quantity":1,"seq":10{fields}}}"#
+            )
+        };
+        for bad in [
+            format!(r#"{{"{id}":3,"quantity":"broken"}}"#),
+            good(3, 50000).replace("BUY", "INVALID"),
+        ] {
+            for slot in 0..3 {
+                let (mut e, socket) = ready();
+                actions(&mut e);
+                let mut rows = vec![good(1, 50001), good(2, 50002)];
+                rows.insert(slot, bad.clone());
+                ws(
+                    &mut e,
+                    socket,
+                    &format!(
+                        r#"{{"topic":"{topic}","ts":3000,"data":[{}]}}"#,
+                        rows.join(",")
+                    ),
+                );
+                for n in ["1", "2"] {
+                    assert!(
+                        e.store().orders().iter().any(|o| o.id == n),
+                        "{topic} slot{slot}: {bad}"
+                    );
+                }
+                assert!(!e.store().orders().iter().any(|o| o.id == "3"));
+                assert_eq!(skipped_rows(&actions(&mut e)), 1);
+                assert!(fill_amounts(&mut e).is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn ws_admission_invalid_terminal_root_cannot_poison_child_or_lower_sequence() {
+    let algos = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","margin_mode":"CROSS","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"quantity":1},{"algo_order_id":102,"root_algo_order_id":100,"algo_type":"TAKE_PROFIT","side":"SELL","algo_status":"NEW","trigger_price":55000,"quantity":1}]}]"#;
+    let (mut e, socket) = ready_with(ORDER, algos, POSITIONS);
+    actions(&mut e);
+    let before = e.store().orders().to_vec();
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":9000,"data":{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","algoStatus":"CANCELLED","rootAlgoStatus":"CANCELLED","side":"INVALID","seq":100}}"#,
+    );
+    assert_eq!(
+        e.store().orders(),
+        before.as_slice(),
+        "rejected leaf changed its root siblings"
+    );
+    assert_eq!(skipped_rows(&actions(&mut e)), 1);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":102,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","triggerPrice":56000,"quantity":1,"seq":10}}"#,
+    );
+    let peer = e.store().orders().iter().find(|o| o.id == "102").unwrap();
+    assert_eq!(peer.status, safe_cex_engine::model::OrderStatus::Open);
+    assert_eq!(
+        peer.price, 56000.0,
+        "rejected root installed a terminal tombstone"
+    );
+    assert!(fill_amounts(&mut e).is_empty());
+}
+
+#[test]
+fn ws_admission_rejected_execution_price_does_not_consume_cumulative_fill() {
+    let (mut e, socket) = ready();
+    actions(&mut e);
+    e.take_frame(2000.0);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"executionreport","ts":3000,"data":{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":50000,"quantity":1,"totalExecutedQuantity":0.25,"averageExecutedPrice":50000,"executedPrice":-1,"seq":10}}"#,
+    );
+    assert!(fill_amounts(&mut e).is_empty());
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"executionreport","ts":3001,"data":{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":50000,"quantity":1,"totalExecutedQuantity":0.25,"averageExecutedPrice":50000,"seq":11}}"#,
+    );
+    assert_eq!(
+        fill_amounts(&mut e),
+        [0.25],
+        "rejected price consumed cumulative fill watermark"
+    );
+}
+
+#[test]
+fn ws_admission_same_id_valid_and_invalid_rows_follow_native_order() {
+    for bad_first in [false, true] {
+        let (mut e, socket) = ready();
+        actions(&mut e);
+        let good = r#"{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":51000,"quantity":1,"seq":10}"#;
+        let bad = good.replace("BUY", "INVALID").replace("51000", "52000");
+        let rows = if bad_first {
+            format!("{bad},{good}")
+        } else {
+            format!("{good},{bad}")
+        };
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"topic":"executionreport","ts":3000,"data":[{rows}]}}"#),
+        );
+        assert_eq!(e.store().orders()[0].price, 51000.0);
+        assert_eq!(skipped_rows(&actions(&mut e)), 1);
+        assert!(fill_amounts(&mut e).is_empty());
+    }
+}
+
+#[test]
+fn ws_admission_structural_errors_are_inert_before_the_first_row() {
+    let good = r#"{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":51000,"quantity":1,"seq":10}"#;
+    let position = r#"{"symbol":"PERP_BTC_USDC","positionQty":3,"marginMode":"CROSS","seq":10}"#;
+    for frame in [
+        format!(r#"{{"topic":"executionreport","ts":3000,"data":[{good},"#),
+        format!(r#"{{"topic":"executionreport","topic":"executionreport","data":[{good}]}}"#),
+        format!(
+            r#"{{"topic":"position","ts":3000,"data":{{"positions":[{position}],"positions":[]}}}}"#
+        ),
+        format!(r#"{{"topic":"position","ts":3000,"data":{{"positions":{{"row":{position}}}}}}}"#),
+        r#"{"topic":"executionreport","data":7}"#.into(),
+    ] {
+        let (mut e, socket) = ready();
+        actions(&mut e);
+        let orders = e.store().orders().to_vec();
+        let positions = e.store().positions().to_vec();
+        ws(&mut e, socket, &frame);
+        assert_eq!(e.store().orders(), orders.as_slice(), "{frame}");
+        assert_eq!(e.store().positions(), positions.as_slice(), "{frame}");
+        assert_eq!(
+            skipped_rows(&actions(&mut e)),
+            0,
+            "structural failure became a row diagnostic"
+        );
+        assert!(fill_amounts(&mut e).is_empty());
+    }
+}
+
+#[test]
+fn ws_admission_bad_nested_root_does_not_commit_its_valid_child() {
+    let (mut e, socket) = ready();
+    actions(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"NEW","childOrders":[{"algoOrderId":101,"rootAlgoOrderId":100,"algoType":"STOP_LOSS","side":"SELL","algoStatus":"NEW","triggerPrice":49000,"quantity":1},{"algoOrderId":102,"rootAlgoOrderId":100,"algoType":"TAKE_PROFIT","side":"INVALID","algoStatus":"NEW","triggerPrice":55000,"quantity":1}]}}"#,
+    );
+    assert!(
+        !e.store()
+            .orders()
+            .iter()
+            .any(|o| o.id == "101" || o.id == "102")
+    );
+    assert_eq!(skipped_rows(&actions(&mut e)), 1);
+    assert!(fill_amounts(&mut e).is_empty());
+}
+
+#[test]
+fn ws_admission_all_supplied_execution_economics_validate_before_terminal_effects() {
+    for field in [
+        "\"executedQuantity\":-0.25",
+        "\"totalExecutedQuantity\":-0.25",
+        "\"executedPrice\":-1",
+        "\"averageExecutedPrice\":-1",
+    ] {
+        let algos = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"quantity":1}]}]"#;
+        let (mut e, socket) = ready_with(ORDER, algos, POSITIONS);
+        actions(&mut e);
+        let before = e.store().orders().to_vec();
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"topic":"algoexecutionreportv2","ts":9000,"data":{{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":100,{field}}}}}"#
+            ),
+        );
+        assert_eq!(e.store().orders(), before.as_slice(), "{field}");
+        assert_eq!(skipped_rows(&actions(&mut e)), 1);
+        assert!(fill_amounts(&mut e).is_empty());
+    }
+}
+
+#[test]
+fn ws_admission_root_only_symbol_must_match_its_cached_descendants() {
+    let algos = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"quantity":1}]}]"#;
+    for symbol in ["PERP_ETH_USDC", "broken"] {
+        let (mut e, socket) = ready_with(ORDER, algos, POSITIONS);
+        actions(&mut e);
+        let before = e.store().orders().to_vec();
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"topic":"algoexecutionreportv2","ts":9000,"data":{{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"{symbol}","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":100}}}}"#
+            ),
+        );
+        assert_eq!(
+            e.store().orders(),
+            before.as_slice(),
+            "wrong-symbol root canceled cached descendants"
+        );
+        assert_eq!(skipped_rows(&actions(&mut e)), 1);
+        // Missing optional symbol remains a valid native root-only control.
+        ws(
+            &mut e,
+            socket,
+            r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":10}}"#,
+        );
+        assert_eq!(
+            e.store()
+                .orders()
+                .iter()
+                .find(|o| o.id == "101")
+                .unwrap()
+                .status,
+            safe_cex_engine::model::OrderStatus::Canceled
+        );
+    }
+}
+
+#[test]
+fn ws_admission_nested_child_cannot_change_its_inherited_root() {
+    let algos = r#"[{"algo_order_id":200,"root_algo_order_id":200,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","child_orders":[{"algo_order_id":201,"root_algo_order_id":200,"algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"quantity":1}]}]"#;
+    let (mut e, socket) = ready_with(ORDER, algos, POSITIONS);
+    actions(&mut e);
+    let before = e.store().orders().to_vec();
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":9000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"NEW","seq":100,"childOrders":[{"algoOrderId":201,"algoType":"STOP_LOSS","side":"SELL","algoStatus":"NEW","triggerPrice":48000,"quantity":1}]}}"#,
+    );
+    assert_eq!(
+        e.store().orders(),
+        before.as_slice(),
+        "cached child moved to an inherited foreign root"
+    );
+    assert_eq!(skipped_rows(&actions(&mut e)), 1);
+}
+
+#[test]
+fn ws_admission_late_unique_fill_survives_the_order_display_fence() {
+    let (mut e, socket) = ready();
+    actions(&mut e);
+    e.take_frame(2000.0);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"executionreport","ts":4000,"data":{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":51000,"quantity":1,"seq":20}}"#,
+    );
+    let late = r#"{"topic":"executionreport","ts":3000,"data":{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":50000,"quantity":1,"totalExecutedQuantity":0.25,"executedQuantity":0.25,"executedPrice":50001,"tradeId":12,"seq":10}}"#;
+    ws(&mut e, socket, late);
+    assert_eq!(fill_amounts(&mut e), [0.25]);
+    assert_eq!(e.store().orders()[0].price, 51000.0);
+    assert_eq!(e.store().orders()[0].filled, 0.0);
+    ws(&mut e, socket, late);
+    assert!(fill_amounts(&mut e).is_empty());
+}
+
+#[test]
+fn ws_admission_sparse_terminal_retains_its_separate_execution_stamp_gate() {
+    let algos = r#"[{"algo_order_id":101,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"quantity":1}]"#;
+    let (mut e, socket) = ready_with(ORDER, algos, POSITIONS);
+    actions(&mut e);
+    e.take_frame(2000.0);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":4000,"data":{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","side":"SELL","algoStatus":"NEW","triggerPrice":50000,"quantity":1,"seq":20}}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","side":"SELL","algoStatus":"FILLED","totalExecutedQuantity":0.25,"executedQuantity":0.25,"executedPrice":49000,"seq":10}}"#,
+    );
+    let order = e.store().orders().iter().find(|o| o.id == "101").unwrap();
+    assert_eq!(order.status, safe_cex_engine::model::OrderStatus::Open);
+    assert_eq!(order.price, 50000.0);
+    assert!(fill_amounts(&mut e).is_empty());
+}
