@@ -156,6 +156,14 @@ Medium:
    stored copy and logs once (Error when none is kept); snapshots still hold
    while discovery or the catalogue is incomplete, and structural failures stay
    fatal. Skips are coded `row.skipped` notices.
+   Standardization continues in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md):
+   `RowAdmission` now owns bounded coverage, unknown/overflow conflict policy,
+   silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
+   compatibility alias. Bybit and Bitunix use the shared collector without
+   changing their scoped freshness/lineage rules. Existing helpers' presence
+   does not prove every keyed REST/WS call site is migrated: Bitget/Orderly and
+   the remaining inventory are follow-up phases. Snapshot commits retain the
+   current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every

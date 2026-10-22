@@ -5,6 +5,7 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::Level;
+use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus,
@@ -29,44 +30,6 @@ const EXECUTION_CACHE_LIMIT: usize = 4096;
 const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
 /// Reject reasons that are the user's own cancel, not an error.
 const QUIET_REJECT_REASONS: [&str; 2] = ["EC_PerCancelRequest", "EC_NoError"];
-
-/// Retain rejected identities without treating them as authoritative settings.
-#[derive(Clone, Default)]
-pub struct RejectedRows {
-    keys: HashSet<String>,
-    unidentified: bool,
-    overflowed: bool,
-}
-impl RejectedRows {
-    fn reject(&mut self, key: Option<String>) {
-        match key {
-            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
-                self.keys.insert(key);
-            }
-            Some(_) => {
-                self.unidentified = true;
-                self.overflowed = true;
-            }
-            None => self.unidentified = true,
-        }
-    }
-    fn extend(&mut self, other: Self) {
-        self.unidentified |= other.unidentified;
-        self.overflowed |= other.overflowed;
-        for key in other.keys {
-            self.reject(Some(key));
-        }
-    }
-    fn holds(&self, key: &str) -> bool {
-        self.unidentified || self.keys.contains(key)
-    }
-    fn conflicts(&self, key: &str) -> bool {
-        self.overflowed || self.keys.contains(key)
-    }
-    fn any(&self) -> bool {
-        self.unidentified || !self.keys.is_empty()
-    }
-}
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +99,7 @@ pub enum Request {
         rows: Vec<Mapped>,
         unsupported: Vec<String>,
         invalid: bool,
-        rejected: RejectedRows,
+        rejected: RowAdmission<String>,
     },
     Positions {
         generation: u32,
@@ -144,7 +107,7 @@ pub enum Request {
         cursor: String,
         rows: Vec<MappedPosition>,
         invalid: bool,
-        rejected: RejectedRows,
+        rejected: RowAdmission<String>,
     },
     Wallet {
         session: u32,
@@ -198,7 +161,7 @@ struct PositionsJoin {
     pending: usize,
     rows: Vec<MappedPosition>,
     failed: bool,
-    rejected: RejectedRows,
+    rejected: RowAdmission<String>,
     cursors: HashSet<String>,
 }
 
@@ -210,7 +173,7 @@ struct OrdersJoin {
     rows: Vec<Mapped>,
     unsupported: Vec<String>,
     failed: bool,
-    rejected: RejectedRows,
+    rejected: RowAdmission<String>,
     cursors: HashSet<String>,
 }
 
@@ -1455,7 +1418,7 @@ impl BybitLinear {
             rows: Vec::new(),
             unsupported: Vec::new(),
             invalid: false,
-            rejected: RejectedRows::default(),
+            rejected: RowAdmission::default(),
         };
         self.send(
             cx,
@@ -1483,7 +1446,7 @@ impl BybitLinear {
             cursor,
             rows: Vec::new(),
             invalid: false,
-            rejected: RejectedRows::default(),
+            rejected: RowAdmission::default(),
         };
         self.send(
             cx,
@@ -1507,7 +1470,7 @@ impl BybitLinear {
             rows: Vec::new(),
             unsupported: Vec::new(),
             failed: false,
-            rejected: RejectedRows::default(),
+            rejected: RowAdmission::default(),
             cursors: HashSet::new(),
         });
         for coin in coins {
@@ -1532,7 +1495,7 @@ impl BybitLinear {
             pending: coins.len(),
             rows: Vec::new(),
             failed: false,
-            rejected: RejectedRows::default(),
+            rejected: RowAdmission::default(),
             cursors: HashSet::new(),
         });
         for coin in coins {
@@ -1781,14 +1744,14 @@ impl BybitLinear {
                         join.rejected.reject(None);
                     }
                     self.account.orders_follow_up |= self.account.orders.is_some();
-                    cx.notice(
+                    row_skipped(
+                        cx,
                         Level::Warn,
-                        code::ROW_SKIPPED,
                         "Bybit malformed order frame; reconciliation scheduled",
                     );
                     return;
                 };
-                let mut rejected = RejectedRows::default();
+                let mut rejected = RowAdmission::default();
                 let mut admitted = Vec::new();
                 for raw in &frame.data {
                     let Ok(row) = serde_json::from_str::<OrderRow>(raw.get()) else {
@@ -1880,14 +1843,14 @@ impl BybitLinear {
                     if let Some(join) = &mut self.account.positions {
                         join.rejected.reject(None);
                     }
-                    cx.notice(
+                    row_skipped(
+                        cx,
                         Level::Warn,
-                        code::ROW_SKIPPED,
                         "Bybit malformed position frame; awaiting reconciliation",
                     );
                     return;
                 };
-                let mut rejected = RejectedRows::default();
+                let mut rejected = RowAdmission::default();
                 let mut admitted = Vec::new();
                 for raw in &frame.data {
                     let Ok(row) = serde_json::from_str::<PositionRow>(raw.get()) else {
@@ -1914,7 +1877,7 @@ impl BybitLinear {
                 }
                 admitted.retain(|row| {
                     !rejected.conflicts(row.symbol.as_ref())
-                        && (!rejected.unidentified
+                        && (!rejected.unidentified()
                             || !cx.store.positions().iter().any(|old| {
                                 let mode = row.position_idx.map(|idx| {
                                     if idx == 0 {
@@ -2214,7 +2177,7 @@ impl BybitLinear {
     fn reject_order_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        rejected: &mut RejectedRows,
+        rejected: &mut RowAdmission<String>,
         item: &str,
     ) {
         let identity = rejected_identity(item);
@@ -2229,14 +2192,13 @@ impl BybitLinear {
                 .filter(|v| !v.is_empty())
                 .and(r.order_id.filter(|v| !v.is_empty()))
         });
-        rejected.reject(key);
-        cx.notice(Level::Warn, code::ROW_SKIPPED, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
+        rejected.skip(cx, key, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
         self.account.orders_stale = true;
     }
     fn reject_position_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        rejected: &mut RejectedRows,
+        rejected: &mut RowAdmission<String>,
         item: &str,
     ) {
         let identity = rejected_identity(item);
@@ -2246,10 +2208,10 @@ impl BybitLinear {
         {
             return;
         }
-        rejected.reject(identity.and_then(|r| r.symbol.filter(|v| !v.is_empty())));
-        cx.notice(
+        rejected.skip(
+            cx,
+            identity.and_then(|r| r.symbol.filter(|v| !v.is_empty())),
             Level::Warn,
-            code::ROW_SKIPPED,
             "Bybit malformed position row; cached symbol exposure retained until reconciliation",
         );
     }
@@ -2649,7 +2611,7 @@ impl BybitLinear {
             .rows
             .iter()
             .map(|r| parent_order_id(&r.orders[0].id))
-            .filter(|id| !join.rejected.conflicts(id))
+            .filter(|id| !join.rejected.conflicts(*id))
             .map(str::to_owned)
             .collect();
         self.account.position_bound.retain(|id| {
@@ -2719,9 +2681,9 @@ impl BybitLinear {
                 merged.push(order.clone());
             }
             if self.account.unsupported_logged.insert(id.clone()) {
-                cx.notice(
+                row_skipped(
+                    cx,
                     Level::Error,
-                    code::ROW_SKIPPED,
                     if known.is_some() {
                         format!(
                             "Bybit order {id} has an unsupported type; its last known state is kept"
@@ -2816,7 +2778,7 @@ impl BybitLinear {
         );
         // Unknown neighbors cannot prove a same-symbol mode transition. Keep
         // that symbol coherent while unrelated authoritative symbols progress.
-        if join.rejected.unidentified {
+        if join.rejected.unidentified() {
             best.retain(|r| {
                 !cx.store.positions().iter().any(|old| {
                     old.symbol == r.position.symbol && old.position_mode != r.position.position_mode
