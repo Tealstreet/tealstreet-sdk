@@ -80,8 +80,8 @@ of checking `options.key`. Raw legacy native/WASM input is a trusted compatibili
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
 
-For dispatch-signing families, browser-facing `signHttpRequest` and `signWsAuth`
-use the same owned provider through bounded signing-only captures, without
+For families with enabled hosted-signing admission, browser-facing `signHttpRequest`
+and `signWsAuth` use the same owned provider through bounded signing-only captures, without
 starting account discovery or venue transport work. The default synchronized
 clock can still initialize its existing time-source calibration. The original HTTP config/WS response
 wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
@@ -90,6 +90,9 @@ signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
+A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
+its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
+The BingX native checkpoint keeps hosted admission disabled until those gates.
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary

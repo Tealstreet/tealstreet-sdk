@@ -697,6 +697,22 @@ impl History {
         }
     }
 
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Some(timer) = self
+            .reads
+            .remove(&request.command)
+            .and_then(|read| read.timer)
+        {
+            cx.clear_timer(timer);
+        }
+        cx.fail(request.command, error);
+    }
+
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         self.reads.remove(&request.command);
         cx.fail(request.command, error.to_owned());

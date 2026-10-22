@@ -1041,6 +1041,38 @@ impl Venue for Bingx {
             ),
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        mut error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Signed(signed) => {
+                if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
+                    // Only the retry was refused before release. The original
+                    // write reached the venue, so reconciliation is still required.
+                    error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                }
+                self.on_sign_error(cx, signed.inner, error);
+            }
+            Pending::Identity(command) => {
+                cx.command_error(command, &error.message);
+                cx.fail(command, error);
+            }
+            Pending::History(request) => self.history.on_sign_failed(cx, request, error),
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
+            }
+            Pending::Account(request) => {
+                if let Some(credentials) = &self.credentials {
+                    self.account.on_sign_failed(cx, request, error, credentials);
+                }
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let discovery = matches!(
             &pending,

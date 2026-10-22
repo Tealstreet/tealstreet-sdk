@@ -131,3 +131,26 @@ independent full-tree preservation review pass. No hosted admission is enabled.
 Architecture gate: pending-owner adapters consume the shared signer failure,
 using existing recovery/outcome state only. Shared outcome consolidation belongs
 to RequestContext, not a new BingX implementation.
+
+Checkpoint evidence: the unchanged resumed implementation reproduced five typed
+owner failures (identity, history, metadata, first unsent write and signed retry)
+and a stale-reservation cleanup failure at runtime; compatibility controls passed.
+The owner adapters correct those controls without changing native success bytes.
+The migration ban now scans BingX sign modules, and its exact allowance shrinks
+517 to 508, equal to the scan. The two retained HMAC entries are work-builder
+descriptors with opaque refs and no secret access; existing test-only crypto is
+outside production venue source. All non-BingX allowance values are unchanged.
+Caller scope is recorded in RUST_CUTOVER_CALLERS.md; hosted admission remains off.
+
+Final focused validation: all BingX/Binance native targets passed (459 tests before
+the added late controls); the final BingX owner suites pass 27 tests, including
+12 actual-engine provider cases and four account-owner groups. The late controls
+cover both cancellation orders with unclassified HTTP responses, buffered later
+history-page refusal, exact retry work/progress, released settings reservations,
+and a native WS settings update before typed margin failure. The shared dispatch
+queue remains ordered; no test requires a newer HTTP write to bypass a parked
+older request. Strict Clippy, fmt, signing bans and negative scan tests pass.
+Default-feature registry/generation/provider suites pass 51 tests; the standalone
+BingX registry build passes. Five focused SDK suites pass 105 tests, plus package
+typecheck and lint. Correctness and adversarial reviews cover the adapter and
+late controls; CI, full replay proof and hosted acceptance remain pending.

@@ -3765,3 +3765,36 @@ values come from exact prepared work, owned public identity and its receipt;
 HTTP does not inherit WS metadata or fixed ids even when query bytes coincide.
 Production routing never imports a TS venue class. Wire-comparison tests retain
 the legacy WS methods only as independent test references.
+
+### BingX native dispatch signing and refusal ownership (checkpoint)
+
+The BingX native checkpoint moves HTTP signing and listen-key API-key
+presentation behind the shared host-injected provider. Venue options retain
+opaque primary/secondary refs; generic engine/SDK options retain no signing
+secret. Ordinary GET work uses the secondary identity when present, while writes
+and listen-key creation/renewal select primary. Native sorted query bytes,
+integer protocol stamps, typed POST parameters and API-key/source headers stay
+unchanged. Worker or custom-host callers must provision the shared provider
+where the engine executes; secrets are not copied back into venue objects.
+
+Provider refusal is not a venue authentication response or a signature rejection.
+Identity/history/metadata commands preserve the original typed failure; failed
+history preparation discards buffered results rather than returning success.
+Background read cleanup releases only its captured in-flight reservation, while
+obsolete listen-key epochs cannot retire a replacement session. Existing read
+backoff, metadata publication and private socket ownership policies remain.
+
+A first refused write is `notSent`. After an earlier write or signature retry
+reached the venue, a later refused signer cannot make the whole operation
+`notSent`; uncertain prior effects require reconciliation. Accepted IDs remain
+in the existing partial result, including when another leg fails before send.
+The BingX `Trading::finish`/`advance` finalizer is an explicit RequestContext
+consolidation target alongside Binance and Bybit; this adapter adds no new
+outcome ledger, retry policy or evidence flags.
+
+This is a native checkpoint, not hosted API closure. BingX hosted/keyless
+admission remains disabled pending exact legacy-wire validation and actual
+WASM/SDK acceptance tests. The venue uses hex HMAC and an API key without a
+passphrase, so those checks may use the landed presentation contract; no new
+WS-auth/session ownership is claimed. Existing hosted callers must retain their
+current supported route until the family admission gates are complete.

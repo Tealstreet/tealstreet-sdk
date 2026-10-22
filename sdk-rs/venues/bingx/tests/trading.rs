@@ -71,6 +71,16 @@ impl Venue for TestVenue {
         self.trading
             .on_failed(cx, Some(&self.credentials), request, error);
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let Pending::Trade(request) = pending;
+        self.trading
+            .on_sign_failed(cx, Some(&self.credentials), request, error);
+    }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         self.trading.command(cx, Some(&self.credentials), command);
