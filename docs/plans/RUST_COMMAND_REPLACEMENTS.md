@@ -193,3 +193,35 @@ include active reserved leaves, preserve historical attempt uncertainty, and
 keep child-provider failure after ancestor release Unknown. Root completion/
 registry wiring remains the separately audited next phase. No venue may call
 the pure numeric journal directly; ordinary Bybit uses the context bridge.
+
+Pure implementation audit correction: selected native/fallback PartialIDs keep
+their exact first-occurrence prefix. Append additional facts in replacement
+planning order; do not reorder or recharge retained prefix IDs. Two unchanged
+evidence-budget assertions caught the original ordering change and now pass;
+no assertion was weakened. Oversized replacement child slices are rejected
+before quadratic duplicate validation. Spare-capacity controls distinguish
+revoked-parent retry from an earlier capacity error and cover retried ancestors
+plus replacement-child parked/provider/rejected/accepted retries.
+
+Registry phase authority refinement, independently reviewed before coding:
+retain exact first-issued command-root identity/metadata for generation-bearing
+logical no-delivery timers, including cleanup of expired logical handles. A
+superseded mutation delivery cannot publish diagnostic/result/seal even if its
+caller passes that root authority. Sending/retrying/result/claim authority of a
+root used as the physical parent is revoked while its original no-delivery
+logical timer authority remains. Never clear delivery scope to bypass this.
+Historical native batch diagnostics publish once before replacement commits,
+with explicit empty terminal report metadata, preserving the original error/done
+assertions without duplicate terminal errors. Shared API tests must exercise
+the same Context as root and sent parent, foreign root clones and old callbacks.
+
+Local pure-journal checkpoint: eight new controls plus all464 engine order-lock
+tests and284 Binance tests pass. Strict engine/Binance/Bybit all-target Clippy,
+formatting, bans and11 ratchet adversarial controls pass; independent pure-slice
+review CLEAN, architecture No. A compiled control disabling reserved-leaf
+uncertainty fails exactly Some(Rejected) versus Some(Unknown); exact restored
+source SHA256 3f1fa5d8ee78129a83d67a3f7d9e1c1b260fcc69a6343eef803f5b220461ff41
+and the restored control are GREEN. No old evidence assertion was changed.
+No registry/root-completion/public bridge or native Bybit production migration
+is claimed: the committed native gateway regression intentionally remains RED
+until that adapter phase. Local-only; no PR/push or complete raw/CI proof.
