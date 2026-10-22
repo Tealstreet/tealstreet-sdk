@@ -917,3 +917,17 @@ Expose one additive command_error_context reporter using the existing synchronou
 completion validator; stale/foreign/background authority emits nothing. This
 lets native adapters preserve that ordering without an unchecked numeric report
 or new validation policy. It grants no send permission or deadline extension.
+
+Owner correction for count-mismatched native batch ACKs: retain valid native IDs
+as evidence-only PartialIDs while sealing Unknown, stopping later lots and
+applying nothing to Store/native ownership or caller-leg bindings. Keep the
+existing Coin-M short-ACK ID assertion. Revise the new mismatch control to
+Unknown plus exact native IDs; never invent row-to-caller attribution. Decode
+the array shape/count first, then inspect mismatched rows independently for
+valid positive native order IDs without a refusal code. Keep that evidence
+separate from the normal accepted-ID/planning vector, and submit it only to the
+shared command journal's bounded Failed partial record. Malformed/refused rows
+grant no IDs or success; earlier/native sibling evidence remains intact.
+Regressions cover short/extra rows, malformed/refused siblings, empty mismatch,
+no Store or ownership change, no continuation, and preservation of the original
+short-ACK cancellation/reconciliation identities. Document in the caller section.
