@@ -5,7 +5,7 @@ import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { MarginType, Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -142,6 +142,8 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     expect(getExchangeMetadata('hyrotrader')).toMatchObject({
       positionModes: [PositionMode.OneWay],
       hidePositionModeSelector: true,
+      marginTypes: [MarginType.Cross],
+      hideMarginTypeSelector: true,
       supportsFeeRates: false,
       supportsPositionMargin: false,
     });

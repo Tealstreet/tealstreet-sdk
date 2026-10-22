@@ -399,6 +399,8 @@ const HyrotraderMetadata: ExchangeMetadata = {
   supportsKlineSeconds: false,
   positionModes: [PositionMode.OneWay],
   hidePositionModeSelector: true,
+  marginTypes: [MarginType.Cross],
+  hideMarginTypeSelector: true,
   supportsFeeRates: false,
   supportsPositionMargin: false,
   exchangeName: 'hyrotrader' as ExchangeName,
