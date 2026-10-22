@@ -455,3 +455,32 @@ handle expiry, success sealing before teardown, atomic no-fail release commit,
 real response-size limits and mutation-stream preservation, and late revision
 fencing without extending transport activity. Do not enable mutations before
 those controls pass.
+
+
+### Reconciliation checkpoint implementation contract
+
+The journal checkpoint is c27bf397be1 (386 engine tests, strict Clippy/fmt,
+ban and staged secret checks; independent review CLEAN). Mutation queueing remains
+closed. The next checkpoint introduces a bounded codec-only late-response record:
+256 tombstones; 256 KiB body, 16 KiB headers, 8 KiB opaque UTF-8 codec metadata per
+record; 4 MiB aggregate retained bytes. These are integrity bounds, not new network
+timeouts. Tombstones expire at original raw deadline + 30 s and never emit timers,
+new requests or retry/auth/command/scheduler actions. Streaming mutations are
+rejected before release; complete raw response bytes are retained from first chunk.
+
+A venue supplies a bounded ReconciliationData codec payload from its pending
+continuation at final release; its default is absent, which refuses managed
+mutation release until the adapter declares a reconciliation path. This payload
+must contain only native correlation facts, never outbound URLs, request bodies,
+credentials or signing recipes. The engine retains no generic Pending, HttpRequest
+or SignStep in tombstones. A late complete UTF-8 response consumes the tombstone
+once and calls a separate codec hook with this data and a restricted reconciliation
+view, not Cx. That view exposes read-only Store and revision-fenced order updates;
+it cannot finish commands, clear order locks, authenticate, schedule or retry.
+Any newer Store order mutation invalidates the old response's mutation fence.
+No late ACK clears order-lock uncertainty. Capacity/size/invalid UTF-8 failures
+retire response state without changing a sealed Unknown outcome.
+
+Implementation: pure bounded response/tombstone service and tests first; then
+engine retirement/event wiring and restricted Store revision view; then adversarial
+native lifecycle tests, independent review and only then mutation activation.
