@@ -84,19 +84,33 @@ impl RetryState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpiryPolicy {
+    /// An unanswered issued read is a failed attempt and consumes retry jitter.
+    Retry,
+    /// Replace a lost read immediately, retaining the existing failure count.
+    ReplaceImmediately,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Policy {
+    /// First notification-repair deadline, retained under repeated invalidation.
     pub debounce_ms: f64,
+    /// Poll/startup refresh delay, independent of notification repair timing.
+    pub refresh_debounce_ms: f64,
     /// Bound on a ready reservation which has not reached the network.
     pub admission_timeout_ms: f64,
     /// Bound for the complete logical read, anchored at actual issue.
     pub response_timeout_ms: f64,
+    pub response_expiry: ExpiryPolicy,
     pub retry: RetryPolicy,
 }
 impl Policy {
     fn valid(self) -> bool {
         self.debounce_ms.is_finite()
             && self.debounce_ms >= 0.0
+            && self.refresh_debounce_ms.is_finite()
+            && self.refresh_debounce_ms >= 0.0
             && self.admission_timeout_ms.is_finite()
             && self.admission_timeout_ms > 0.0
             && self.response_timeout_ms.is_finite()
@@ -116,10 +130,25 @@ struct Read<K> {
     key: K,
     group: usize,
     policy: Policy,
+    /// Refresh, retry or revoked-reservation demand. Notifications retain their
+    /// own first deadline, including while this logical read is active.
     pending: Option<f64>,
-    dirty: Option<f64>,
+    /// Fresh demand may advance a notification deadline, never a retry floor.
+    retry_not_before: f64,
+    invalidation_due: Option<f64>,
     active: Option<Active>,
     retry: RetryState,
+}
+
+impl<K> Read<K> {
+    fn due(&self, pause_until: f64) -> Option<f64> {
+        let due = match (self.pending, self.invalidation_due) {
+            (Some(refresh), Some(notification)) => refresh.min(notification),
+            (Some(due), None) | (None, Some(due)) => due,
+            (None, None) => return None,
+        };
+        Some(due.max(self.retry_not_before).max(pause_until))
+    }
 }
 
 struct Group<G> {
@@ -206,7 +235,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             group,
             policy,
             pending: None,
-            dirty: None,
+            retry_not_before: f64::NEG_INFINITY,
+            invalidation_due: None,
             active: None,
             retry: RetryState::default(),
         });
@@ -220,15 +250,24 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter_mut()
             .find(|read| &read.key == key)
             .ok_or(Error::UnknownKey)?;
-        let due = after(now, read.policy.debounce_ms);
-        if read.active.is_some() {
-            if demand == Demand::Invalidate {
-                read.dirty.get_or_insert(due);
+        let due = after(
+            now,
+            match demand {
+                Demand::Refresh => read.policy.refresh_debounce_ms,
+                Demand::Invalidate => read.policy.debounce_ms,
+            },
+        );
+        match demand {
+            Demand::Invalidate => {
+                // Retain the first notification even across raw-clock rollback.
+                read.invalidation_due.get_or_insert(due);
             }
-        } else {
-            // A fresh notification must not move a retry earlier or postpone a
-            // repair. Its pending read will already cover the new demand.
-            read.pending.get_or_insert(due);
+            Demand::Refresh if read.active.is_none() => {
+                // A fresh read covers pending notification demand too. Neither
+                // kind of demand may bypass a separate retry or pause floor.
+                read.pending = Some(read.pending.map_or(due, |old| old.min(due)));
+            }
+            Demand::Refresh => {}
         }
         Ok(())
     }
@@ -252,7 +291,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
                 read.pending = Some(until);
                 // The replacement has not been prepared, so it covers dirty
                 // demand as well. No failed network attempt or jitter draw.
-                read.dirty = None;
+                read.invalidation_due = None;
             }
         }
         Ok(())
@@ -267,8 +306,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
                 if let Some(active) = read.active {
                     Some(active.deadline)
                 } else {
-                    read.pending
-                        .map(|due| due.max(self.groups[read.group].until))
+                    read.due(self.groups[read.group].until)
                 }
             })
             .min_by(f64::total_cmp)
@@ -290,7 +328,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
                 && if let Some(active) = read.active {
                     active.deadline <= now
                 } else {
-                    read.pending.is_some_and(|due| due <= now)
+                    read.due(self.groups[read.group].until)
+                        .is_some_and(|due| due <= now)
                 };
             if eligible {
                 lease_deadline(now, read.policy.admission_timeout_ms)?;
@@ -301,13 +340,19 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
                 && active.deadline <= now
             {
                 read.active = None;
-                let delay = if active.issued {
+                let retry = active.issued && read.policy.response_expiry == ExpiryPolicy::Retry;
+                let delay = if retry {
                     read.retry.failed_with(read.policy.retry, &mut jitter)
                 } else {
                     0.0
                 };
                 read.pending = Some(after(now, delay));
-                read.dirty = None;
+                read.retry_not_before = if retry {
+                    after(now, delay)
+                } else {
+                    f64::NEG_INFINITY
+                };
+                read.invalidation_due = None;
             }
         }
         let index = self
@@ -315,7 +360,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter()
             .enumerate()
             .filter_map(|(index, read)| {
-                let due = read.pending?.max(self.groups[read.group].until);
+                let due = read.due(self.groups[read.group].until)?;
                 (read.active.is_none() && due <= now).then_some((index, due))
             })
             .min_by(|left, right| left.1.total_cmp(&right.1))
@@ -332,6 +377,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         let read = self.reads.last_mut().expect("reserved registered read");
         let token = Attempt(self.serial);
         read.pending = None;
+        read.invalidation_due = None;
+        read.retry_not_before = f64::NEG_INFINITY;
         read.active = Some(Active {
             token,
             deadline: lease_deadline(now, read.policy.admission_timeout_ms)?,
@@ -343,21 +390,45 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
     /// Called only when the logical read actually leaves the host. Returns false
     /// for cancelled, expired or superseded reservations. Check before sending.
     pub fn mark_issued(&mut self, token: Attempt, now: f64) -> Result<bool, Error> {
+        self.admit_inner(token, now, false)
+            .map(|deadline| deadline.is_some())
+    }
+
+    /// Shared HTTP-release gate for the first request and all parallel legs or
+    /// continuation pages of one logical attempt. Only the first release starts
+    /// its response lease; later releases validate without renewing it. Pauses
+    /// gate every new physical release, while existing responses may progress.
+    /// The returned raw deadline must also be capped by the request lifecycle.
+    pub fn admit(&mut self, token: Attempt, now: f64) -> Result<Option<f64>, Error> {
+        self.admit_inner(token, now, true)
+    }
+
+    fn admit_inner(
+        &mut self,
+        token: Attempt,
+        now: f64,
+        allow_issued: bool,
+    ) -> Result<Option<f64>, Error> {
         time(now)?;
         for read in &mut self.reads {
             if let Some(active) = &mut read.active
                 && active.token == token
             {
-                if active.issued || now >= active.deadline || now < self.groups[read.group].until {
-                    return Ok(false);
+                if (!allow_issued && active.issued)
+                    || now >= active.deadline
+                    || now < self.groups[read.group].until
+                {
+                    return Ok(None);
                 }
-                let deadline = lease_deadline(now, read.policy.response_timeout_ms)?;
-                active.issued = true;
-                active.deadline = deadline;
-                return Ok(true);
+                if !active.issued {
+                    let deadline = lease_deadline(now, read.policy.response_timeout_ms)?;
+                    active.issued = true;
+                    active.deadline = deadline;
+                }
+                return Ok(Some(active.deadline));
             }
         }
-        Ok(false)
+        Ok(None)
     }
 
     /// Renew a page/leg budget only after validated progress from this issued
@@ -403,12 +474,32 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         read.active = None;
         if success {
             read.retry.reset();
-            read.pending = read.dirty.take();
+            // Keep the retained first notification until its next reservation,
+            // so a later notification cannot restart it after completion.
         } else {
             let delay = read.retry.failed_with(read.policy.retry, jitter);
             read.pending = Some(after(now, delay));
-            read.dirty = None;
+            read.retry_not_before = after(now, delay);
+            read.invalidation_due = None;
         }
+        Ok(true)
+    }
+
+    /// A valid response was superseded by publication authority (for example an
+    /// accepted write), not by a network failure. Retain retry history and one
+    /// repair demand without drawing entropy or reporting authentication evidence.
+    pub fn superseded(&mut self, token: Attempt, now: f64) -> Result<bool, Error> {
+        time(now)?;
+        let Some(read) = self.reads.iter_mut().find(|read| {
+            read.active.is_some_and(|active| {
+                active.token == token && active.issued && now < active.deadline
+            })
+        }) else {
+            return Ok(false);
+        };
+        read.active = None;
+        read.invalidation_due
+            .get_or_insert_with(|| after(now, read.policy.debounce_ms));
         Ok(true)
     }
 
@@ -421,7 +512,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .ok_or(Error::UnknownKey)?;
         read.active = None;
         read.pending = None;
-        read.dirty = None;
+        read.retry_not_before = f64::NEG_INFINITY;
+        read.invalidation_due = None;
         read.retry.reset();
         Ok(())
     }
@@ -444,8 +536,10 @@ mod tests {
     fn policy() -> Policy {
         Policy {
             debounce_ms: 10.0,
+            refresh_debounce_ms: 10.0,
             admission_timeout_ms: 50.0,
             response_timeout_ms: 100.0,
+            response_expiry: ExpiryPolicy::Retry,
             retry: RetryPolicy::default(),
         }
     }
@@ -466,6 +560,392 @@ mod tests {
             .unwrap()
             .unwrap()
             .1
+    }
+
+    fn immediate_policy() -> Policy {
+        Policy {
+            refresh_debounce_ms: 0.,
+            response_expiry: ExpiryPolicy::ReplaceImmediately,
+            ..policy()
+        }
+    }
+
+    fn single(policy: Policy) -> Scheduler<&'static str, &'static str> {
+        let mut scheduler = Scheduler::new(1, vec!["private"]).unwrap();
+        scheduler.register("balance", &"private", policy).unwrap();
+        scheduler
+    }
+
+    #[test]
+    fn immediate_refresh_covers_notification_without_restarting_first_debounce() {
+        let mut scheduler = single(immediate_policy());
+        scheduler
+            .request(&"balance", 100., Demand::Invalidate)
+            .unwrap();
+        scheduler
+            .request(&"balance", 90., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(110.));
+        scheduler
+            .request(&"balance", 105., Demand::Refresh)
+            .unwrap();
+        scheduler
+            .request(&"balance", 90., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(105.));
+        let first = ready(&mut scheduler, 105.);
+        assert!(scheduler.mark_issued(first, 105.).unwrap());
+        for now in 106..120 {
+            scheduler
+                .request(&"balance", f64::from(now), Demand::Refresh)
+                .unwrap();
+        }
+        assert!(
+            scheduler
+                .finish(first, 120., true, |_| unreachable!())
+                .unwrap()
+        );
+        assert_eq!(scheduler.next_deadline(), None);
+    }
+
+    #[test]
+    fn first_notification_can_preempt_slow_refresh_but_repeats_retain_its_deadline() {
+        let mut policy = immediate_policy();
+        policy.refresh_debounce_ms = 100.;
+        let mut scheduler = single(policy);
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(100.));
+        scheduler
+            .request(&"balance", 1., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(11.));
+        scheduler
+            .request(&"balance", 2., Demand::Invalidate)
+            .unwrap();
+        scheduler
+            .request(&"balance", -100., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(11.));
+        let token = ready(&mut scheduler, 11.);
+        scheduler.mark_issued(token, 11.).unwrap();
+        scheduler
+            .request(&"balance", 12., Demand::Invalidate)
+            .unwrap();
+        scheduler
+            .finish(token, 13., true, |_| unreachable!())
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(22.));
+        scheduler
+            .request(&"balance", -100., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(22.));
+        let followup = ready(&mut scheduler, 22.);
+        scheduler.mark_issued(followup, 22.).unwrap();
+        scheduler
+            .finish(followup, 23., true, |_| unreachable!())
+            .unwrap();
+        assert_eq!(
+            scheduler.next_deadline(),
+            None,
+            "one fresh read covers both original demands"
+        );
+    }
+
+    #[test]
+    fn immediate_refresh_cannot_pull_retry_or_pause_floors_forward() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let first = ready(&mut scheduler, 0.);
+        scheduler.mark_issued(first, 0.).unwrap();
+        scheduler
+            .finish(first, 1., false, |delay| delay / 2.)
+            .unwrap();
+        for now in 2..20 {
+            scheduler
+                .request(&"balance", f64::from(now), Demand::Refresh)
+                .unwrap();
+            scheduler
+                .request(&"balance", f64::from(now), Demand::Invalidate)
+                .unwrap();
+        }
+        assert_eq!(scheduler.next_deadline(), Some(501.));
+        assert!(
+            scheduler
+                .take_ready(500., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        scheduler.pause(&"private", 700.).unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(700.));
+        assert!(
+            scheduler
+                .take_ready(699., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        let second = ready(&mut scheduler, 700.);
+        scheduler.mark_issued(second, 700.).unwrap();
+        scheduler
+            .finish(second, 701., false, |delay| {
+                assert_eq!(delay, 2000.);
+                delay
+            })
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(2701.));
+        scheduler.cancel(&"balance").unwrap();
+        scheduler
+            .request(&"balance", 702., Demand::Refresh)
+            .unwrap();
+        assert!(
+            scheduler
+                .take_ready(702., |_| unreachable!())
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn immediate_lost_read_replacement_keeps_failure_streak_without_entropy() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let first = ready(&mut scheduler, 0.);
+        scheduler.mark_issued(first, 0.).unwrap();
+        scheduler.finish(first, 1., false, |_| 0.).unwrap();
+        let lost = ready(&mut scheduler, 1.);
+        scheduler.mark_issued(lost, 1.).unwrap();
+        scheduler
+            .request(&"balance", 20., Demand::Invalidate)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(101.));
+        let replacement = ready(&mut scheduler, 101.);
+        assert_ne!(lost, replacement);
+        assert!(
+            !scheduler
+                .finish(lost, 101., false, |_| unreachable!())
+                .unwrap()
+        );
+        assert!(!scheduler.superseded(lost, 101.).unwrap());
+        scheduler.mark_issued(replacement, 101.).unwrap();
+        scheduler
+            .finish(replacement, 102., false, |delay| {
+                assert_eq!(
+                    delay, 2000.,
+                    "expiry neither increments nor resets failures"
+                );
+                delay
+            })
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(2102.));
+    }
+
+    #[test]
+    fn immediate_expiry_replacement_waits_for_the_shared_pause() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let old = ready(&mut scheduler, 0.);
+        scheduler.mark_issued(old, 0.).unwrap();
+        scheduler.pause(&"private", 500.).unwrap();
+        assert!(
+            scheduler
+                .take_ready(100., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(scheduler.next_deadline(), Some(500.));
+        scheduler
+            .request(&"balance", 101., Demand::Refresh)
+            .unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(500.));
+        assert!(
+            !scheduler
+                .finish(old, 101., true, |_| unreachable!())
+                .unwrap()
+        );
+        let replacement = ready(&mut scheduler, 500.);
+        assert_ne!(old, replacement);
+        assert!(scheduler.mark_issued(replacement, 500.).unwrap());
+    }
+
+    #[test]
+    fn superseded_completion_preserves_first_dirty_deadline_and_failure_streak() {
+        for (dirty, completed, expected) in [(true, 5., 12.), (true, 20., 12.), (false, 20., 30.)] {
+            let mut scheduler = single(immediate_policy());
+            scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+            let failed = ready(&mut scheduler, 0.);
+            scheduler.mark_issued(failed, 0.).unwrap();
+            scheduler.finish(failed, 1., false, |_| 0.).unwrap();
+            let stale = ready(&mut scheduler, 1.);
+            scheduler.mark_issued(stale, 1.).unwrap();
+            if dirty {
+                scheduler
+                    .request(&"balance", 2., Demand::Invalidate)
+                    .unwrap();
+                scheduler
+                    .request(&"balance", -100., Demand::Invalidate)
+                    .unwrap();
+            }
+            assert!(scheduler.superseded(stale, completed).unwrap());
+            assert_eq!(scheduler.next_deadline(), Some(expected));
+            assert!(!scheduler.superseded(stale, completed).unwrap());
+            assert!(
+                !scheduler
+                    .finish(stale, completed, false, |_| unreachable!())
+                    .unwrap()
+            );
+            let next = ready(&mut scheduler, completed.max(expected));
+            scheduler
+                .mark_issued(next, completed.max(expected))
+                .unwrap();
+            scheduler
+                .finish(next, completed.max(expected) + 1., false, |delay| {
+                    assert_eq!(
+                        delay, 2000.,
+                        "neutral completion retains the previous failure"
+                    );
+                    delay
+                })
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn superseded_rejects_unsent_expired_replaced_and_cancelled_tokens() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let old = ready(&mut scheduler, 0.);
+        assert!(!scheduler.superseded(old, 1.).unwrap());
+        assert_eq!(scheduler.next_deadline(), Some(50.));
+        scheduler.mark_issued(old, 1.).unwrap();
+        assert_eq!(scheduler.superseded(old, f64::NAN), Err(Error::InvalidTime));
+        assert!(!scheduler.superseded(old, 101.).unwrap());
+        assert_eq!(scheduler.next_deadline(), Some(101.));
+        let current = ready(&mut scheduler, 101.);
+        assert!(!scheduler.superseded(old, 101.).unwrap());
+        assert_eq!(scheduler.next_deadline(), Some(151.));
+        scheduler.cancel(&"balance").unwrap();
+        assert!(!scheduler.superseded(current, 102.).unwrap());
+        assert_eq!(scheduler.next_deadline(), None);
+    }
+
+    #[test]
+    fn superseded_and_cancelled_reads_cannot_erase_a_shared_pause() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let failed = ready(&mut scheduler, 0.);
+        scheduler.mark_issued(failed, 0.).unwrap();
+        scheduler.finish(failed, 1., false, |_| 0.).unwrap();
+        let stale = ready(&mut scheduler, 1.);
+        scheduler.mark_issued(stale, 1.).unwrap();
+        scheduler
+            .request(&"balance", 2., Demand::Invalidate)
+            .unwrap();
+        scheduler.pause(&"private", 50.).unwrap();
+        assert!(scheduler.superseded(stale, 5.).unwrap());
+        scheduler.request(&"balance", 6., Demand::Refresh).unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(50.));
+        assert!(
+            scheduler
+                .take_ready(49., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        let next = ready(&mut scheduler, 50.);
+        scheduler.mark_issued(next, 50.).unwrap();
+        scheduler
+            .finish(next, 51., false, |delay| {
+                assert_eq!(delay, 2000.);
+                delay
+            })
+            .unwrap();
+        scheduler.pause(&"private", 3000.).unwrap();
+        scheduler.cancel(&"balance").unwrap();
+        scheduler.request(&"balance", 52., Demand::Refresh).unwrap();
+        assert_eq!(scheduler.next_deadline(), Some(3000.));
+        let fresh = ready(&mut scheduler, 3000.);
+        scheduler.mark_issued(fresh, 3000.).unwrap();
+        scheduler
+            .finish(fresh, 3001., false, |delay| {
+                assert_eq!(delay, 1000., "cancel resets the key, not its shared pause");
+                delay
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn physical_release_admission_is_idempotent_without_renewing_logical_lease() {
+        let mut scheduler = single(immediate_policy());
+        scheduler.request(&"balance", 0., Demand::Refresh).unwrap();
+        let token = ready(&mut scheduler, 0.);
+        assert_eq!(scheduler.admit(token, 20.).unwrap(), Some(120.));
+        assert_eq!(scheduler.admit(token, 30.).unwrap(), Some(120.));
+        assert!(!scheduler.mark_issued(token, 30.).unwrap());
+        scheduler.pause(&"private", 60.).unwrap();
+        assert_eq!(scheduler.admit(token, 40.).unwrap(), None);
+        assert_eq!(scheduler.next_deadline(), Some(120.));
+        assert!(scheduler.progress(token, 50.).unwrap());
+        assert_eq!(scheduler.admit(token, 59.).unwrap(), None);
+        assert_eq!(scheduler.admit(token, 60.).unwrap(), Some(150.));
+        assert_eq!(
+            scheduler.admit(token, f64::INFINITY),
+            Err(Error::InvalidTime)
+        );
+        assert_eq!(scheduler.next_deadline(), Some(150.));
+        assert_eq!(scheduler.admit(token, 150.).unwrap(), None);
+        scheduler.cancel(&"balance").unwrap();
+        assert_eq!(scheduler.admit(token, 151.).unwrap(), None);
+        scheduler
+            .request(&"balance", 200., Demand::Refresh)
+            .unwrap();
+        let unsent = ready(&mut scheduler, 200.);
+        scheduler.pause(&"private", 250.).unwrap();
+        assert_eq!(scheduler.admit(unsent, 210.).unwrap(), None);
+        assert_eq!(scheduler.next_deadline(), Some(250.));
+    }
+
+    #[test]
+    fn retry_floor_preflight_does_not_let_an_ineligible_key_block_a_peer() {
+        let big = 9_007_199_254_740_992.;
+        let mut scheduler = Scheduler::new(2, vec!["private"]).unwrap();
+        let mut tiny = immediate_policy();
+        tiny.admission_timeout_ms = 1.;
+        scheduler.register("tiny", &"private", tiny).unwrap();
+        scheduler
+            .register("healthy", &"private", immediate_policy())
+            .unwrap();
+        scheduler
+            .request(&"tiny", big - 1., Demand::Refresh)
+            .unwrap();
+        let token = ready(&mut scheduler, big - 1.);
+        scheduler.mark_issued(token, big - 1.).unwrap();
+        scheduler
+            .finish(token, big - 1., false, |delay| delay)
+            .unwrap();
+        scheduler.request(&"tiny", big, Demand::Refresh).unwrap();
+        scheduler.request(&"healthy", big, Demand::Refresh).unwrap();
+        let (key, _) = scheduler
+            .take_ready(big, |_| unreachable!())
+            .unwrap()
+            .unwrap();
+        assert_eq!(*key, "healthy");
+    }
+
+    #[test]
+    fn invalid_refresh_debounce_is_rejected_before_registration() {
+        for delay in [-1., f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut scheduler = Scheduler::new(1, vec!["private"]).unwrap();
+            let mut invalid = immediate_policy();
+            invalid.refresh_debounce_ms = delay;
+            assert_eq!(
+                scheduler.register("balance", &"private", invalid),
+                Err(Error::InvalidPolicy)
+            );
+            assert!(scheduler.next_deadline().is_none());
+            assert!(
+                scheduler
+                    .register("balance", &"private", immediate_policy())
+                    .is_ok()
+            );
+        }
     }
 
     #[test]
@@ -864,6 +1344,7 @@ mod tests {
         let mut scheduler = scheduler();
         for read in &mut scheduler.reads {
             read.policy.debounce_ms = 0.0;
+            read.policy.refresh_debounce_ms = 0.0;
         }
         for key in ["orders", "positions"] {
             scheduler.request(&key, 0.0, Demand::Refresh).unwrap();

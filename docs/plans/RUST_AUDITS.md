@@ -1272,7 +1272,11 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   public trades now share accepted-only contextual finalization and strict policy
   rejection: first failures reject typed, later actual-page failures recover only
   accepted rows with an owned marker; missing result/list never proves empty
-  complete coverage. OKX general history and other query-marker sites still need
+  complete coverage. Binance general histories now use shared accepted-page
+  storage too, with engine-owned range selection/completeness for income. Whole
+  array parse failures cannot leak prefixes or empty complete results; strict
+  signer refusal/timeout keeps typed rejection even after accepted rows.
+  OKX general history and other query-marker sites still need
   fan-out and enforcement; these repairs do not claim a universal choke point.
   Six background account-coverage markers have no command: the follow-on must
   route them through one engine-owned account/background notice, never attach a

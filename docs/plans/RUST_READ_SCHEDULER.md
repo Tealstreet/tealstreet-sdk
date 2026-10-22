@@ -119,3 +119,85 @@ as reproduced production defects.
 
 Socket reconnect/keepalive stays in `socket`; live periodic polling and Infinity
 pause stay in the engine poll service. The scheduler does not bypass either.
+
+## Venue-adoption execution plan after the clock core
+
+Base: actual clock PR2 #1722
+`d3e34e6e10523bd3bb465be362e4cc7fc75671b2` (scheduler foundation #1717
+actually merged as `faf799268857f7aed35badba5349b572ef836c4a`).
+The owner selected shared policy extensions first, followed by Bitunix balance
+as the reference adopter and then scoped venue fan-out.
+
+1. Extend only the shared scheduler and its state-machine tests now:
+   - Declare separate refresh and invalidation debounce durations. Immediate
+     periodic/start/reconnect demand must not inherit notification repair delay;
+     repeated notifications retain the first pending deadline.
+   - Declare whether an issued response lease expires into retry/backoff or an
+     immediate replacement. Immediate replacement must neither sample entropy nor
+     increment/reset failures; an unsent expired reservation remains distinct.
+   - Add neutral superseded-read completion: release only a matching live issued
+     attempt, retain existing retry state, and coalesce one repair at its retained
+     first notification deadline (or a newly established notification deadline).
+     Neither a stale callback nor an expired token may release a replacement.
+   Keep existing policies and tests compatible, preserving startup retry behavior.
+2. Regress immediate polls versus first notification debounce, sustained demand,
+   lost-read replacement without entropy draws, neutral completion with/without
+   dirty demand, retained next failure step, pause floors, stale callbacks and
+   independent keys. Independent correctness/adversarial and architecture review,
+   four-job engine/Binance native checks, fmt/Clippy and current-head CI precede a
+   separate guard/merge. No venue/runtime adoption is claimed by this policy PR.
+3. Bitunix ordinary balance is the first runtime adopter after the shared release
+   seam lands. It has one request/response and fixed identity; retain serial and
+   accepted-write/auth/publication fences, raw 500ms polling and first 1s repair,
+   ten-second lost-read replacement, selected credentials and owned prerequisites.
+   Replace duplicate coalescing/debounce/lease state with the shared service.
+   Keep one shared private-GET pause authority during partial adoption; unmigrated
+   axes must consult that authority rather than mirroring a second pause window.
+4. Actual-release admission belongs to codex-uufub4's RequestContext follow-on
+   immediately after signer prerequisites #1721. `Cx::request` only queues work;
+   neither venue request creation nor signing preparation may mark a read issued.
+   The common plain/signed HTTP release path supplies raw release time, rejects
+   revoked/expired reservations before I/O, and anchors the response lease there.
+   The signer receipt callback is metadata-only and is not this seam. Coordinate
+   exact API/ownership before runtime edits; no per-venue callback/queue workaround.
+5. Then migrate Bitunix positions and independent regular/TP-SL logical reads,
+   bounded symbol-settings keys, and the audited venue inventory in scoped batches.
+   Parallel legs/pages share one logical attempt; continuation admission must not
+   call first-issue twice or renew a response lease without validated progress.
+   Preserve order coverage, paired publication, per-symbol write/auth fences and
+   each venue's current retry/readiness contracts. Signer-family migrations remain
+   separately gated on actual #1721 and coordinate account-file ownership.
+
+Audit evidence: Bitunix `balance_read_progress.rs`, `auth_results.rs`, and later
+`order_read_scheduling.rs`/`position_read_progress.rs`/`settings_read_progress.rs`
+already prove financial authority boundaries and must remain intact. Bybit's
+per-coin joins and Hyro cumulative-fill paths stay outside the reference slice.
+Architecture gate: this extends one engine scheduling policy and one shared
+release boundary; adapters map identity and outcomes, not another scheduler.
+
+RequestContext coordination refinement: add `Scheduler::admit(token, raw_now)`
+in the policy phase. It returns a live raw lease deadline, starts the lease only
+on the first actual release, and validates later legs/pages without renewal.
+All new physical releases consult the same group pause; already-issued responses
+may still make validated progress. Existing `mark_issued` keeps first-issue-only
+semantics. The RequestContext owner caps this returned deadline by the original
+request lifecycle and distinguishes admission cancellation from network/auth
+failure. No dispatcher, request metadata or signer receipt code changes here.
+
+Policy implementation evidence: separate retained notification intent now takes
+its minimum with queued refresh intent before retry and pause floors. A review
+regression reproduced a notification incorrectly waiting at 100ms behind a slow
+refresh instead of its own 11ms deadline; the fix also retains that first deadline
+across completion and raw-clock rollback and produces no extra covered read.
+Neutral completion retains failure history; unjittered response expiry does not
+increment or reset it. Idempotent admission gates every physical release without
+renewing the lease; `mark_issued` remains first-only. Eleven additional regression
+groups cover these policies and their pause/cancel/continuation interactions.
+Focused engine/Binance verification passes 578 native tests, denied-warning
+Clippy, formatting and bans; independent correctness/adversarial review is clear.
+This remains pure shared policy: no venue, dispatch or startup adapter edits.
+Fault-disabling refresh selection, retry floors, unjittered expiry, neutral failure
+history and continuation lease stability produces the corresponding new test
+failures (five controls, seven named regressions). The restored implementation
+passes all 25 scheduler tests. The real first-notification regression also failed
+before its fix; no existing financial or lifecycle assertions were weakened.

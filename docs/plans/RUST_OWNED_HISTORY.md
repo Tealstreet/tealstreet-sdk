@@ -3,6 +3,86 @@
 Owner: codex-cxxyqr. Planned from landing `556906286997` (2026-10-22).
 Reference merged in #1710 at `1910baa65a3`; fan-out remains active.
 
+## Next local phase: owned range paging / Binance reference
+
+Fresh `feat/rust-owned-history-range` starts from actual scheduler landing
+`faf799268857` while #1720 owns the source merge window. Commit this plan first,
+then locally integrate the reviewed frozen #1719 foundation `35ee0ea84af` to
+exercise its contextual finalization. The reviewed local dependency was subsequently merged as actual #1719
+`fa89bc0b59c` and real-integrated before publication; this owner API is now landed.
+Do not publish/merge this phase before that actual integration;
+real-integrate actual #1720/#1719 and other shared-engine dependencies before
+final proof. No dispatch/request/signing/host, clock, lib.rs, row/account reducer
+or financial helper edits. Engine source stays in history.rs (and paging.rs only
+if the shared range primitive demonstrably needs an additive API).
+
+Add engine `RangeHistory<T>` around `HistoryRows` and `RangeWalk`. It owns active
+Fetch bounds, pending typed rows with matching PageRow facts, fresh-index
+selection and terminal/lifecycle state. Do not let the adapter call RangeWalk.page
+or mutate dedupe state before the whole response is valid. Pair row/fact staging
+atomically, validate any selection invariant, then retain only selected accepted
+rows. Asking for another step with an unadmitted Fetch, or completing success
+before Finished, poisons strict completion even if rows were accepted. Shared
+contextual finalization receives accepted rows only. Preserve a known omission
+inside the active chunk too: RangeWalk only latches truncated/exhausted counts
+at rollover, so add a small read-only coverage snapshot if necessary. Test a
+full duplicate/no-progress page followed by failure before ChunkDone; count
+selected accepted rows, never excluded/staged rows, for recovery eligibility. Reuse existing first/later
+failure and strict-rejection policy; do not copy it into this adapter. Range
+budget/stall coverage is recorded by the owner, preserving prior range omissions
+when a subsequent actual-page failure ends the query.
+
+Binance general histories are the reference: ranged income uses this owner and
+its existing successful RangeWalk span splitting, fresh-index order, compound
+identity and 2-second chunk cadence. Keep request limit distinct from the range
+pager's native page size; income has no new global output cap. Fills retain
+oldest-first seven-day requests/per-request limits and existing output order,
+without new sort/dedupe/global truncation. Orders remain one request plus final
+descending sort; public trades stay unsigned and preserve response order. Use
+HistoryRows/Completion for the non-range cases too, check every whole-array parse
+result, stage failed prefixes without admitting them, and remove unwrap-or-empty
+serialization. Preserve missing-symbol/keyless no-I/O and unsupported profiles.
+
+Before accepted rows, actual page failure rejects typed, never empty complete;
+after accepted rows, it finishes those rows plus one command-owned incomplete
+marker. The old ranged-income walk.failed continuation is superseded by that
+owner policy. Signing refusal/timeout remains STRICT with its supplied typed
+VenueError and timer cleanup; do not stringify it into recoverable HTTP-page
+failure. Keep client-order lookup separate: primary credential routing, cache
+scope, identity checks and definitive -2013/HTTP conditions stay unchanged;
+partial histories must never manufacture a definitive lookup miss. The
+existing Binance best-effort-empty test encodes the superseded contract: replace
+its empty-success/CommandError expectations with typed failure and exactly-once
+command delivery, while retaining its background-log isolation assertions. The
+account test for later fills-window loss is superseded too: keep prior rows with
+owned incompleteness instead of CommandError plus empty success.
+
+Engine tests pin fresh-index selection, duplicate/out-of-range rows, successful
+range order, pending/terminal lifecycle failures, first/later page failures,
+failed-prefix exclusion, known range omissions and encoder refusal. Binance
+regressions pin successful windows/pacing/output and first/later native/HTTP/
+transport/malformed failures, accepted-empty behavior, strict typed signing
+failure/timer cleanup, unsigned trades and unchanged lookup proof. Prove changed
+behavior original RED/core GREEN. Update caller/AUDITS/QUALITY scope without
+claiming other histories, background notices, remote signing or B11 closed.
+
+Independent written-plan, correctness and adversarial reviews must answer the
+architecture gate: shared engine range admission/completion plus a reference
+adapter, not a second venue marker helper. Focused engine/Binance and shared-owner
+reference crates, strict Clippy/fmt/bans/links locally; full family/replay/WASM CI,
+then a separate fresh guard, separate exact merge and actual tree/parent proof.
+
+Local range-core checkpoint: shared RangeHistory now owns bounds, staged facts,
+selection and lifecycle; no Binance adapter code is changed yet. Six new core
+tests cover 18 scenario paths including actual 50-page budget exhaustion, active
+chunk gaps before rollover, no double count after finish, empty/filtered recovery
+eligibility and strict signer/encoder/lifecycle failures. These and the nine
+existing history tests pass; strict engine all-target Clippy passes. Independent
+correctness/adversarial reviews are clean; the additional budget control follows
+the adversarial suggestion. This checkpoint is local only with unmerged #1719
+as a reviewed dependency; actual dependency integration and reference regressions
+remain required before publication.
+
 ## Contract and sequence
 
 1. Reference PR: engine-owned history completion and cursor paging, exercised by
@@ -314,3 +394,56 @@ reference financial repairs without claiming other cumulative consumers migrated
 Latest overseer order is #1722 clock calibration, then #1719, then #1721 signer
 prerequisites. Batch the imminent actual clock dependency before final history
 CI; no merge against the prior scheduler-only head despite its green checks.
+
+
+### Range reference implementation checkpoint
+
+The Binance adapter now uses typed HistoryRows for fills/orders/public trades
+and single income, and RangeHistory for ranged income. IncomeHistory is only
+transparent native-shape delegation; there is no venue completeness emitter,
+range page-admission call, independent accepted vector or walk.failed recovery.
+All streamed root-array results are checked before admission. The private
+Request.window field is removed because the engine range owner holds the active
+bounds. Client-order lookup is unchanged; typed signer failures strictly reject
+through each owner and retire pending income pacing.
+
+Four original adapter controls fail at their intended assertions: first-page
+failure, later fill-window loss, later ranged-income failure and accepted-empty/
+excluded-row recovery eligibility. The corrected adapter passes those and
+successful native ordering/per-window limits, income compound identity/chunk
+pacing, keyless/public-only behavior and strict signing refusal. Actual dependency
+integration, final independent reviews, focused gates and CI still precede
+publication/merge; no NX or remote-signing closure is claimed.
+
+
+Final local reference gates: 1,308 engine/Binance/Bybit/BloFin/OKX native
+tests, strict all-target engine/Binance Clippy, fmt, bans and 93 relative links
+pass. Correctness and adversarial reviews are clean, explicitly confirming
+shared core ownership and unchanged successful lookup/request contracts. The
+range owner is boxed in the adapter enum to avoid inflating every single-income
+read. The legacy account test for discarded earlier fill windows now asserts
+retained rows and marker ordering; no comparator/fixture/budget is weakened.
+Both Refused and TimedOut supplied signing errors preserve strict typed notSent
+rejection after accepted rows. Actual #1719 is still required before publication.
+
+
+Actual #1719 `fa89bc0b59ccb36bc36d87428950fddc67217e51` is now
+real-integrated after its exact frozen ed757 head passed full CI and a separate
+guard/merge. This dependency merge is content-neutral: the reviewed history
+foundation and all incoming source/tests remain intact. Actual financial #1720
+and protocol-clock #1722 are already ancestors. Signer prerequisites #1721 have
+next merge priority; this range reference can run provisional CI, but it must
+real-integrate that actual shared-engine merge before final proof/guard. No
+unmerged signer API or caller migration is claimed in these docs.
+
+
+Signer prerequisites #1721 actually merged as
+`802e9c8c6e947aa36864aabb7254aa6e50c92b4e` and are real-integrated without
+conflicts before final range-reference proof. All 26 incoming paths are retained;
+the eight owned core/adapter source/test files remain identical to reviewed
+506471f0645. The caller doc pins actual structured provider results/trusted setup
+and leaves NX bootstrap and remote signing open. A nearby historical pagination
+summary now explicitly supersedes its old Binance error-plus-empty-success
+contract rather than continuing to recommend it. Fresh focused native/strict
+checks, integration reviews and exact-head CI run from this dependency before
+the separate final guard/merge.
