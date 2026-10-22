@@ -56,7 +56,7 @@ impl SignStep for Http {
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
-        let stamp = dispatch.now_ms.floor();
+        let stamp = dispatch.stamp_ms();
         self.stamp = num::format(stamp);
         Ok(SignRequest {
             receipt: SignReceipt {
@@ -132,7 +132,7 @@ impl SignStep for WsAuth {
         if !matches!(outbound, Action::WsSend { .. }) {
             return Err(SignError::InvalidRequest);
         }
-        let expiry = (dispatch.now_ms + WS_AUTH_EXPIRY_MS).floor();
+        let expiry = dispatch.stamp_ms() + WS_AUTH_EXPIRY_MS;
         self.expires = num::format(expiry);
         Ok(SignRequest {
             receipt: SignReceipt {

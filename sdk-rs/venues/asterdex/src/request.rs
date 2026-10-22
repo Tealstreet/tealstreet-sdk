@@ -209,7 +209,7 @@ impl AsterDex {
             credentials,
             request.method,
             &request.path,
-            cx.protocol_now(),
+            cx.protocol_stamp_ms(),
             self.options.testnet,
         ) {
             Ok(query) => query,

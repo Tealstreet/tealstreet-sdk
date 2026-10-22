@@ -90,7 +90,7 @@ impl Params {
             let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
             headers.push(("X-BX-APIKEY", key.to_owned()));
             if signs(path) {
-                self = self.num("timestamp", now.floor());
+                self = self.num("timestamp", safe_cex_engine::time::wire_stamp_ms(now));
                 let signature =
                     hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
                 self = self.str("signature", &signature);

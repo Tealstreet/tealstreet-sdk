@@ -1654,3 +1654,31 @@ fn already_expired_preparation_fails_before_immediate_provider_instead_of_reprep
         Some(SignError::InvalidRequest.venue_error().message.as_str())
     );
 }
+
+#[test]
+fn wire_stamp_floors_after_fractional_calibration_without_changing_clock_domains() {
+    let mut engine = engine();
+    let mut cx = Cx {
+        now: 1000.875,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert!(cx.observe_protocol_time(2001.125));
+    assert_eq!(cx.protocol_now(), 2001.125);
+    assert_eq!(cx.protocol_stamp_ms(), 2001.0);
+    assert_eq!(cx.now, 1000.875);
+    cx.now += 0.875;
+    assert_eq!(cx.protocol_now(), 2002.0);
+    assert_eq!(cx.protocol_stamp_ms(), 2002.0);
+    let context = crate::DispatchContext::new(cx.protocol_now() + 0.875, None);
+    assert_eq!(context.now_ms, 2002.875);
+    assert_eq!(context.stamp_ms(), 2002.0);
+    assert!(
+        crate::signing::SignReceipt {
+            stamp_ms: Some(context.stamp_ms()),
+            expiry_ms: None
+        }
+        .validate()
+        .is_ok()
+    );
+}

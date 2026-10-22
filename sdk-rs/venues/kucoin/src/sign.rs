@@ -44,7 +44,7 @@ pub fn headers(
     body: &str,
     now: f64,
 ) -> Vec<(&'static str, String)> {
-    let timestamp = (now as u64).to_string();
+    let timestamp = (safe_cex_engine::time::wire_stamp_ms(now) as u64).to_string();
     let payload = format!("{timestamp}{}{path}{body}", method.as_str());
     let mut headers = vec![
         ("KC-API-KEY", credentials.key.clone()),

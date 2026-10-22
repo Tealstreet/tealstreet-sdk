@@ -14,6 +14,7 @@ pub fn query(params: &Params) -> String {
 }
 
 pub fn payload(instruction: &str, rows: &[Params], now: f64, window: u32) -> String {
+    let now = safe_cex_engine::time::wire_stamp_ms(now);
     let mut text = rows
         .iter()
         .map(|row| {
@@ -67,6 +68,7 @@ impl Credentials {
     }
 
     pub fn ws_auth(&self, now: f64) -> [String; 4] {
+        let now = safe_cex_engine::time::wire_stamp_ms(now);
         let bytes = payload("subscribe", &[Params::new()], now, 5000);
         [
             self.key.clone(),
@@ -82,6 +84,7 @@ impl Credentials {
         rows: &[Params],
         now: f64,
     ) -> Vec<(&'static str, String)> {
+        let now = safe_cex_engine::time::wire_stamp_ms(now);
         vec![
             ("X-API-Key", self.key.clone()),
             ("X-Broker-Id", "1200".into()),
@@ -96,6 +99,23 @@ impl Credentials {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fractional_protocol_time_is_floored_in_preimage_rest_and_ws() {
+        let c = Credentials::new("public-test-key".into(), &STANDARD.encode([7u8; 32])).unwrap();
+        let expected = "instruction=subscribe&timestamp=1000&window=5000";
+        assert_eq!(
+            payload("subscribe", &[Params::new()], 1000.875, 5000),
+            expected
+        );
+        let auth = c.ws_auth(1000.875);
+        assert_eq!(auth[2], "1000");
+        assert_eq!(
+            auth[1],
+            STANDARD.encode(ed25519::sign(expected.as_bytes(), &c.seed).unwrap())
+        );
+        let headers = c.headers("subscribe", &[Params::new()], 1000.875);
+        assert!(headers.contains(&("X-Timestamp", "1000".into())));
+    }
     #[test]
     fn canonical_batch_matches_documented_signing_example() {
         let row = |price: &str, quantity: &str| {

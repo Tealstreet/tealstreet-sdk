@@ -3,6 +3,7 @@ use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::execution::{Cursor, ObservedProgress};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -732,30 +733,9 @@ impl Woo {
         c.open = true;
         c.ping_at = cx.now;
         self.account.supervisor.opened(cx);
-        let Some(secret) = self.options.secret.as_deref() else {
+        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
             return true;
         };
-        let sign = crate::sign::signature(secret, &format!("|{}", num::format(cx.now)));
-        #[derive(serde::Serialize)]
-        struct Auth<'a> {
-            event: &'a str,
-            params: AuthParams<'a>,
-        }
-        #[derive(serde::Serialize)]
-        struct AuthParams<'a> {
-            apikey: &'a str,
-            sign: String,
-            timestamp: f64,
-        }
-        let text = serde_json::to_string(&Auth {
-            event: "auth",
-            params: AuthParams {
-                apikey: self.options.key.as_deref().unwrap_or(""),
-                sign,
-                timestamp: cx.now,
-            },
-        })
-        .unwrap();
         cx.send(socket, text);
         self.account_refresh(cx);
         true
@@ -1756,7 +1736,7 @@ impl Woo {
             .unwrap_or(0.0)
             .max(cx.store.order(&order.id).map_or(0.0, |o| o.filled));
         let cumulative = r.total_executed.or(r.executed);
-        let delta = cumulative.map(|n| (n - baseline).max(0.0));
+        let observed = ObservedProgress::new(baseline, cumulative).ok();
         // REST progress describes order state, not executions already delivered to the caller.
         let execution_baseline = self
             .account
@@ -1764,14 +1744,6 @@ impl Woo {
             .get(&order.id)
             .copied()
             .unwrap_or(0.0);
-        let execution_delta = cumulative.map(|n| {
-            let previous = if n > baseline {
-                baseline.max(execution_baseline)
-            } else {
-                execution_baseline
-            };
-            (n - previous).max(0.0)
-        });
         let key = if r.trade_id.is_empty() {
             None
         } else {
@@ -1780,64 +1752,57 @@ impl Woo {
         let fresh = key
             .as_ref()
             .is_none_or(|k| !self.account.fills.contains_key(k));
-        let quantity = if key.is_some() {
-            r.executed_quantity.or(execution_delta)
-        } else {
-            execution_delta
-        };
+        let price = r
+            .executed_price
+            .or(r.average_executed_price)
+            .unwrap_or(order.price);
+        let prepared =
+            if fresh && matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED") {
+                observed.and_then(|observed| {
+                    let delivered = Cursor::seed(execution_baseline, None).ok()?;
+                    observed
+                        .prepare(delivered, key.as_ref().and(r.executed_quantity), price)
+                        .ok()
+                        .flatten()
+                })
+            } else {
+                None
+            };
         if cumulative.is_none()
-            && key.is_some()
-            && fresh
-            && matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
-            && let Some(quantity) = quantity
+            && let Some(prepared) = prepared
         {
-            order.filled = baseline + quantity;
+            order.filled = prepared.observed();
             order.remaining = (order.amount - order.filled).max(0.0);
             self.account
                 .cumulative
                 .insert(order.id.clone(), order.filled);
         }
-        let price = r
-            .executed_price
-            .or(r.average_executed_price)
-            .unwrap_or(order.price);
-        if let Some(n) = cumulative {
+        if cumulative.is_some()
+            && let Some(observed) = observed
+        {
             self.account
                 .cumulative
-                .insert(order.id.clone(), baseline.max(n));
-        }
-        if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
-            && price > 0.0
-            && let Some(n) = cumulative
-        {
-            self.account
-                .execution_cumulative
-                .insert(order.id.clone(), execution_baseline.max(n));
+                .insert(order.id.clone(), observed.quantity());
         }
         self.account_upsert(cx, order.clone());
-        if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
-            && fresh
-            && price > 0.0
-            && let Some(amount) = quantity.filter(|n| *n > 0.0)
-        {
+        if let Some(prepared) = prepared {
             if let Some(key) = key {
                 self.account.fills.insert(key, cx.now);
             }
-            if cumulative.is_none() {
-                self.account
-                    .execution_cumulative
-                    .insert(order.id.clone(), execution_baseline + amount);
-            }
+            let delivery = prepared.delivery();
+            self.account
+                .execution_cumulative
+                .insert(order.id.clone(), delivery.next().quantity());
             let fill = Fill {
                 id: None,
                 order_id: order.id,
                 symbol: order.symbol,
                 side: order.side,
-                price,
-                amount,
+                price: delivery.price(),
+                amount: delivery.amount(),
             };
             // REST may already include an execution whose stream report arrived late.
-            let position_amount = delta.map_or(amount, |advance| amount.min(advance));
+            let position_amount = prepared.position_amount();
             if position_amount > 0.0 {
                 self.account_optimistic_fill(cx, &fill, position_amount);
             } else {

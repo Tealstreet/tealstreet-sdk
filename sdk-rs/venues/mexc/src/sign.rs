@@ -12,7 +12,12 @@ impl Credentials {
     pub fn signature(&self, now: f64, payload: &str) -> String {
         hmac_sha256(
             self.secret.as_bytes(),
-            format!("{}{}{payload}", self.key, num::format(now)).as_bytes(),
+            format!(
+                "{}{}{payload}",
+                self.key,
+                num::format(safe_cex_engine::time::wire_stamp_ms(now))
+            )
+            .as_bytes(),
             Encoding::Hex,
         )
     }
@@ -29,7 +34,10 @@ impl Credentials {
         let window = window.unwrap_or(20_000).clamp(1, 20_000);
         vec![
             ("ApiKey", self.key.clone()),
-            ("Request-Time", num::format(now)),
+            (
+                "Request-Time",
+                num::format(safe_cex_engine::time::wire_stamp_ms(now)),
+            ),
             ("Signature", self.signature(now, payload)),
             ("Recv-Window", window.to_string()),
             ("Content-Type", "application/json".into()),
@@ -48,6 +56,19 @@ pub fn query(params: impl IntoIterator<Item = (&'static str, String)>) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fractional_protocol_time_uses_the_same_integer_in_header_and_preimage() {
+        let c = Credentials {
+            key: "replay-key".into(),
+            secret: "replay-secret".into(),
+        };
+        let headers = c.headers(1700000000000.875, "[\"739113577038255616\"]");
+        assert!(headers.contains(&("Request-Time", "1700000000000".into())));
+        assert!(headers.contains(&(
+            "Signature",
+            "59e9ebb06b0e27069eec29158b3682a9f279f1e3790b0fa09a403d4965270557".into()
+        )));
+    }
     #[test]
     fn signs_exact_post_bytes_and_sorted_get_parameters() {
         let c = Credentials {

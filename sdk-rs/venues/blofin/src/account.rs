@@ -310,7 +310,7 @@ impl Blofin {
             r.secret.as_str()
         });
         let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
-        let timestamp = num::format(now.floor());
+        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
         Ok(vec![
             (
                 "ACCESS-KEY",
@@ -507,7 +507,7 @@ impl Blofin {
                 return;
             }
         };
-        let timestamp = cx.now.floor() as u64;
+        let timestamp = safe_cex_engine::time::wire_stamp_ms(cx.now) as u64;
         let sign = sign::signature(
             self.options.secret.as_deref().unwrap_or(""),
             "/users/self/verify",

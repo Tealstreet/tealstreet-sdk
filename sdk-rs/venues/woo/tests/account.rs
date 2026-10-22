@@ -138,6 +138,12 @@ fn count_fills(e: &mut TestEngine) -> u32 {
     0
 }
 fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
+    fill_values(e)
+        .into_iter()
+        .map(|(_, amount)| amount)
+        .collect()
+}
+fn fill_values(e: &mut TestEngine) -> Vec<(f64, f64)> {
     let Some(frame) = e.take_frame(100.0) else {
         return vec![];
     };
@@ -150,10 +156,10 @@ fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
     let rows = (4 + 12 * count + 7) & !7;
     (0..count)
         .map(|index| {
-            f64::from_le_bytes(
-                payload[rows + 16 * index + 8..rows + 16 * index + 16]
-                    .try_into()
-                    .unwrap(),
+            let at = rows + 16 * index;
+            (
+                f64::from_le_bytes(payload[at..at + 8].try_into().unwrap()),
+                f64::from_le_bytes(payload[at + 8..at + 16].try_into().unwrap()),
             )
         })
         .collect()
@@ -1350,6 +1356,73 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
     assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
 }
 
+fn invalid_last_does_not_consume_cumulative_correction(last: f64) {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(60.0);
+    let invalid = format!(
+        r#"{{"topic":"executionreport","data":{{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedQuantity":{last},"executedPrice":59000,"tradeId":"correctable-last"}}}}"#
+    );
+    ws(&mut e, socket, 70.0, &invalid);
+    assert!(fill_values(&mut e).is_empty());
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.006);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+
+    // The correction retains the native identity and supplies cumulative-only
+    // quantity evidence. Its valid order observation already reached display.
+    let correction = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000,"tradeId":"correctable-last"}}"#;
+    ws(&mut e, socket, 71.0, correction);
+    let fills = fill_values(&mut e);
+    assert_eq!(
+        fills.len(),
+        1,
+        "valid correction must deliver its execution"
+    );
+    assert_eq!(fills[0].0, 59000.0);
+    assert!((fills[0].1 - 0.001).abs() < 1e-12);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+    ws(&mut e, socket, 72.0, correction);
+    assert!(fill_values(&mut e).is_empty(), "same native ID emits once");
+}
+
+#[test]
+fn zero_last_quantity_keeps_cumulative_correction_eligible() {
+    invalid_last_does_not_consume_cumulative_correction(0.0);
+}
+
+#[test]
+fn negative_last_quantity_keeps_cumulative_correction_eligible() {
+    invalid_last_does_not_consume_cumulative_correction(-0.001);
+}
+
+#[test]
+fn unpriced_last_without_cumulative_does_not_double_count_the_correction() {
+    for price in [0.0, -1.0] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        e.take_frame(60.0);
+        let report = |price| {
+            format!(
+                r#"{{"topic":"executionreport","data":{{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"executedQuantity":0.001,"executedPrice":{price},"tradeId":"correctable-price"}}}}"#
+            )
+        };
+        ws(&mut e, socket, 70.0, &report(price));
+        assert!(fill_values(&mut e).is_empty());
+        assert_eq!(e.store().positions()[0].contracts, 0.01);
+        ws(&mut e, socket, 71.0, &report(59000.0));
+        assert_eq!(fill_values(&mut e), [(59000.0, 0.001)]);
+        assert!(
+            (e.store().order("9007199254740993").unwrap().filled - 0.006).abs() < 1e-12,
+            "the unpriced report and its correction describe one execution"
+        );
+        assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+        ws(&mut e, socket, 72.0, &report(59000.0));
+        assert!(fill_values(&mut e).is_empty());
+        assert!((e.store().order("9007199254740993").unwrap().filled - 0.006).abs() < 1e-12);
+        assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+    }
+}
+
 // Private reads start before the ticker seed. A stop read then cannot be
 // classified; when the seed lands mid-read, the stop is re-read at once
 // instead of staying invisible until the next poll.
@@ -1506,4 +1579,29 @@ fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
     response(&mut e, &pos, 2020.0, &isolated);
     assert!(!e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID)));
     assert_eq!(e.store().positions().len(), 1);
+}
+
+#[test]
+fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
+    let (mut e, socket, _, _) = start();
+    e.drain_actions().for_each(drop);
+    e.handle(1700000000000.875, Event::WsOpened { socket });
+    let auth = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("timestamp") => {
+                Some(serde_json::from_str::<serde_json::Value>(&text).unwrap())
+            }
+            _ => None,
+        })
+        .expect("auth frame");
+    assert_eq!(auth["params"]["timestamp"], 1700000000000.0);
+    assert_eq!(
+        auth["params"]["sign"],
+        safe_cex_crypto::hmac_sha256(
+            b"replay-secret",
+            b"|1700000000000",
+            safe_cex_crypto::Encoding::Hex
+        )
+    );
 }
