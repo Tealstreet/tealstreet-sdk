@@ -45,10 +45,13 @@ impl Signer {
         })
     }
     pub fn nonce(&mut self, now: f64) -> Result<String, String> {
-        if !now.is_finite() || now < 0.0 || now.floor() > (u64::MAX / 1000) as f64 {
+        if !now.is_finite()
+            || now < 0.0
+            || safe_cex_engine::time::wire_stamp_ms(now) > (u64::MAX / 1000) as f64
+        {
             return Err("Kraken invalid nonce clock".into());
         }
-        let clock = (now.floor() as u64)
+        let clock = (safe_cex_engine::time::wire_stamp_ms(now) as u64)
             .checked_mul(1000)
             .ok_or("Kraken nonce overflow")?;
         safe_cex_crypto::nonce::next("kraken", self.identity, clock, u64::MAX)

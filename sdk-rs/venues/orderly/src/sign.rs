@@ -55,7 +55,7 @@ impl Credentials {
         if !now.is_finite() || now < 0.0 {
             return Err("Orderly invalid clock".into());
         }
-        let timestamp = (now as u64).to_string();
+        let timestamp = (safe_cex_engine::time::wire_stamp_ms(now) as u64).to_string();
         let text = format!("{timestamp}{}{path}{}", method.as_str(), body.unwrap_or(""));
         Ok(vec![
             ("orderly-key", self.key.clone()),

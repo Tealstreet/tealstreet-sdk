@@ -4,6 +4,14 @@
 
 pub const DAY_MS: i64 = 86_400_000;
 
+/// Integer Unix milliseconds for outbound protocol fields. Apply calibration
+/// first, then floor once; never round a timestamp into the next millisecond.
+/// This is not a scheduling clock or input validator: nonfinite/out-of-range
+/// values remain invalid to the caller's clock/receipt validation.
+pub fn wire_stamp_ms(protocol_ms: f64) -> f64 {
+    protocol_ms.floor()
+}
+
 pub fn is_leap(year: i64) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
@@ -66,6 +74,30 @@ pub fn iso_millis(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wire_stamp_never_rounds_or_validates_an_invalid_clock() {
+        for (time, expected) in [
+            (1000.125, 1000.),
+            (1000.5, 1000.),
+            (1000.999, 1000.),
+            (1001., 1001.),
+            (-0.125, -1.),
+        ] {
+            assert_eq!(wire_stamp_ms(time), expected);
+        }
+        assert!(wire_stamp_ms(f64::NAN).is_nan());
+        assert_eq!(wire_stamp_ms(f64::INFINITY), f64::INFINITY);
+        assert_eq!(wire_stamp_ms(f64::NEG_INFINITY), f64::NEG_INFINITY);
+        assert!(
+            crate::signing::SignReceipt {
+                stamp_ms: Some(wire_stamp_ms(9_007_199_254_740_992.)),
+                expiry_ms: None
+            }
+            .validate()
+            .is_err()
+        );
+    }
 
     #[test]
     fn civil_round_trips_across_eras_and_leap_days() {
