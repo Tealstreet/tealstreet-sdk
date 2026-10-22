@@ -2,28 +2,23 @@
 //! rows, which the host maps with the TS mappers. Rows dedupe on `historyId`,
 //! not `positionId`, and page by the smallest `historyId` seen.
 use super::*;
-use safe_cex_engine::Level;
-use safe_cex_engine::log::code;
+use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::url::encode;
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 const PAGE: usize = 100;
 const MAX_PAGES: u32 = 100;
 
 pub struct Request {
-    command: CommandId,
+    history: CursorHistory<String>,
     instrument: Option<String>,
     from: Option<f64>,
     to: Option<f64>,
-    after: Option<String>,
-    page: u32,
     count: usize,
     added: usize,
     oldest: Option<String>,
-    seen: HashSet<String>,
-    rows: Vec<String>,
     failed: bool,
 }
 
@@ -66,15 +61,16 @@ impl Blofin {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     ) {
+        let completion = Completion::new(command);
         if !self.signed() {
-            cx.done(command, "[]".into());
+            completion.finish(cx, Ok("[]".into()));
             return;
         }
         let instrument = match symbol {
             Some(symbol) => match cx.store.market(&symbol) {
                 Some(market) => Some(market.id.clone()),
                 None => {
-                    cx.done(command, "[]".into());
+                    completion.finish(cx, Ok("[]".into()));
                     return;
                 }
             },
@@ -83,24 +79,31 @@ impl Blofin {
         self.request_closed_page(
             cx,
             Request {
-                command,
+                history: CursorHistory::new(
+                    completion,
+                    CursorWalk::new(MAX_PAGES)
+                        .end_on_no_new_rows()
+                        .end_on_unchanged_cursor(),
+                    |reason| match reason {
+                        Stall::PageBudget => format!(
+                            "BloFin closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"
+                        ),
+                        _ => "BloFin closed positions stopped at a repeated cursor; older positions were not fetched".into(),
+                    },
+                    |rows| Ok(format!("[{}]", rows.join(","))),
+                ),
                 instrument,
                 from: from_ms,
                 to: to_ms,
-                after: None,
-                page: 0,
                 count: 0,
                 added: 0,
                 oldest: None,
-                seen: HashSet::new(),
-                rows: Vec::new(),
                 failed: false,
             },
         );
     }
 
     fn request_closed_page(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
-        request.page += 1;
         request.count = 0;
         request.added = 0;
         request.oldest = None;
@@ -115,7 +118,7 @@ impl Blofin {
             params.push(format!("end={}", num::format(to)));
         }
         params.push(format!("limit={PAGE}"));
-        if let Some(after) = &request.after {
+        if let Some(after) = request.history.cursor() {
             params.push(format!("after={}", encode(after)));
         }
         let path = format!("/api/v1/account/positions-history?{}", params.join("&"));
@@ -135,7 +138,7 @@ impl Blofin {
                     Pending::Closed(request),
                 );
             }
-            Err(error) => cx.fail(request.command, error),
+            Err(error) => request.history.finish(cx, Err(error.into())),
         }
     }
 
@@ -159,12 +162,12 @@ impl Blofin {
         }
         // TS keys the dedupe on the untrimmed `String(historyId)`.
         if let Some(id) = id.filter(|id| !id.is_empty())
-            && !request.seen.insert(id)
+            && !request.history.fresh(id)
         {
             return;
         }
         request.added += 1;
-        request.rows.push(item.to_owned());
+        request.history.stage(item.to_owned());
     }
 
     pub(crate) fn closed_response(
@@ -179,31 +182,25 @@ impl Blofin {
         if request.failed {
             return Self::closed_failed(cx, request, "malformed positions-history row");
         }
-        if request.count == 0 || request.added == 0 || request.count < PAGE {
-            return Self::finish_closed(cx, request);
+        match request.history.advance(CursorPage {
+            next: request.oldest.take(),
+            rows: request.count,
+            fresh: request.added,
+            want_more: request.count >= PAGE,
+        }) {
+            CursorStep::Done | CursorStep::Stalled(_) => return Self::finish_closed(cx, request),
+            CursorStep::More(_) => {}
         }
-        let next = request.oldest.take().unwrap_or_default();
-        if next.is_empty() || request.after.as_deref() == Some(next.as_str()) {
-            return Self::finish_closed(cx, request);
-        }
-        if request.page >= MAX_PAGES {
-            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
-                format!(
-                    "BloFin closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"
-                ),
-                vec![("command", safe_cex_engine::Value::Num(f64::from(request.command)))],
-            );
-            return Self::finish_closed(cx, request);
-        }
-        request.after = Some(next);
         self.request_closed_page(cx, request);
     }
 
     pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.fail(request.command, format!("BloFin closed positions: {error}"));
+        request
+            .history
+            .finish(cx, Err(format!("BloFin closed positions: {error}").into()));
     }
 
     fn finish_closed(cx: &mut Cx<'_, Pending>, request: Request) {
-        cx.done(request.command, format!("[{}]", request.rows.join(",")));
+        request.history.finish(cx, Ok(()));
     }
 }

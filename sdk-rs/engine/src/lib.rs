@@ -10,6 +10,7 @@ pub mod engine;
 pub mod entropy;
 pub mod error;
 pub mod fence;
+pub mod history;
 pub mod json;
 pub mod log;
 pub mod model;

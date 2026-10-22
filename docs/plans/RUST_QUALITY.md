@@ -161,8 +161,10 @@ Medium:
    silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
    compatibility alias. Bybit and Bitunix use the shared collector without
    changing their scoped freshness/lineage rules. Existing helpers' presence
-   does not prove every keyed REST/WS call site is migrated: Bitget/Orderly and
-   the remaining inventory are follow-up phases. Snapshot commits retain the
+   does not prove every keyed REST/WS call site is migrated: Bitget existing
+   REST/WS and Orderly REST now use shared admission/reporting; Orderly typed WS
+   arrays and the remaining inventory are follow-up phases. Snapshot commits
+   retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
@@ -213,3 +215,13 @@ a `SocketSpec`; one `Action::WsConnect` carries headers).
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,
 Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
 [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).
+
+
+Owned history completion follow-up: the first reference now uses
+`engine::history::{Completion, CursorHistory}` for BloFin closed positions.
+Command ownership, marker-before-result ordering and retained-rows completion
+live together in the engine. It stages each page until validation: failures before
+accepted rows reject, later failures retain accepted rows with owned incompleteness;
+encoding and lifecycle invariant failures still reject. Shared cursor policy owns its budget/dedupe/end
+checks. Other history consumers remain to migrate; this does not close the
+cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
