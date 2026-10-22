@@ -4,6 +4,7 @@ mod candles;
 mod history;
 mod identity;
 mod paths;
+mod reads;
 mod sign;
 pub use sign::hosted_signing;
 mod trading;
@@ -15,9 +16,10 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -94,7 +96,7 @@ impl Urls {
 /// Startup lists and klines stream in element by element (see
 /// `Cx::request_streamed`); their continuations collect the decoded rows.
 pub enum Pending {
-    Identity(CommandId),
+    Identity(Context),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -107,7 +109,7 @@ pub enum Pending {
         generation: u64,
     },
     Klines {
-        command: CommandId,
+        context: Context,
         candles: Vec<Candle>,
     },
     Account(account::Request),
@@ -1196,16 +1198,19 @@ impl BinanceFutures {
     fn on_klines(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: Context,
         candles: Vec<Candle>,
         response: Response<'_>,
     ) {
         let Response { status, body, .. } = response;
         if status != 200 {
-            cx.fail(command, format!("Binance klines HTTP {status}: {body}"));
+            let _ = cx.fail_context(&context, format!("Binance klines HTTP {status}: {body}"));
             return;
         }
-        cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
+        let _ = cx.done_context(
+            &context,
+            serde_json::to_string(&candles).unwrap_or_default(),
+        );
     }
 }
 
@@ -1476,8 +1481,8 @@ impl Venue for BinanceFutures {
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         self.observe_weight(cx, &response);
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(context) = pending {
+            self.identity_response(cx, context, response);
             return;
         }
         let Response { status, body, .. } = response;
@@ -1492,7 +1497,7 @@ impl Venue for BinanceFutures {
             Pending::DepthSnapshot { symbol, generation } => {
                 self.on_depth_snapshot(cx, symbol, generation, status, body)
             }
-            Pending::Klines { command, candles } => self.on_klines(cx, command, candles, response),
+            Pending::Klines { context, candles } => self.on_klines(cx, context, candles, response),
             Pending::Account(request) => self.on_account_response(cx, request, response),
             Pending::Trade(request) => self.on_trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.on_history_response(cx, request, Ok(response)),
@@ -1597,19 +1602,24 @@ impl Venue for BinanceFutures {
     ) {
         match pending {
             Pending::Trade(request) => self.on_trade_sign_failed(cx, request, error),
-            Pending::Identity(command) => cx.fail(command, error),
+            Pending::Identity(context) => self.identity_error(cx, &context, error),
+            Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::History(request) => self.on_history_sign_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Identity(context) = pending {
+            self.identity_error(cx, &context, error.into());
             return;
         }
         match pending {
-            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
+            Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error.to_owned());
+            }
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation
@@ -1739,20 +1749,29 @@ impl Venue for BinanceFutures {
                     cx.fail(command, interval.unsupported("Binance"));
                     return;
                 }
-                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
-                    Ok(query) => query,
+                let planned = candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now)
+                    .map_err(safe_cex_engine::VenueError::from)
+                    .and_then(|query| {
+                        Self::read_context(cx, command, None).map(|context| (query, context))
+                    });
+                let (query, context) = match planned {
+                    Ok(planned) => planned,
                     Err(error) => {
                         cx.fail(command, error);
                         return;
                     }
                 };
                 let path = format!("{}?{}", self.paths.klines, query.into_string());
-                let candles = Vec::new();
-                self.get_streamed(
+                self.managed_read(
                     cx,
-                    &path,
-                    ArrayAt::Root,
-                    Pending::Klines { command, candles },
+                    context.clone(),
+                    format!("{}{}", self.urls.rest, path),
+                    None,
+                    Some(ArrayAt::Root),
+                    Pending::Klines {
+                        context,
+                        candles: Vec::new(),
+                    },
                 );
             }
             Command::Query { command, query } => self.start_query(cx, command, query),

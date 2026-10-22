@@ -467,6 +467,21 @@ impl<P> Cx<'_, P> {
         self.finish_command(id, Ok(result), Some(context))
     }
 
+    /// Publish a correlated diagnostic only for live completion authority.
+    /// The caller completes synchronously; this neither issues nor renews HTTP.
+    pub fn command_error_context(
+        &mut self,
+        context: &Context,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        self.validate_completion_context(context)?;
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.command_error(id, message);
+        Ok(())
+    }
+
     pub fn fail_context(
         &mut self,
         context: &Context,
@@ -640,6 +655,43 @@ mod tests {
         assert!(cx.io.pending.is_empty());
         assert!(cx.io.actions.is_empty());
         assert!(cx.io.timers.is_empty());
+    }
+
+    #[test]
+    fn context_diagnostics_require_exact_completion_authority() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let original = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let background = cx.http_context(Scope::Background, policy()).unwrap();
+        let foreign = ContextRegistry::default()
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        assert_eq!(
+            cx.command_error_context(&background, "background"),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            cx.command_error_context(&foreign, "foreign"),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.actions.is_empty());
+        cx.done_context(&original, "[]".into()).unwrap();
+        cx.io.actions.clear();
+        let current = cx.http_context(Scope::Command(7), policy()).unwrap();
+        assert_eq!(
+            cx.command_error_context(&original, "old"),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.actions.is_empty());
+        cx.command_error_context(&current, "current").unwrap();
+        assert!(
+            matches!(cx.io.actions.as_slice(), [crate::Action::Notice(crate::Notice::CommandError {command:7,message})] if message == "current")
+        );
     }
 
     #[test]

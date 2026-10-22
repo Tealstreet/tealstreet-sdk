@@ -1,6 +1,7 @@
 //! Rare identity reads are independent of recurring account reconciliation.
-use crate::{BinanceFutures, Pending, Variant, sign::Query};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use crate::{BinanceFutures, Pending, Variant};
+use safe_cex_engine::request_context::{Context, Credential};
+use safe_cex_engine::{CommandId, CredentialSlot, Cx, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -41,7 +42,7 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         .ok_or("Binance balance response did not include an account alias")?;
     Ok(Identity { user_id })
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
+fn finish_unissued(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
     let result = result
         .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
     match result {
@@ -53,18 +54,18 @@ fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity,
     }
 }
 impl BinanceFutures {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            finish(cx, command, Err(error.into()));
+            finish_unissued(cx, command, Err(error.into()));
             return;
         }
         let path = match self.options.variant {
             Variant::UsdM => "/fapi/v3/balance",
             Variant::PortfolioMargin => "/papi/v1/balance",
             _ => {
-                finish(
+                finish_unissued(
                     cx,
                     command,
                     Err("Binance account identity is unsupported for this product".into()),
@@ -78,35 +79,70 @@ impl BinanceFutures {
                 .as_ref()
                 .is_none_or(|c| c.credential.0.is_empty() || c.signing.0.is_empty())
         {
-            finish(
+            finish_unissued(
                 cx,
                 command,
                 Err("Binance account identity requires credentials".into()),
             );
             return;
         }
-        self.signed(
+        let (credentials, slot) = match &self.options.read_credentials {
+            Some(credentials) => (credentials.clone(), CredentialSlot::Secondary),
+            None => (
+                self.credentials.as_ref().expect("validated above").clone(),
+                CredentialSlot::Primary,
+            ),
+        };
+        let context = match Self::read_context(
             cx,
-            Method::Get,
-            path,
-            Query::new(),
-            Pending::Identity(command),
+            command,
+            Some(Credential {
+                slot,
+                reference: credentials.credential.clone(),
+            }),
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                finish_unissued(cx, command, Err(error.message));
+                return;
+            }
+        };
+        self.managed_read(
+            cx,
+            context.clone(),
+            format!("{}{path}", self.urls.account_rest),
+            Some(credentials),
+            None,
+            Pending::Identity(context),
         );
     }
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: Context,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response));
+        let result = parse(response).and_then(|identity| {
+            serde_json::to_string(&identity).map_err(|error| error.to_string())
+        });
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(&context, data);
+            }
+            Err(error) => self.identity_error(cx, &context, error.into()),
+        }
     }
-    pub(crate) fn identity_failed(
+    pub(crate) fn identity_error(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        error: &str,
+        context: &Context,
+        error: VenueError,
     ) {
-        finish(cx, command, Err(error.into()));
+        if cx
+            .command_error_context(context, error.message.clone())
+            .is_ok()
+        {
+            let _ = cx.fail_context(context, error);
+        }
     }
 }

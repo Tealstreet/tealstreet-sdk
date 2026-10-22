@@ -2579,6 +2579,30 @@ mod audit_tests {
                     let label = format!("{variant:?} hung={hung} {command:?}");
                     engine.handle(1000.0, Event::Command(command));
                     let mut actions: Vec<_> = engine.drain_actions().collect();
+                    let preparations: Vec<_> = actions
+                        .iter()
+                        .filter_map(|action| match action {
+                            Action::ManagedHttp(action) => match action.as_ref() {
+                                safe_cex_engine::request_context::HttpAction::Prepare {
+                                    preparation,
+                                    ..
+                                } => Some(*preparation),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    for preparation in preparations {
+                        engine.http_prepared(
+                            1000.,
+                            preparation,
+                            safe_cex_engine::request_context::Prepared {
+                                id: 1,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                    actions.extend(engine.drain_actions());
                     if hung {
                         let timers: Vec<_> = actions
                             .iter()

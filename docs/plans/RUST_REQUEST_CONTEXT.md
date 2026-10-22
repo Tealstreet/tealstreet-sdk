@@ -931,3 +931,14 @@ grant no IDs or success; earlier/native sibling evidence remains intact.
 Regressions cover short/extra rows, malformed/refused siblings, empty mismatch,
 no Store or ownership change, no continuation, and preservation of the original
 short-ACK cancellation/reconciliation identities. Document in the caller section.
+
+Identity/candle checkpoint: the two preparation/deadline controls failed on the
+old adapter, then all five new native read controls pass, including streamed
+timeout, typed preparation failure and parked-provider refusal. Existing identity
+HMAC/secondary routing, result JSON, Store and candle query checks remain intact.
+434 engine and 15 Binance library tests, 32 focused native controls, strict
+engine/Binance Clippy/fmt and independent review pass. The native private-read
+refusal fixture now prepares its route before exercising the original signer
+failure/timer assertions. Inventory shrinks by four more sites, 1,280 to 1,276.
+This is not full Binance/whole-PR readiness: the separately approved ambiguous
+short-batch ID correction, account/history reads and Bybit migration remain.

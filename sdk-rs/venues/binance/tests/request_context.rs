@@ -13,6 +13,241 @@ fn ready() -> Harness {
     h
 }
 
+fn read(command: u32, identity: bool) -> Command {
+    if identity {
+        Command::FetchAccount { command }
+    } else {
+        Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(1),
+            from_ms: Some(0.),
+            to_ms: Some(1_000.),
+        }
+    }
+}
+
+#[test]
+fn command_reads_park_unsigned_until_the_shared_route_is_prepared() {
+    use safe_cex_engine::Action;
+    use safe_cex_engine::request_context::HttpAction;
+    for identity in [false, true] {
+        let mut h = ready();
+        h.engine.handle(h.now, Event::Command(read(710, identity)));
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        let prepares: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare { request, .. } => Some(request),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prepares.len(), 1, "one explicit read awaits preparation");
+        assert!(prepares[0].headers.is_empty());
+        assert!(!prepares[0].url.contains("signature="));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_) | Action::Sign { .. }))
+        );
+    }
+}
+
+#[test]
+fn command_read_deadline_rejects_late_results_and_old_ids_cannot_complete_reused_command() {
+    for identity in [false, true] {
+        let mut h = ready();
+        let path = if identity {
+            "/fapi/v3/balance"
+        } else {
+            "/klines"
+        };
+        let body = if identity {
+            r#"[{"accountAlias":"account"}]"#
+        } else {
+            "[]"
+        };
+        h.event(Event::Command(read(711, identity)));
+        let first = h.take(path);
+        h.now += 20_000.;
+        h.reply(first.id, 200, "", body);
+        assert!(
+            h.result(711).unwrap().is_err(),
+            "deadline cannot be renewed by a reply"
+        );
+        assert_eq!(
+            h.done.iter().filter(|(command, _)| *command == 711).count(),
+            1
+        );
+        h.done.clear();
+        h.event(Event::Command(read(711, identity)));
+        let second = h.take(path);
+        h.reply(first.id, 200, "", body);
+        assert!(h.result(711).is_none());
+        h.reply(second.id, 200, "", body);
+        assert!(h.result(711).unwrap().is_ok());
+        assert_eq!(
+            h.done.iter().filter(|(command, _)| *command == 711).count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn streamed_candles_discard_partial_rows_when_the_original_deadline_expires() {
+    let mut h = ready();
+    h.event(Event::Command(read(712, false)));
+    let request = h.take("/klines");
+    h.event(Event::HttpStart {
+        request: request.id,
+        status: 200,
+        headers: "",
+    });
+    h.event(Event::HttpChunk {
+        request: request.id,
+        data: br#"[[1000,"1","3","1","2","8",2000,"16",1,"0","0","0"],"#,
+    });
+    assert!(h.result(712).is_none());
+    h.now += 20_000.;
+    h.event(Event::HttpChunk {
+        request: request.id,
+        data: b"]",
+    });
+    h.event(Event::HttpEnd {
+        request: request.id,
+    });
+    assert!(h.result(712).unwrap().is_err());
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 712).count(), 1);
+}
+
+#[test]
+fn command_read_preparation_failures_keep_typed_errors_and_emit_no_http() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    use safe_cex_engine::{Action, ErrorKind, Notice, VenueError};
+    for identity in [false, true] {
+        let mut h = ready();
+        h.engine.handle(h.now, Event::Command(read(713, identity)));
+        let token = h
+            .engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        h.engine.http_preparation_failed(
+            h.now + 1.,
+            token,
+            Error::State,
+            VenueError::new("route denied").kind(ErrorKind::AuthPermission),
+        );
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 713,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].kind, Some(ErrorKind::AuthPermission));
+        assert_eq!(failures[0].message, "route denied");
+    }
+}
+
+#[test]
+fn identity_waits_for_provider_and_refusal_remains_typed_without_a_physical_send() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    use safe_cex_engine::signing::{SignError, SignFuture, SignRequest, Signer};
+    use safe_cex_engine::{Action, ErrorKind, Notice};
+    struct Parked;
+    impl Signer for Parked {
+        fn sign(&self, _: SignRequest) -> SignFuture {
+            Box::pin(std::future::pending())
+        }
+    }
+    let mut engine = support::engine(Options {
+        key: Some("primary-key".into()),
+        secret: Some("primary-secret".into()),
+        ..Options::default()
+    });
+    engine
+        .set_signer(Some(std::sync::Arc::new(Parked)))
+        .unwrap();
+    engine.handle(1_000., Event::Command(read(714, true)));
+    let token = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_prepared(
+        1_100.,
+        token,
+        Prepared {
+            id: 1,
+            expires_at: None,
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let attempt = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Sign { attempt, work, .. } => {
+                assert_eq!(work.receipt.stamp_ms, Some(1_100.));
+                Some(*attempt)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    engine.handle(
+        1_200.,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::Refused),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed {command:714,error}) if error.kind == Some(ErrorKind::InvalidInput))).count(), 1);
+    engine.handle(
+        1_201.,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::Refused),
+        },
+    );
+    assert!(engine.drain_actions().next().is_none());
+}
+
 #[test]
 fn terminal_native_reports_follow_logical_plan_not_callback_order() {
     let mut h = ready();
