@@ -262,6 +262,32 @@ impl Bingx {
         self.retries.failed(cx, kind);
     }
 
+    fn candle_response_context(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &safe_cex_engine::request_context::Context,
+        response: Response<'_>,
+        rows: Vec<Candle>,
+        valid: bool,
+    ) {
+        let result = success(response).and_then(|_| {
+            if valid {
+                candle_data(rows)
+            } else {
+                Err("malformed BingX list row".into())
+            }
+        });
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(context, data);
+            }
+            Err(error) => {
+                let _ = cx.command_error_context(context, error.clone());
+                let _ = cx.fail_context(context, error);
+            }
+        }
+    }
+
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &'static str, pending: Pending) {
         if !self.tickers_committed
             && matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. })
@@ -337,7 +363,13 @@ impl Bingx {
         }
     }
 
-    fn resend_managed(&mut self, cx: &mut Cx<'_, Pending>, signed: Signed) {
+    fn resend_managed(&mut self, cx: &mut Cx<'_, Pending>, mut signed: Signed) {
+        // A refused envelope cannot contribute rows or decode status to a
+        // later successful physical attempt of the same logical candle read.
+        if let Pending::Candles { rows, valid, .. } = &mut signed.inner {
+            rows.clear();
+            *valid = true;
+        }
         let scope = match &signed.inner {
             Pending::Account(request) => account::auth_scope(request),
             _ => None,
@@ -916,6 +948,9 @@ impl Venue for Bingx {
                         (Some(context), Pending::Identity(_)) => {
                             self.identity_response_context(cx, context, response)
                         }
+                        (Some(context), Pending::Candles { rows, valid, .. }) => {
+                            self.candle_response_context(cx, context, response, rows, valid)
+                        }
                         (_, pending) => self.on_response(cx, pending, response),
                     }
                     managed::finish(cx, context);
@@ -1067,15 +1102,12 @@ impl Venue for Bingx {
             }
             Pending::Candles {
                 command,
-                mut rows,
+                rows,
                 valid: true,
-            } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
-            }
+            } => match candle_data(rows) {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            },
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
     }
@@ -1098,9 +1130,20 @@ impl Venue for Bingx {
                 }
             }
             Pending::Signed(signed) => {
-                let context = signed.context;
-                self.on_stream_error(cx, signed.inner, response);
-                managed::finish(cx, context);
+                if signed.context.is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    self.on_request_failed(
+                        cx,
+                        Pending::Signed(signed),
+                        &format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        ),
+                    );
+                } else {
+                    let context = signed.context;
+                    self.on_stream_error(cx, signed.inner, response);
+                    managed::finish(cx, context);
+                }
             }
             pending => self.on_request_failed(
                 cx,
@@ -1121,7 +1164,10 @@ impl Venue for Bingx {
         match pending {
             Pending::Signed(signed) => {
                 if let Some(context) = &signed.context
-                    && matches!(&signed.inner, Pending::Identity(_))
+                    && matches!(
+                        &signed.inner,
+                        Pending::Identity(_) | Pending::Candles { .. }
+                    )
                 {
                     let _ = cx.command_error_context(context, error.message.clone());
                     let _ = cx.fail_context(context, error);
@@ -1162,7 +1208,10 @@ impl Venue for Bingx {
         match pending {
             Pending::Signed(signed) => {
                 if let Some(context) = &signed.context
-                    && matches!(&signed.inner, Pending::Identity(_))
+                    && matches!(
+                        &signed.inner,
+                        Pending::Identity(_) | Pending::Candles { .. }
+                    )
                 {
                     let _ = cx.command_error_context(context, error.to_owned());
                     let _ = cx.fail_context(context, error);
@@ -1373,19 +1422,37 @@ impl Venue for Bingx {
                     .str("interval", interval.as_str())
                     .num("startTime", start)
                     .num("endTime", end);
-                issue(
-                    cx,
-                    self.credentials.as_ref(),
-                    Method::Get,
-                    paths::KLINES,
-                    params,
-                    Some(ArrayAt::EnvelopeField("data")),
-                    Pending::Candles {
-                        command,
-                        rows: Vec::new(),
-                        valid: true,
-                    },
-                );
+                let pending = Pending::Candles {
+                    command,
+                    rows: Vec::new(),
+                    valid: true,
+                };
+                if let Some(credentials) = &self.credentials {
+                    if let Err((pending, error)) = managed::read(
+                        cx,
+                        credentials,
+                        managed::Read {
+                            method: Method::Get,
+                            path: paths::KLINES,
+                            params,
+                            at: Some(ArrayAt::EnvelopeField("data")),
+                        },
+                        pending,
+                        safe_cex_engine::request_context::Scope::Command(command),
+                    ) {
+                        self.on_sign_error(cx, *pending, error);
+                    }
+                } else {
+                    issue(
+                        cx,
+                        None,
+                        Method::Get,
+                        paths::KLINES,
+                        params,
+                        Some(ArrayAt::EnvelopeField("data")),
+                        pending,
+                    );
+                }
             }
             other => {
                 self.account.bump_orders();
@@ -1459,6 +1526,11 @@ fn reread_partial<P>(
         );
     }
     *stalls < 5
+}
+
+fn candle_data(mut rows: Vec<Candle>) -> Result<String, String> {
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    serde_json::to_string(&rows).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

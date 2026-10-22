@@ -4059,10 +4059,10 @@ family migrations must consume actual shared APIs, preserve semantic Context
 ownership and carry their own caller acceptance. Existing SDK callers need no
 new option, credential transfer or persisted identity mapping for this additive
 header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
-### BingX native dispatch signing and refusal ownership (checkpoint)
+### BingX native dispatch signing and refusal ownership
 
-The BingX native checkpoint moves HTTP signing and listen-key API-key
-presentation behind the shared host-injected provider. Venue options retain
+BingX HTTP signing and listen-key API-key presentation use the shared
+host-injected provider. Venue options retain
 opaque primary/secondary refs; generic engine/SDK options retain no signing
 secret. Ordinary GET work uses the secondary identity when present, while writes
 and listen-key creation/renewal select primary. Native sorted query bytes,
@@ -4081,32 +4081,28 @@ A first refused write is `notSent`. After an earlier write or signature retry
 reached the venue, a later refused signer cannot make the whole operation
 `notSent`; uncertain prior effects require reconciliation. Accepted IDs remain
 in the existing partial result, including when another leg fails before send.
-The BingX `Trading::finish`/`advance` finalizer is an explicit RequestContext
-consolidation target alongside Binance and Bybit; this adapter adds no new
-outcome ledger, retry policy or evidence flags.
+BingX hosted/keyless admission is disabled. Hosted callers use their existing
+supported runtime route. Native provider signing uses hex HMAC and API-key
+presentation; WebSocket session ownership remains separate.
 
-This is a native checkpoint, not hosted API closure. BingX hosted/keyless
-admission remains disabled pending exact legacy-wire validation and actual
-WASM/SDK acceptance tests. The venue uses hex HMAC and an API key without a
-passphrase, so those checks may use the landed presentation contract; no new
-WS-auth/session ownership is claimed. Existing hosted callers must retain their
-current supported route until the family admission gates are complete.
+## BingX managed single-owner reads
 
-## BingX managed single-owner reads (draft #1779 checkpoint)
-
-Credentialed startup quotes, rare account identity and recurring private snapshot
-reads prepare their route before provider signing, using the same native primary
+Credentialed startup quotes, account identity, candle commands and recurring
+private snapshot reads prepare their route before provider signing, using the same native primary
 or secondary credential selection and exact header/query/body bytes. A read keeps
 its original raw 20s deadline through route/provider delays and its existing
-one-signature retry; identity retains its native no-retry behavior. Identity
+one-signature retry; identity retains its native no-retry behavior. Identity and candle
 success and failures complete through generation-bearing Context authority.
 Provider or route refusal stays typed and does not become native account-auth
 evidence. Account snapshot, revision, settings and stale-owner publication fences
 remain native and unchanged.
 
-This checkpoint is not whole-family cutover: candle reads, paired metadata and
-command writes continue in the next slices. Session upkeep and history remain
-explicitly legacy-owned under the single temporary provider-stage allowance,
-to be removed after shared session Context and managed history completion/read
-validation adoption. Hosted admission stays disabled. No NX deployment or
-persisted identity migration is claimed for this intermediate checkpoint.
+Candle rows keep native time sorting and seconds conversion. Refused response
+rows and decode status are discarded before a signature retry; they cannot
+appear in or poison its successful response. Provider, route, malformed-stream
+and deadline failures settle the command once, and late responses cannot revive
+it. Unsigned public candles retain their existing request path.
+
+Session upkeep and history retain their explicit legacy ownership and existing
+native retry/completion contracts. Hosted admission is disabled. These read
+adapters require no new caller option or persisted identity mapping.

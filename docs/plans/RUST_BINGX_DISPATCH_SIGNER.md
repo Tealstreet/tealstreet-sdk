@@ -291,3 +291,15 @@ callbacks inert. Original-RED controls must show the actual credentialed command
 fails to publish managed preparation, then verify route/sign/bind/claim and
 success/native refusal/malformed row/provider refusal/original-deadline expiry.
 No metadata, history, session or write authority changes enter this slice.
+
+
+Candle implementation verification retains the original actual-builder
+preparation assertion RED. A second reviewed regression reproduces buffered rows
+from a refused100001 response escaping into its successful retry (and malformed
+rows poisoning that retry). The adapter now clears only candle rows/valid state
+when starting that native read retry, retaining the engine Context, request
+intent and original deadline. Thirteen managed read controls cover both buffer
+variants, HTTP/native errors, missing/null/truncated lists, row decode, exact
+completion, typed route/provider refusal, duplicate callbacks and a retry parked
+until the original20s boundary. Metadata, writes and full inventory closure
+remain separate unfinished implementation phases.
