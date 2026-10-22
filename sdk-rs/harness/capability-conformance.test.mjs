@@ -18,7 +18,7 @@ test('a returned unsupported command failure cannot pass as decoder success', ()
 
 test('a coded unsupported event cannot pass as decoder success', () => {
   assert.throws(() => probeCapabilityCommand(engine([
-    { op: 'event', code: 'command.unsupported', message: 'unsupported command' },
+    { op: 'event', level: 'error', code: 'command.unsupported', message: 'unsupported command' },
   ]), command, 'advertised book'), /advertised book/);
 });
 
@@ -80,7 +80,7 @@ test('preconditions, terminal results, requests and deferred output remain disti
   const cases = [
     [[{ op: 'done', command: 17, error: 'Unknown market', detail: { kind: 'invalidInput' } }], 'precondition'],
     [[{ op: 'done', command: 17, result: '[]' }], 'terminal'],
-    [[{ op: 'http', request: 1, method: 'GET', url: 'https://example.test' }], 'request'],
+    [[{ op: 'http', request: 1, method: 'GET', url: 'https://example.test', headers: [] }], 'request'],
     [[], 'deferred'],
   ];
   for (const [actions, evidence] of cases) {
@@ -123,4 +123,21 @@ test('construction fixture covers known prerequisites and the options profile', 
   assert.equal(constructionProfiles('breakoutprop')[0].key, 'user');
   assert.equal(constructionProfiles('hyrotrader')[0].endpoints.rest, 'https://hyro.test');
   assert.deepEqual(constructionProfiles('bybit').map((options) => options.enableOptionMarkets ?? false), [false, true]);
+});
+
+
+test('request evidence requires real wire fields and terminal evidence is unique and typed', () => {
+  for (const actions of [
+    [{ op: 'http' }], [{ op: 'sign' }], [{ op: 'signPayload' }], [{ op: 'wsSend' }],
+    [{ op: 'event' }],
+    [{ op: 'done', command: 17, result: '[]', error: 123 }],
+    [{ op: 'done', command: 17, result: '[]' }, { op: 'done', command: 17, result: '[]' }],
+  ]) assert.throws(() => probeCapabilityCommand(engine(actions), command, 'malformed proof'), /malformed proof/);
+});
+
+test('an unsupported input symbol is ingress-only, not an unavailable command', () => {
+  const proof = probeCapabilityCommand(engine([
+    { op: 'done', command: 17, error: 'Unsupported native history symbol' },
+  ]), command, 'symbol precondition');
+  assert.equal(proof.evidence, 'precondition');
 });

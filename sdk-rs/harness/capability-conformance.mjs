@@ -85,18 +85,50 @@ export function probeCapabilityCommand(instance, command, label) {
   let actions;
   assert.doesNotThrow(() => { actions = output === '' ? [] : JSON.parse(output); }, `${label}: malformed encoded actions`);
   assert.ok(Array.isArray(actions), `${label}: actions must be an array`);
-  const knownOps = new Set(['accountAuth', 'deactivate', 'startupFailed', 'wsConnect', 'wsSend', 'wsClose', 'http', 'sign', 'signPayload', 'setTimer', 'clearTimer', 'event', 'commandError', 'done', 'commandProgress']);
+  let terminalCount = 0;
   for (const action of actions) {
-    assert.ok(action && typeof action === 'object' && typeof action.op === 'string', `${label}: malformed action`);
-    assert.ok(knownOps.has(action.op), `${label}: unknown action op ${action.op}`);
-    if (action.op === 'done') {
-      assert.ok((typeof action.result === 'string') !== (typeof action.error === 'string'), `${label}: malformed terminal output`);
+    assert.ok(action && typeof action === 'object' && !Array.isArray(action) && typeof action.op === 'string', `${label}: malformed action`);
+    const integer = (value) => Number.isSafeInteger(value) && value >= 0;
+    const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+    const headers = (value) => Array.isArray(value) && value.every((pair) => Array.isArray(pair) && pair.length === 2 && pair.every((item) => typeof item === 'string'));
+    const optional = (key, validate) => !Object.hasOwn(action, key) || validate(action[key]);
+    let valid;
+    switch (action.op) {
+      case 'http': valid = integer(action.request) && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(action.method)
+        && typeof action.url === 'string' && headers(action.headers) && optional('body', (v) => typeof v === 'string'); break;
+      case 'sign': valid = integer(action.attempt) && object(action.work) && Number.isFinite(action.timeoutMs); break;
+      case 'signPayload': valid = integer(action.request) && object(action.payload) && Number.isFinite(action.timeoutMs); break;
+      case 'wsSend': valid = integer(action.socket) && typeof action.text === 'string'; break;
+      case 'wsConnect': valid = integer(action.socket) && typeof action.url === 'string' && optional('headers', headers); break;
+      case 'wsClose': valid = integer(action.socket); break;
+      case 'setTimer': valid = integer(action.timer) && Number.isFinite(action.at); break;
+      case 'clearTimer': valid = integer(action.timer); break;
+      case 'event': valid = ['debug', 'info', 'warn', 'error'].includes(action.level)
+        && typeof action.code === 'string' && typeof action.message === 'string' && optional('fields', object); break;
+      case 'done': {
+        terminalCount++;
+        const result = Object.hasOwn(action, 'result');
+        const error = Object.hasOwn(action, 'error');
+        valid = integer(action.command) && result !== error
+          && optional('result', (v) => typeof v === 'string') && optional('error', (v) => typeof v === 'string') && optional('detail', object);
+        break;
+      }
+      case 'commandError': valid = integer(action.command) && typeof action.message === 'string'; break;
+      case 'commandProgress': valid = integer(action.command) && Array.isArray(action.receipts); break;
+      case 'accountAuth': valid = Object.hasOwn(action, 'credential') && Object.hasOwn(action, 'scope') && Object.hasOwn(action, 'outcome'); break;
+      case 'startupFailed': valid = object(action.detail); break;
+      case 'deactivate': valid = true; break;
+      default: valid = false;
     }
+    assert.ok(valid, `${label}: malformed or unknown ${action.op} action`);
+    assert.ok(terminalCount <= 1, `${label}: duplicate terminal output`);
     assert.notEqual(action.detail?.kind, 'unsupported', `${label}: advertised handler is unsupported`);
     assert.notEqual(action.code, 'command.unsupported', `${label}: advertised handler is unsupported`);
-    if (action.op === 'done' || action.op === 'commandError') {
+    if (['done', 'commandError', 'commandProgress'].includes(action.op)) {
       assert.equal(action.command, command.command, `${label}: uncorrelated command output`);
-      assert.doesNotMatch(action.error ?? action.message ?? '', /unsupported|not supported|not implemented/i,
+      // Legacy operation-level refusals only. An unsupported symbol/argument is
+      // a precondition, not proof that the advertised command is unavailable.
+      assert.doesNotMatch(action.error ?? action.message ?? '', /^(?:unsupported|not supported|not implemented)(?:$| command\b)|\b(?:command|operation|query|method)\b.*\b(?:unsupported|not supported|not implemented)\b/i,
         `${label}: advertised handler is unsupported`);
     }
   }

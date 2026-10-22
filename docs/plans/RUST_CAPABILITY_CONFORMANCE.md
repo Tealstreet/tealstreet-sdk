@@ -93,3 +93,15 @@ It removes exactly the command-order-book opt-in, rebuilds the isolated MEXC
 family, verifies the flag remains true and requires specifically the unknown
 fetchOrderBook variant error. Build/constructor/entropy failures do not count.
 The mutant never overwrites normal pkg artifacts or tracked manifests.
+
+
+Independent adversarial review found that op-only validation could label malformed
+HTTP/sign actions as request evidence and admit duplicate or mistyped terminal
+output. The verifier now checks the required wire fields, completion ownership,
+exclusive string result/error and at most one terminal. Added controls also keep
+unsupported input-symbol errors as preconditions rather than inventing a missing
+command. All 16 focused controls and all 1,130 harness unit tests pass; the
+native eight-book dispatch fixture and strict registry Clippy pass. Release
+artifact and isolated missing-feature mutation proof remain CI-only/pending.
+Actual Aster profile #1734 `b95cad5a1003` is integrated; no own runtime source
+changes were introduced by integration.
