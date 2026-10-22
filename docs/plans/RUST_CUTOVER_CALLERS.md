@@ -4027,6 +4027,20 @@ shape changes. Existing B11 request-scoped incomplete ingestion/coverage and typ
 rejection handling remain required; this native/shared-owner scope does not close
 B11, managed Context migration or deployed runtime proof. [Scope](RUST_OWNED_HISTORY.md).
 
+
+## Grouped and deferred row-reporting compatibility
+
+Crypto.com and WOO skipped-row groups use shared engine collectors while keeping
+native summary level/code/text/order, first-label/count rules and cached-state
+retention. WOO clean groups re-arm only that summary kind. Bybit unsupported-order
+diagnostics retain unbounded per-product Once memory at accepted joined reads;
+a failed/noncurrent/incomplete whole join cannot consume it, an admitted partial
+join still reports, and clean/mapped rows never re-arm it. Known unsupported
+orders are restored independently of whether their diagnostic was suppressed.
+No SDK argument/result, remote/header/signing contract, order/position/FILLS wire
+shape, caller migration or financial/snapshot authority changes. Remaining
+persistent reporter consumers stay open in RUST_ROW_ADMISSION.md.
+
 ### KuCoin futures and spot owned history
 
 This slice moves the implemented KuCoin query reads to the existing engine
