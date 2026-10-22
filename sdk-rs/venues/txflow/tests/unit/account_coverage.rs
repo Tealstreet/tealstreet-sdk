@@ -43,7 +43,11 @@ impl Venue for Fixture {
                 ids: HashSet::new(),
                 valid: true,
             },
-            Response { status: 200, headers: "", body: &body },
+            Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
         );
     }
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -55,43 +59,71 @@ impl Venue for Fixture {
     fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
         panic!("fixture must not issue network requests");
     }
-    fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> { None }
+    fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+        None
+    }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
         Box::new(std::iter::empty())
     }
-
 }
 fn execution(tid: u64) -> Execution {
     Execution {
-        tid, oid: 1, instrument_id: 1, px: N(1.0), sz: N(1.0),
-        side: "B".into(), time: N(1_000.0),
+        tid,
+        oid: 1,
+        instrument_id: 1,
+        px: N(1.0),
+        sz: N(1.0),
+        side: "B".into(),
+        time: N(1_000.0),
     }
 }
 fn assert_exhausted(limit: Limit, message: &str) {
-    let venue = TxFlow::new(Options { testnet: true, public_data_only: true, ..Default::default() });
+    let venue = TxFlow::new(Options {
+        testnet: true,
+        public_data_only: true,
+        ..Default::default()
+    });
     let mut engine = safe_cex_engine::test_support::seeded_engine(Fixture { venue, limit });
     engine.set_log_level(Level::Error);
     engine.start(1_000.0);
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert_eq!(actions.len(), 1, "no fill, request, retry or command completion");
-    let Action::Notice(Notice::Event(event)) = &actions[0] else { panic!("coverage event") };
+    assert_eq!(
+        actions.len(),
+        1,
+        "no fill, request, retry or command completion"
+    );
+    let Action::Notice(Notice::Event(event)) = &actions[0] else {
+        panic!("coverage event")
+    };
     assert_eq!(event.code, code::HISTORY_INCOMPLETE);
     assert_eq!(event.level, Level::Error);
     assert_eq!(event.message, message);
-    assert_eq!(event.fields, vec![("scope", Value::Str("account/background".into()))]);
+    assert_eq!(
+        event.fields,
+        vec![("scope", Value::Str("account/background".into()))]
+    );
     assert!(engine.venue().venue.account.fills_exhausted);
     assert!(!engine.venue().venue.account.inflight.contains("fills"));
     assert!(engine.take_frame(1_000.0).is_none());
 }
 #[test]
 fn offset_exhaustion_is_account_scoped_without_a_query_owner() {
-    assert_exhausted(Limit::Offset, "TxFlow execution coverage exhausted; restart account reconciliation");
+    assert_exhausted(
+        Limit::Offset,
+        "TxFlow execution coverage exhausted; restart account reconciliation",
+    );
 }
 #[test]
 fn row_exhaustion_is_account_scoped_without_a_query_owner() {
-    assert_exhausted(Limit::Rows, "TxFlow execution coverage exhausted; restart account reconciliation");
+    assert_exhausted(
+        Limit::Rows,
+        "TxFlow execution coverage exhausted; restart account reconciliation",
+    );
 }
 #[test]
 fn dedup_exhaustion_is_account_scoped_without_a_query_owner() {
-    assert_exhausted(Limit::Dedup, "TxFlow execution deduplication capacity exhausted; restart account reconciliation");
+    assert_exhausted(
+        Limit::Dedup,
+        "TxFlow execution deduplication capacity exhausted; restart account reconciliation",
+    );
 }

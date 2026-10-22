@@ -585,3 +585,20 @@ answer the architecture gate: this is one engine choke point, not three local
 policies. Record the caller boundary without claiming full history fan-out or
 NX/runtime closure. After this phase, the owner ordered capability/feature
 conformance CI next; other unconverted paged histories remain separate work.
+
+
+The actual stamp #1726 `e09e3448625` and financial #1729 `6e10b0e8a23`
+are real-integrated before the Bitunix edit. Their source changes are retained;
+this follow-on changes no financial arithmetic, dispatch or request builders.
+Original-red controls fail on the missing scope field for Bitunix metadata
+repair, Lighter's exhausted reconnect retry and all three TxFlow limit branches
+(offset, accumulated rows, deduplication). The shared reporter preserves four
+Warn/two Error sites and emits only the scope field. Its real-engine control
+keeps an unrelated command pending across repeated notices, then completes that
+command without an incomplete marker. Existing health counters are unchanged;
+there is no history.incomplete health counter to add or increment.
+
+Focused engine/Bitunix/Lighter/TxFlow/Binance gates pass 1,133 native tests;
+strict all-target Clippy and formatting pass. Adversarial source review is clean:
+the six replacements are emitter-only, and the existing Cx::notice path already
+delegates to Cx::event. The only event contract change is the explicit scope.
