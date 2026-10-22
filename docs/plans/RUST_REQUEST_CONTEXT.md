@@ -1471,3 +1471,22 @@ sampling/instrumentation limitations; this is diagnosis, not new gate evidence.
 Only fix demonstrated clear waste that preserves all semantics, with focused
 regressions and independent review. Otherwise report findings without a source
 change. The shared response-proof/ordinary-Bybit work stays local and separate.
+
+Profiling result (one pass, 4.078 seconds total): all five entire nonmetric Rust
+outputs match the exact CI raw results. Aggregate managed prepare/bind/cancel
+counts were17/9/12/14/20 and matched claim/drain counts; no aggregate attempt
+inflation was demonstrated. Synchronous elapsed sums for the four lifecycle
+invoke wrappers (httpPreparationPending/httpPrepared/httpClaim/prepareDispatch)
+were1.627–2.346 ms per case; the three response wrappers
+(httpStart/httpChunk/httpEnd) were9.555–12.361 ms, with httpEnd largest.
+Inclusive WASM-ancestor response/control samples totaled355/54. These wrapper
+sums exclude host JS outside invoke and are not CPU totals or new gate evidence.
+
+No demonstrated removable waste justified a production change. The single-run
+sampling, shifted import accounting from diagnostic preload, local machine and
+stripped WASM symbols do not establish a cause for the CI ratio change. GC/idle
+and clock-boundary uncertainty remain separate. An ignored local regular tape
+failed preflight before any replay; the unchanged generator recovered exact CI
+bytes into a temporary input, leaving the working tape untouched. No measured
+case was rerun. Independent DATA/report review recomputed all five outputs,
+provenance, sums, counts and sampling tables CLEAN; architecture No.
