@@ -1804,3 +1804,25 @@ first actual page failures reject typed and failed-page prefixes stay excluded.
 Shared filtered admission and checked range-stage/native-bound transitions retain
 coverage before output filtering. The strict output cap and single-page Phemex
 history/lookup policies remain; other venue adoption is still open.
+
+## KuCoin Spot cumulative fallback — shared execution adoption
+
+~~Without `matchSize`, the Spot match reducer emitted all of `filledSize` as a
+new Fill, replaying the already trusted cumulative prefix.~~ Native regressions
+prove the defect against actual `2cf8c4c91dd`: startup filled0.5 followed by
+filledSize0.75 emitted0.75 instead of0.25. Existing engine `Cursor` now prepares
+the binary suffix before native identity admission; positive unique delivery
+commits its anchor. Authoritative `matchSize` remains exact and independent of
+stale/terminal display fences. Raw native identity keys and optional bounds stay.
+
+Valid raw REST prefixes seed previously unseen IDs only after current nonlookup
+snapshot admission, including healthy peers of rejected rows. Seeds never come
+from retained rejected/cached replacement rows, failed/stale reads or lookups.
+The independent20,000-order FIFO retains anchors through terminal removal,
+REST absence and reconnect; later reads do not overwrite live execution progress.
+Eviction ends that bounded guarantee, even for active orders. A last fill with
+no cumulative endpoint does not invent a prefix; subsequent fallback cannot
+prove how that unanchored last overlaps, an explicit remaining evidence limit.
+This fixes one financial defect with multiple native RED controls, not a claim
+of new live captures or complete all-family fill-helper adoption. Orderly and
+the shared row-reporting extension remain next.
