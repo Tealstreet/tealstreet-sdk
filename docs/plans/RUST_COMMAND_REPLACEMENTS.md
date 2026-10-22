@@ -456,9 +456,10 @@ predicate called inside that callback would be too late. Place the decision
 before that callback and before account-auth observation. Apply it to both
 complete-response and streamed custody, and to retained late responses; ordinary
 managed reads and unmanaged work remain explicitly separate. Define unproven as
-HTTP408 or500..=599 (reject invalid status at existing integrity ingress rather
-than silently assigning it a native success meaning). Confirm the existing
-status contract during review; do not broaden this slice to429 or native codes.
+HTTP408 or status>=500, exactly preserving both existing predicates, including
+600 and65535. Collector.start currently accepts anyu16; this slice does not
+claim general HTTP validity or proof for lower invalid statuses. Defer that
+policy explicitly; do not broaden this slice to429 or native codes.
 
 Proposed authority split, to audit before implementing:
 
@@ -504,3 +505,44 @@ Hyro semantics explicitly; no all-family closure. Run focused engine/Binance/
 Bybit tests, strict Clippy/fmt, ratchet/bans and independent correctness plus
 adversarial review at each checkpoint. Architecture gate: No; one engine
 proof/authority branch, with native evidence codecs in two different families.
+
+
+Response-proof plan audit refinements (before production source):
+
+- Pin the command-wide abort: first record the current RELEASED attempt Failed,
+  then centrally seal once using all prior journal facts/exact IDs and every
+  sibling's release history. Retire outstanding sibling route/preparation/
+  provider/transport work through existing cancellation and late custody.
+  Never manufacture a successful or definitively rejected sibling fact. A
+  later repeated guard cannot emit another terminal result. Cover accepted and
+  KnownPartial siblings, plus unresolved released siblings in both callback
+  orders; overflow still yields Unknown and cannot drop earlier native facts.
+- The discard-only native notification is bound to the exact owner generation,
+  never a numeric command alone. It removes only native Job/ResolveMode/delay/
+  fallback planning, not account/order ownership reducers. Preserve actual
+  dynamic amendment and mode/fallback behavior on proven responses. Test that
+  stale cleanup cannot remove a newly reused command's plan. Existing timer
+  events may remain physically scheduled but must be inert after that exact
+  plan is removed; no arbitrary venue-supplied timer cancellation list.
+- Active evidence decoding borrows Pending; late evidence has only bounded
+  ReconciliationData, never retained Pending/Rest/LocalWrite/recipes. A writer
+  consumes the existing command-wide ID/text quotas row by row (no unbounded
+  temporary list or reset per response). A sealed result cannot be amended:
+  this slice makes NO late-ID retention/publication promise. Late unproven
+  custody may retire without native decoding; never silently lose IDs collected
+  before sealing or reopen a result just to attach later evidence.
+- Guard only after issuer/generation/attempt/deadline admission, before BOTH
+  auth observation and Store-capable native callbacks. For late responses it
+  runs before any Store-capable reconciliation callback. Keep status counting,
+  begin/finish event scope and deferred order-lock drain exactly once; neither
+  stale late cleanup nor native decoding grants completion/send authority.
+- Engine controls include408,500,503,600,65535, wrong/stale/reused owners,
+  queued and released sibling cancellation/late ACK, repeated guard, exact known
+  partial IDs, order locks and deferred failure. Real family controls include
+  Binance dynamic amendments plus ordinary Bybit mode/fallback/supersession
+  plans. Existing positive200 assertions stay unchanged. Lower invalid-status
+  policy is explicitly outside this first classification slice.
+
+Independent correctness/adversarial plan review CLEAN after these refinements;
+architecture No. The implementation must establish the owner-bound native plan
+cleanup shape before source adoption; no mutable-Cx compatibility escape.
