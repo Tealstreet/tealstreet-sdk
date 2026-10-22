@@ -51,7 +51,7 @@ jobs:
         with:
           node-version: 22
           check-latest: true
-          cache: yarn
+      - uses: ./.github/actions/prepare-yarn
 
       - name: Use npm with trusted publishing support
         run: npm install -g npm@^11.5.1 && npm --version
@@ -100,13 +100,13 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
           '
 
-      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
 
       - name: Typecheck
-        run: yarn --cwd "$PACKAGE_DIR" typecheck
+        run: corepack yarn --cwd "$PACKAGE_DIR" typecheck
 
       - name: Test
-        run: yarn --cwd "$PACKAGE_DIR" test-ci
+        run: corepack yarn --cwd "$PACKAGE_DIR" test-ci
 
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
@@ -122,12 +122,12 @@ jobs:
       # Also writes dist/THIRD_PARTY_LICENSES.md, and fails on a bundled
       # dependency whose licence is not allowed.
       - name: Build
-        run: yarn --cwd "$PACKAGE_DIR" build
+        run: corepack yarn --cwd "$PACKAGE_DIR" build
 
       # Boots dist/index.js over stdio, then loads the Poseidon WASM that
       # Lighter signs through from the same dist/ directory.
       - name: Smoke-test the bundle
-        run: yarn --cwd "$PACKAGE_DIR" smoke
+        run: corepack yarn --cwd "$PACKAGE_DIR" smoke
 
       # The bundle is self-contained: a runtime dependency on an unpublished
       # @tealstreet/* workspace is what broke `npm install -g @tealstreet/cli`.
