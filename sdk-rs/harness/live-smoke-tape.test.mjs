@@ -604,3 +604,56 @@ test('secondary credential aliases and arbitrary secret containers never borrow 
   assert.ok(!Object.hasOwn(safe, 'secrets'));
   assert.equal(safe.price, '100');
 });
+
+test('managed recorder holds original command stage across parked preparation and records after dispatch', async () => {
+  let finishPrepare;
+  const events = [], receivers = [];
+  const response = { status: 200, headers: '', body: bytes(JSON.stringify({ orderId: 'native-1', note: secrets.key })) };
+  const bound = { ready() { receivers.push(this === bound); return true; }, cancel() { receivers.push(this === bound); },
+    dispatch() { receivers.push(this === bound); events.push('send'); return Promise.resolve(response); } };
+  const resource = { expiresAt: 200, cancel() { receivers.push(this === resource); },
+    bind(packet) { receivers.push(this === resource); assert.equal(packet.headers['X-MBX-APIKEY'], secrets.key); return bound; } };
+  const live = { ...makeLive(), prepareHttp() { receivers.push(this === live); return new Promise((resolve) => { finishPrepare = () => resolve(resource); }); } };
+  const recorder = createPrivateRecorder(live, { venue: venueOf('binance'), secrets,
+    write: (record) => events.push(record.type) });
+  const request = { request: 1, method: 'POST', url: 'https://demo-fapi.binance.com/fapi/v1/order?symbol=BTCUSDT', route: 'direct' };
+  const preparing = recorder.command({ op: 'placeOrders' }, () => recorder.transport.prepareHttp(request));
+  recorder.command({ op: 'fetchBalance' }, () => {});
+  finishPrepare(); const prepared = await preparing;
+  events.length = 0;
+  const ready = prepared.bind({ ...request, headers: { 'X-MBX-APIKEY': secrets.key } });
+  assert.equal(prepared.expiresAt, 200);
+  assert.equal(ready.ready(), true);
+  assert.deepEqual(events, []);
+  assert.equal(await ready.dispatch(), response);
+  const http = recorder.records.filter((row) => row.type === 'http');
+  assert.equal(http.length, 1);
+  assert.equal(http[0].afterCommand, 1);
+  assert.deepEqual(events, ['send', 'http']);
+  assert.equal(JSON.stringify(recorder.records).includes(secrets.key), false);
+  assert.equal(JSON.parse(http[0].body).orderId, 'native-1');
+  ready.cancel(); prepared.cancel();
+  assert.equal(receivers.every(Boolean), true);
+});
+
+test('managed recorder writer failure follows physical dispatch and cancels bind failure', async () => {
+  let sent = 0, canceled = 0;
+  const live = { ...makeLive(), prepareHttp: () => ({
+    cancel() { canceled++; },
+    bind(packet) {
+      if (packet.bad) throw new Error('private bind failure');
+      return { ready: () => true, dispatch() { sent++; return Promise.resolve({ status: 200, headers: '', body: bytes('{}') }); } };
+    },
+  }) };
+  const recorder = createPrivateRecorder(live, { secrets, write: (row) => { if (row.type === 'http') throw new Error(secrets.key); } });
+  const request = { request: 1, method: 'POST', url: 'https://exchange.example/order', headers: {} };
+  const rejected = await recorder.transport.prepareHttp(request);
+  assert.throws(() => rejected.bind({ ...request, bad: true }), /transport.*preparation|transport.*bind/i);
+  assert.equal(canceled, 1);
+  assert.equal(sent, 0);
+  const prepared = await recorder.transport.prepareHttp(request), ready = prepared.bind(request);
+  await assert.rejects(ready.dispatch(), /write failed|recording failed/);
+  assert.equal(sent, 1);
+  assert.ok(recorder.failure);
+  assert.equal(typeof createPrivateRecorder(makeLive(), { secrets }).transport.prepareHttp, 'undefined');
+});
