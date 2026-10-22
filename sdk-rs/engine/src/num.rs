@@ -78,6 +78,12 @@ pub fn decimal_subtract(a: f64, b: f64) -> f64 {
     round_half_up((a - b) * factor) / factor
 }
 
+/// Fifteen significant digits using the established native wire conversion.
+/// Financial callers must validate both the input and the rounded result.
+pub fn significant15(value: f64) -> f64 {
+    format!("{value:.14e}").parse().unwrap_or(value)
+}
+
 /// Round `value` to the nearest multiple of `step`, then trim float noise to
 /// the step's decimal places.
 pub fn adjust(value: f64, step: f64) -> f64 {

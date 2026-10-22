@@ -169,9 +169,13 @@ Medium:
    validated cumulative-fill preparation now starts with `engine::execution`
    and Hyro/Bitget Classic reference consumers, repairing five original-RED
    financial defects before progress/dedup commit. See
-   [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md). Remaining cumulative
-   consumers need engine interval/gap extensions and fan-out, rather than
-   independent venue repairs. Snapshot commits retain the
+   [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md). The engine now owns
+   observed/delivered/position suffix separation and bounded priced intervals;
+   WOO/Bitrue adopt it with five more original-RED/core-GREEN controls. An
+   exclusive borrow keeps prepared interval decisions current until consuming
+   commit, which precedes Fill emission; aggregate VWAP cannot price a clipped
+   subset. Remaining cumulative consumers still need fan-out before reporting
+   and snapshot freshness, rather than independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
