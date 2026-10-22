@@ -1102,3 +1102,18 @@ added to each fixture. All original provider/canonical-signature/refusal, startu
 frame, clock and timeout assertions remain. The helper's three tests, SDK
 typecheck and explicit non-ignored fixture lint pass. Independent review CLEAN,
 architecture No; fresh compiled-WASM CI remains required.
+
+Final conformance integration plan (before editing, after actual dependency
+integration): #1737's probe accepts the old HTTP/sign/WS wire only. Add the new
+managedHttp Prepare/Bind/Cancel schema to that one existing checker and its unit
+controls. Keep token counters as canonical decimal strings with closed p1/r1
+arity, u32 request/u64 bounds and packet-request/permit-attempt correlation; do
+not coerce them through Number. Validate closed phase fields, credential intent,
+packet method/URL/headers/optional body/route/timeout. Prepare/Bind are ingress
+request evidence, never physical-send proof; cancel-only stays deferred. Do not
+prepare, sign, claim or send from the conformance probe. Malformed/unknown ops,
+unsupported advertised handlers and mismatched completions must keep failing.
+Add valid wide-token controls and malformed/mismatched/unknown-phase controls
+that fail on the old checker; run existing conformance tests and bans. This is
+required new-wire recognition in the existing harness choke point, not another
+capability policy or a valid-state proof exemption. Architecture No.
