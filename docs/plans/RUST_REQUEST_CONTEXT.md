@@ -91,6 +91,13 @@ physical sends must still retain the gap rather than bunch after engine drain.
 No local SignStep/apply/receipt pacing workaround. Trusted MEXC credential setup
 normalization is owned separately by codex-5c57jl, outside this PR.
 
+Owner sequencing clarification (2026-10-22): #1741's merge proof uses the shared
+engine release policy and a real native prepared-handoff probe with a parked
+provider. The actual MEXC parked-provider 450 ms regression is mandatory in its
+signer migration; Phemex's actual repair-deadline projection is likewise mandatory
+in its companion migration. Both block cutover, rather than the shared core PR.
+Core tests alone do not claim either production adapter has migrated.
+
 ## Transport handshake and permit boundary
 
 Use distinct route-preparing, prepared/ready, signing, permit-issued, dispatched

@@ -307,6 +307,91 @@ pub struct Preparation {
     sequence: u64,
 }
 
+impl Preparation {
+    pub fn attempt(self) -> Attempt {
+        self.attempt
+    }
+
+    /// Lossless opaque host token: wide counters must never cross JS as numbers.
+    pub fn to_wire(self) -> String {
+        format!(
+            "p1:{}:{}:{}",
+            self.attempt.request.0, self.attempt.generation, self.sequence
+        )
+    }
+
+    pub fn from_wire(token: &str) -> Result<Self, Error> {
+        let parts = token_parts(token.strip_prefix("p1:").ok_or(Error::Invalid)?, 3)?;
+        Ok(Self {
+            attempt: token_attempt(parts[0], parts[1])?,
+            sequence: parts[2],
+        })
+    }
+}
+
+impl Permit {
+    pub fn attempt(self) -> Attempt {
+        self.attempt
+    }
+
+    pub fn prepared_id(self) -> u64 {
+        self.preparation
+    }
+
+    pub fn to_wire(self) -> String {
+        format!(
+            "r1:{}:{}:{}:{}",
+            self.attempt.request.0, self.attempt.generation, self.preparation, self.sequence
+        )
+    }
+
+    pub fn from_wire(token: &str) -> Result<Self, Error> {
+        let parts = token_parts(token.strip_prefix("r1:").ok_or(Error::Invalid)?, 4)?;
+        if parts[3] == 0 {
+            return Err(Error::Invalid);
+        }
+        Ok(Self {
+            attempt: token_attempt(parts[0], parts[1])?,
+            preparation: parts[2],
+            sequence: parts[3],
+        })
+    }
+}
+
+fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
+    if request == 0 || generation == 0 {
+        return Err(Error::Invalid);
+    }
+    Ok(Attempt {
+        request: RequestId(u32::try_from(request).map_err(|_| Error::Invalid)?),
+        generation,
+    })
+}
+
+fn token_parts(token: &str, count: usize) -> Result<[u64; 4], Error> {
+    if token.len() > 80 {
+        return Err(Error::Invalid);
+    }
+    let mut values = [0; 4];
+    let mut words = token.split(':');
+    for value in &mut values[..count] {
+        let word = words.next().ok_or(Error::Invalid)?;
+        // Reject aliases, whitespace, signs and non-ASCII numerals. The host's
+        // resource-map key and the engine's decoded identity must agree exactly.
+        if word.is_empty()
+            || (word.len() > 1 && word.starts_with('0'))
+            || !word.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(Error::Invalid);
+        }
+        *value = word.parse().map_err(|_| Error::Invalid)?;
+    }
+    if words.next().is_some() {
+        return Err(Error::Invalid);
+    }
+    Ok(values)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
     Preparing,

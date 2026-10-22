@@ -1012,3 +1012,97 @@ fn per_request_longer_gap_is_anchored_to_its_own_handoff_and_survives_next_reque
         Ok(Claim::WaitUntil(1_360.))
     );
 }
+
+#[test]
+fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
+    let attempt = Attempt {
+        request: RequestId(u32::MAX),
+        generation: u64::MAX,
+    };
+    let preparation = Preparation {
+        attempt,
+        sequence: u64::MAX,
+    };
+    let permit = Permit {
+        attempt,
+        preparation: u64::MAX,
+        sequence: u64::MAX,
+    };
+    assert_eq!(
+        Preparation::from_wire(&preparation.to_wire()),
+        Ok(preparation)
+    );
+    assert_eq!(Permit::from_wire(&permit.to_wire()), Ok(permit));
+    assert!(preparation.to_wire().contains("18446744073709551615"));
+    assert_eq!(preparation.attempt(), attempt);
+    assert_eq!(permit.attempt(), attempt);
+    assert_eq!(permit.prepared_id(), u64::MAX);
+    assert!(Preparation::from_wire(&permit.to_wire()).is_err());
+    assert!(Permit::from_wire(&preparation.to_wire()).is_err());
+}
+
+#[test]
+fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
+    for token in [
+        "p1:0:1:0",
+        "p1:1:0:0",
+        "p1:01:1:0",
+        "p1:+1:1:0",
+        "p1:1:1:00",
+        "p1:1:1:-1",
+        "p1:1:1:0 ",
+        "p1:1:1:０",
+        "p1:1:1:0:",
+        "p1:1:1",
+        "p1:1::0",
+        "p2:1:1:0",
+        "p1:4294967296:1:0",
+        "p1:1:18446744073709551616:0",
+    ] {
+        assert_eq!(
+            Preparation::from_wire(token),
+            Err(Error::Invalid),
+            "{token}"
+        );
+    }
+    for token in [
+        "r1:1:1:0:0",
+        "r1:1:1:0:01",
+        "r1:1:1:+0:1",
+        "r1:1:1:0:1:",
+        "r1:1:1:0",
+        "r1:1:1:18446744073709551616:1",
+        "r2:1:1:0:1",
+    ] {
+        assert_eq!(Permit::from_wire(token), Err(Error::Invalid), "{token}");
+    }
+}
+
+#[test]
+fn decoded_old_generation_cannot_complete_or_claim_a_reprepared_request() {
+    let mut life = lifecycle(1, None);
+    let old_preparation = life.preparation().to_wire();
+    let old_permit = ready(&mut life).to_wire();
+    life.reprepare().unwrap();
+    assert_eq!(
+        life.prepared(
+            Preparation::from_wire(&old_preparation).unwrap(),
+            Prepared {
+                id: 7,
+                expires_at: None
+            }
+        ),
+        Err(Error::Revoked)
+    );
+    let fresh = ready(&mut life);
+    assert_eq!(
+        claim(
+            &mut life,
+            Permit::from_wire(&old_permit).unwrap(),
+            10.,
+            &mut SendPacing::new(&[]).unwrap()
+        ),
+        Err(Error::Revoked)
+    );
+    assert!(claim(&mut life, fresh, 10., &mut SendPacing::new(&[]).unwrap()).is_ok());
+}
