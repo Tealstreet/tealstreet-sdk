@@ -1,3 +1,4 @@
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Event, Method, RequestId};
@@ -340,7 +341,7 @@ fn uta_ambiguous_trailing_replace_does_not_duplicate_protection() {
 }
 
 fn inverse_eth() -> Harness {
-    use safe_cex_venue_bitget::{Options, Product};
+    use safe_cex_venue_bitget::Product;
     let mut h = Harness::started(Options {
         product: Product::Inverse,
         key: Some("key".into()),

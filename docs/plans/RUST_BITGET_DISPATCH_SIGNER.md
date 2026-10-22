@@ -60,3 +60,38 @@ shared setup policy, not a per-venue fix of a cross-cutting concern. Shared
 encoding/passphrase presentation is already peeled and approved for OKX/Bitget;
 RequestContext owns physical release/pacing/outcome consolidation. This draft
 adds no scheduler, provider queue, clock offset, retries or outcome ledger.
+
+## Native checkpoint implementation and evidence
+
+Actual account, identity, history and trade HTTP builders plus Classic/UTA login
+now stage shared SignStep work using opaque identities. Public builders remain
+unsigned. Test fixtures retain their raw test-input shape only in test helpers,
+where the same #1738 trusted setup owns the provider. Existing financial, history,
+mode, row-admission and socket assertions remain; required missing/empty material
+now asserts synchronous setup rejection rather than a later startup callback.
+
+Nine real-builder tests cover Probe refusal without Classic promotion; strict
+identity/history refusal; metadata refusal without transport retry; first-write
+notSent and duplicate completion; native40009 prior-attempt Unknown; rollback
+original native error detail; delayed timestamp reprepare retaining intent and
+primary route; and private WS FIFO/retired completion. A review finding reproduced
+runtime RED when rollback refusal dropped nativecode40017; reusing the existing
+original-based error projection fixes it. Bypassing owned signing-error handling
+also reproduces six runtime RED assertions, restored source passes all nine.
+Three aliases independently exercise native HTTP secondary/fallback and private
+WS primary MACs; standalone Bitget-only provider construction passes.
+
+The scan now includes Bitget signing modules with exactly501 allowances/matches
+from517 on this base. All non-Bitget entries are unchanged. Production has two
+shared work-builder descriptor matches; remaining Bitget sites are cfg(test)
+setup/oracles. Independent correctness and adversarial reviews classify this as
+shared signer adoption, not new cross-cutting policy. No hosted readiness or
+actual-WASM/replay claim is made. Those prerequisites and the owner queue still
+block readiness/merge; this checkpoint is local, reviewable native progress.
+
+Checkpoint gates: 310 Bitget/registry native tests and266 Binance tests pass,
+including nine real-builder provider tests and standalone Bitget-only alias
+construction. Strict all-target Bitget/registry Clippy, fmt, SDK typecheck/lint
+and59 focused SDK setup tests pass. Independent adversarial scan verifies exact
+501 matches/501 allowances and unchanged non-Bitget allowances. Reviews are
+clear after the rollback fix. Final actual-WASM/replay/hosted gates are pending.

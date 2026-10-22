@@ -409,21 +409,10 @@ impl BitgetFutures {
                 .collect::<Vec<_>>()
                 .join("&")
         );
-        let headers = if public {
-            vec![]
-        } else {
-            match self.signed_headers(cx.now, Method::Get, &path, "") {
-                Ok(h) => h,
-                Err(e) => {
-                    cx.fail(r.command, e);
-                    return;
-                }
-            }
-        };
-        cx.request_streamed(
+        let id = cx.request_streamed(
             Method::Get,
             format!("{}{path}", paths::REST),
-            headers,
+            vec![],
             if r.uta && matches!(r.query, Query::Income { .. }) {
                 ArrayAt::Path(&["data", "list"])
             } else {
@@ -431,6 +420,9 @@ impl BitgetFutures {
             },
             Pending::History(Box::new(r)),
         );
+        if !public {
+            self.sign_request(cx, id, Method::Get, &path);
+        }
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if r.uta && matches!(r.query, Query::Income { .. }) {
@@ -856,6 +848,14 @@ impl BitgetFutures {
             Err(error) => cx.fail(r.command, error),
         };
     }
+    pub(crate) fn history_sign_failed(
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.fail(r.command, error);
+    }
+
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
         if r.retries >= 3 {
             cx.fail(r.command, format!("Bitget history incomplete: {error}"));

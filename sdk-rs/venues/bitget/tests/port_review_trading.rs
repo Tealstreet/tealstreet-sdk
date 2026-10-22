@@ -1,7 +1,8 @@
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Method};
-use safe_cex_venue_bitget::Options;
+
 use serde_json::{Value, json};
 use support::*;
 

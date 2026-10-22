@@ -77,7 +77,7 @@ fn passphrase_venues_refuse_private_accounts_without_one() {
         (&["weex"][..], "WEEX requires a passphrase"),
         (
             &["bitget", "bitgetusdc", "bitgetinverse"][..],
-            "Bitget requires a passphrase",
+            "Invalid local signer setup",
         ),
         (
             &["okx", "okxeu", "okxdemo", "okxeudemo"][..],
@@ -728,6 +728,9 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
 #[test]
 fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
     for venue in [
+        "bitget",
+        "bitgetusdc",
+        "bitgetinverse",
         "binance",
         "binancepm",
         "binanceinverse",
@@ -740,7 +743,7 @@ fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
     ] {
         let error = rejected(
             venue,
-            r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#,
+            r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing","passphrase":"primary.passphrase"}}}"#,
         );
         assert!(
             error.to_lowercase().contains("provider"),

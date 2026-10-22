@@ -31,26 +31,13 @@ pub enum Product {
     Inverse,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
     pub product: Product,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
 }
 
 pub enum Pending {
@@ -101,7 +88,7 @@ impl Default for Connection {
 }
 
 pub struct BitgetFutures {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
@@ -146,7 +133,6 @@ impl BitgetFutures {
     }
 
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             discovery: Default::default(),
@@ -594,9 +580,13 @@ impl Venue for BitgetFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+            && let Err(error) = read.validate().and_then(|_| {
+                read.passphrase
+                    .as_ref()
+                    .filter(|key| !key.0.is_empty())
+                    .map(|_| ())
+                    .ok_or("Bitget secondary signing credentials require a passphrase")
+            })
         {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
@@ -903,6 +893,31 @@ impl Venue for BitgetFutures {
             );
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(command) | Pending::Candles { command, .. } => {
+                cx.fail(command, error)
+            }
+            Pending::History(request) => Self::history_sign_failed(cx, *request, error),
+            Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
+            Pending::Account {
+                generation,
+                request,
+            } => {
+                if generation == self.account.generation {
+                    self.account_sign_failed(cx, request, &error.message);
+                    self.resume_trading(cx);
+                }
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(command) = pending {
             self.identity_failed(cx, command, error);

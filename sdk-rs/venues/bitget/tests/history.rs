@@ -1,3 +1,4 @@
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::{Command, Event, Query};
 use serde_json::{Value, json};
@@ -349,7 +350,7 @@ fn first_query_late_uta_signal_reprobes_and_uses_v3() {
 
 #[test]
 fn inverse_fill_without_fee_coin_uses_the_symbol_collateral() {
-    use safe_cex_venue_bitget::{Options, Product};
+    use safe_cex_venue_bitget::Product;
     let mut h = Harness::started(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),

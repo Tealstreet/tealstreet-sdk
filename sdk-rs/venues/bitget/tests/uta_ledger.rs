@@ -5,9 +5,10 @@
 //! assumption is inherited. CCXT's Bitget parseLedgerEntry independently uses
 //! before = balance - amount and preserves fee separately:
 //! https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::{Command, Event, Query};
-use safe_cex_venue_bitget::{Options, Product};
+use safe_cex_venue_bitget::Product;
 use serde_json::{Value, json};
 use support::Harness;
 

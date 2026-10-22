@@ -1,9 +1,10 @@
 //! Classic account WS uses equity rather than REST accountEquity:
 //! https://www.bitget.com/api-doc/classic/contract/websocket/private/Account-Channel
+use crate::support::FixtureOptions as Options;
 mod support;
 
 use safe_cex_engine::Event;
-use safe_cex_venue_bitget::{Options, Product};
+use safe_cex_venue_bitget::Product;
 use serde_json::{Value, json};
 use support::Harness;
 

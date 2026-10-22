@@ -1,9 +1,10 @@
 //! Private startup until the account is ready: transient settings-probe failures
 //! back off and retry forever; a documented key refusal fails startup exactly once.
+use crate::support::FixtureOptions as Options;
 mod support;
 
 use safe_cex_engine::{ErrorKind, Event, ReadCredentials, Response};
-use safe_cex_venue_bitget::Options;
+
 use support::*;
 
 const SETTINGS: &str = "/account/settings";
@@ -252,18 +253,15 @@ fn invalid_read_only_credentials_fail_startup() {
 }
 
 #[test]
-fn missing_passphrase_fails_startup() {
-    let mut h = expecting(Options {
+fn missing_passphrase_fails_trusted_setup_before_startup() {
+    let result = try_engine(Options {
         passphrase: None,
         ..keyed()
     });
-    run_for(&mut h, 600_000.);
-    assert!(!has(&h, SETTINGS));
-    assert_eq!(h.startup_failures.len(), 1);
-    assert_eq!(
-        h.startup_failures[0].message,
-        "Bitget requires a passphrase"
-    );
+    assert!(matches!(
+        result,
+        Err(safe_cex_engine::signing::SignError::InvalidRequest)
+    ));
 }
 
 /// Detects a Classic account and opens the private socket, without loading.

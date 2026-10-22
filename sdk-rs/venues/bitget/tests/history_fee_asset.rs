@@ -1,9 +1,10 @@
 //! Classic fills schema with native fee currencies, including a delisted symbol.
 //! https://www.bitget.com/docs/catalog/classic-contract-trade/classic-contract-trade
+use crate::support::FixtureOptions as Options;
 mod support;
 
 use safe_cex_engine::{Command, Query};
-use safe_cex_venue_bitget::{Options, Product};
+use safe_cex_venue_bitget::Product;
 use serde_json::{Value, json};
 use support::Harness;
 

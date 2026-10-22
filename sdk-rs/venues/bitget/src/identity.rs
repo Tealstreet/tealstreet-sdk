@@ -104,19 +104,16 @@ impl BitgetFutures {
             return;
         }
         const PATH: &str = "/api/v2/spot/account/info";
-        match self.signed_headers(cx.now, Method::Get, PATH, "") {
-            Ok(headers) => {
-                cx.request(
-                    Method::Get,
-                    format!("{}{PATH}", paths::REST),
-                    headers,
-                    None,
-                    Pending::Identity(command),
-                );
-            }
-            Err(error) => finish(cx, command, Err(error)),
-        }
+        let request = cx.request(
+            Method::Get,
+            format!("{}{PATH}", paths::REST),
+            vec![],
+            None,
+            Pending::Identity(command),
+        );
+        self.sign_request(cx, request, Method::Get, PATH);
     }
+
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,

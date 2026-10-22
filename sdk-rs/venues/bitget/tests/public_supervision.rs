@@ -1,6 +1,7 @@
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::{Event, PublicFeedPolicy, SocketId, TimerId};
-use safe_cex_venue_bitget::{BitgetFutures, Options};
+
 use support::Harness;
 
 const TICKER: &str = r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"101"}]}"#;
@@ -168,10 +169,10 @@ fn silent_secondary_public_feed_times_out_and_reconnects() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
+    let mut engine = crate::support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();

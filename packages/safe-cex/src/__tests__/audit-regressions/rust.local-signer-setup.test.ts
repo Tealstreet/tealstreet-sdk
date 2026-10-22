@@ -235,14 +235,22 @@ const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
 };
 
 describe('shared required passphrase field policy', () => {
-  it.each(passphraseFamilies)('%s declares both slot rules without adopting dispatch signing', (venue) => {
+  it.each(passphraseFamilies)('%s declares both slot rules independently of family adoption', (venue) => {
     expect(deriveSignerSetupPolicy(venue)).toEqual({
       primary: { passphrase: 'requiredForPrivate' },
       secondary: { passphrase: 'requiredWithPrimaryFallback' },
     });
-    expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(false);
-    expect(() => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore()))
-      .toThrow(/not supported/);
+    const migrated = venue.startsWith('bitget');
+    expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
+    const construct = () => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore());
+    if (migrated) {
+      const exchange = construct();
+      expect(exchange.options.key).toBeUndefined();
+      expect(exchange.options.secret).toBeUndefined();
+      expect(exchange.options.passphrase).toBeUndefined();
+    } else {
+      expect(construct).toThrow(/not supported/);
+    }
   });
 
   it.each(passphraseFamilies)('%s rejects missing/empty primary passphrase only for complete private material', (venue) => {

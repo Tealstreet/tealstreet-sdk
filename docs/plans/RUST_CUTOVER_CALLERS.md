@@ -3694,3 +3694,34 @@ one-time initial REST seeding and later REST/read isolation remain. FILLS
 revision, IDs/row shape, SDK arguments, signer/clock/lifecycle and NX interfaces
 are unchanged. This is a correction to financial admission, with no mandatory
 NX handler migration or universal cumulative-fan-out completion claim.
+
+
+## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
+
+This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
+execution through the existing engine signer/provider. Production venue options
+contain only opaque primary/secondary identities. Trusted #1738 setup consumes
+material once: private primary passphrase required, missing secondary passphrase
+inherits the primary reference, and explicit empty rejects before startup.
+Ordinary private GETs (identity, metadata, resolve-amend and history included)
+select secondary when configured; degraded balance recovery retains its existing
+primary identity/egress exception. Writes and Classic/UTA private WS use primary.
+Public requests stay unsigned; product, inverse sizing and UTA admission remain.
+
+#1714/#1728 provider bootstrap requirements extend to these aliases: provision
+and rotate/dispose the provider in the engine-owning worker/host, rather than
+copying sanitized exchange options. Use construction/readiness metadata instead
+of `options.key`. No new persisted account-ID mapping is introduced. Missing
+passphrases now fail trusted setup synchronously rather than a later startup
+callback. Native provider refusal does not prove Classic account type or native
+auth rejection. Strict identity/history reads cannot report successful absence;
+a wholly unsent write remains notSent, while existing accepted/resent/rollback
+financial evidence is preserved.
+
+**Draft boundary:** hosted `signHttpRequest`/`signWsAuth`, keyless RemoteSigner
+and PayloadSigner admission require actual #1757 plus the separately reviewed
+shared encoding/passphrase presentation extension. This checkpoint must not
+merge before that dependency and positive actual-WASM hosted HTTP/WS proofs per
+alias. Passphrase custody stays with the trusted provider; no SDK receiver secret,
+new required external wire field or venue-local crypto fallback is authorized.
+[Family plan and proof gates](RUST_BITGET_DISPATCH_SIGNER.md).

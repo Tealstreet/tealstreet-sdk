@@ -2,10 +2,11 @@
 //! the exact numeric conversions in BitgetInverseExchange as the parity oracle.
 //! https://www.bitget.com/docs/catalog/classic-contract-position/classic-contract-position
 //! https://www.bitget.com/docs/catalog/classic-contract-account/classic-contract-account
+use crate::support::FixtureOptions as Options;
 mod support;
 
 use safe_cex_engine::{Command, Event, wire};
-use safe_cex_venue_bitget::{Options, Product};
+use safe_cex_venue_bitget::Product;
 use serde_json::{Value, json};
 use support::Harness;
 

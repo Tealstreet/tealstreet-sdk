@@ -939,3 +939,21 @@ revision/terminal/opened fence as retained order rows, preserving cancel routes.
 Read-only recovery uses the existing coalesced timers and busy/pause handling;
 malformed-only or foreign-only traffic does not claim useful financial liveness.
 The financial fill channel, auth, signing and write-retry policy are unchanged.
+
+
+## Rust dispatch signer checkpoint
+
+The draft native migration stages private HTTP and Classic/UTA login with shared
+engine SignStep work. Venue state carries opaque identities; trusted setup owns
+all material. Private primary passphrase is mandatory; an absent secondary
+passphrase inherits its primary provider ref, while explicit empty rejects.
+Ordinary GET uses secondary, degraded balance recovery remains primary, and POST
+and WS stay primary. Public broker headers remain unchanged.
+
+Owned identity/history/trade read provider refusal bypasses network read retries.
+Background account failures retain existing recovery/backoff, and provider refusal
+cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
+and original rollback diagnostics retain existing outcome semantics. This draft
+is not hosted admission: shared encoding/passphrase presentation and all-alias
+actual-WASM HTTP/WS proofs remain merge prerequisites. No secret restoration or
+venue-local signing fallback is permitted.
