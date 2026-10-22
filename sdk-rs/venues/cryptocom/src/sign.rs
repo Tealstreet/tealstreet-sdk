@@ -51,7 +51,7 @@ pub struct Credentials {
 }
 impl Credentials {
     pub fn envelope(&self, method: &str, params: &Params, now: f64, auth: bool) -> String {
-        let nonce = now as u64;
+        let nonce = safe_cex_engine::time::wire_stamp_ms(now) as u64;
         let payload = format!(
             "{method}{nonce}{}{}{nonce}",
             self.key,

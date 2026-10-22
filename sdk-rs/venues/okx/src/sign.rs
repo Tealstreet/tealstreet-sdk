@@ -37,7 +37,7 @@ impl Credentials {
 }
 
 fn iso_timestamp(ms: f64) -> String {
-    safe_cex_engine::time::iso_millis(ms.floor() as i64)
+    safe_cex_engine::time::iso_millis(safe_cex_engine::time::wire_stamp_ms(ms) as i64)
 }
 
 #[cfg(test)]

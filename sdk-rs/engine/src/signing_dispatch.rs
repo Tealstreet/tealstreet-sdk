@@ -13,6 +13,12 @@ impl<'a> DispatchContext<'a> {
     pub(crate) fn new(now_ms: f64, entropy: Option<&'a crate::entropy::Entropy>) -> Self {
         Self { now_ms, entropy }
     }
+    /// Integer protocol milliseconds captured for this signing attempt.
+    /// Use this for wire timestamps; `now_ms` retains submillisecond precision
+    /// for protocol freshness calculations.
+    pub fn stamp_ms(&self) -> f64 {
+        crate::time::wire_stamp_ms(self.now_ms)
+    }
     /// Draw anew on every preparation. Failure clears even partial output.
     pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {
         use zeroize::Zeroize;

@@ -1162,6 +1162,12 @@ impl<P> Cx<'_, P> {
         self.io.protocol_clock.at(self.now)
     }
 
+    /// Integer calibrated Unix milliseconds for outbound protocol fields.
+    /// Scheduling time and fractional calibration are unchanged.
+    pub fn protocol_stamp_ms(&self) -> f64 {
+        crate::time::wire_stamp_ms(self.protocol_now())
+    }
+
     /// Feed a server-time observation captured at this callback's raw host time.
     /// Replaces the per-engine correction; invalid observations preserve it.
     pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
