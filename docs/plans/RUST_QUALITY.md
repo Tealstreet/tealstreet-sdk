@@ -292,3 +292,14 @@ and fills fallback remain. The shared probe-stage operation preserves cycle and
 lifecycle checks while preventing result-row admission from hiding coverage.
 Queued auth/preparation rejection stays distinct from actual-page recovery.
 [Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.
+
+
+
+
+
+
+Lighter general histories now adopt CursorHistory for staged/accepted rows,
+command-owned completion and native cursor facts. One owner spans trade/funding
+income with a stage output baseline; actual later failures recover accepted
+pages only. Native saturation/cycle/budget and synchronous auth preparation
+refusals remain strict. No new engine API or universal migration claim.
