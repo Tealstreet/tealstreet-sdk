@@ -1491,3 +1491,47 @@ unsigned public retry. Final strict all-target Clippy, fmt, banned patterns and
 diff checks pass. Independent source and final tests/docs correctness/adversarial
 reviews are CLEAN. No new core source is added beyond the approved #1760 stack;
 actual predecessor ancestry, final CI/proof and separate guard/merge remain.
+
+## KuCoin futures and spot owner adoption (planned 2026-10-23)
+
+Base: actual landing `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`.
+Scope: `venues/kucoin/src/history.rs`, `funding.rs`, spot query-only regions in
+`spot/mod.rs`, focused existing/new history tests, and appended caller/audit/
+quality notes. No signing helper, credential selection, account reducer,
+capability, HTTP recipe or request-context authority changes. Keep all watches;
+no landing merge during the #1741 exclusive window. Actual shared predecessors
+must be integrated before final CI/proof.
+
+1. Pin numbered-page/ledger and funding request sequences, admission errors,
+   retry delays/counts, 350ms pacing, exact integer offsets/nanosecond fill
+   bounds, newest-first tiled windows, census/cursor proofs and final shaping.
+   Spot fills remains one request, limit/defaults/output schema unchanged;
+   disabled order-history/income stubs and lookup remain unchanged.
+2. Regression-only first: reject Internal with no Done/marker on initial failed
+   HTTP/envelope/row reads; after an accepted futures/funding page resolve only
+   admitted rows with one command-owned Warn on terminal page failure. Prove
+   failed-page prefixes and retries cannot leak rows/poison dedupe, concurrent
+   owners remain isolated, successful empty is complete, and spot malformed/
+   transport failures become typed failures without partial success.
+3. Adopt existing engine `CursorHistory`/`Completion` for futures history and
+   funding, retaining one owner across every native window. Native page/offset/
+   timestamp tokens describe wire continuation; the shared walk owns accepted
+   row identity, continuation lifecycle and missing-coverage reporting. Keep
+   native census, strictly decreasing ledger/funding cursor and bounded-attempt
+   refusals strict via owner.reject; those native completeness proofs are not
+   recoverable page failures. Keep the existing total HTTP-attempt safety guard
+   (counts retries), independent of accepted-page tracking. Stage normalized
+   page rows locally until the whole response validates, then admit atomically.
+   Spot fills uses `HistoryRows` for its single validated response, without
+   inventing pagination or enabling unsupported endpoints.
+4. Preserve final descending time/identity ordering and limit exceptions for
+   explicitly ranged income/funding. Preserve newest-window allocation bounds,
+   cursor inclusivity and padding, output units, filters and successful paths.
+   HTTP/decode callbacks are multiplexed, so the shared Internal default is
+   honest; do not classify all failures as Network. No numeric/managed fallback.
+5. Independent correctness/adversarial reviews must answer the architecture
+   gate: these are two family adapters to the existing engine history choke
+   point, not a second marker emitter/pager. Focused engine/KuCoin (spot feature)/
+   Binance tests, strict touched all-target Clippy/fmt/bans/diff locally with
+   four Cargo jobs; no local release WASM/full replay/size/timing. Update caller
+   impact and open a draft with CI watch, no cutover/B11/runtime closure claim.
