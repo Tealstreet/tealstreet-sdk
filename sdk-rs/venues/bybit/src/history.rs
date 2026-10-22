@@ -640,7 +640,7 @@ impl BybitLinear {
         let body = match &response {
             Ok(response) => match venue_error(response) {
                 None => Ok(response.body),
-                Some((code, message)) => Err(VenueError::new(message).venue_code(code.to_string())),
+                Some((_, message)) => Err(VenueError::new(message)),
             },
             Err(error) => Err(VenueError::new(*error).kind(ErrorKind::Network)),
         };

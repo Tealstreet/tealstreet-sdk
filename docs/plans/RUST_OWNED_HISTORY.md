@@ -253,8 +253,9 @@ the exact result kind, rejects mismatched variants, then sorts/dedupes/truncates
 accepted rows. No direct completion or history marker emitter remains in this
 adapter. Private `Listed.ret_code` is renamed `_ret_code` with identical explicit
 serde naming/parser because its last read-and-discard site migrated; account
-execution deserialization is unchanged. Native error codes are retained, transport
-errors are typed Network, and unclassified failures use the core Internal default.
+execution deserialization is unchanged. Transport errors are typed Network;
+unclassified native/HTTP/parse failures use the core Internal default and keep
+their existing message, without inventing native codes from HTTP fallbacks.
 
 Independent correctness/adversarial reviews are clean and both answer the
 architecture gate: shared engine extension plus protocol adapter, not duplicated
@@ -287,3 +288,12 @@ category failure otherwise loses prior rows; both are corrected. Together with
 the five initial failing regressions this gives seven original-RED/core-GREEN
 controls; duplicate-count and empty-page checks preserve existing policy. Root
 typecheck/lint pass; root tests and final-head CI complete before merging.
+
+
+A final narrow contract review caught introduced metadata conflation before
+merge: Bybit's existing venue_error helper returns either native code or HTTP
+status, so blindly labeling that number venueCode would fabricate native codes
+for malformed HTTP-200 and body-less 503 responses. Removed the new metadata
+assignment instead of adding a venue-local classifier; the first-page matrix
+now asserts no fabricated venueCode. Typed Internal/Network behavior and the
+existing message remain. Fresh focused checks and final-head CI are required.
