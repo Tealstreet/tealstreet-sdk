@@ -154,7 +154,10 @@ High:
   controls preserve historical quotes, equal-endpoint corrections and native
   Spot/INTX/CFM quantity units. BloFin also uses checked prefix admission,
   capped-decimal arithmetic and scaled public-output preparation before live
-  progress commits. BingX, AsterDEX, Kraken Spot, Orderly and the KuCoin Spot
+  progress commits. Kraken Spot now prepares direct/cumulative trade delivery
+  through the same helper before row state commits, preserving native IDs,
+  explicit last quantities and independent lifecycle observations. BingX,
+  AsterDEX, Orderly and the KuCoin Spot
   fallback still need adoption before
   row reporting and snapshot freshness. ApeX cumulative events still never
   emit public fills; synthetic history remains distinct. No live capture claim.
@@ -1132,6 +1135,18 @@ native authoritative state; neither observation alone demonstrates a defect.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
+- ~~Spot cumulative-only trades with zero/negative prices commit displayed
+  progress without a Fill, losing same-quantity corrections; an invalid final
+  trade can also poison native time, terminal status and order provenance.~~
+  Existing `engine::execution::Cursor::prepare` validates direct/last evidence
+  before any row/fence/dedup effects. Four original-source assertion-RED controls
+  cover zero and negative prices independently, retained final-row state and
+  same-ID correction within a batch; decoded correction delivery is .5@100.
+  Healthy peers and accepted-row ordering remain independent. Zero/no-growth,
+  snapshots and separate lifecycle observations retain native policy; no
+  independent delivery ledger or recovery after a valid terminal lifecycle is
+  promised. Full native engine/Kraken/Binance verification passes (844 tests).
+  [Scope and remaining cumulative fan-out](RUST_CUMULATIVE_FILLS.md).
 - ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
@@ -1331,6 +1346,16 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
+- High: ~~a zero/negative selected execution price emits an invalid Fill, consumes
+  the native trade ID and cumulative progress, suppresses corrected evidence,
+  and can close/advance a stored partial order.~~ Four original-source native
+  assertion regressions reproduce these real financial defects. Shared engine
+  `ObservedProgress::prepare_capped` validates the chosen capped suffix before
+  revisions, dedup, cumulative/terminal commits or Fill delivery. The BingX
+  adapter preserves native price fallback, explicit/heuristic identity rules,
+  blind-gap coverage and quiet zero-growth identity bookkeeping. Existing
+  authoritative Last semantics are unchanged. Remaining cumulative consumers
+  still need fan-out; [scope/evidence](RUST_CUMULATIVE_FILLS.md).
 - High: ~~one bad market/ticker row or failed funding read keeps the private side
   from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
   freezes that list (`account.rs:491,557`).~~ Bad rows skipped (placeholder
@@ -1354,11 +1379,21 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
-- ~~WEEX's five query-associated omissions~~ now carry the actual income query
-  command before retained-row completion or failure, including lifetime/chunk
-  budgets, opaque cursors and read errors. Native ownership/order regressions
-  and a native-verified fixture through host/worker overlapping-client isolation
-  cover the fix; range continuation and failure policy remain intact.
+Owned-list follow-on: ~~a later fill-window/algo failure discards already valid
+history~~ now returns accepted rows with shared command-owned incompleteness.
+Missing fill identities and explicit algo hasMore facts are admitted only after
+whole-response validation; the engine publishes coverage once before success.
+First/zero-accepted failure rejects typed, preparation remains strict notSent,
+and native mapping, sequencing, pause and dedupe are preserved. This completes
+WEEX general-history owner adoption, not all-family or B11/deployment closure.
+
+- ~~WEEX's five query-associated omissions~~ now flow through the shared income
+  owner. First/zero-accepted failures reject typed without a coverage marker;
+  later failures immediately retain only accepted pages with one command-owned
+  marker before success. Valid opaque-cursor gaps and lifetime/chunk budgets
+  retain the first coverage cause until final success. The old failed-chunk
+  continuation policy is superseded. Native-backed host/worker fixture proof now
+  uses accepted-page/later-failure success; fills/orders remain a later slice.
 
 - High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
@@ -1392,6 +1427,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
   can mislabel value.
 
 ### Coinbase (already defaults to Rust)
+- Owned-history follow-up: Advanced Trade fills/orders/public trades now share
+  the engine CursorHistory owner, including CFM-to-Spot reads. Later actual
+  page failures retain only admitted pages with command-owned incomplete coverage;
+  zero-admitted failures reject typed, while native continuation/proof and
+  queued signing refusals remain strict. Native mapping, requests and account
+  state are unchanged; Starbase and NX B11 coverage are not closed. See
+  [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md).
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
@@ -1420,6 +1462,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
 ### Lighter
 
 Signing, integer scaling, tx encoding and nonces match TS.
+
+Owned-history follow-up: ~~later page failure discards validated earlier history~~
+now retains accepted pages with one command-owned incomplete marker through the
+shared engine owner, including trade-to-funding income. Failed prefixes remain
+excluded; first/zero-accepted failures reject typed. Native cursor/saturation
+proof and synchronous auth preparation stay strict; account reconciliation,
+signing arithmetic and the remaining cross-family history fan-out are unchanged.
+
 
 - High: ~~position `initial_margin_fraction` ("20.00" = 5x) read in basis points
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
@@ -1694,3 +1744,15 @@ App stop payloads accepted; amend stricter than TS.
   order type, multi-leg order) rejects the whole snapshot
   (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
   skipped and logged; off-catalogue position margin still counts).
+
+
+## Paradex owned-history fan-out
+
+General histories and client-ID lookup now use the shared CursorHistory owner,
+including the native empty-fills fallback. Actual later-page failure recovers
+accepted mapped rows with owned incompleteness; a first failure rejects typed.
+Lookup proof, repeated cursors, unbounded cap refusals and queued preparation
+failures stay strict. Native request/codec/ledger behavior is pinned; no account
+or signing implementation changes. This closes Paradex's local completion/
+paging ownership copy, not all-family fan-out or B11 downstream coverage.
+[Implementation and limits](RUST_OWNED_HISTORY.md).

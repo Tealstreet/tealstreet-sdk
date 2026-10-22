@@ -151,6 +151,7 @@ impl Coinbase {
     fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Trading(request) => self.trading_unsent(cx, request, error),
+            Pending::History(request) => self.history_unsent(cx, request, error),
             other => self.on_request_failed(cx, other, error),
         }
     }

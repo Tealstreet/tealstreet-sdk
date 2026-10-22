@@ -3268,6 +3268,43 @@ adapter is transitional: remove it before TS venue/reference deletion after
 trusted bootstrap adoption. [Current core contract](RUST_SIGNER.md).
 
 
+## Bybit send-time signer adoption (#1728)
+
+Actual merge `3b20e602258` extends the shared dispatch signer to all five Bybit
+aliases: `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo` and `hyrotrader`.
+Their shared construction rules now set `bridge.dispatchSigning: true`.
+The trusted SDK adapter extracts primary/secondary signing credentials before
+`BaseExchange`; retained generic `exchange.options` and engine-options JSON
+therefore no longer contain those credentials. The default factory still accepts
+ordinary `ExchangeOptions` setup without an added caller constructor argument.
+
+**REQUIRED NX trusted bootstrap migration now includes Bybit:** the #1714
+worker/hosted/signingHost changes above apply to these aliases too. Supply
+provider setup separately in the engine-owning realm, including reload, rotation
+and disposal; copying sanitized `exchange.options` to the worker or hosted
+signing account cannot reconstruct the credentials. Keep public/private checks
+on construction/signing-state metadata rather than `options.key` or
+`options.secret`. Pinned NX file/line evidence and the static-versus-deployed
+boundary remain the #1714 evidence above; this merge does not implement NX work.
+
+Raw WASM constructor argument 3, optional `signerSetupJson`, carries the one-use
+trusted setup separately. Custom WASM loaders must forward it; ordinary managed
+SDK factories already do. Valid `ExchangeOptions.localSigner` metadata is now
+accepted for Bybit through the shared validation/setup path, where unmigrated
+venues still reject it as `unsupported`/`notSent`. Standard UTF-8 setup needs no
+new metadata. Native GET secondary selection and POST/private-WS primary
+selection remain; Bybit venue user/inviter identities are preserved, so this
+migration requires no new persisted stable-ID mapping.
+
+Hosted `signHttpRequest`/`signWsAuth` for migrated Bybit use #1745's shared
+provider-backed signing path. This is signing-side adoption, not completion of
+the keyless remote HTTP/WS sign-request/sign-response wire or a deployed
+server-held-key/bootstrap claim. Provider receipts remain release evidence, not
+venue ACKs or permission to replay an unknown write.
+[Shared signer contract](RUST_SIGNER.md),
+[Bybit adoption and evidence](RUST_BYBIT_DISPATCH_SIGNER.md).
+
+
 ## Cumulative-fill reference correctness (#1720)
 
 Actual merge `9fc2a7c174ad` introduces shared engine financial preparation for
@@ -3441,3 +3478,200 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### BingX validated cumulative execution suffix
+
+BingX now rejects a live trade that would deliver positive quantity with a
+selected zero/negative price before consuming its native trade ID or cumulative
+quantity, advancing stored orders, or publishing a Fill. Corrected evidence with the same ID and cumulative
+quantity can therefore deliver the valid fill; healthy peer orders continue.
+Native last/average/order-price precedence remains, so an unused invalid last
+price does not reject a valid native fallback. Zero-growth observations still
+retain native identity bookkeeping. A terminal trade with positive delivery quantity and an
+invalid selected price preserves the previous stored partial rather than closing
+it; separate lifecycle and quiet-terminal policy remains native.
+
+The shared engine helper caps last quantity to observed cumulative growth and
+keeps full native observation for blind intervals. Explicit trade IDs, heuristic
+growth escape, covered-history suppression, late unique executions and retention
+limits remain native policy. SDK arguments, FILLS revision/row shape and IDs are
+unchanged. Existing consumers should not rely on invalid prices or a rejected
+row advancing order state. No NX API migration, live-capture claim or universal
+cumulative-fill completion claim is introduced; remaining consumers are tracked
+in [the fan-out plan](RUST_CUMULATIVE_FILLS.md).
+
+
+
+
+### Paradex histories: shared cursor owner and accepted-page recovery
+
+Paradex fills (including the native orders-history fallback), historical orders,
+income and public trades now complete through the engine history owner. Actual
+HTTP/native/transport/stream/row/list failure before accepted mapped rows rejects
+with a typed error instead of an unclassified failure. A later failed page now
+returns only validated earlier pages, with one command-owned Warn
+`history.incomplete` before success, including at Error-only logging. Failed-page
+prefixes never reach the result; empty/fully filtered pages do not by themselves
+qualify for partial recovery. The multiplexed transport/decode callback uses the
+shared `internal` fallback, without fabricated native codes or Network evidence.
+
+Client-ID lookup failures, repeated cursors and unbounded page-cap policy
+refusals remain strict even after earlier accepted rows. Queued auth/setup and
+signing refusal stays strict and now reports `internal`/`notSent`; it cannot be
+reinterpreted as a recoverable page failure. A capped open-order lookup remains
+nondefinitive and adds no new warning; only both completed lookup stages can
+prove a definitive miss. A found row in a failed envelope never proves success.
+
+The native 5/50/200 budgets, raw cursor progress, empty-fill traversal fallback,
+public trades' single page, request parameters, native IDs/financial mapping,
+sort/limits, public-only and unknown-symbol no-I/O shapes remain. SDK method
+arguments and result row shapes stay the same. Callers still need B11's
+request-scoped incomplete-query ingestion/coverage and ordinary typed rejection
+handling; no additional NX migration is introduced by this slice.
+[Scope and proof](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+### Lighter histories: shared cursor owner across trade and funding stages
+
+Lighter fills, historical orders, public trades and income now use the existing
+engine CursorHistory owner. Actual HTTP/native, transport, malformed/foreign-row
+or missing-list failures before accepted mapped rows reject typed with the
+engine's `internal` fallback. After accepted pages, actual page failure instead
+returns only earlier accepted rows with one command-owned Warn
+`history.incomplete` before success, including Error-only logging. Failed page
+prefixes never enter the result. Empty or filtered pages alone do not authorize
+partial recovery. Transport and stream decoding share a callback, so this slice
+does not claim every callback failure is `network`.
+
+All-income keeps the same owner from trade fee/PnL rows through funding; a
+funding failure can retain validated trade income and earlier funding pages.
+Each stage keeps its own output-limit stopping rule, followed by the existing
+global stable time sort and truncation. Native raw row counts, cursor escaping,
+100-row requests, 1000-page stage budget, time/principal filters, trade/order/
+funding dedupe namespaces, financial units and row shapes remain unchanged.
+Repeated cursors/page-budget exhaustion and saturated full pages without a
+continuation remain strict rejections without an incomplete success. Synchronous
+auth-token preparation refusal also stays strict after accepted rows, now typed
+`internal`/`notSent` where it previously had neither kind nor outcome. Existing
+admission and keyless no-I/O behavior remains. SDK arguments do not change and
+no new NX handler is required by this slice; B11's request-scoped ingestion,
+coverage gating and typed rejection handling remain required. Other-family
+history fan-out and deployed caller proof remain open.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+### Coinbase Advanced Trade histories: one accepted-page owner
+
+Fills, historical orders and public trades now use the engine CursorHistory
+owner. The same owner spans CFM then Spot family reads. A transport/HTTP or
+whole-response decode/mapping failure before any mapped rows are admitted
+rejects typed; after admitted rows, an actual failed page returns only earlier
+accepted pages with one command-owned Warn history.incomplete before successful
+completion, including at Error-only logging. An empty or entirely filtered
+earlier page cannot authorize partial recovery. A conflicting native identity
+invalidates the entire page before shared dedupe, even when its earlier copy
+was filtered. The failed page's prefix never enters results. Repeated cursors
+and the 50-page per-family cap now return owned incomplete coverage instead of
+discarding accepted history.
+
+Native continuation/proof metadata refusals stay strict: wrong typed fields,
+unusable continuing cursors and proof_token_required reject even after admitted
+rows. Both immediate request preparation refusal and the later queued signing
+refusal are strict internal/notSent; ordinary legacy stream/transport failures
+use the shared internal fallback because the callback also carries parse errors.
+These runtime errors previously had no kind, so caller error-kind telemetry
+becomes explicit. Query admission errors keep their existing classification.
+
+Native endpoints/family order, cursor escaping, immediate requests subject to the
+existing REST pacing, per-family output limits, fingerprint validation before
+UTC filtering, CFM contract units, public maker-side inversion, stable timestamp
+sort and final global truncation remain. No SDK query argument or row shape
+change, no Starbase wiring and no new mandatory NX handler; B11 request-scoped
+incomplete-query ingestion/coverage and typed rejection handling remain required.
+This adoption does not close the remaining history fan-out or prove live/deployed
+completeness. [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+### WEEX income: shared range coverage and accepted-page completion
+
+WEEX bounded income now uses engine RangeHistory; unbounded/one-sided/equal-bound
+income uses CursorHistory for its single page. A failed first page or a failure
+before any admitted mapped rows rejects typed with the engine's `internal`
+fallback and no completeness marker. Actual later HTTP/transport/native-response/
+stream/list/row failure now returns only accepted earlier pages with one Warn
+`history.incomplete` before success, including Error-only logging; it stops the
+walk immediately. This supersedes the previous skip-failed-chunk-and-continue
+behavior. Failed streamed prefixes never enter accepted history. Transport and
+decode share a callback, so these errors do not all claim `network`.
+
+A validated page advertising hasNextPage/nextKey can retain rows, including a
+valid empty result, with an owned coverage gap; span continuation does not prove
+an opaque cursor was consumed. Cursor, chunk and lifetime omissions retain the
+first cause and publish once at final success, rather than one marker per page.
+The 10,000-request lifetime limit is enforced by the shared owner before issuing
+request 10,001. Native 100-day spans, 100-row ranged requests, 100 ms pacing,
+shared-pause resumption, compound/time-fallback dedupe, income mapping and stable
+descending sort remain. Single-page rows retain their old no-range-filter/no-
+dedupe behavior, including equal bounds; no extra final limit is introduced.
+Signing setup unavailability stays strict and now has `internal`/`notSent`;
+keyless/admission no-I/O stays unchanged. Terminal completion removes deferred
+state/timers. Fills, orders, public trades and the fill-ID omission marker are
+unchanged and remain separate follow-ons.
+
+No SDK argument, row shape or new NX handler is introduced by this slice. B11's
+request-scoped incomplete-query ingestion/coverage and typed rejection handling
+remain required. Native-backed host/worker tests now use the reachable later-page
+partial-success event instead of the superseded first-failure marker. This is
+source/fixture evidence, not deployed runtime proof or cross-family closure.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### WEEX remaining histories: one owner across windows and order endpoints
+
+WEEX fills, historical orders and public trades now use the existing engine
+CursorHistory owner. Each whole native response validates before shared dedupe
+and admission; a failed page's prefix is excluded. A first/zero-accepted actual
+HTTP/transport/native-response/list/row failure rejects typed with the engine's
+`internal` fallback. A later failure now returns only accepted earlier windows
+or endpoints with one command-owned Warn `history.incomplete` before success,
+including Error-only logging, and stops the queue. In particular, failed algo
+orders retain previously admitted normal orders instead of discarding the query.
+Synchronous signing preparation refusal remains strict after acceptance and now
+reports `internal`/`notSent`; it never becomes a partial success.
+
+Missing fill IDs are still skipped after symbol/order/time filters, with no
+invented identity. The once-per-query native `row.skipped(field id)` diagnostic
+now publishes only after a valid whole page is admitted. Its coverage fact is
+retained by the engine until one final incomplete success; a rejected page cannot
+publish a marker or consume the valid-page diagnostic latch. Valid all-omitted
+pages may succeed incomplete []; an actual later failure with zero admitted rows
+still rejects. Native-backed empty-fill host/worker fixture text stays unchanged.
+A valid allAlgoOrders.hasMore:true likewise records an owned coverage gap without
+adding pagination; absent/false keeps the previous result, while malformed
+explicit continuation metadata rejects or recovers only prior accepted pages.
+
+Native financial mapping/units/large IDs, filters, first-wins symbol|id dedupe,
+stable fill/order sorting and public-trade order/duplicates remain. Shared engine
+window generation preserves seven-/90-day bounds, the existing ratio budget,
+request limits/page0 and endpoint order. List continuation remains immediate;
+shared pauses defer the same next native stage. Income retains #1751's behavior.
+No SDK arguments or row shapes change. B11 request-scoped incomplete-query
+handling/coverage and typed rejection handling remain required; no new NX handler
+or deployed-runtime proof is claimed. [Scope](RUST_OWNED_HISTORY.md).

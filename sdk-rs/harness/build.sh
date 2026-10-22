@@ -16,6 +16,9 @@ wasm_profile_args=(--config 'profile.release.opt-level="z"'
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   --config 'profile.release.package.safe-cex-engine.opt-level="z"'
   --config 'profile.release.package.safe-cex-venue-kucoin.opt-level=3')
+# One JSON throughput policy for every WASM family and the combined engine.
+# Native Cargo profiles are unchanged; CI gates family CPU and size budgets.
+wasm_throughput_args=(--config 'profile.release.package.serde_json.opt-level=3')
 # The Cargo arguments building the family that contains a venue.
 family_args() {
   case "$1" in
@@ -29,10 +32,11 @@ family_args() {
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
-  # WOO, KuCoin Spot and Aster need their original host/engine/dependency defaults:
-  # shared z repeatedly missed public CPU gates on unrelated changes.
-  # Combined is measured separately; keep every other family's selection.
-  if [[ $family != woo && $family != kucoinspot && $family != asterdex ]]; then build_args+=("${wasm_profile_args[@]}"); fi
+  # Use size defaults unless measured CPU margin requires speed defaults.
+  # Aster and KuCoin Spot retain speed defaults after measured margin misses.
+  if [[ $family != asterdex && $family != kucoinspot ]]; then
+    build_args+=("${wasm_profile_args[@]}")
+  fi
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
@@ -44,6 +48,7 @@ family_args() {
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
   fi
+  build_args+=("${wasm_throughput_args[@]}")
 }
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
 # family). CI installs the pinned release (install-binaryen.sh) and sets
@@ -90,7 +95,8 @@ fi
 # The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
 # Measure a narrower host-only profile without changing their engine/dependencies.
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
-  --config 'profile.release.package.safe-cex-wasm.opt-level="z"')
+  --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
+  "${wasm_throughput_args[@]}")
 if [[ ${1:-} == --venue ]]; then family_args "$2"; fi
 cargo build "${build_args[@]}"
 bind hosts/wasm/pkg/web hosts/wasm/pkg/node

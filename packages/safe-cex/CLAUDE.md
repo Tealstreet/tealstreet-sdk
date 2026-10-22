@@ -44,7 +44,7 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases. High-level credential input is consumed by a trusted
+Binance's four aliases and Bybit's five aliases. High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
@@ -57,11 +57,42 @@ the private setup channel, never retained in generic exchange options. Unmigrate
 Rust venues reject this metadata. Stable ids never default to key hashes or slot
 names; identity/nonce consumers require the caller's intended stable mapping.
 
+Trusted signer setup uses shared declarative per-family/per-slot normalization
+from construction-rules.json. Unspecified fields preserve caller trimCredential
+metadata; MEXC forces primary credential trimming and secondary preservation.
+The same field policy declares primary required-for-private passphrases and
+required secondary passphrases with primary fallback for OKX and Bitget aliases.
+Missing/JSON-null secondary passphrases inherit an opaque primary reference;
+explicit empty never inherits. Public mode bypasses only the primary requirement,
+while secondary validation stays active. Shared publicMode intent takes precedence
+over legacy publicDataOnly, including null/omitted requested. This declaration does
+not enable signing for an unmigrated family.
+Normalization and required-material validation occur before opaque identities are installed, and SDK cached
+public/private intent uses the same effective presence before raw options are
+stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
+not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged.
+This policy does not enable an unmigrated family; opaque external providers
+remain responsible for compliant provisioning.
+
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
 of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
+
+For dispatch-signing families, browser-facing `signHttpRequest` and `signWsAuth`
+use the same owned provider through bounded signing-only captures, without
+starting account discovery or venue transport work. The default synchronized
+clock can still initialize its existing time-source calibration. The original HTTP config/WS response
+wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
+their codec/site tables and the capture utility are the TS retained for remote
+signing after TS venue classes are deleted; no TS venue/API factory is created.
+They retain real qs/Axios serialization and caller-owned WS preimages. Capture
+tokens are single use and fenced by raw deadlines, protocol expiry and clock
+revision; provider text and partial results are not returned on failure.
+This signing-side bridge does not itself enable keyless `remoteSigner` or
+`PayloadSigner` routing to Rust. That separate companion must preserve REST-only
+PayloadSigner feeds, result headers and explicit account/secondary selection.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and

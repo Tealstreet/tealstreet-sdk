@@ -1,5 +1,14 @@
 # Binance Exchange Integration
 
+Rust hosted browser signing uses the installed primitive provider for both
+`signHttpRequest` and `signWsAuth`, without venue startup or transport actions; the default host clock retains
+its existing synchronized-time initialization.
+Its standalone request interceptor is shared with the TS Axios clients and
+retains their exact public/listen-key policy, qs spelling, parameter order and
+data-to-query handling. WS capture signs the caller's original preimage. No raw
+secret is restored to exchange options and no TS venue class is constructed.
+Keyless RemoteSigner/PayloadSigner routing is a separate companion migration.
+
 ## Rust profiles
 
 `sdk-rs/venues/binance` implements all four profiles through `Options.variant`

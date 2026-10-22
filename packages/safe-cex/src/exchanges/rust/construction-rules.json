@@ -4,6 +4,14 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "okx": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxeu": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxdemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxeudemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitget": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitgetinverse": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitgetusdc": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "mexc": {"signerSetup": {"primary": {"trimCredential": true}, "secondary": {"trimCredential": false}}},
     "coinbase": {"canSign": [["key"]], "bridge": {"primaryCredentialsOnly": true}},
     "coinbasespot": {"canSign": [["key"]], "bridge": {"spot": true, "primaryCredentialsOnly": true}},
     "txflow": {"canSign": [["secret"], ["applicationId"]], "privateEligible": []},
@@ -13,7 +21,9 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
-    "bybitspot": {"bridge": {"spot": true}},
+    "bybit": {"bridge": {"dispatchSigning": true}},
+    "bybitinverse": {"bridge": {"dispatchSigning": true}},
+    "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}},
     "binance": {"bridge": {"dispatchSigning": true}},
     "binancepm": {"bridge": {"dispatchSigning": true}},
     "binanceinverse": {"bridge": {"dispatchSigning": true}},
@@ -21,7 +31,7 @@
     "kucoinspot": {"bridge": {"spot": true}},
     "hyperliquidspot": {"bridge": {"spot": true}},
     "krakenspot": {"bridge": {"spot": true}},
-    "bybitdemo": {"bridge": {"demo": "always"}},
-    "hyrotrader": {"bridge": {"demo": "hyroMode"}}
+    "bybitdemo": {"bridge": {"demo": "always", "dispatchSigning": true}},
+    "hyrotrader": {"bridge": {"demo": "hyroMode", "dispatchSigning": true}}
   }
 }

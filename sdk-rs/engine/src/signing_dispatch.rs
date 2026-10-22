@@ -1,5 +1,5 @@
 //! Shared bounded park/resume state for HTTP, WS messages and WS upgrades.
-use crate::signing::{Algorithm, Operation, SignError, SignReceipt, SignRequest, SignResult};
+use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
 use std::collections::HashMap;
 
@@ -273,23 +273,7 @@ impl Dispatch {
         }
         p.receipt = work.receipt;
         p.prepared_protocol_at = Some(context.now_ms);
-        p.expected = work
-            .operations
-            .iter()
-            .map(|op| match op {
-                Operation::Sha256 { .. } => Some(32),
-                Operation::Present { .. } => None,
-                Operation::Sign { algorithm, .. } => Some(match algorithm {
-                    Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
-                    Algorithm::HmacSha512
-                    | Algorithm::Ed25519
-                    | Algorithm::Es256
-                    | Algorithm::StarkDigest
-                    | Algorithm::SchnorrDigest => 64,
-                    Algorithm::Secp256k1Digest => 65,
-                }),
-            })
-            .collect();
+        p.expected = work.expected_result_lengths();
         p.prepared_at = Some(now);
         p.prepared_revision = Some(clock_revision);
         Ok(work)
@@ -328,14 +312,8 @@ impl Dispatch {
             Ok(result) => result,
             Err(error) => return Some(Completion::Failed(p, error)),
         };
-        if result.receipt.validate().is_err()
-            || result.receipt != p.receipt
-            || p.prepared_at.is_none()
-            || result.values.len() != p.expected.len()
-            || p.expected
-                .iter()
-                .zip(&result.values)
-                .any(|(n, b)| b.len() > 1024 * 1024 || n.is_some_and(|n| b.len() != n))
+        if p.prepared_at.is_none()
+            || validate_result_shape(&p.expected, p.receipt, &result).is_err()
         {
             return Some(Completion::Failed(p, SignError::InvalidResult));
         }

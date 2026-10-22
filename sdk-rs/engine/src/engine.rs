@@ -2050,6 +2050,15 @@ impl<V: Venue> Engine<V> {
         self.io.signer.clone()
     }
 
+    /// Read the same calibrated protocol view and revision used by dispatch,
+    /// without starting the venue or changing its raw scheduling clock.
+    pub fn signing_clock(&self, host_now: f64) -> (f64, u64) {
+        (
+            self.io.protocol_clock.at(host_now),
+            self.io.protocol_clock.revision(),
+        )
+    }
+
     /// Host configuration is immutable once startup begins.
     pub fn set_entropy(&mut self, fill: crate::entropy::Fill) -> Result<(), VenueError> {
         if self.started {

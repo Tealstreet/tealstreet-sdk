@@ -1,6 +1,7 @@
 # Rust landing → master: remaining blockers
 
-Sam’s decision checklist, re-verified at landing `74c45b4f162` (2026-10-22).
+Sam’s decision checklist. Owner dispositions below are refreshed from the
+2026-10-22 handoff; the earlier runtime inventory was pinned at `74c45b4f162`.
 This lists outstanding cutover work, not authority to deploy, capture credentials
 or trade. SDK fixes/green CI do not establish NX adoption or live evidence.
 [Historical consumer conformance](RUST_CUTOVER_READINESS.md) stays separate;
@@ -10,12 +11,24 @@ or trade. SDK fixes/green CI do not establish NX adoption or live evidence.
 
 | Item | Cutover disposition / what remains |
 | --- | --- |
-| **B1 — engine delivery** | Choose a distinct mirrored engine path plus NX CI build, or a prebuilt package, and prove delivery to each chosen host. NX’s unrelated `sdk-rs/` and gitignored `pkg/` do not deliver the engine; mobile follows B3. [Delivery contract](RUST_CUTOVER_CALLERS.md#build-and-delivery-steps). |
-| **B2 — keyless signing** | Short-term policy is **already decided: preserve browser remote signing**. Retain the TS hosted-signing delegates, including Coinbase/Orderly. The later engine port/session-key direction is undecided; preserving today’s hosted mode does not require that port. [Decision and costs](RUST_REMOTE_SIGNING.md). |
-| **B3 — React Native/Hermes** | Choose/verify retained device TS, hosted execution or native/JSI integration. Hermes cannot execute WASM; the loader hook is not a shipped host. Device TS remains a recommendation. [Options and app boundaries](RUST_MOBILE_B3.md). |
-| **Rollback — #1699** | Approve resolver/policy, TS reachability, observation windows and tested recovery. No forced-TS switch exists; unsetting Rust restores defaults, and TxFlow has no production TS fallback. Retain TS/helpers/signing delegates/executable references through cutover. [Recommendation, costs and soak plan](RUST_ROLLBACK.md). |
-| **Bybit split preflight** | Accept whole-batch rejection before writes when one split lot cannot format, or authorize another policy; TS skips that order. Partial TP/SL semantics are already decided. [Bybit retained findings](RUST_AUDITS.md#bybit-family). |
-| **Coinbase CFM accounting** | Verify CFM/spot accounting and downstream equity consumers before choosing summary PnL/equity treatment. Native reports PnL while TS uses zero; hiding or double-counting it is unacceptable. [Accounting decision](RUST_AUDITS.md#coinbase-already-defaults-to-rust). |
+| **B1 — engine delivery: DECIDED** | The Node exchange server (`services/exchange-server`) consumes a pinned SDK package containing the WASM engine; the browser needs no engine. Prove package pinning, deployed artifact identity and server loading. NX’s unrelated `sdk-rs/` and gitignored `pkg/` are not delivery evidence. [Delivery inventory](RUST_CUTOVER_CALLERS.md#build-and-delivery-steps). |
+| **B2 — keyless signing: DECIDED** | Port remote HTTP signing **and WS auth** into Rust before cutover, retaining the existing sign-request/sign-response wire and keyless `remoteSigner` upgrade path for external SDK users. Shared local signing does not prove this remote port. TS support ends after cutover; hosted TS delegates are transitional. [Decision, historical costs and port proof](RUST_REMOTE_SIGNING.md). |
+| **B3 — application hosting** | Under the chosen server topology, prove web/mobile command routing, trusted setup, reconnect and outcomes. The server holds API keys in memory for connection life plus resume grace. Hermes cannot execute WASM; the chosen path needs no device engine or long-term device TS support. [Historical mobile inventory](RUST_MOBILE_B3.md). |
+| **Rollback — #1699: DECIDED retention** | Retain TS fallback long-term, **frozen for rollback only**, without dual maintenance after cutover. Resolver/policy, TS reachability, observation windows and recovery still need implementation/proof. No forced-TS switch exists; TxFlow has no production TS fallback. Retain executable references through cutover. [Recommendation, costs and soak plan](RUST_ROLLBACK.md). |
+| **Bybit split preflight: ACCEPTED** | Accept whole-batch rejection before any writes when one split lot cannot format; TS skips that order. The policy decision is closed; preserve preflight regressions. Partial TP/SL semantics remain decided. [Bybit retained findings](RUST_AUDITS.md#bybit-family). |
+| **Coinbase CFM accounting: ACCEPTED** | Accept native PnL. Verify downstream CFM/spot equity consumers apply it once; the old TS zero-PnL behavior is not the target. This is integration proof, not an open accounting-policy choice. [Accounting evidence](RUST_AUDITS.md#coinbase-already-defaults-to-rust). |
+
+Owner provenance, recorded in the local handoff
+`.aimux/plans/overseer-handoff-claude-limit.md:72,84` (2026-10-22):
+
+> TS support ends after cutover (team won't maintain both).
+
+> Engine delivery: exchange server (Node, services/exchange-server) consumes a pinned SDK package with wasm engine; browser needs no engine.
+
+The same handoff records “TS fallback retained long-term (frozen)”, “Bybit split
+preflight: accept whole-batch reject” and “Coinbase CFM: accept native PnL”. These
+decisions do not establish a deployed server, completed Rust remote-signing port
+or tested rollback. [Remote-signing decision](RUST_REMOTE_SIGNING.md).
 
 ## 2. Required NX caller changes and integration proof
 
