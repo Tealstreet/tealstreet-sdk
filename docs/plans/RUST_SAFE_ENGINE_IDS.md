@@ -72,3 +72,20 @@ for the existing shared-public socket identity; allocated IDs start at one.
 Command IDs and milliseconds remain u32. All outbound resource fields become
 u64 bounded numeric JSON, with no wasm-bindgen u64/BigInt export. Preparation
 and final-claim token strings retain their unchanged u64 decimal codec.
+
+Independent audit found two required refinements before source implementation:
+signed managed admission must preflight both the three Io IDs and its Dispatch
+attempt before committing either counter; reprepare must preflight before taking
+the recipe or advancing lifecycle generation. Poll registration similarly
+reserves logical and physical IDs together when it arms a finite cadence.
+Monotonic gaps after later independent refusals remain intentional, never reused.
+
+The legacy fatal backstop requires explicit fail-stop custody: latch exhaustion
+before trapping, reject subsequent handle/drain work, and have hosts dispose the
+failed engine so catching a trap cannot flush a partially executed callback.
+This proposal is sent to the overseer before source edits. Tests cover both
+managed counters exhausting independently, no partial pending/context/actions,
+reprepare recipe retention, last safe ID exactly once, and no usable I/O after
+fatal legacy exhaustion. Actual host ingress/serialization must reject invalid
+IDs before touching clocks, health or draining actions; tuple constructors do
+not exempt forged outbound IDs from the safe-number boundary.
