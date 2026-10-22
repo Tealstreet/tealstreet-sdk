@@ -636,3 +636,21 @@ fn background_preparation_refusal_releases_account_joins_for_fresh_polling() {
         "preparation refusal must clear the orders join"
     );
 }
+
+#[test]
+fn mixed_native_cancel_batch_with_proven_effects_is_known_partial_not_rejected() {
+    use safe_cex_engine::model::OrderStatus;
+    let mut h = ready();
+    put_order(&mut h);
+    let mut second = h.engine.store().order("12").unwrap().clone();
+    second.id = "13".into();
+    second.client_order_id = Some("client13".into());
+    h.engine.store_mut().upsert_order(second);
+    h.event(Event::Command(Command::CancelOrders { command: 715, ids: vec!["12".into(), "13".into()] }));
+    let request = h.take("/fapi/v1/batchOrders");
+    h.reply(request.id, 200, "", r#"[{"symbol":"BTCUSDT","orderId":12,"status":"CANCELED","origQty":"1","executedQty":"0"},{"code":-2011,"msg":"unknown order"}]"#);
+    assert_eq!(h.engine.store().order("12").unwrap().status, OrderStatus::Canceled);
+    assert_eq!(h.engine.store().order("13").unwrap().status, OrderStatus::Open);
+    let error = &h.failures.iter().find(|(id, _)| *id == 715).unwrap().1;
+    assert_eq!(error.outcome, None, "proven cancellation effects forbid whole-command rejection");
+}
