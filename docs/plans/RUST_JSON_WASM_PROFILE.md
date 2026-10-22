@@ -127,3 +127,40 @@ were unchanged before this evidence addition. Fresh CI and a new actual-bridge
 baseline proof are required for the integrated profile head. Initial 37115
 evidence remains historical and is not relabeled as final. Same budgets,
 workloads, thresholds, entropy, comparators and explicit package policies remain.
+
+
+## Owner decision: retain speed defaults where size costs CPU margin
+
+The all-size integrated candidate 51c5ab1e653 is NOT selected and must not
+merge. Despite all green checks, Aster's normalized TS/Rust steady ratio fell
+from 45.429/29.004 = 1.5663 to 72.015/62.325 = 1.1555. Its four historical
+near-1.0x size-profile misses were the reason #1734 restored whole-family level
+3. One passing sample does not justify removing that restoration.
+
+The shared measured rule is: keep a family's speed defaults where the size
+profile materially costs CPU margin, using the CI comparison and historical
+gate evidence. Keep global JSON level 3 for all families. Under the measured
+rule, retain Aster's existing whole-family speed defaults; remove only WOO and
+KuCoin Spot from the broad exclusion. Their observed ratios did not degrade:
+WOO 28.794/28.318 = 1.0168 to 28.631/27.645 = 1.0357, and KuCoin Spot
+323.664/268.070 = 1.2074 to 197.034/159.947 = 1.2319. Absolute timings remain
+runner-sensitive; WOO still has a narrow margin and no repair claim.
+
+Concrete adjusted source, to review BEFORE implementation: apply the existing
+wasm_profile_args unless family is asterdex. Keep its explicit venue-level 3
+selection and the global JSON policy, every other explicit package override,
+combined/native settings and family driver unchanged. This restores exactly
+the actual-bridge baseline arguments for Aster. Against that same actual
+baseline, only WOO and KuCoin Spot arguments may change; capture all 39 aliases
+and combined without invoking a build. This central rule is not a venue parser
+or another per-family JSON override.
+
+Commit this adjusted plan first, obtain independent concrete-policy review,
+then update source. Re-run all exact-head CI, the full authenticated 32-suite /
+976-output comparison and all 28 family sizes / 42 public CPU/memory workloads.
+Verify Aster's package bytes/hash and arguments match the speed baseline,
+report every changed-family ratio, and preserve every strict unequal result.
+Any TS-reference variation needs exact pre-change full-output control receipts
+and owner disposition; no new exclusions. Old 51c5 data/body/guard remain
+historical, never relabeled. Fresh independent source/data reviews, fixed-head
+separate guard and separate merge are required for the adjusted candidate.
