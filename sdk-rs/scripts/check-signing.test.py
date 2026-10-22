@@ -31,12 +31,14 @@ class SigningBan(unittest.TestCase):
                         self.assertTrue(ban.main())
                 source.write_text('fn uses_provider_refs() {}\n')
                 self.assertFalse(ban.main())
-                migrated = ban.ROOT / 'venues/binance/src/sign.rs'
-                migrated.parent.mkdir(parents=True)
-                for body in ['fn new_secret() {}', 'fn hmac_sha256() {}']:
-                    migrated.write_text(body)
-                    with contextlib.redirect_stdout(io.StringIO()):
-                        self.assertTrue(ban.main())
+                for family in ['binance', 'bybit']:
+                    migrated = ban.ROOT / f'venues/{family}/src/sign.rs'
+                    migrated.parent.mkdir(parents=True)
+                    for body in ['fn new_secret() {}', 'fn hmac_sha256() {}']:
+                        migrated.write_text(body)
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            self.assertTrue(ban.main())
+                    migrated.write_text('fn uses_provider_refs() {}')
             finally:
                 ban.ROOT = old_root
 
