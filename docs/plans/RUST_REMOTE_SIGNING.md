@@ -1,19 +1,46 @@
 # Remote signing on the Rust engine: cost of a port
 
-Status: costing for an owner decision; nothing here is implemented.
+Status: **B2 DECIDED (Sam, 2026-10-22)**. Port remote HTTP signing and private
+WS auth into Rust as a cutover prerequisite, preserving the existing
+sign-request/sign-response wire and keyless `remoteSigner` contract for external
+SDK users. Shared local Signer work is not proof of the remote wire/host port.
 
-**Decision (Sam, 2026-10-21).** Remote signing must stay available in the short
-term: hosted exchange-server accounts built with `secret: ''` and a
-`RemoteSigner`, signed by the browser, keep working at and after cutover.
-Server-held session keys are the likely long-term direction but are not
-committed. This doc costs porting remote signing into the engine so that
-decision can be made with numbers. Cutover status lives in
-[RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) (B2).
+The owner handoff records at
+`.aimux/plans/overseer-handoff-claude-limit.md:72`:
+
+> TS support ends after cutover (team won't maintain both).
+
+> Remote signing must be ported into the Rust engine before TS deletion so open-source users keep an upgrade path.
+
+The application cutover accompanies AWS→Vultr: devices use the exchange server,
+which holds exchange API keys in memory for the connection plus resume grace.
+This application custody decision does not remove external SDK users' remote
+signing requirement. The later handoff at `:84` adds:
+
+> Engine delivery: exchange server (Node, services/exchange-server) consumes a pinned SDK package with wasm engine; browser needs no engine.
+
+> TS fallback retained long-term (frozen).
+
+Active TS support ends after cutover; the retained TS fallback is rollback only,
+without dual maintenance. Transitional hosted TS delegates do not satisfy B2.
+Preserve that frozen rollback path when deciding deletions. Runtime integration,
+remote HTTP/WS proof and rollback reachability remain work, not consequences of
+the decision. [Current blocker dispositions](RUST_MASTER_MERGE_BLOCKERS.md).
+
+## Historical costing and source baseline
+
+The remaining inventory, estimates and option sketch were recorded before the
+2026-10-22 decision. They explain the earlier TS hedge and cost assumptions;
+they do not defer the required port or prescribe today's signer API. Actual
+implementation must use the shared dispatch-time [Signer core](RUST_SIGNER.md)
+and [prerequisites](RUST_SIGNER_PREREQUISITES.md), with validated request/outcome
+and HTTP/WS host integration. Production NX deployments and remote wire support
+are not claimed here.
 
 Sources: SDK `origin/feat/rust-rewrite` `4b8212be36`; tealstreet-next
 `origin/master` `41e538d78d`, read only. **NX** marks tealstreet-next paths.
 
-## Today
+## Baseline behavior at the recorded source pins
 
 ### Hosted remote signing end to end
 
@@ -52,7 +79,7 @@ Sources: SDK `origin/feat/rust-rewrite` `4b8212be36`; tealstreet-next
    (`utils/unknownSendOutcome.ts:9-13`), which order and chaser code rely on to
    resend safely.
 
-### Rust engine today
+### Rust engine at the historical baseline
 
 - No engine path forwards an HTTP config or WS auth to a `RemoteSigner`. A
   directly built `RustEngineExchange` refuses a keyless remote-signed private
@@ -110,10 +137,12 @@ uses).
 | txflow | local secret | — | 3 | n/a (no hosted users) |
 | breakoutprop | DXtrade username/password login | session | — | n/a (no remote signing on master) |
 
-## Port design (sans-I/O)
+## Historical port option sketch (sans-I/O)
 
-The port keeps today's wire protocol, so neither exchange-server's
-`WebSocketRemoteSigner` nor the browser's `signingHost` changes:
+The owner requires the existing exchange-server WebSocketRemoteSigner and
+browser signingHost wire to remain unchanged. Prove compatibility through both
+halves. The engine APIs below are historical sketches; implement them through
+the current shared signer and trusted setup contracts.
 
 1. **Server engine: external signing mode.** When an account has a remote
    signer, a venue builds each private request **unsigned** and the engine
@@ -181,12 +210,13 @@ signer that is a pure function of the request and a timestamp.
 | lighter | 3+ | tx signing; read-only today on both stacks |
 | **Full port** | **~30-45** | plus a hosted soak on exchange-server |
 
-## Keep hosted TS vs port signing into the engine
+## Historical options and superseding decision
 
 For Coinbase and Orderly, option (a) from this doc's first version (#1500)
 shipped as #1505: restore TS Coinbase/Orderly, about 2 days, instead of porting
-those two first at about 9-11. So the decision left is
-whether to replace hosted TS with an engine port, and when.
+those two first at about 9-11. That was a transitional hedge. The owner has now
+required the Rust remote-signing port before cutover; the alternatives below
+retain their original costing context.
 
 | | Keep hosted TS (shipped) | Port remote signing into the engine | Server-held session keys |
 | --- | --- | --- | --- |
@@ -194,15 +224,22 @@ whether to replace hosted TS with an engine port, and when.
 | Effort | done; upkeep only | ~6-8 days core + per venue: Orderly 1, Coinbase 1.5-2, simple HMAC families 0.5-1 each, cryptocom/weex/backpack 1-1.5 each, hyperliquid/asterdex v3/grvt/apexomni 2-3 each, lighter 3+; ~30-45 total | not costed here: key issuance/rotation, custody and revocation per venue, plus a consent flow; engine side is close to zero (it already signs locally) |
 | Risk | Two implementations per hosted venue: hosted users run TS while local users run Rust, so fixes land twice and behaviour can drift; every TS venue class with hosted users stays undeletable; Coinbase/Orderly live copies must stay apart from the frozen replay references | New money-path protocol (parked requests, request-integrity check, outcome mapping, re-signing every resend); needs a hosted soak per venue; the browser still holds every secret | Custody: the server holds signing material; venue support for scoped or expiring keys varies, so not every venue can do it |
 | Kept if the plan changes | nothing; deleted on port or session keys | everything if remote signing stays long term; the shared core is thrown away if session keys win | everything; it removes remote signing entirely |
-| Unblocks | cutover now | deleting TS venues for hosted users | deleting TS venues and the remote-signer protocol |
+| Historical scope | TS hedge before the new owner decision; does not satisfy B2 | Required Rust remote HTTP/WS path for external SDK users | Application server custody; does not retire the external remote-signer contract |
 
-**Recommendation:**
-- Keep hosted TS through cutover; it costs nothing more and is master's
-  behaviour.
-- Do not start the port until session keys are decided. They are the likely
-  long-term direction, and a port would be largely thrown away if they win.
-- If session keys are rejected, port the shared core first, then venues in
-  order of hosted usage (exchange-server account counts, which this doc does
-  not have). Orderly (1 day) and Coinbase (1.5-2) are the cheapest first
-  venues and retire the restored TS copies.
-- Each ported venue's TS class can be deleted once its hosted soak passes.
+**Required implementation and proof under the 2026-10-22 decision:**
+
+- Complete remote HTTP and WS auth through the shared dispatch signer, using
+  the existing sign-request/sign-response wire; accept keyless `remoteSigner`
+  Rust construction for supported external contracts. Local signer migrations
+  alone do not close this requirement.
+- Prove actual host/worker request correlation, deadlines, re-signing on any
+  permitted resend, typed pre-send refusal and post-send unknown outcomes.
+  Never auto-replay an unknown write. Keep endpoint/intent validation and
+  credential redaction at the shared boundary.
+- Prove default application execution on the new server from a pinned SDK/WASM
+  package, including connection/resume-grace key lifetime and command routing.
+  Browser engine delivery is not required for that application topology;
+  external SDK remote providers remain supported.
+- End TS feature/support work after cutover. Keep the TS fallback long-term,
+  frozen for rollback only, with verified reachability. Historical per-venue
+  deletion advice above cannot authorize removing that retained fallback.
