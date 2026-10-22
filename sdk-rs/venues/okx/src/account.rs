@@ -265,13 +265,14 @@ impl Okx {
         private: bool,
         pending: Pending,
     ) {
-        cx.request(
+        let request = cx.request(
             Method::Get,
             format!("{}{path}", self.rest()),
-            self.headers(cx.now, Method::Get, path, "", private),
+            self.headers(Method::Get),
             None,
             pending,
         );
+        self.sign_request(cx, request, Method::Get, path, private, false);
     }
 
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -363,32 +364,17 @@ impl Okx {
     }
 
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Login<'a> {
-            api_key: &'a str,
-            passphrase: &'a str,
-            timestamp: String,
-            sign: String,
-        }
-        #[derive(serde::Serialize)]
-        struct Payload<'a> {
-            op: &'static str,
-            args: [Login<'a>; 1],
-        }
-        if let (Some(c), Some(socket)) = (&self.credentials, self.connections[channel].socket) {
-            let timestamp = num::format((cx.now / 1000.0).floor());
-            let sign = c.signature(&timestamp, "GET", "/users/self/verify", "");
-            let payload = Payload {
-                op: "login",
-                args: [Login {
-                    api_key: &c.key,
-                    passphrase: &c.passphrase,
-                    timestamp,
-                    sign,
-                }],
-            };
-            cx.send(socket, serde_json::to_string(&payload).expect("login"));
+        if let (Some(identity), Some(socket)) =
+            (&self.credentials, self.connections[channel].socket)
+        {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::WsLogin::new(
+                    identity.clone(),
+                    self.socket_url(channel),
+                )),
+            );
         }
     }
 

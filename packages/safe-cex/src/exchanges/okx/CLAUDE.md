@@ -1225,3 +1225,19 @@ Rust closed-position caps and ordinary history caps/cursor stalls emit
 The host flags only the owning result and routes its warning to that caller.
 EEA composite-source cap/cursor failures still reject; strict financial rows,
 caps, cursors and retained-row policies are unchanged.
+
+
+## Rust signer migration checkpoint
+
+The draft Rust adoption stages native private HTTP and private/business login
+through the engine SignStep/provider. Venue options contain opaque identity refs;
+trusted setup owns key, secret and passphrase material, including absent-only
+secondary passphrase fallback. Native GET reads prefer secondary; client-ID lookup,
+ordered writes and both WS login channels stay primary. Public requests remain
+unsigned. Setup validation may report sanitized `Invalid local signer setup`
+before startup rather than the TS client error text.
+
+This draft is not a hosted admission claim. Its merge requires the separate
+shared encoding/passphrase presentation extension and positive actual-WASM
+hosted HTTP/WS tests for all four aliases. No caller may restore raw secrets to
+sanitized options or use a venue-local signing fallback.

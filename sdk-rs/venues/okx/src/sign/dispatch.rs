@@ -68,12 +68,12 @@ fn context(origin: &str, method: &str, path: &str) -> Context {
 }
 
 pub(crate) struct Http {
-    identity: Identity,
+    identity: Option<Identity>,
     path: String,
     stamp: String,
 }
 impl Http {
-    pub fn new(identity: Identity, path: String) -> Self {
+    pub fn new(identity: Option<Identity>, path: String) -> Self {
         Self {
             identity,
             path,
@@ -101,7 +101,7 @@ impl SignStep for Http {
         let stamp_ms = dispatch.stamp_ms();
         self.stamp = safe_cex_engine::time::iso_millis(stamp_ms as i64);
         work(
-            &self.identity,
+            self.identity.as_ref().ok_or(SignError::Unavailable)?,
             format!(
                 "{}{}{}{}",
                 self.stamp,
@@ -241,7 +241,7 @@ mod tests {
                 cx.sign_http(
                     request,
                     Box::new(Http::new(
-                        self.identity.clone(),
+                        Some(self.identity.clone()),
                         if self.mismatch { "/different" } else { path }.into(),
                     )),
                 );

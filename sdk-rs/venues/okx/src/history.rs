@@ -530,7 +530,7 @@ impl Okx {
             encode(&instrument),
             encode(&client_order_id)
         );
-        let headers = self.primary_headers(cx.now, Method::Get, &path, "");
+        let headers = self.headers(Method::Get);
         let request = cx.request(
             Method::Get,
             format!("{}{path}", self.rest()),
@@ -559,6 +559,7 @@ impl Okx {
                 rows: Rows::Orders(Vec::new()),
             }),
         );
+        self.sign_request(cx, request, Method::Get, &path, true, true);
         cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }
 
@@ -1057,6 +1058,14 @@ impl Okx {
         r.after = r.oldest.take();
         let timer = cx.set_timer(100.0);
         self.history.delayed.push((timer, r));
+    }
+
+    pub(crate) fn history_sign_failed(
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.fail(request.command, error);
     }
 
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {

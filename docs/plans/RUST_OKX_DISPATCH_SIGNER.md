@@ -77,3 +77,35 @@ Independent review caught and cleared the path-binding and header-order gaps.
 Production credential replacement, owned failure wiring, registry activation,
 caller section, ratchet shrink and hosted alias proofs remain to implement.
 This checkpoint does not claim that OKX dispatch signing is enabled.
+
+## Native builder checkpoint (not ready to merge)
+
+The four real HTTP builders and private/business login now use the existing
+shared dispatch provider. Production options retain opaque identities only;
+trusted setup owns raw material and passphrase fallback. Independent production
+review is clear, including strict lookup/history refusal and preservation of
+accepted bracket effects after a later signer refusal. Existing native fixtures
+enter trusted provider setup, preserving their financial and lifecycle assertions.
+
+Standalone OKX registry/WASM feature declarations select dispatch signing without
+requiring Binance. The compiled bridge flag is staged for native construction;
+this branch is deliberately not ready to merge: hosted HTTP/WS admission and
+all-alias actual-WASM positives depend on the separate shared presentation PR.
+No keyless/hosted support claim is made by this checkpoint.
+
+The legacy scan includes OKX signing modules and decreases its exact allowance
+from 517 to 516. The twelve newly scanned matches are six independent test-oracle
+sites, two primitive work-builder descriptors and four test setup/oracle sites;
+none grants production credential custody or local signing. Source-independent
+CI replay equality, remaining delayed/socket/account/history regressions, hosted
+proof and actual shared-input integration remain readiness gates.
+
+Checkpoint verification: 274 OKX/registry native tests, 266 Binance tests,
+strict all-target OKX/registry Clippy, SDK typecheck/lint and 59 focused setup
+checks pass. Disabling typed owned signing-error handling reproduces three
+runtime RED assertions (first write, later accepted bracket effect, strict
+lookup); restored source passes all four actual-builder tests including delayed
+reprepare. Independent adversarial review recomputed the full ratchet: exact
+516 matches/516 allowances, all non-OKX entries unchanged, no stale allowances.
+Actual-WASM hosted and replay evidence remains pending, not inferred from native
+fixtures or the SDK constructor-only setup tests.

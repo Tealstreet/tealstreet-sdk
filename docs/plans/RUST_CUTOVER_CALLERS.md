@@ -3641,3 +3641,35 @@ remain required. Native-backed host/worker tests now use the reachable later-pag
 partial-success event instead of the superseded first-failure marker. This is
 source/fixture evidence, not deployed runtime proof or cross-family closure.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+## OKX dispatch signer adoption (draft; hosted prerequisite outstanding)
+
+This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
+Native HTTP and private/business WS stage canonical work through the shared
+engine signer. Trusted setup consumes primary/secondary credentials before
+venue construction; generic options carry opaque identities, not secrets or
+passphrases. Native ordinary private GET uses secondary when configured;
+ordered writes, client-ID lookup and both WS login channels use primary.
+The primary passphrase is required for private accounts. An absent secondary
+passphrase inherits the primary provider ref; explicit empty is rejected.
+
+The #1714/#1728 worker/bootstrap requirements apply: provision the provider in
+the engine-owning realm, including rotation/reload/disposal, rather than copying
+sanitized `exchange.options`. Public/private readiness must use construction
+metadata. No new persisted account-ID mapping is introduced. Live/demo/EEA roots
+and proxy/CORS requirements remain as documented in the OKX integration guide.
+Typed signer refusal before the first write is `notSent`; earlier accepted
+bracket effects retain the existing aggregate outcome. Provider refusal cannot
+mean lookup absence or an empty completed financial snapshot.
+
+**Not yet a landed capability:** hosted HTTP/WS and keyless `remoteSigner`/
+`PayloadSigner` require the separately reviewed shared encoding/passphrase
+presentation extension after #1757. This draft must not merge before consuming
+that actual extension and passing positive actual-WASM hosted tests per alias.
+Passphrase custody stays with the trusted provider; the existing external wire
+must not gain a required field, and secondary requests must refuse rather than
+silently use primary where that wire cannot select a secondary identity.
+[Family plan](RUST_OKX_DISPATCH_SIGNER.md),
+shared presentation plan `RUST_HOSTED_SIGNER_PRESENTATION.md` (on its separate
+prerequisite branch).
