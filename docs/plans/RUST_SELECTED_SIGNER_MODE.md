@@ -19,3 +19,12 @@ native flag; their raw public intent and mutation/forged-input checks remain.
 Six focused SDK suites pass 129 tests; SDK typecheck and lint pass. Both
 correctness and adversarial reviews are CLEAR. Actual dependency integration
 and final CI/proof remain pending. No native/engine/venue source or external schema changes.
+
+Actual RequestContext #1741 `b2fe97324763e1e2702c69ac5b839da37102928b`
+is genuinely merged at `2c00b2ce3e9420cadb53838765dbe6bee20b1dd1`.
+Two independent preservation reviews confirm exact eight-file own scope,
+all prior owned source/test/caller blobs unchanged, the complete unowned tree
+matching actual #1741, and both README rows retained once. Incoming managed
+HTTP, request lifecycle and provider interfaces remain unchanged. Post-integration
+focused SDK checks, typecheck and lint pass; final CI and authenticated replay
+comparison use this integrated source and the actual #1741 baseline.
