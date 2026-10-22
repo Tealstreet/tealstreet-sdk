@@ -129,8 +129,14 @@ transport receipts, commands and checkpoints stay in repeatability comparisons.
   Published vectors and adversarial Tape controls cover the observed contract;
   full current-head CI/five-pair proof remains the merge gate. Existing private
   account FAILs and synthetic/live evidence limits remain.
-  Orderly's existing unstaged mutation ACKs/current command-snapshot visibility
-  remain a causality caveat. #1694 closes the sweep's exact 50-name effective-clock
+  ~~Orderly's unstaged mutation ACKs expose current command snapshots too soon.~~
+  The separate [ACK-fence repair](HARNESS_ORDERLY_ACK_FENCES.md) stages twelve
+  mutation replies per tape and holds final snapshots until all staged ACKs for
+  a command arrive, including two-write stages. Actual-Tape controls cover all
+  fourteen identities; stripping only the added stages reproduces the original
+  bytes. Settlement remains a scheduling fallback rather than success evidence;
+  current-head five-pair artifacts/full CI remain the merge gate.
+  #1694 closes the sweep's exact 50-name effective-clock
   assertion and 20 stale WEEX fee keys; its complete ten-output proof and exact
   112-key declaration check do not establish private parity. Coordinate future
   validator/fixture changes with that lane; no harness files changed in this PR.

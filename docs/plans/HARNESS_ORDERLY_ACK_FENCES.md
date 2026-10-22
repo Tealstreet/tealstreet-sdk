@@ -73,3 +73,32 @@ history. No production Rust/TS, signing, routing or economic payload changes.
   TS references and current reconstruction limitations. Next inspect offline TS
   recorder support; actual new public/private captures, shadow/canary and native
   provenance/contract work stay skipped and explicitly reported.
+
+## Verification in progress
+
+The plan was reviewed before implementation. The focused suite has 35 passing
+controls. Removing the mutation stages reproduces premature order 30 visibility
+before the first ACK; restoring first-ACK release exposes algo 200/children
+201–202 before command 3's second ACK. Both negative controls fail the causal
+regression, and the restored implementation passes. The implementation review
+found no remaining fence bypass. Original byte identity covers all fourteen
+82-record/14-command/12-mutation fixtures; manifest changes initially substitute
+only their fourteen SHAs, preserving every existing diagnostic key and reason.
+
+Actual fee-subject fix #1701 (`b1510f267c78`) is integrated with every incoming
+file and existing harness edit preserved. Its authentic Orderly engine from
+CI `39699465571` passes the hard build-tree fingerprint
+`f9d397f2050b2c79ff4a8b26322c6ba77d55d699d0ada8cd4176f6bc375fb046`.
+Local private iteration completed all 140 outputs: five identical full
+nonmetric outputs per implementation/tape, full IDs/receipts/checkpoints retained.
+All fourteen cases retain exactly 912 observed declarations with zero unexpected
+or unused keys, so no pruning or new allowance is required. This remains
+preliminary evidence: full PR-head CI, all fifteen mandatory cases and independent
+review of the current CI artifacts still gate merging.
+
+Local verification: all 1,077 serial harness tests, 44 root typecheck tasks and
+28 root lint tasks pass. Independent raw review confirms complete IDs, 14
+command results, 12 writes and zero signature/protocol/missing-write failures in
+each case. The complete nonmetric outputs equal earlier #1692 CI artifacts: the
+repair changes eligibility under adversarial timing without changing these
+observed outputs. Fresh current-head CI evidence remains required.

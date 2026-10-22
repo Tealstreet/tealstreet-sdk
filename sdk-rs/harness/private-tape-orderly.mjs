@@ -38,6 +38,7 @@ const http = (method, path, data, requestBody, metadata = {}) => records.push({
   t: 0, type: 'http', method, url: REST + path, status: 200,
   body: JSON.stringify(ok(data)),
   ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+  ...(method === 'GET' ? {} : { afterCommand: commandCount }),
   ...metadata,
 });
 const rows = (data) => ({ rows: data, meta: { total: data.length, records_per_page: 500, current_page: 1 } });

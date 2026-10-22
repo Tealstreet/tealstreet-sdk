@@ -789,6 +789,29 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   slice, not the raw spot row); ~~fills lack execution id, realized PnL and fee~~
   (FILLS revision 2 carries `tid`; #1430 financials retain live venue conventions).
 
+
+Known nonce limits (owner decision: document only; no production change):
+`crypto/src/nonce.rs:9,19–28` keeps signer-domain history and allocates
+`max(floor(now), previous + 1)`. `ethereum_agent` keys that history by the
+signer's public-address digest (`nonce.rs:33–44`); Hyperliquid writes use it at
+`venues/hyperliquid/src/trading.rs:641–644`. Engine recreation and backward clock
+resynchronization within the same native process or Wasm memory preserve that
+history. The synchronized SDK clock is passed at
+`packages/safe-cex/src/exchanges/rust/rust.exchange.ts:892,917`; it can move
+backward (`packages/safe-cex/src/utils/virtualClock.ts:98–110,151`).
+
+- Fresh process, worker or Wasm-memory restarts lose the history, as documented
+  in `sdk-rs/crypto/src/nonce.rs:1–2`. A same-ms restart after the previous counter
+  ran ahead of wall time can reuse a nonce. Deployment boundaries must coordinate
+  signers if they need continuity across those restarts; TS Date.now-based
+  signing has the same restart limitation.
+- The allocator checks finite/nonnegative time and the safe-integer ceiling,
+  rather than the venue's T−2-day/T+1-day freshness window
+  (`sdk-rs/crypto/src/nonce.rs:24–26,33–44`). A >1-day forward clock excursion, or
+  sustained >1000 writes/s for one signer, can leave its counter ahead of the
+  allowed future window even after clock correction. These are known limits,
+  not regressions from #1693; synchronized time reduces ordinary skew rejections.
+
 ### Binance family
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
   and Rust re-places (`binance/src/trading.rs:530`): a regression.~~
