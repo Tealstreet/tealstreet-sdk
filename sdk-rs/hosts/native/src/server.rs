@@ -1425,6 +1425,7 @@ mod tests {
             _: &(),
             _: &Response<'_>,
             _: f64,
+            _store: &safe_cex_engine::Store,
         ) -> Option<safe_cex_engine::AuthOutcome> {
             Some(safe_cex_engine::AuthOutcome::Rejected)
         }

@@ -2920,6 +2920,26 @@ account state. Command-owned/private prerequisite generation fences remain
 strict, and no write is replayed. Existing caller signatures and readiness
 guidance apply; no caller-issued resync is required.
 
+### Engine-owned financial snapshot admission (Binance and Bitunix)
+
+Native order snapshots now use one Store-owned write-freshness token instead of
+Binance/Bitunix local order revision counters. Older in-flight reads cannot
+apply native terminal/filled/bootstrap/binding metadata before being admitted.
+Binance keeps post-ACK lagging-server and native identity protections. Bitunix
+still publishes healthy REST peers beside newer WS rows, while writes invalidate
+whole older reads; both complete initial endpoint tokens are admitted together.
+No FILLS quantity, wire ID, snapshot retention, command retry or SDK/worker call
+shape change is intended. Permanent exhaustion sends no unfenced snapshot read
+and rejects an owned prerequisite once, without disabling accepted native writes.
+
+Rust Venue implementers receive an added read-only `&Store` argument in
+`account_auth_outcome`; the four built-in overrides and native/engine fixtures
+are updated together. Auth observation still precedes account callbacks and
+retains current-read, expected-list, credential-scope and retry checks. There is
+no new NX/CLI/MCP argument or caller migration. Safe late ACK patch adoption and
+other snapshot consumers remain follow-ons; see
+[RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md](RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md).
+
 ### Bitunix private snapshot progress and retention (#1641/#1643/#1645)
 
 Ordinary position reconciliation now progresses during continuous WS position
