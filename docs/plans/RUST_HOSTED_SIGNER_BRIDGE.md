@@ -415,3 +415,15 @@ these as its existing PayloadSigner result, retaining its original precedence.
 No new external sign-request/response field, host map or unsigned recipe state.
 Add RED/GREEN capture tests, codec policy tests and actual-WASM callback-header
 round trips. Coordinate additive API with RequestContext before final integration.
+
+
+Owner wire refinement: preserve legacy WS envelopes byte-for-byte, including
+Bybit's shared `bybit` label for all five aliases and `{expires}`, and Binance
+Spot's alias, fixed subscription request id and `{apiKey, recvWindow, timestamp}`.
+Declare label/extra-data codec/fixed WS id in the same construction policy.
+A shared codec derives metadata only from the owned public credential, captured
+receipt and exact prepared preimage; it never reads time independently or grants
+key authority from advisory Context. Ordinary HTTP primitive envelopes keep
+unique correlation ids and no synthetic WS metadata. Regression tests invoke the
+legacy TS WS methods with fixed clock/id and compare complete serialized
+requests for each alias; production code imports no TS venue classes.
