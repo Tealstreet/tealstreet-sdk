@@ -1575,3 +1575,25 @@ failures and strict coverage refusals while preserving admission/lookup/setup
 paths; B11 ingestion/coverage, other adapters and deployed runtime proof stay
 open. Final exact-head green CI and fresh post-sort raw/package/ordered-gate
 evidence precede an announced fresh separate guard and separate exact-head merge.
+
+Bitrue implementation checkpoint: regression-only `51b6193c21e` leaves production
+unchanged, with 19 controls PASS and four typed-terminal assertion groups RED.
+Existing HistoryRows/Completion adoption makes those groups GREEN. All 28 final
+history controls pass, including mixed resend/GET orders with strict timestamp
+increments, no-list signature refusal after exhausted GET retries, signature
+resend not replenishing GET budget, staged same-ID economic replacement,
+1000/1001 raw-row admission, valid empty success versus malformed list,
+UTF-8/no-list nonretry, independent concurrent owners and first eligible native
+identity. No new core, library request/retry, public WS or lookup edits.
+Independent correctness source review is CLEAN; final adversarial/tests/docs
+review and focused native/strict checks remain before the draft PR. Current
+shared registry/SDK predecessor #1763 must be genuinely integrated before final
+CI/proof. No historical evidence is a certificate for that new head.
+
+Bitrue final local checks: all 842 focused engine/Bitrue/Binance tests pass;
+all 28 final history controls pass again after tightening the mixed-retry raw
+terminal drain. Touched all-target strict Clippy, fmt, bans and diff checks pass.
+Independent correctness, adversarial source and final tests/docs reviews are
+CLEAN; architecture gate is existing shared owner adoption. No local release
+WASM/full replay/size/timing run. Actual #1763 integration and fresh CI/proof
+remain required before landing.

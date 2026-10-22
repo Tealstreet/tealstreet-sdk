@@ -655,10 +655,18 @@ fn interrupt(e: &mut Engine<Bitrue>, r: &HttpRequest, prefix: &str) {
             data: prefix.as_bytes(),
         },
     );
-    assert!(e.drain_actions().all(|a| !matches!(
-        a,
-        Action::Http(_) | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
-    )));
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(_)
+            | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
+                panic!("unvalidated prefix escaped")
+            }
+            Action::Notice(Notice::Event(event)) => {
+                assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE);
+            }
+            _ => {}
+        }
+    }
     e.handle(
         1700000000000.0,
         Event::HttpFailed {
@@ -752,9 +760,156 @@ fn retry_resets_same_id_economics_and_keeps_signature_and_transport_budgets_sepa
             r,
             &format!(r#"{{"code":200,"data":[{corrected}]}}"#),
         );
-        let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        let rows = owned_success(&mut e, 99);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(rows[0]["price"], 61000.0);
         assert_eq!(rows[0]["qty"], 0.003);
     }
+}
+
+fn owned_success(e: &mut Engine<Bitrue>, expected_command: u32) -> serde_json::Value {
+    let mut results = Vec::new();
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(_) => panic!("single-page success continued"),
+            Action::Notice(Notice::CommandFailed { .. }) => panic!("successful page rejected"),
+            Action::Notice(Notice::CommandDone { command, result }) => {
+                assert_eq!(command, expected_command);
+                results.push(serde_json::from_str::<serde_json::Value>(&result).unwrap());
+            }
+            Action::Notice(Notice::Event(event)) => {
+                assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE);
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(results.len(), 1);
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
+    results.pop().unwrap()
+}
+
+#[test]
+fn single_page_hard_row_bound_is_checked_before_limit_and_admission() {
+    for count in [1000, 1001] {
+        let mut e = engine();
+        query(
+            &mut e,
+            Query::Fills {
+                symbol: Some(SYMBOL.into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(1000),
+            },
+        );
+        let r = retry_request(&mut e);
+        let rows = (1..=count)
+            .map(|id| ROW.replace("1558124009467904992", &id.to_string()))
+            .collect::<Vec<_>>()
+            .join(",");
+        response(&mut e, r, &format!(r#"{{"code":0,"data":[{rows}]}}"#));
+        if count == 1000 {
+            assert_eq!(owned_success(&mut e, 99).as_array().unwrap().len(), 1000);
+        } else {
+            assert_eq!(
+                owned_failure(&mut e).message,
+                "Malformed Bitrue execution history"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_list_signature_resend_is_once_after_transport_retries() {
+    let mut e = engine();
+    query(&mut e, fills());
+    let mut r = retry_request(&mut e);
+    for _ in 0..3 {
+        interrupt(&mut e, &r, &format!(r#"{{"code":0,"data":[{ROW},"#));
+        r = retry_request(&mut e);
+    }
+    response(&mut e, r, r#"{"code":"-1022","msg":"signature"}"#);
+    let r = retry_request(&mut e);
+    response(&mut e, r, r#"{"code":"-1022","msg":"signature again"}"#);
+    assert!(owned_failure(&mut e).message.contains("signature again"));
+}
+
+#[test]
+fn signature_retry_does_not_replenish_get_retry_budget() {
+    let mut e = engine();
+    query(&mut e, fills());
+    let mut r = retry_request(&mut e);
+    for _ in 0..3 {
+        interrupt(&mut e, &r, &format!(r#"{{"code":0,"data":[{ROW},"#));
+        r = retry_request(&mut e);
+    }
+    response(&mut e, r, &format!(r#"{{"data":[{ROW}],"code":"-1022"}}"#));
+    let r = retry_request(&mut e);
+    interrupt(&mut e, &r, &format!(r#"{{"code":0,"data":[{ROW},"#));
+    assert_eq!(owned_failure(&mut e).message, "network");
+}
+
+#[test]
+fn utf8_and_missing_list_fail_without_retry_or_prefix_publication() {
+    for error in [
+        "invalid UTF-8",
+        "response did not contain the expected list: {}",
+    ] {
+        let mut e = engine();
+        query(&mut e, fills());
+        let r = retry_request(&mut e);
+        e.handle(
+            1700000000000.0,
+            Event::HttpStart {
+                request: r.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        let prefix = format!(r#"{{"code":0,"data":[{ROW},"#);
+        e.handle(
+            1700000000000.0,
+            Event::HttpChunk {
+                request: r.id,
+                data: prefix.as_bytes(),
+            },
+        );
+        assert!(e.drain_actions().next().is_none());
+        e.handle(
+            1700000000000.0,
+            Event::HttpFailed {
+                request: r.id,
+                error,
+            },
+        );
+        assert_eq!(owned_failure(&mut e).message, error);
+    }
+}
+
+#[test]
+fn concurrent_single_page_owners_complete_independently_and_empty_is_valid() {
+    let mut e = engine();
+    query(&mut e, fills());
+    let first = retry_request(&mut e);
+    e.handle(
+        1700000000000.0,
+        Event::Command(Command::Query {
+            command: 100,
+            query: fills(),
+        }),
+    );
+    let second = retry_request(&mut e);
+    response(&mut e, second, r#"{"code":200,"data":[]}"#);
+    assert_eq!(owned_success(&mut e, 100), serde_json::json!([]));
+    let other = ROW.replace("E-BTC-USDT", "E-ETH-USDT");
+    let duplicate = ROW.replace("60000", "61000").replace("180", "183");
+    response(
+        &mut e,
+        first,
+        &format!(r#"{{"code":0,"data":[{other},{ROW},{duplicate}]}}"#),
+    );
+    let rows = owned_success(&mut e, 99);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["price"], 60000.0);
 }

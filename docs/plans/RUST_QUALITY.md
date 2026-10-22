@@ -408,3 +408,14 @@ field presence, overflow, REST non-seeding, late identity and bounded eviction.
 Whole-growth inference is Binary-only and best-effort, with supplied evidence
 validated before effects. Shared row-reporting policy/fan-out remains separate;
 this does not claim new live captures or universal financial contract coverage.
+
+## Bitrue shared single-page owner adoption
+
+Bitrue fills reuse engine HistoryRows/Completion without a fake cursor walk or a
+new engine API. Four original-source assertion-RED groups pin the shared typed
+Internal fallback on terminal native/malformed/exhausted-transport failures and
+strict endpoint coverage refusal. Compatibility controls pin per-attempt row
+rollback, same-ID economics after retries, independent signature/GET budgets,
+strict timestamp increments, 1000/1001 admission, native duplicate/filter order,
+missing-array versus empty success, concurrent owners and Store isolation.
+The adapter retains endpoint facts, not another completion or pager policy.

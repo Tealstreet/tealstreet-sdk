@@ -1864,3 +1864,13 @@ not replace quote. A blind gap cannot infer a whole historical quote; the native
 arbitrary-last quote-delta quotient and its zero fallback remain deliberately
 unchanged. `Report::Last` remains strict. Native/root/helper controls are evidence
 for this repair, not live capture, new caller deployment or reporting closure.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
