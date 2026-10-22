@@ -178,3 +178,30 @@ test('account authentication actions use the closed host wire contract', () => {
     }
   }
 });
+
+// TxFlow reports public-only trading as Unsupported rather than AuthInvalid.
+// Exercise its real handler precondition with a private-capable fixture instead
+// of treating all Unsupported errors as harmless or exempting that venue.
+test('private-command construction fixtures satisfy authenticated testnet preconditions', () => {
+  const options = constructionProfiles('txflow')[0];
+  assert.equal(options.testnet, true);
+  assert.equal(options.publicDataOnly, false, 'private command ingress cannot use a public-only TxFlow fixture');
+  assert.ok(/^0x01[0-9a-f]{62}$/.test(options.secret), 'ephemeral nonzero scalar is within the valid range');
+  assert.ok(/^0x[0-9a-f]{40}$/.test(options.applicationId), 'synthetic account address is valid');
+  assert.ok(options.secret !== constructionProfiles('txflow')[0].secret, 'no fixed signing key is stored in the fixture');
+  const proofs = checkAdvertisedCommands(() => ({
+    capabilities: () => JSON.stringify(record()),
+    command: (json) => JSON.stringify([options.publicDataOnly
+      ? { op: 'done', command: JSON.parse(json).command, error: 'requires authenticated testnet', detail: { kind: 'unsupported' } }
+      : { op: 'done', command: JSON.parse(json).command, result: '[]' }]),
+    free() {},
+  }), 'private command fixture');
+  assert.equal(proofs[0].evidence, 'terminal');
+  assert.deepEqual(constructionProfiles('mexc'), [{ publicDataOnly: true, testnet: true }]);
+  assert.throws(() => checkAdvertisedCommands(() => ({
+    capabilities: () => JSON.stringify(record()),
+    command: (json) => JSON.stringify([{ op: 'done', command: JSON.parse(json).command,
+      error: 'actual unsupported handler', detail: { kind: 'unsupported' } }]),
+    free() {},
+  }), 'authenticated unsupported handler'), /authenticated unsupported handler/);
+});

@@ -1,6 +1,7 @@
 // One capability-to-command contract for combined and isolated shipped artifacts.
 // Requests returned by raw WASM are inspected, never sent to a network.
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 
 const symbol = '__capability_probe__';
 const enums = {
@@ -168,6 +169,15 @@ export function checkAdvertisedCommands(create, label) {
 // Construction data only; this does not say which capabilities any venue has.
 export function constructionProfiles(venue) {
   const base = { publicDataOnly: true, testnet: true };
+  // TxFlow classifies public-only trading as Unsupported. Reach private
+  // command ingress with a valid testnet setup, never a refusal exemption.
+  // A 0x01-prefixed scalar is nonzero and below the secp256k1 order. This key
+  // exists only in this short-lived test process; it is never stored or logged.
+  if (venue === 'txflow') Object.assign(base, {
+    publicDataOnly: false,
+    secret: `0x01${randomBytes(31).toString('hex')}`,
+    applicationId: `0x${randomBytes(20).toString('hex')}`,
+  });
   if (venue === 'breakoutprop') Object.assign(base, { key: 'user', secret: 'password' });
   if (venue === 'hyrotrader') base.endpoints = {
     rest: 'https://hyro.test', publicWs: 'wss://hyro.test/public', privateWs: 'wss://hyro.test/private',

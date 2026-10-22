@@ -146,3 +146,23 @@ reproduces this; the shared verifier now applies the same closed credential,
 scope, outcome and field contract as EngineHost. The corrected control covers
 malformed values plus every valid combination. Production host behavior is
 unchanged.
+
+
+Fresh shipped-artifact CI caught a fixture precondition: TxFlow classifies
+public-only trading as Unsupported before its existing cancel-symbol handler
+can run. Keep the shared unsupported verifier strict. Its conformance fixture
+now supplies an authenticated testnet setup with a valid scalar/account address
+generated only in the short-lived test process, never persisted or logged. An
+original-red/corrected-green fixture control pins these prerequisites. All other
+venue setup profiles stay unchanged. An empty-order terminal is still ingress
+evidence, not positive signed cancellation/request/reply proof. The failed run
+39791929530 is retained as diagnostic evidence and cannot supply final proof;
+corrected-head CI must rebuild all artifacts and repeat the MEXC mutant.
+
+
+A focused sans-I/O check loaded the authenticated TxFlow CI package from the
+failed run (ZIP digest, file hashes, checkout tree/parents and run/head verified).
+The old public-only fixture reproduces the Unsupported failure; the corrected
+ephemeral private fixture passes all five advertised probes. Empty-order cancel
+completes without HTTP/WS/sign actions. This is one existing compiled package
+check, not a local build, replay matrix or substitute for corrected-head CI.
