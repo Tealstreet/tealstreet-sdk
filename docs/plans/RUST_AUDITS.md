@@ -1252,12 +1252,15 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   The owned-history core now binds BloFin closed-position completion and cursor
   paging in `engine::history`; its venue no longer emits this marker directly.
   Bybit and OKX closed-position reads now share its staged/accepted cursor owner,
-  including per-window reset and seeded bounds. Their general history reads and
-  other query-marker sites still require fan-out and an enforcement gate; the
-  earlier ownership repairs are retained, not a claim of a universal choke point.
-  Six background account-coverage markers
-  have no command and need a separate account-scoped protocol decision; never
-  attach a fabricated request ID or broadcast unowned semantic markers.
+  including per-window reset and seeded bounds. Bybit general fills/orders/income/
+  public trades now share accepted-only contextual finalization and strict policy
+  rejection: first failures reject typed, later actual-page failures recover only
+  accepted rows with an owned marker; missing result/list never proves empty
+  complete coverage. OKX general history and other query-marker sites still need
+  fan-out and enforcement; these repairs do not claim a universal choke point.
+  Six background account-coverage markers have no command: the follow-on must
+  route them through one engine-owned account/background notice, never attach a
+  fabricated request ID or broadcast a command-owned marker.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.

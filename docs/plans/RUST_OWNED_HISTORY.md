@@ -264,3 +264,109 @@ incoming source and plan changes are retained. The caller refresh also records
 #1709's retired hostClock/bit14 and shared clock ingress, superseding historical
 venue opt-ins. Both integration reviews are clean; all 1,225 focused native tests,
 strict touched-crate Clippy, formatting, bans and touched links pass again.
+
+## Next fan-out: Bybit general histories
+
+Fresh `feat/rust-owned-history-bybit` starts from actual #1712 `0e15f31a874`.
+Keep implementation outside engine dispatch/request/signing, coverage, clock,
+account reducers and host adapters. Integrate actual queued dependency changes
+before final CI; #1715 and install-retry #1716 still precede later merges.
+
+Extend engine `HistoryRows`/`CursorHistory` with consuming `finish_with`, whose
+single-use finalizer receives only accepted `Vec<T>` and can capture native query
+sorting/dedupe/limit metadata. Existing `finish` delegates through that same path.
+Lifecycle poison and premature completion reject before invoking the finalizer;
+failed-page staging is discarded; first/no-accepted-row failures reject typed;
+actual later-page failure retains accepted rows plus one command-owned marker.
+Encoding failure still emits neither marker nor success. Add a shared consuming
+strict-rejection path for pagination-policy refusals, distinct from recoverable
+actual page failure. Never pass a policy refusal into the recovery branch.
+
+Migrate only `venues/bybit/src/history.rs` in this slice: one owner from initial
+admission/no-I/O paths through category/window restarts and final completion.
+Use a typed row enum and engine-owned accepted/staged storage; mismatched row
+variants reject, never silently filter away records. Preserve mapped-row counts
+before final dedupe, per-category limit accounting, global truncation, page/window
+budgets, native arguments and unsigned public-trade behavior. Preserve income's
+compound identity including source/hedge legs and its empty-list termination.
+Make missing/malformed result/list fail rather than become empty complete output;
+return serialization failures instead of `unwrap_or_default()`. Bounded cap and
+repeated-cursor policy errors stay strict; unbounded order cap retains rows with
+owned incompleteness across subsequent windows. Any intentional early cycle
+termination difference needs an explicit caller note and regression.
+
+Engine tests cover context-capturing finalization, staged-row exclusion, strict
+policy rejection after accepted rows, encoding errors and poisoned lifecycle not
+invoking the finalizer. Bybit account/product/variant regressions cover first and
+later native/HTTP/transport/malformed failures, Error-only marker-before-result,
+empty accepted pages, window/category recovery, duplicate limit accounting,
+hedge-income identity and strict cap/cursor policy. Prove original RED/core GREEN
+for changed behaviors; preserve existing assertions. Update AUDITS/QUALITY and
+caller scope without claiming other histories, background coverage or B11 closed.
+
+Use independent plan/correctness/adversarial review and state the architecture
+answer: shared engine completion/paging extension, not duplicated venue policy.
+Focused engine/Bybit plus Binance native tests, strict touched-crate Clippy,
+format/bans/links locally; full CI owns family/replay/build proof. Then separate
+fresh guard, separate exact-head merge and actual parent/tree verification.
+Paradex lookup/fallback coverage is a later slice: partial unrelated rows must
+never manufacture a definitive lookup miss.
+
+
+Phase-3 implementation uses a typed individual-row enum; page-local decoding
+requires result/list before staging. The adapter's contextual finalizer rebuilds
+the exact result kind, rejects mismatched variants, then sorts/dedupes/truncates
+accepted rows. No direct completion or history marker emitter remains in this
+adapter. Private `Listed.ret_code` is renamed `_ret_code` with identical explicit
+serde naming/parser because its last read-and-discard site migrated; account
+execution deserialization is unchanged. Transport errors are typed Network;
+unclassified native/HTTP/parse failures use the core Internal default and keep
+their existing message, without inventing native codes from HTTP fallbacks.
+
+Independent correctness/adversarial reviews are clean and both answer the
+architecture gate: shared engine extension plus protocol adapter, not duplicated
+venue completion policy. Existing successful request sequences/variants pass.
+The new matrix covers first/later native, HTTP, transport and malformed-page
+failures, accepted-empty/filtered pages, strict caps/cycles, duplicate limit
+accounting, recovered hedge income, cross-window cause retention and category
+recovery with sorted global limits. Original adapter source fails five new
+account regressions at their intended assertions (typed first failure, retained
+later failure, hedge recovery, early cycle refusal and cross-window recovery);
+corrected code passes all nine new account/product tests. Final focused gates,
+actual signer dependency integration, final independent review and CI remain.
+
+
+Actual signer #1714 `ad0e6fa1e42` is real-integrated at `dae6e76b666` with no
+conflicts. All six history source/test changes and four own docs are preserved;
+incoming signer construction/dispatch, tests and plans remain unchanged. This
+phase's caller catch-up also pins that actual signer API and the separately
+required NX trusted bootstrap migration; it claims neither remote signing nor
+NX runtime adoption. Final native checks and integration reviews run from this
+shared-engine dependency before publishing the PR.
+
+
+Final integration audit is clean: all 83 incoming signer paths are byte-identical
+to the actual merge, and all six reviewed history source/test files were preserved
+through the porcelain merge. Strict touched-crate Clippy, fmt, banned-pattern
+checks and 89 relative doc links pass. Two additional original-source controls
+prove missing required list data otherwise becomes empty success and a later
+category failure otherwise loses prior rows; both are corrected. Together with
+the five initial failing regressions this gives seven original-RED/core-GREEN
+controls; duplicate-count and empty-page checks preserve existing policy. Root
+typecheck/lint pass; root tests and final-head CI complete before merging.
+
+
+A final narrow contract review caught introduced metadata conflation before
+merge: Bybit's existing venue_error helper returns either native code or HTTP
+status, so blindly labeling that number venueCode would fabricate native codes
+for malformed HTTP-200 and body-less 503 responses. Removed the new metadata
+assignment instead of adding a venue-local classifier; the first-page matrix
+now asserts no fabricated venueCode. Typed Internal/Network behavior and the
+existing message remain. Fresh focused checks and final-head CI are required.
+
+
+Scheduler #1717 actual `faf799268857` landed before the history guard and is now
+real-integrated without conflicts. All five incoming paths and six reviewed
+history source/test files are preserved byte-for-byte; no scheduler/history
+source interaction is introduced by this merge. Fresh focused checks and CI run
+from this shared-engine dependency; earlier `e68e7c0d4b5` CI is not merge proof.
