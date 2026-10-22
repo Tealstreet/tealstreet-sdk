@@ -14,8 +14,8 @@ import {
   signatureRejectedResponse,
 } from '../../utils/signatureRejection';
 import { BaseExchange } from '../base';
-import { signBinanceRequest } from './binance.signing';
-import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binance.types';
+import { createBinanceRequestInterceptor } from './binance.signing';
+import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './binance.types';
 
 export const createPublicAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
@@ -87,25 +87,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       signatureRejectedResponse(isBinanceStyleSignatureRejection)(error),
   });
 
-  xhr.interceptors.request.use((config) => {
-    // on livenet, don't sign listen key requests (they don't need it)
-    if (config.url === ENDPOINTS.LISTEN_KEY && !options.testnet) {
-      return markSkipRemoteSigning(config);
-    }
-
-    const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
-    if (isPublicEndPoint) {
-      return markSkipRemoteSigning({
-        ...config,
-        headers: AxiosHeaders.from({
-          'Content-Type': 'application/json, charset=utf-8',
-        }),
-        timeout: 20_000,
-      });
-    }
-
-    return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);
-  });
+  xhr.interceptors.request.use(createBinanceRequestInterceptor(options, exchange.name));
 
   if (options.tealstreetTunnel) {
     installTransportAdapter(xhr, options, exchange.name, 'bigInt');
