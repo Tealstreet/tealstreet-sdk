@@ -4,6 +4,14 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "okx": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxeu": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxdemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "okxeudemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitget": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitgetinverse": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "bitgetusdc": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
+    "mexc": {"signerSetup": {"primary": {"trimCredential": true}, "secondary": {"trimCredential": false}}},
     "coinbase": {"canSign": [["key"]], "bridge": {"primaryCredentialsOnly": true}},
     "coinbasespot": {"canSign": [["key"]], "bridge": {"spot": true, "primaryCredentialsOnly": true}},
     "txflow": {"canSign": [["secret"], ["applicationId"]], "privateEligible": []},
