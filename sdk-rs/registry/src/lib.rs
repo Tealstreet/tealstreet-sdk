@@ -453,7 +453,7 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
 }
 
 /// Trusted native/legacy setup. Consume fields once; never pass them to a venue.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 pub fn prepare_local_signer(
     options: &mut EngineOptions,
 ) -> Result<
@@ -488,7 +488,7 @@ pub fn prepare_local_signer(
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 pub fn local_signer_from_json(
     input: String,
 ) -> Result<
@@ -512,7 +512,7 @@ pub fn build<T: Visit>(
 ) -> Result<T::Output, VenueError> {
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
-    #[cfg(feature = "binance")]
+    #[cfg(feature = "dispatch-signing")]
     let (options, signer) = {
         let mut options = options;
         let signer = if construction::bridge(venue, &options).dispatch_signing
@@ -526,7 +526,7 @@ pub fn build<T: Visit>(
         };
         (options, signer)
     };
-    #[cfg(not(feature = "binance"))]
+    #[cfg(not(feature = "dispatch-signing"))]
     let signer = None;
     build_with_signer(venue, options, entropy, signer, visitor)
 }
@@ -1444,7 +1444,7 @@ pub struct EngineOptions {
     #[serde(default)]
     pub recv_window: Option<f64>,
     #[cfg(any(
-        feature = "binance",
+        feature = "dispatch-signing",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "okx",
@@ -1539,7 +1539,7 @@ impl EngineOptions {
         self.key.zeroize();
         self.secret.zeroize();
         #[cfg(any(
-            feature = "binance",
+            feature = "dispatch-signing",
             feature = "kucoin",
             feature = "kucoinspot",
             feature = "okx",
