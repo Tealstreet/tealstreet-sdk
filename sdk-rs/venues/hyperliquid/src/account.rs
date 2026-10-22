@@ -197,11 +197,7 @@ impl Hyperliquid {
         }
         let body = serde_json::to_string(&Read {
             r#type: kind,
-            user: if kind == "userFees" {
-                self.options.key.as_deref().unwrap_or_default()
-            } else {
-                self.user().unwrap_or_default()
-            },
+            user: self.user().unwrap_or_default(),
             dex,
         })
         .unwrap();
@@ -364,8 +360,10 @@ impl Hyperliquid {
             }
             return;
         }
-        self.account_read(cx, "userFees", None, Request::Fees, false);
-        if self.options.public_data_only {
+        if self.options.public_data_only || (self.user().is_none() && self.options.key.is_none()) {
+            // Anonymous public discovery retains the venue's fee fallback. Private
+            // agents must resolve their trading account before asking for its tier.
+            self.account_read(cx, "userFees", None, Request::Fees, false);
             return;
         }
         if self.user().is_none() {
@@ -391,6 +389,7 @@ impl Hyperliquid {
         self.private_bootstrap(cx);
     }
     fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_read(cx, "userFees", None, Request::Fees, false);
         self.account_read(cx, "userAbstraction", None, Request::Mode, false);
         self.account.mode_timer = Some(cx.set_timer(6000.0));
         self.check_builder(cx);

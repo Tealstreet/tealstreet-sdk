@@ -753,6 +753,14 @@ Remaining resilience and completeness findings are independent of request parity
 
 ### Hyperliquid
 
+- ~~User fee tiers use the API signer address instead of the trading account.~~
+  Native fee reads use the vault or applicationId account, after successful
+  identity discovery when needed. Agent, master and vault addresses are tested
+  separately; failed/timed-out discovery cannot emit a premature fee query.
+  [Native regression scope and official contract](RUST_HYPERLIQUID_FEE_SUBJECT.md).
+  The analogous TS production defect remains an owner-managed follow-up; TS is
+  unchanged by this native repair.
+
 - ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
   actual query command before completion. A native 2,000-row regression checks
   retained financial rows, Warn ownership/order and Error-only delivery.

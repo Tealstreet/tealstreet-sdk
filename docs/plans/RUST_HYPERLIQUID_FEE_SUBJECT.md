@@ -35,3 +35,18 @@ account, so changing only the body would leave discovery using a blank subject.
 Caller impact: corrected native account/vault fee tier, unchanged options and
 transport/signing contracts. TS has the analogous defect and is explicitly
 outside this repair; the overseer will raise it with Sam.
+
+## Regression evidence
+
+All six focused regressions fail against the prior native implementation and
+pass after the subject/order repair. They cover explicit account/vault identity,
+agent/user/vault role discovery, failed/malformed/timed-out roles and duplicate
+late replies, mapped maker/taker rates and anonymous 422 fallback. Configured
+fees retain their position before mode/account reads. No fixture, declared
+failure, signer bytes, fee arithmetic or TS code is changed.
+
+Local verification: all 437 Hyperliquid + Binance native tests pass, including
+the six regressions; touched-package formatting and strict all-target Clippy
+pass. Independent plan, implementation/adversarial and final-delta reviews are
+clean. The harness oracle predecessor #1698 is integrated before final CI;
+its fee-subject contract uses the same account/vault precedence.
