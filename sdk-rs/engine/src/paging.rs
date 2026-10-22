@@ -253,6 +253,8 @@ pub struct CursorWalk {
     pages: u32,
     stall_on_empty_page: bool,
     stall_on_no_new_rows: bool,
+    end_on_no_new_rows: bool,
+    end_on_unchanged_cursor: bool,
     cursor: Option<String>,
     cursors: HashSet<String>,
     seen: HashSet<String>,
@@ -265,6 +267,8 @@ impl CursorWalk {
             pages: 0,
             stall_on_empty_page: false,
             stall_on_no_new_rows: false,
+            end_on_no_new_rows: false,
+            end_on_unchanged_cursor: false,
             cursor: None,
             cursors: HashSet::new(),
             seen: HashSet::new(),
@@ -280,6 +284,19 @@ impl CursorWalk {
     /// Stall when a nonempty page holds only rows seen before.
     pub fn stall_on_no_new_rows(mut self) -> Self {
         self.stall_on_no_new_rows = true;
+        self
+    }
+
+    /// Some endpoints prove exhaustion by repeating the last page's identities.
+    /// Keep this distinct from a no-progress failure on other endpoints.
+    pub fn end_on_no_new_rows(mut self) -> Self {
+        self.end_on_no_new_rows = true;
+        self
+    }
+
+    /// Some endpoints use the same continuation to signal exhaustion.
+    pub fn end_on_unchanged_cursor(mut self) -> Self {
+        self.end_on_unchanged_cursor = true;
         self
     }
 
@@ -312,7 +329,10 @@ impl CursorWalk {
         let Some(next) = page.next.filter(|next| !next.is_empty()) else {
             return CursorStep::Done;
         };
-        if !page.want_more {
+        if !page.want_more
+            || (self.end_on_no_new_rows && page.fresh == 0)
+            || (self.end_on_unchanged_cursor && self.cursor.as_ref() == Some(&next))
+        {
             return CursorStep::Done;
         }
         if !self.cursors.insert(next.clone()) {
