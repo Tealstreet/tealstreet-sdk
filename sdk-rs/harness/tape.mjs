@@ -336,10 +336,16 @@ export class Tape {
         (venue.isWrite?.(record.method, record.url) ?? isWriteRequest(record.method, record.url)),
     );
     this.expectedWrites = writeRecords.map((record) => this.keyFor(record.method, record.url, record.requestBody));
-    // A read staged after command N shows its outcome, so it waits until one of
-    // that command's staged writes is acknowledged or the command settles.
+    // A read staged after command N shows its outcome. Orderly's final
+    // snapshots wait for every staged write; other venues retain first-ACK
+    // release. Command settlement remains a separate scheduling fallback.
     // Unstaged writes cannot be attributed to a command and gate nothing.
     this.unacknowledgedStages = new Set(writeRecords.map((record) => record.afterCommand ?? 0).filter((stage) => stage > 0));
+    this.pendingStageWrites = venue.waitForAllStageWrites ? new Map() : undefined;
+    if (this.pendingStageWrites) for (const record of writeRecords) {
+      const stage = record.afterCommand ?? 0;
+      if (stage > 0) this.pendingStageWrites.set(stage, (this.pendingStageWrites.get(stage) ?? 0) + 1);
+    }
     this.settledCommands = 0;
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
     this.requestAudit = this.auditEnabled ? this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate }) : undefined;
@@ -568,16 +574,26 @@ export class Tape {
       throw error;
     }
     if (this.responses.unserved !== unservedBefore) this.pollingFence?.reject(new Error('Polling replay sent an unmatched HTTP request'));
-    if (this.responses.isWrite(method, url) && response.status !== 599) {
+    const matchedWrite = this.responses.isWrite(method, url) && response.status !== 599;
+    const ackStage = matchedWrite ? this.responses.served.afterCommand : undefined;
+    if (matchedWrite) {
       this.expectedWrites.shift();
-      this.unacknowledgedStages.delete(this.responses.served.afterCommand);
-      this.deliverBeforeAck(this.responses.served.afterCommand);
+      if (!this.pendingStageWrites) this.unacknowledgedStages.delete(ackStage);
+      this.deliverBeforeAck(ackStage);
     }
     try {
       this.requestAudit?.response({ method, url, body, headers, response });
     } catch (error) {
       this.invalidSignatures++;
       throw error;
+    }
+    if (matchedWrite && this.pendingStageWrites) {
+      const pending = this.pendingStageWrites.get(ackStage);
+      if (pending > 1) this.pendingStageWrites.set(ackStage, pending - 1);
+      else {
+        this.pendingStageWrites.delete(ackStage);
+        this.unacknowledgedStages.delete(ackStage);
+      }
     }
     return response;
   }

@@ -267,6 +267,7 @@ const orderly = (alias) => {
   return {
     family: 'orderly',
     virtualPrivateClock: true,
+    waitForAllStageWrites: true,
     orderlyProtocol: true,
     subscriptionGenerations: true,
     publicTickers: (records) => {

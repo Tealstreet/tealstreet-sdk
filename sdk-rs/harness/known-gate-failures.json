@@ -17695,7 +17695,7 @@
     },
     {
       "venue": "kodiakfi",
-      "tapeSha256": "5e9854daf8ee4fddd032a666e9714333c9255975de80b3cc7d10fd2e509738a3",
+      "tapeSha256": "92c1a45a25631e572067144f2ca82b7c07681420c12827e893b8614f1379fab0",
       "tape": "sdk-rs/harness/tapes/kodiakfi-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -18654,7 +18654,7 @@
     },
     {
       "venue": "kodiakfi",
-      "tapeSha256": "ea06c5c3af055adc8ba6ff099107e6bd9b7dadc79356ecde6a38cf7ae141cd7f",
+      "tapeSha256": "57a62b3e64899f8728fbcb5d03f90b96330d2c52e46c167ebbd3be149c98c004",
       "tape": "sdk-rs/harness/tapes/kodiakfi-private.jsonl",
       "diagnostics": [
         {
@@ -37274,7 +37274,7 @@
     },
     {
       "venue": "mode",
-      "tapeSha256": "aa448a77a7c389c763da9650ef3975afd2d216c03adfadf02da15eebb73ab4d0",
+      "tapeSha256": "06fa8bf66160aff6384db243e8e0c941276a57f2baecc31573dc2ae7a8d0a21c",
       "tape": "sdk-rs/harness/tapes/mode-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -38233,7 +38233,7 @@
     },
     {
       "venue": "mode",
-      "tapeSha256": "b5b32fedb8b488daf757c2e4d03bb815fe8ddfe0931ffb6913428e7d7c7a3824",
+      "tapeSha256": "23c67abafcc83f64a46170777ea80d452bfc7480008039a1f386e31769b4a08a",
       "tape": "sdk-rs/harness/tapes/mode-private.jsonl",
       "diagnostics": [
         {
@@ -40532,7 +40532,7 @@
     },
     {
       "venue": "orderly",
-      "tapeSha256": "304f45018c6754cdf51fcc61b5b45c68344f91337eb809e7f0d21e76f80b73cf",
+      "tapeSha256": "612f018f0dbc32d5b546021114126ef6e382e3b443a98cd42c2ddab955592295",
       "tape": "sdk-rs/harness/tapes/orderly-private.jsonl",
       "diagnostics": [
         {
@@ -41491,7 +41491,7 @@
     },
     {
       "venue": "orderly",
-      "tapeSha256": "3f1cba9a44276f72767bd070cfef94c4da2c5600f45d00aed3d2ec5528f762da",
+      "tapeSha256": "e2e96067f9b2cf1433409bb2faaac735c3168ab97e47ecd574fcf807ebbb562f",
       "tape": "sdk-rs/harness/tapes/orderly-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -43462,7 +43462,7 @@
     },
     {
       "venue": "salsadex",
-      "tapeSha256": "825088146aafbc97564c0265a347e37b751076e26cf02fecc93957d67a64b310",
+      "tapeSha256": "7a2e7c99b5dffcacfea22ac60d58b0905538f07e283e25391c18b4d7a19c7b4f",
       "tape": "sdk-rs/harness/tapes/salsadex-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -44421,7 +44421,7 @@
     },
     {
       "venue": "salsadex",
-      "tapeSha256": "ba075afaff5d773083faa9b35ac4775edd3d695e4adb1a186c703b696c0021a1",
+      "tapeSha256": "3130855d8951cd348cb173dc1c6f2f36fc6698a65dc92bddd2044be0a16ee4ef",
       "tape": "sdk-rs/harness/tapes/salsadex-private.jsonl",
       "diagnostics": [
         {
@@ -45380,7 +45380,7 @@
     },
     {
       "venue": "tealstreet-dex",
-      "tapeSha256": "526c0b117ef5d4b72dee6ca45459b2e1fa9b2c1a65f80fe8927f0a896defa2fb",
+      "tapeSha256": "251fd5a7eb3dc7d98880c6c45115784d7e89d74565105dbe93eeb8d744a76deb",
       "tape": "sdk-rs/harness/tapes/tealstreet-dex-private.jsonl",
       "diagnostics": [
         {
@@ -46339,7 +46339,7 @@
     },
     {
       "venue": "tealstreet-dex",
-      "tapeSha256": "54797276ee70e1093e7efc8694b4674d5ec00b45b8dff9d6d2ef7ebd369d1d7b",
+      "tapeSha256": "fed38051e4573b9dd9373752fc1ac0da553cb793036cdf556bd165ab727d7871",
       "tape": "sdk-rs/harness/tapes/tealstreet-dex-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -47487,7 +47487,7 @@
     },
     {
       "venue": "what",
-      "tapeSha256": "2ac7469d552d86750d46322fa869e4840aefff03d931ba1b5b9571031647d8a2",
+      "tapeSha256": "29d2d6257e4b7918de8ef9de86d448ac0ce34568322d5f577988153134aa73d7",
       "tape": "sdk-rs/harness/tapes/what-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -48446,7 +48446,7 @@
     },
     {
       "venue": "what",
-      "tapeSha256": "eb272f24e6f6fa4584522379e3b78425f8473c01346a6324b7a399fda60229da",
+      "tapeSha256": "f133c0782b156d2eea6ed87175d45a2dfb4c0958cd3b82103cf72c775d583c19",
       "tape": "sdk-rs/harness/tapes/what-private.jsonl",
       "diagnostics": [
         {
@@ -50039,7 +50039,7 @@
     },
     {
       "venue": "woofi",
-      "tapeSha256": "092de9811f5ee9466c2b178fa6132ab3a8ba4c9013f7d62272ad5e854efc179b",
+      "tapeSha256": "fb5b8e8d81e7b27aad7c27d78c05f63b8559b64bd88e5ac41648ea358496522f",
       "tape": "sdk-rs/harness/tapes/woofi-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -50998,7 +50998,7 @@
     },
     {
       "venue": "woofi",
-      "tapeSha256": "cb4afed27567e6d61e366b2a0ae3c9b9c913828b1ffdc7b2d243c172dc063b27",
+      "tapeSha256": "0f848340e44bb640bf48f07b7406c9ca1da0e82d3e3b7876d8d0cea4921f6b5a",
       "tape": "sdk-rs/harness/tapes/woofi-private.jsonl",
       "diagnostics": [
         {

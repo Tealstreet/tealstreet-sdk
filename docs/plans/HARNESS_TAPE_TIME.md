@@ -451,9 +451,19 @@ tealstreet-dex, kodiakfi, woofi, mode, salsadex and what on mainnet/testnet.
 Preserve existing epoch1765805280000 and all fourteen fixture byte streams,
 broker/network identities, independent Ed25519/freshness checks, request/socket
 correlation, heartbeat roles, the 1000ms polling floor and staged reads.
-Inspect command/ACK visibility before declaring any differences: read snapshots
-have command stages, while current mutation replies are unstaged. Investigate
-any future-state diagnostics rather than assuming they are valid allowances.
+The original #1692 clock proof retained unstaged mutation replies, so current
+command snapshots could become visible before an ACK. The separate
+[ACK-fence repair](HARNESS_ORDERLY_ACK_FENCES.md) stages all twelve mutations and
+opts only these seven aliases into waiting for every staged write. Commands 3–6
+have two ACKs each; their final snapshots stay fenced between those ACKs despite
+elapsed-time pumping. Adversarial actual-Tape controls cover all fourteen
+broker/network identities, original-generator and first-ACK negative controls,
+rejected/premature/duplicate requests and independent before-ACK delivery.
+Settlement remains a scheduling fallback, not proof of successful writes.
+Stripping only the new mutation stages reproduces the fourteen original tape
+SHAs, preserving wire payloads, times, ordinals and existing GET stages.
+Fresh five-pair artifacts and full current-head CI remain the merge gate; this
+repair alone does not establish private account parity or live provenance.
 
 Use authentic CI wasm with a hard current-tree fingerprint check for five
 private pairs per tape, comparing all140 complete outputs except top-level
@@ -503,4 +513,4 @@ Spot's existing verifier and both synthetic fixture byte streams are preserved.
 This closes the absent request-validator implementation gap for observed wires;
 full current-head CI and five-pair evidence are the merge gate. The six/eight
 account differences still fail strictly; this is not private parity or live
-certification. Orderly ACK fencing is the next separate phase.
+certification. Orderly ACK fencing is a separate follow-up described above.
