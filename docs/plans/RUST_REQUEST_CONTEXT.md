@@ -1318,3 +1318,41 @@ SDK helper3/typecheck/lint passed the extraction. Independent final source and
 preservation review CLEAN, architecture No. All ten lifecycle assertions/clocks/
 timeouts remain exact. Integrated engine/Binance/KuCoin native gates are running
 alongside fresh draft CI; no merge readiness or replay recovery is claimed.
+
+### Native recorded transport regression (2026-10-22, before correction)
+
+Exact corea0c528 native CI39824926892/job119985877284 passed native44unit
+and3entropy tests, then hung in tests/host.rs::the_native_loop_streams_startup_and_publishes_books
+from17:46:49 until30-minute job cancellation. Its Tape only implements legacy
+request, so managed Binance startup receives the intentional Unsupported default
+and the old fixture polls for a WS forever. The exact compiled test also times
+out after15 runtime seconds locally (compilation excluded); receipt
+/tmp/codex-1741-native-host-runtime-red.json. No rerun or production fallback.
+
+Plan before correction: add one test-only prepared-packet binder under native
+tests/support, retaining unsigned request identity/method/route/origin metadata
+and a one-use binding closure. It validates before handing the exact final packet
+to an existing executor, never performs I/O at preparation/bind, and prints no
+packet values. Tape explicitly opts into prepare_http, with Bound.dispatch calling
+its unchanged three-chunk response emitter synchronously after final claim.
+Bounded socket-start and host-join waits replace the unbounded fixture waits; all
+existing traffic, sleeps, book/frame assertions remain unchanged. Assert managed
+preparation/dispatch counters so a legacy bypass cannot pass.
+
+The same native integration inventory finds NoticeNetwork in routing.rs wraps
+Binance's legacy request only. Reuse that prepared-packet binder around the real
+NetworkTransport.prepare_http and its actual BoundHttp, applying its existing
+loopback URL/header mapping to BOTH unsigned preparation and final bind. Its
+existing explicit account_route fixture selects Primary versus Public intent;
+never infer intent from headers or modify production routing. Preserve every
+connection/body/token/HOW redaction assertion and real network executor. Other
+custom transports serve synthetic unmanaged venues; do not change them.
+
+Add focused binder controls for no dispatch during prepare/bind, exact packet
+bytes, one-use ownership and identity/method/origin refusal. Run the exact formerly
+hanging integration test under a runtime-only timeout, all native integration
+tests under a bounded outer process-group timeout, focused managedHTTP unit tests,
+strict native Clippy/fmt and independent correctness/adversarial review before
+any next push. Keep production Unsupported behavior and its existing negative
+control. Architecture gate: No; this is shared test-transport contract adoption,
+not a per-venue runtime workaround or a fallback to legacy dispatch.
