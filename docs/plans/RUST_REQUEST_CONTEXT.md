@@ -1451,6 +1451,38 @@ with those additional checks; no proof/readiness/merge claim until every gate
 passes on the same immutable source. Preservation and inventory receipts are
 /tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
 
+
+## Deterministic Workers deadline fixture (priority test-only follow-up)
+
+Start from actual#1765 a3a89719d4079c97d56297bb4738fdc13c659ceb. The Workers
+transport test expects exact20,000/5,000ms budgets but leaves Date.now live while
+prepareFetch samples preparation and binding separately. A real1ms tick correctly
+consumes budget, making the unclocked fixture flaky. Production timing is correct.
+
+Plan before source: force one1ms Date.now tick inside the existing test to obtain
+an assertion-RED [19,999,5,000] versus [20,000,5,000], then replace that temporary
+clock with a test-context-scoped frozen Date.now. Preserve the exact timeout,
+abort-through-body and routing-metadata assertions. No tolerance widening,
+production clock injection/change, harness profile or semantic timeout change.
+Run the filtered original-RED/GREEN and full Workers/related managed-host unit
+checks, independently review the fixture and frozen assertions, then a small PR
+with CI/background watch. Integrate actual#1775 before the separate final guard
+and merge under owner queue. Architecture gate: No; this only fixes a test clock
+for the existing shared managed transport boundary.
+
+Fixture evidence: a temporary test-scoped clock returning1700000000000 for its
+first read and1700000000001 thereafter reproduced the exact assertion failure:
+expected[20000,5000], actual[19999,5000]. Replacing that temporary clock with one
+scoped constant passes the unchanged test. The committed source change is only
+that constant Date.now mock; TestContext restores it after the test. Independent
+plan/correctness/adversarial review CLEAN, architecture No.
+
+The package Workers unit script and managed-HTTP unit suite pass. An attempted
+full Workers plus managed-HTTP run passed37/39; two earlier real-engine startup
+tests timed out before the changed test. Keep that local failure visible; fresh
+CI with its matching built WASM must verify the complete integration suite.
+No production timing, timeout tolerance, route or response-body assertion changed.
+
 ## Bounded private-path profiling after #1741
 
 Owner request (2026-10-23): after caller backfill #1777, profile the managed
