@@ -3128,6 +3128,8 @@ notice. Deployment is Sam's call; neither logging PR deploys anything.
 
 ## Owned history completion core: BloFin reference
 
+Merged #1710 at `1910baa65a3` (source and caller section audited at that pin).
+
 BloFin closed positions now finish through the shared engine history owner and
 cursor pager. The successful partial-result contract stays the same: an owned
 Warn `history.incomplete` precedes retained rows, including at Error-only log

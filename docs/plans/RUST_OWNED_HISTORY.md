@@ -1,7 +1,7 @@
 # Owned history completion and pagination
 
 Owner: codex-cxxyqr. Planned from landing `556906286997` (2026-10-22).
-Implementation pending; this plan does not claim migrations have landed.
+Reference merged in #1710 at `1910baa65a3`; fan-out remains active.
 
 ## Contract and sequence
 
@@ -136,3 +136,39 @@ row-core integration, 695 engine/BloFin/Binance tests pass, as do touched-crate
 strict all-target Clippy, fmt, bans and touched doc links. Independent correctness
 and adversarial delta reviews are clean after the strict invariant fix. Full CI
 must run on the revised final head before merge.
+
+## Fan-out phase 1: windowed / seeded closed-position reads
+
+Fresh `feat/rust-owned-history-windows` from actual `1910baa65a3`.
+Plan before source changes; source merges held for row phase 2 #1711 until release.
+
+- Engine `history.rs`: restart the cursor stage without replacing the completion
+  owner, accepted rows or first missing-coverage cause. Restart resets per-stage
+  cursor/budget history; premature restart is a strict lifecycle error. Preserve
+  cross-stage dedupe state (consumers which retain duplicate rows need not opt in).
+- Engine `paging.rs`: seed an initial request cursor, needed by OKX's explicit
+  upper close-time bound. Preserve decimal strings; do not coerce IDs through f64.
+- Bybit `closed.rs`: replace local page/cursor counters and raw rows with the
+  shared owner/pager and staged response rows. Keep seven-day windows, category
+  selection, URL encoding, per-window budget and raw duplicate rows. Require the
+  success response's result/list before page admission. Native response codecs
+  remain venue facts, not a separate completion or paging algorithm.
+- OKX `closed.rs`: preserve initial after=to, before=from, oldest uTime-1,
+  100 ms page delays, current missing/unchanged-cursor exhaustion and raw rows.
+  Move row acceptance, counters, completion and failure recovery into the core.
+- Both consumers: first-page/no-accepted-row errors reject; later failed responses
+  discard staged rows and return accepted rows with owned incompleteness. Non-
+  adjacent cursor cycles stop earlier with incomplete coverage. Serialization and
+  lifecycle errors stay strict. Do not modify account/row/store/fence/signing code.
+- Tests before migration pin existing request sequences; add original-red/core-
+  green first/later failure and malformed-success tests. Cross-window tests must
+  prove independent budgets/cursor reset, preserved early incomplete cause,
+  marker ordering at Error-only level, raw duplicate preservation, and later
+  failure recovery. Guard premature reset even after accepted rows.
+- Verify engine/Bybit/OKX/BloFin and Binance native tests; strict touched Clippy,
+  fmt, bans, docs links. Independent plan/correctness/adversarial review and full
+  CI before separate guard/merge. No local WASM release or replay sweeps.
+- Caller doc: pin #1710 and document this slice's later-failure recovery, required
+  incompleteness handling and unchanged method args. Do not close B11 or claim
+  other histories migrated. Follow subsequent fan-out with account/background
+  notice core, then standalone/combined capability conformance.
