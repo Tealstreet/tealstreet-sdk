@@ -60,6 +60,7 @@ pub struct Supervisor {
     idle_enabled: bool,
     next_ping: Option<f64>,
     watch: Option<TimerId>,
+    watch_at: Option<f64>,
     retry: Option<TimerId>,
     failures: u32,
 }
@@ -91,6 +92,7 @@ impl Supervisor {
             idle_enabled: true,
             next_ping: None,
             watch: None,
+            watch_at: None,
             retry: None,
             failures: 0,
         }
@@ -149,6 +151,14 @@ impl Supervisor {
         self.idle_enabled = enabled;
         if enabled {
             self.received = cx.now;
+        }
+        if enabled
+            && self
+                .watch_at
+                .zip(self.next_watch_at(cx.now))
+                .is_some_and(|(old, new)| old <= new)
+        {
+            return;
         }
         self.rearm(cx);
     }
@@ -224,6 +234,7 @@ impl Supervisor {
         if let Some(timer) = self.retry.take() {
             cx.clear_timer(timer);
         }
+        self.watch_at = None;
         self.phase = Phase::Stopped;
         self.next_ping = None;
     }
@@ -246,6 +257,7 @@ impl Supervisor {
             return Tick::Unhandled;
         }
         self.watch = None;
+        self.watch_at = None;
         if let Some(timeout) = self.expired(cx.now) {
             // Retire first; late activity cannot rescue an expired connection.
             self.phase = Phase::Stopped;
@@ -268,6 +280,14 @@ impl Supervisor {
     }
 
     fn arm<P>(&mut self, cx: &mut Cx<'_, P>) {
+        if let Some(at) = self.next_watch_at(cx.now) {
+            self.watch = Some(cx.set_timer(at - cx.now));
+            self.watch_at = Some(at);
+        } else {
+            self.watch_at = None;
+        }
+    }
+    fn next_watch_at(&self, now: f64) -> Option<f64> {
         let idle = self
             .idle_enabled
             .then_some(self.received + self.config.idle_timeout_ms);
@@ -281,15 +301,13 @@ impl Supervisor {
                 }
             }
             Phase::Ready => idle,
-            Phase::Stopped | Phase::Waiting => return,
+            Phase::Stopped | Phase::Waiting => return None,
         };
         let deadline = match (deadline, self.next_ping) {
             (Some(at), Some(ping)) => Some(at.min(ping)),
             (deadline, ping) => deadline.or(ping),
         };
-        if let Some(deadline) = deadline {
-            self.watch = Some(cx.set_timer((deadline - cx.now).clamp(0.0, 5_000.0)));
-        }
+        deadline.map(|deadline| now + (deadline - now).clamp(0.0, 5_000.0))
     }
 }
 

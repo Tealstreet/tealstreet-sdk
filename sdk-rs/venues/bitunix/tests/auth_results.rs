@@ -578,7 +578,8 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
         r#"{"code":0,"data":{"positionList":[]}}"#,
     );
     assert_eq!(auth(&recovered).last().unwrap().2, AuthOutcome::Accepted);
-    // Opening the private socket starts a fresh read, without resetting failures itself.
+    // A fresh private epoch starts a read without resetting failures itself.
+    // The original unopened connection has expired during these REST retries.
     let socket = initial
         .iter()
         .find_map(|a| match a {
@@ -586,11 +587,27 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
             _ => None,
         })
         .unwrap();
-    e.handle(now + 1.0, Event::WsOpened { socket });
+    e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (timer, at) = retry(&actions, now + 1.0);
+    let actions = fired(&mut e, timer, at);
+    let replacement = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
     let actions: Vec<_> = e.drain_actions().collect();
     let r = http(&actions, "get_pending_positions");
-    let failed = answer(&mut e, &r, now + 2.0, 200, "", r#"{"code":10004}"#);
-    retry(&failed, now + 2.0);
+    let failed = answer(&mut e, &r, at + 1.0, 200, "", r#"{"code":10004}"#);
+    retry(&failed, at + 1.0);
 }
 
 #[test]

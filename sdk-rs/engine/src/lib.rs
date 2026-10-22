@@ -30,6 +30,8 @@ pub mod signing_headers;
 pub mod signing_policy;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
+mod socket_driver;
+pub mod socket_lifecycle;
 pub mod startup;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]

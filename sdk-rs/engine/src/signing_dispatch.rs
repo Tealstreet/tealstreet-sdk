@@ -169,6 +169,20 @@ impl Dispatch {
             .chain(self.outbound.values())
             .any(|p| p.socket() == Some(socket))
     }
+    /// Read-only target for engine socket epoch/expiry admission. The pending
+    /// recipe and all HTTP lifecycle state remain owned by Dispatch.
+    pub fn outbound_socket(&self, attempt: RequestId) -> Option<(SocketId, bool)> {
+        let pending = self
+            .pending
+            .get(&attempt)
+            .or_else(|| self.outbound.get(&attempt))?;
+        pending.socket().map(|socket| {
+            (
+                socket,
+                matches!(&pending.outbound, Action::WsConnect { .. }),
+            )
+        })
+    }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
         self.stage(id, outbound, Box::new(Plain), TimerId(0), 0.)?;

@@ -1818,3 +1818,14 @@ prove how that unanchored last overlaps, an explicit remaining evidence limit.
 This fixes one financial defect with multiple native RED controls, not a claim
 of new live captures or complete all-family fill-helper adoption. Orderly and
 the shared row-reporting extension remain next.
+
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and Bitunix and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs remain a distinct
+post-RequestContext prerequisite; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.

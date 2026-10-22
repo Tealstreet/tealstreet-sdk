@@ -3806,3 +3806,25 @@ side, direct `matchSize` quantities and late distinct-execution behavior remain.
 The native20,000-order prefix retention is bounded; an authoritative last with
 no cumulative endpoint cannot establish its overlap with a later fallback.
 No caller deployment, TS removal or live evidence claim is bundled.
+
+## Draft Engine socket lifecycle: OKX and Bitunix
+
+The two reference families move authentication state, socket epochs, reconnect
+permission, subscription replay and retirement into the Engine lifecycle. Venue
+code supplies native login/subscription codecs and Store invalidation. The host
+continues using the existing socket actions and events. Frames and timer events
+for retired or expired sockets cannot restore authentication, replay interests,
+advance private health, or publish a parked signing result. Auth refusal remains
+distinct from reconnectable transport loss; OKX private/business permanent
+credential refusals revoke both retry authorities before callbacks.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Bitunix preserves pre-ACK reads, first-pong
+idle activation, and native 20-argument/250ms shard pacing. Consumer health sees
+one real host close and one reconnect, with no duplicate epoch effects.
+
+These are draft native reference changes. Physical host ID widening remains a
+separate prerequisite after RequestContext #1741; final actual CI/replay and
+caller/deployment validation are still required. Other venue families and NX
+socket migration remain open; existing signing and remote-signing wires remain.

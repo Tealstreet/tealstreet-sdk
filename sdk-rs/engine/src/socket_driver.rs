@@ -2,20 +2,12 @@
 //!
 //! Effects contain owned data only. Engine restores its registry before calling
 //! a venue codec/effect handler, then acknowledges required invalidation here.
-use crate::socket::{Supervisor, Tick, Timeout};
+use crate::socket::{Supervisor, Tick};
 use crate::socket_lifecycle::{
     Admission, AuthEvidence, AuthRecovery, AuthTransition, Control, Epoch, FeedId, FeedPolicy,
-    Ingress, Lifecycle, Retirement, SocketError, TrafficPolicy,
+    Ingress, Lifecycle, RetireReason, Retirement, SocketError, TrafficPolicy,
 };
 use crate::{Cx, SocketId, TimerId};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RetireReason {
-    Closed,
-    Timeout(Timeout),
-    Authentication,
-    Stopped,
-}
 
 #[derive(Clone, Debug)]
 pub(crate) enum Effect {
@@ -31,6 +23,7 @@ pub(crate) enum Effect {
     AuthFailure {
         epoch: Epoch,
         evidence: AuthEvidence,
+        terminal: bool,
     },
     Retired {
         retirement: Retirement,
@@ -51,6 +44,8 @@ struct Runtime {
     feed: FeedId,
     supervisor: Supervisor,
     login_retry: Option<TimerId>,
+    batch_timer: Option<TimerId>,
+    next_batch: Option<f64>,
 }
 
 #[derive(Default)]
@@ -60,6 +55,27 @@ pub(crate) struct Driver {
 }
 
 impl Driver {
+    pub(crate) fn frames_ready(&self, now: f64, barrier: impl Fn(SocketId) -> bool) -> bool {
+        self.runtimes.iter().any(|r| {
+            self.state.epoch(r.feed).is_some_and(|e| {
+                self.state.ready(e)
+                    && r.batch_timer.is_none()
+                    && self.state.has_batches(r.feed)
+                    && r.next_batch.is_none_or(|at| now >= at)
+                    && Self::valid_time(self.state.policy(r.feed).expect("registered feed"), now)
+                    && !barrier(e.socket())
+            })
+        })
+    }
+    pub(crate) fn one_shot_ready(&self, epoch: Epoch, now: f64, barrier: bool) -> bool {
+        self.state.ready(epoch)
+            && !self.state.has_batches(epoch.feed())
+            && !barrier
+            && self
+                .state
+                .policy(epoch.feed())
+                .is_ok_and(|policy| Self::valid_time(policy, now))
+    }
     /// Representability only: Supervisor remains the sole expiry/backoff
     /// authority. Every interval it can schedule must advance raw time, even
     /// its 5-second watchdog polling cap and minimum jittered retry.
@@ -103,6 +119,8 @@ impl Driver {
             feed,
             supervisor,
             login_retry: None,
+            batch_timer: None,
+            next_batch: None,
         });
         Ok(feed)
     }
@@ -124,6 +142,7 @@ impl Driver {
         let epoch = self.state.begin(feed, socket)?;
         let idle = self.state.policy(feed)?.traffic != TrafficPolicy::TextAfterFirstPong;
         let runtime = self.runtime_mut(feed);
+        runtime.next_batch = None;
         // The activation flag deliberately persists in Supervisor. Reset it on
         // every physical epoch, including replacement after a first pong.
         runtime.supervisor.set_idle_enabled(cx, idle);
@@ -137,6 +156,79 @@ impl Driver {
         if let Some(timer) = runtime.login_retry.take() {
             cx.clear_timer(timer);
         }
+        if let Some(timer) = runtime.batch_timer.take() {
+            cx.clear_timer(timer);
+        }
+        runtime.next_batch = None;
+    }
+
+    pub(crate) fn stop_feed<P>(&mut self, cx: &mut Cx<'_, P>, feed: FeedId) -> Option<Effect> {
+        // Revocation applies even while waiting for retry, before any new epoch.
+        self.state.policy(feed).ok()?;
+        self.cancel_runtime(cx, feed);
+        self.state
+            .stop_feed(feed)
+            .map(|retirement| Effect::Retired {
+                retirement,
+                reason: RetireReason::Stopped,
+                retry: false,
+            })
+    }
+
+    pub(crate) fn stop_all<P>(&mut self, cx: &mut Cx<'_, P>) -> Vec<Effect> {
+        let retired = self.state.stop_all();
+        for feed in self.state.feeds() {
+            self.cancel_runtime(cx, feed);
+        }
+        retired
+            .into_iter()
+            .map(|r| self.finish_retirement(cx, r, RetireReason::Stopped, false))
+            .collect()
+    }
+
+    pub(crate) fn release_frame<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        epoch: Epoch,
+        barrier: bool,
+    ) -> (Option<String>, Vec<Effect>) {
+        if !self.state.has_batches(epoch.feed())
+            || self.runtime_mut(epoch.feed()).batch_timer.is_some()
+        {
+            return (None, Vec::new());
+        }
+        let result = self.ingress(cx, epoch.socket(), Ingress::Send);
+        if result.admission != Admission::Current(epoch) || barrier {
+            return (None, result.effects);
+        }
+        if !self.state.has_batches(epoch.feed()) {
+            return (None, Vec::new());
+        }
+        let cadence = self
+            .state
+            .policy(epoch.feed())
+            .expect("current feed")
+            .subscription_interval_ms;
+        let runtime = self.runtime_mut(epoch.feed());
+        if let Some(at) = runtime.next_batch
+            && cx.now < at
+        {
+            if runtime.batch_timer.is_none() {
+                runtime.batch_timer = Some(cx.set_timer(at - cx.now));
+            }
+            return (None, Vec::new());
+        }
+        let frame = self.state.release_batch(epoch, false);
+        if frame.is_some() {
+            self.runtime_mut(epoch.feed()).next_batch = Some(cx.now + cadence);
+        }
+        if frame.is_some() && cadence > 0. && self.state.has_batches(epoch.feed()) {
+            let runtime = self.runtime_mut(epoch.feed());
+            if runtime.batch_timer.is_none() {
+                runtime.batch_timer = Some(cx.set_timer(cadence));
+            }
+        }
+        (frame, Vec::new())
     }
 
     fn finish_retirement<P>(
@@ -281,7 +373,11 @@ impl Driver {
                 evidence,
                 recovery,
             } => {
-                let mut effects = vec![Effect::AuthFailure { epoch, evidence }];
+                let mut effects = vec![Effect::AuthFailure {
+                    epoch,
+                    evidence,
+                    terminal: false,
+                }];
                 match recovery {
                     AuthRecovery::Reconnect => {
                         if let Some(retired) =
@@ -321,6 +417,7 @@ impl Driver {
                 let mut effects = vec![Effect::AuthFailure {
                     epoch,
                     evidence: AuthEvidence::Rejected(error),
+                    terminal: true,
                 }];
                 for retirement in retirements {
                     effects.push(self.finish_retirement(
@@ -359,10 +456,11 @@ impl Driver {
 
     /// Engine queries this BEFORE removing a managed timer from Io.
     pub(crate) fn timer_admissible(&self, timer: TimerId, now: f64) -> Option<bool> {
-        let runtime = self
-            .runtimes
-            .iter()
-            .find(|r| r.login_retry == Some(timer) || r.supervisor.owns_timer(timer))?;
+        let runtime = self.runtimes.iter().find(|r| {
+            r.login_retry == Some(timer)
+                || r.batch_timer == Some(timer)
+                || r.supervisor.owns_timer(timer)
+        })?;
         Some(Self::valid_time(
             self.state.policy(runtime.feed).expect("registered feed"),
             now,
@@ -371,14 +469,19 @@ impl Driver {
 
     /// None means an unowned timer; Some(empty) is owned but has no callback.
     pub(crate) fn timer<P>(&mut self, cx: &mut Cx<'_, P>, timer: TimerId) -> Option<Vec<Effect>> {
-        let index = self
-            .runtimes
-            .iter()
-            .position(|r| r.login_retry == Some(timer) || r.supervisor.owns_timer(timer))?;
+        let index = self.runtimes.iter().position(|r| {
+            r.login_retry == Some(timer)
+                || r.batch_timer == Some(timer)
+                || r.supervisor.owns_timer(timer)
+        })?;
         let feed = self.runtimes[index].feed;
         if self.timer_admissible(timer, cx.now) == Some(false) {
             // Engine must perform this admission before removing an owned timer
             // from Io; an invalid host timestamp does not consume a live timer.
+            return Some(Vec::new());
+        }
+        if self.runtimes[index].batch_timer == Some(timer) {
+            self.runtimes[index].batch_timer = None;
             return Some(Vec::new());
         }
         if self.runtimes[index].login_retry == Some(timer) {
@@ -418,8 +521,9 @@ impl Driver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::socket::Timeout;
     use crate::socket_lifecycle::{AuthMode, Invalidation};
-    use safe_cex_engine::{
+    use crate::{
         Action, Command, Engine, ErrorKind, Event, Response, SocketChannel, Venue, VenueError,
         book::Book, socket::Config,
     };
@@ -553,7 +657,7 @@ mod tests {
                         acknowledge,
                         begin_errors: Vec::new(),
                     },
-                    Some(safe_cex_engine::entropy::Entropy::new(
+                    Some(crate::entropy::Entropy::new(
                         Box::new(|bytes| {
                             bytes.fill(17);
                             Ok(())
@@ -772,7 +876,7 @@ mod tests {
             1
         );
         assert_eq!(h.epoch(0), epoch);
-        assert!(h.engine.venue().effects.iter().any(|e| matches!(e, Effect::AuthFailure { epoch:e, evidence:AuthEvidence::Malformed } if *e==epoch)));
+        assert!(h.engine.venue().effects.iter().any(|e| matches!(e, Effect::AuthFailure { epoch:e, evidence:AuthEvidence::Malformed, .. } if *e==epoch)));
     }
 
     #[test]

@@ -460,3 +460,37 @@ fn managed_expired_auth_cannot_be_rescued_before_watchdog_delivery() {
             .any(|(s, t)| *s == socket && t.contains("subscribe"))
     );
 }
+
+#[test]
+fn malformed_login_codes_never_authenticate_or_deactivate_credentials() {
+    for text in [
+        r#"{"event":"login"}"#,
+        r#"{"event":"login","code":0}"#,
+        r#"{"event":"login","code":null}"#,
+    ] {
+        let mut h = Harness::private();
+        let socket = h.socket("/private");
+        h.event(Event::WsOpened { socket });
+        h.sent.clear();
+        h.message(socket, text);
+        assert!(h.closed.contains(&socket));
+        assert!(!h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+        assert_eq!(h.engine.health().auth_failures, 0);
+    }
+}
+
+#[test]
+fn array_shaped_login_is_neither_acceptance_nor_auth_recovery_evidence() {
+    for text in [r#"["login"]"#, r#"["login","0"]"#, r#"["login",null]"#] {
+        let mut h = Harness::private();
+        let socket = h.socket("/private");
+        h.event(Event::WsOpened { socket });
+        h.sent.clear();
+        h.message(socket, text);
+        assert!(!h.closed.contains(&socket));
+        assert!(!h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+        assert_eq!(h.engine.health().auth_failures, 0);
+        h.message(socket, LOGIN_OK);
+        assert!(h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+    }
+}

@@ -1,0 +1,1136 @@
+//! Managed socket boundaries. HTTP dispatch and physical ID allocation are unchanged.
+use super::*;
+use crate::socket_driver::{Driver, Effect};
+use crate::socket_lifecycle::{
+    Admission, Control, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest, LifecycleEvent,
+    MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
+};
+const MAX_EFFECTS: usize = MAX_FEEDS * 16;
+const MAX_PROPOSALS: usize = MAX_FEEDS;
+
+pub(super) enum InterestUpdate {
+    Desired(Vec<Interest>),
+    Repair(Vec<String>),
+}
+pub(super) struct Proposal {
+    id: u64,
+    feed: FeedId,
+    update: InterestUpdate,
+    bytes: usize,
+}
+
+impl<P> Cx<'_, P> {
+    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
+        let mut driver = std::mem::take(&mut self.io.socket_driver);
+        let result = f(&mut driver, self);
+        self.io.socket_driver = driver;
+        result
+    }
+    pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
+        if self.io.socket_effects.len().saturating_add(effects.len()) > MAX_EFFECTS {
+            self.io.socket_failed = true;
+            // Revoked epochs still own physical/signing cleanup. Preserve
+            // their retirements when dropping nonterminal work on exhaustion.
+            self.io
+                .socket_effects
+                .retain(|e| matches!(e, Effect::Retired { .. }));
+            self.io.socket_effects.extend(
+                effects
+                    .into_iter()
+                    .filter(|e| matches!(e, Effect::Retired { .. })),
+            );
+            self.io.socket_proposals.clear();
+            self.io.socket_proposal_bytes = 0;
+            let stopped = self.with_socket_driver(|d, cx| d.stop_all(cx));
+            self.io.socket_effects.extend(stopped);
+            self.notice(
+                Level::Error,
+                log_code::SUBSCRIPTION_REJECTED,
+                "Managed socket effect capacity exhausted",
+            );
+            return;
+        }
+        self.io.socket_effects.extend(effects);
+    }
+    pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self.io.socket_driver.register(policy)?;
+        self.io.managed_sockets = true;
+        Ok(feed)
+    }
+    pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
+        self.io.socket_driver.state.epoch(feed)
+    }
+    pub fn socket_authenticated(&self, feed: FeedId) -> bool {
+        self.io.socket_driver.state.authenticated(feed)
+    }
+    /// Native one-shot frames ordered after current interests, retained with
+    /// their epoch until final drain. They are never persistent interests.
+    pub fn send_after_socket_interests(
+        &mut self,
+        feed: FeedId,
+        text: String,
+    ) -> Result<(), SocketError> {
+        let epoch = self.socket_epoch(feed).ok_or(SocketError::Stale)?;
+        if self.io.socket_failed
+            || self.io.socket_after.len() >= crate::socket_lifecycle::MAX_FRAMES
+            || text.len() > crate::socket_lifecycle::MAX_FRAME_BYTES
+        {
+            return Err(SocketError::Capacity);
+        }
+        self.io.socket_driver.state.reserve_external(text.len())?;
+        self.io.socket_after.push_back((epoch, text));
+        Ok(())
+    }
+    pub fn connect_socket(
+        &mut self,
+        feed: FeedId,
+        spec: impl Into<SocketSpec>,
+    ) -> Result<Epoch, SocketError> {
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        self.io.socket_driver.preflight_begin(feed, self.now)?;
+        let role = self.io.socket_driver.state.policy(feed)?.role.clone();
+        if role == SocketChannel::Public && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+            return Err(SocketError::NotPermitted);
+        }
+        let mut spec = spec.into();
+        spec.channel = Some(role);
+        let socket = SocketId(self.io.next());
+        let epoch = self.with_socket_driver(|d, cx| d.begin(cx, feed, socket))?;
+        self.queue_socket_transport(socket, spec);
+        Ok(epoch)
+    }
+    pub fn connect_socket_signed(
+        &mut self,
+        feed: FeedId,
+        spec: impl Into<SocketSpec>,
+        step: Box<dyn crate::SignStep>,
+    ) -> Result<Epoch, SocketError> {
+        let epoch = self.connect_socket(feed, spec)?;
+        self.sign_socket_upgrade(epoch.socket(), step);
+        Ok(epoch)
+    }
+    pub fn retire_socket(&mut self, feed: FeedId, reason: RetireReason) {
+        let effects =
+            self.with_socket_driver(|d, cx| d.retire(cx, feed, reason, true).into_iter().collect());
+        self.socket_effects(effects);
+    }
+    pub fn stop_socket_feed(&mut self, feed: FeedId) {
+        let effects = self.with_socket_driver(|d, cx| d.stop_feed(cx, feed).into_iter().collect());
+        self.socket_effects(effects);
+    }
+    fn propose_interests(
+        &mut self,
+        feed: FeedId,
+        update: InterestUpdate,
+    ) -> Result<u64, SocketError> {
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        self.io.socket_driver.state.policy(feed)?;
+        let (count, bytes) = match &update {
+            InterestUpdate::Desired(values) => (
+                values.len(),
+                values
+                    .iter()
+                    .try_fold(0usize, |n, i| {
+                        n.checked_add(i.key.len())?.checked_add(i.wire_args.len())
+                    })
+                    .ok_or(SocketError::Capacity)?,
+            ),
+            InterestUpdate::Repair(keys) => (
+                keys.len(),
+                keys.iter()
+                    .try_fold(0usize, |n, k| n.checked_add(k.len()))
+                    .ok_or(SocketError::Capacity)?,
+            ),
+        };
+        if count > MAX_INTERESTS
+            || bytes > MAX_INTEREST_BYTES / 2
+            || self.io.socket_proposals.len() >= MAX_PROPOSALS
+            || self.io.socket_proposal_bytes.saturating_add(bytes) > MAX_INTEREST_BYTES
+        {
+            return Err(SocketError::Capacity);
+        }
+        let id = self
+            .io
+            .socket_proposal_next
+            .checked_add(1)
+            .ok_or(SocketError::Capacity)?;
+        self.io.socket_proposal_next = id;
+        self.io.socket_proposal_bytes += bytes;
+        self.io.socket_proposals.push_back(Proposal {
+            id,
+            feed,
+            update,
+            bytes,
+        });
+        Ok(id)
+    }
+    /// Admission only. Encoding/transaction completion is a LifecycleEvent.
+    pub fn set_socket_interests(
+        &mut self,
+        feed: FeedId,
+        values: Vec<Interest>,
+    ) -> Result<u64, SocketError> {
+        self.propose_interests(feed, InterestUpdate::Desired(values))
+    }
+    /// Force native unsubscribe/subscribe for unchanged current interests.
+    pub fn repair_socket_interests(
+        &mut self,
+        feed: FeedId,
+        keys: Vec<String>,
+    ) -> Result<u64, SocketError> {
+        self.propose_interests(feed, InterestUpdate::Repair(keys))
+    }
+    pub(super) fn managed_send_allowed(&self, socket: SocketId) -> bool {
+        !self.io.managed_sockets
+            || !self.io.socket_failed && self.io.socket_driver.state.socket_epoch(socket).is_some()
+    }
+}
+
+impl<V: Venue> Engine<V> {
+    fn socket_mutate<R>(
+        &mut self,
+        now: f64,
+        f: impl FnOnce(&mut Driver, &mut Cx<'_, V::Pending>) -> R,
+    ) -> R {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.with_socket_driver(f)
+    }
+    fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        self.venue.on_socket_event(&mut cx, event)
+    }
+    fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.socket_effects(effects);
+    }
+    fn socket_replace(&mut self, feed: FeedId, update: InterestUpdate) -> Result<u64, SocketError> {
+        let venue = &self.venue;
+        let store = &self.store;
+        let encode =
+            |subscribe,
+             items: &[Interest],
+             emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>| {
+                venue.encode_socket_interests(store, feed, subscribe, items, emit)
+            };
+        match update {
+            InterestUpdate::Desired(items) => self
+                .io
+                .socket_driver
+                .state
+                .replace_interests(feed, items, encode),
+            InterestUpdate::Repair(keys) => self
+                .io
+                .socket_driver
+                .state
+                .repair_interests(feed, &keys, encode),
+        }
+    }
+    pub(super) fn process_socket_work(&mut self, now: f64) {
+        if !self.io.managed_sockets {
+            return;
+        }
+        let mut processed = 0usize;
+        loop {
+            if processed >= MAX_EFFECTS && !self.io.socket_failed {
+                self.io.socket_failed = true;
+                self.io
+                    .socket_effects
+                    .retain(|e| matches!(e, Effect::Retired { .. }));
+                self.io.socket_proposals.clear();
+                self.io.socket_proposal_bytes = 0;
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                cx.notice(
+                    Level::Error,
+                    log_code::SUBSCRIPTION_REJECTED,
+                    "Managed socket effect processing capacity exhausted",
+                );
+                let stopped = self.socket_mutate(now, |d, cx| d.stop_all(cx));
+                self.io.socket_effects.extend(stopped);
+            }
+            if let Some(effect) = self.io.socket_effects.pop_front() {
+                processed += 1;
+                if let Effect::Retired {
+                    retirement,
+                    reason,
+                    retry,
+                } = effect
+                {
+                    let pending = std::mem::take(&mut self.io.socket_after);
+                    for (epoch, text) in pending {
+                        if epoch == retirement.epoch {
+                            self.io.socket_driver.state.release_external(text.len());
+                        } else {
+                            self.io.socket_after.push_back((epoch, text));
+                        }
+                    }
+                    {
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        if reason == RetireReason::Closed
+                            && cx.io.sockets.closed(retirement.epoch.socket(), true)
+                        {
+                            cx.io.health.count(log_code::WS_CLOSED);
+                        }
+                        cx.close_socket_transport(retirement.epoch.socket());
+                    }
+                    let result = self.socket_native(
+                        now,
+                        LifecycleEvent::Retired {
+                            epoch: retirement.epoch,
+                            reason,
+                        },
+                    );
+                    if let Err(error) = result {
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        cx.notice(
+                            Level::Error,
+                            log_code::SUBSCRIPTION_REJECTED,
+                            format!("Managed socket invalidation refused: {error:?}"),
+                        );
+                    }
+                    if let Err(error) = self.socket_mutate(now, |d, cx| {
+                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
+                    }) {
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        cx.notice(
+                            Level::Error,
+                            log_code::SUBSCRIPTION_REJECTED,
+                            format!("Managed socket retirement refused: {error:?}"),
+                        );
+                    }
+                    continue;
+                }
+                if self.io.socket_failed {
+                    continue;
+                }
+                let (event, epoch) = match effect {
+                    Effect::Opened(e) => (LifecycleEvent::Opened(e), Some(e)),
+                    Effect::Ready { epoch, reopened } => {
+                        let desired = self
+                            .io
+                            .socket_driver
+                            .state
+                            .desired(epoch.feed())
+                            .unwrap_or_default();
+                        if let Err(error) =
+                            self.socket_replace(epoch.feed(), InterestUpdate::Desired(desired))
+                        {
+                            self.socket_failed_feed(now, epoch.feed(), error);
+                            continue;
+                        }
+                        (LifecycleEvent::Ready { epoch, reopened }, Some(epoch))
+                    }
+                    Effect::Authenticated { epoch, first } => {
+                        (LifecycleEvent::Authenticated { epoch, first }, Some(epoch))
+                    }
+                    Effect::AuthFailure {
+                        epoch,
+                        evidence,
+                        terminal,
+                    } => (
+                        LifecycleEvent::AuthFailure {
+                            epoch,
+                            evidence,
+                            terminal,
+                        },
+                        None,
+                    ),
+                    Effect::Ping(e) => (LifecycleEvent::Ping(e), Some(e)),
+                    Effect::RetryLogin(e) => (LifecycleEvent::RetryLogin(e), Some(e)),
+                    Effect::Reconnect(feed) => (LifecycleEvent::Reconnect(feed), None),
+                    Effect::Retired { .. } => unreachable!(),
+                };
+                if epoch.is_some_and(|e| !self.io.socket_driver.state.current(e)) {
+                    continue;
+                }
+                let feed = match &event {
+                    LifecycleEvent::Reconnect(f) => *f,
+                    LifecycleEvent::AuthFailure { epoch, .. } => epoch.feed(),
+                    _ => epoch.expect("epoch effect").feed(),
+                };
+                if let Err(error) = self.socket_native(now, event) {
+                    self.socket_failed_feed(now, feed, error);
+                }
+                continue;
+            }
+            let Some(proposal) = self.io.socket_proposals.pop_front() else {
+                break;
+            };
+            processed += 1;
+            self.io.socket_proposal_bytes -= proposal.bytes;
+            if self.io.socket_failed {
+                continue;
+            }
+            let event = match self.socket_replace(proposal.feed, proposal.update) {
+                Ok(_) => LifecycleEvent::InterestsCommitted {
+                    feed: proposal.feed,
+                    proposal: proposal.id,
+                },
+                Err(error) => LifecycleEvent::InterestsRefused {
+                    feed: proposal.feed,
+                    proposal: proposal.id,
+                    error,
+                },
+            };
+            if let Err(error) = self.socket_native(now, event) {
+                self.socket_failed_feed(now, proposal.feed, error);
+            }
+        }
+    }
+    fn socket_failed_feed(&mut self, now: f64, feed: FeedId, error: SocketError) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            format!("Managed socket operation refused: {error:?}"),
+        );
+        let effects = self.socket_mutate(now, |d, cx| d.stop_feed(cx, feed).into_iter().collect());
+        self.socket_enqueue(now, effects);
+    }
+    pub(super) fn handle_managed_socket(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !self.io.managed_sockets {
+            return false;
+        }
+        if let Event::TimerFired { timer } = event {
+            match self.io.socket_driver.timer_admissible(*timer, now) {
+                None => return false,
+                Some(false) => return true,
+                Some(true) => {
+                    if self.io.timers.remove(timer).is_some() {
+                        let effects = self
+                            .socket_mutate(now, |d, cx| d.timer(cx, *timer).unwrap_or_default());
+                        self.socket_enqueue(now, effects);
+                    }
+                    self.process_socket_work(now);
+                    return true;
+                }
+            }
+        }
+        let (socket, kind) = match event {
+            Event::WsOpened { socket } => (*socket, Ingress::Open),
+            Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
+                (*socket, Ingress::Message)
+            }
+            Event::WsClosed { socket, .. } => (*socket, Ingress::Close),
+            _ => return false,
+        };
+        let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+        self.socket_enqueue(now, result.effects);
+        let Admission::Current(epoch) = result.admission else {
+            self.process_socket_work(now);
+            return true;
+        };
+        match event {
+            Event::WsOpened { .. } => {
+                self.io.health.ws_opened = self.io.health.ws_opened.saturating_add(1)
+            }
+            Event::WsMessage { text, .. } => {
+                self.io.sockets.received(socket, now, &mut self.io.health);
+                let control = self.venue.socket_control(
+                    &self.store,
+                    epoch.feed(),
+                    self.io.socket_driver.state.authenticated(epoch.feed()),
+                    text,
+                );
+                let other = matches!(control, Control::Other);
+                let ready = self.venue.socket_startup_ready(&self.store);
+                let effects = self.socket_mutate(now, |d, cx| d.control(cx, epoch, control, ready));
+                self.socket_enqueue(now, effects);
+                self.process_socket_work(now);
+                if other && self.io.socket_driver.state.current(epoch) {
+                    let mut cx = Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
+                    };
+                    self.venue.on_message(&mut cx, socket, text);
+                }
+            }
+            Event::WsBinary { data, .. } => {
+                self.io.sockets.received(socket, now, &mut self.io.health);
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                self.venue.on_binary(&mut cx, socket, data);
+            }
+            _ => {}
+        }
+        self.process_socket_work(now);
+        true
+    }
+    pub(super) fn socket_gate(&mut self, now: f64, socket: SocketId, connect: bool) -> bool {
+        if !self.io.managed_sockets {
+            return true;
+        }
+        if self.io.socket_failed {
+            return false;
+        }
+        let result = self.socket_mutate(now, |d, cx| {
+            d.ingress(
+                cx,
+                socket,
+                if connect {
+                    Ingress::Connect
+                } else {
+                    Ingress::Send
+                },
+            )
+        });
+        self.socket_enqueue(now, result.effects);
+        self.process_socket_work(now);
+        matches!(result.admission,Admission::Current(e)if self.io.socket_driver.state.current(e))
+    }
+    pub(super) fn gate_socket_action(&mut self, now: f64, action: &Action) -> bool {
+        match action {
+            Action::WsConnect { socket, .. } => self.socket_gate(now, *socket, true),
+            Action::WsSend { socket, .. } => self.socket_gate(now, *socket, false),
+            _ => true,
+        }
+    }
+    pub(super) fn fence_socket_actions(&mut self, now: f64) {
+        if !self.io.managed_sockets {
+            return;
+        }
+        self.process_socket_work(now);
+        let io = &mut self.io;
+        io.actions.retain(|a| match a {
+            Action::WsConnect { socket, .. } | Action::WsSend { socket, .. } => {
+                !io.socket_failed && io.socket_driver.state.socket_epoch(*socket).is_some()
+            }
+            Action::Sign { attempt, .. } => io.signing.timer(*attempt).is_some(),
+            _ => true,
+        });
+    }
+    pub(super) fn drain_socket_frames(&mut self, now: f64) {
+        if !self.io.managed_sockets || self.io.socket_failed {
+            return;
+        }
+        for feed in self.io.socket_driver.state.feeds() {
+            let Some(epoch) = self.io.socket_driver.state.epoch(feed) else {
+                continue;
+            };
+            let mut released_any = false;
+            for _ in 0..crate::socket_lifecycle::MAX_FRAMES {
+                let barrier = self.io.signing.has_socket(epoch.socket());
+                let (frame, effects) =
+                    self.socket_mutate(now, |d, cx| d.release_frame(cx, epoch, barrier));
+                self.socket_enqueue(now, effects);
+                self.process_socket_work(now);
+                let Some(text) = frame else {
+                    break;
+                };
+                // Registry-owned until this final handoff; no held plain queue.
+                released_any = true;
+                self.io.actions.push(Action::WsSend {
+                    socket: epoch.socket(),
+                    text,
+                });
+            }
+            if self.io.socket_driver.state.ready(epoch)
+                && (!self.io.socket_driver.state.has_batches(feed)
+                    || released_any
+                        && self
+                            .io
+                            .socket_driver
+                            .state
+                            .policy(feed)
+                            .is_ok_and(|p| p.subscription_interval_ms > 0.))
+                && !self.io.signing.has_socket(epoch.socket())
+                && self
+                    .io
+                    .socket_after
+                    .iter()
+                    .any(|(owner, _)| *owner == epoch)
+                && self.socket_gate(now, epoch.socket(), false)
+            {
+                let pending = std::mem::take(&mut self.io.socket_after);
+                for (owner, text) in pending {
+                    if owner == epoch {
+                        self.io.socket_driver.state.release_external(text.len());
+                        self.io.actions.push(Action::WsSend {
+                            socket: epoch.socket(),
+                            text,
+                        });
+                    } else {
+                        self.io.socket_after.push_back((owner, text));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::socket_lifecycle::{AuthMode, AuthRecovery, Invalidation, TrafficPolicy};
+    use crate::{book::Book, socket::Config};
+
+    #[derive(Default)]
+    struct Probe {
+        feed: Option<FeedId>,
+        events: Vec<LifecycleEvent>,
+        messages: usize,
+        timers: usize,
+        refuse_ready: bool,
+        refuse_retirement: bool,
+        receipts: usize,
+    }
+    fn policy() -> FeedPolicy {
+        FeedPolicy {
+            role: SocketChannel::Private,
+            supervision: Config::default(),
+            auth: AuthMode::None,
+            recovery: AuthRecovery::Reconnect,
+            permanent_refusal_group: None,
+            traffic: TrafficPolicy::AnyText,
+            invalidation: Invalidation::Required,
+            subscription_interval_ms: 0.,
+        }
+    }
+    impl Venue for Probe {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            let feed = cx.register_socket_feed(policy()).unwrap();
+            self.feed = Some(feed);
+            cx.connect_socket(feed, "wss://socket.test").unwrap();
+        }
+        fn on_socket_event(
+            &mut self,
+            cx: &mut Cx<'_, ()>,
+            event: LifecycleEvent,
+        ) -> Result<(), SocketError> {
+            self.events.push(event.clone());
+            match event {
+                LifecycleEvent::Reconnect(feed) => {
+                    cx.connect_socket(feed, "wss://socket.test")?;
+                }
+                LifecycleEvent::Ready { .. } if self.refuse_ready => {
+                    return Err(SocketError::InvalidInterest);
+                }
+                LifecycleEvent::Retired { .. } if self.refuse_retirement => {
+                    return Err(SocketError::NotPermitted);
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        fn encode_socket_interests(
+            &self,
+            _: &Store,
+            _: FeedId,
+            subscribe: bool,
+            items: &[Interest],
+            emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+        ) -> Result<(), SocketError> {
+            for item in items {
+                emit(EncodedBatch {
+                    text: format!("{subscribe}:{}", item.wire_args),
+                    covered_keys: vec![item.key.clone()],
+                })?;
+            }
+            Ok(())
+        }
+        fn on_signing_receipt(&mut self, _: SigningTarget<'_, ()>, _: crate::signing::SignReceipt) {
+            self.receipts += 1;
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {
+            panic!("managed open reached legacy handler");
+        }
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, _: &str) {
+            self.messages += 1;
+            cx.notice(Level::Error, log_code::AUTH_REJECTED, "probe refusal");
+        }
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {
+            panic!("managed close reached legacy handler");
+        }
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {
+            self.timers += 1;
+        }
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn engine() -> (Engine<Probe>, SocketId) {
+        let mut e = crate::test_support::seeded_engine(Probe::default());
+        e.start(0.);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let socket = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::WsConnect { socket, .. } = a {
+                    Some(*socket)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        (e, socket)
+    }
+    fn stop(e: &mut Engine<Probe>) {
+        let feed = e.venue.feed.unwrap();
+        let mut cx = Cx {
+            now: e.io.dispatch_now,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        cx.stop_socket_feed(feed);
+    }
+    #[test]
+    fn unexpected_close_counts_once_and_replacement_is_a_reconnect() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(1., Event::WsClosed { socket, code: 1006 });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let (timer, at) = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, at_ms } = a {
+                    Some((*timer, *at_ms))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        e.handle(1., Event::WsClosed { socket, code: 1006 });
+        assert!(e.drain_actions().next().is_none());
+        e.handle(at, Event::TimerFired { timer });
+        assert_eq!(
+            e.drain_actions()
+                .filter(|a| matches!(a, Action::WsConnect { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(e.io.health.reconnects, 1);
+        assert_eq!(e.io.health.ws_closed, 1);
+    }
+    #[test]
+    fn managed_frames_reset_auth_health_per_event_and_keep_common_epilogue() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        for now in [1., 2.] {
+            e.handle(
+                now,
+                Event::WsMessage {
+                    socket,
+                    text: "refusal",
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+        assert_eq!(e.venue.messages, 2);
+        assert_eq!(e.io.health.auth_failures, 2);
+        assert_eq!(e.io.health.last_private_message_ms, Some(2.));
+        assert!(!e.has_actions());
+    }
+    #[test]
+    fn invalid_clock_does_not_consume_owned_timer() {
+        let (mut e, _) = engine();
+        let (&timer, _) = e.io.timers.iter().next().unwrap();
+        e.handle(f64::NAN, Event::TimerFired { timer });
+        assert!(e.io.timers.contains_key(&timer));
+        e.handle(10_000., Event::TimerFired { timer });
+        assert!(!e.io.timers.contains_key(&timer));
+        assert_eq!(e.venue.timers, 0);
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::WsClose { .. }))
+        );
+    }
+    #[test]
+    fn stop_waiting_feed_cancels_retry_and_revokes_grant() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(1., Event::WsClosed { socket, code: 1006 });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let (timer, at) = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, at_ms } = a {
+                    Some((*timer, *at_ms))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        stop(&mut e);
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a,Action::ClearTimer { timer:t } if t==timer))
+        );
+        e.handle(at, Event::TimerFired { timer });
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::WsConnect { .. }))
+        );
+        let feed = e.venue.feed.unwrap();
+        assert_eq!(
+            e.io.socket_driver.preflight_begin(feed, at),
+            Err(SocketError::NotPermitted)
+        );
+    }
+    #[test]
+    fn stop_granted_feed_blocks_already_queued_reconnect() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(1., Event::WsClosed { socket, code: 1006 });
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, at_ms } = a {
+                    Some((timer, at_ms))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let effects = e.socket_mutate(at, |d, cx| d.timer(cx, timer).unwrap());
+        assert!(effects.iter().any(|e| matches!(e, Effect::Reconnect(_))));
+        e.socket_enqueue(at, effects);
+        stop(&mut e);
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::WsConnect { .. }))
+        );
+        assert!(
+            e.io.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::Event(LogEvent {
+                    code: log_code::SUBSCRIPTION_REJECTED,
+                    ..
+                }))
+            )) || e
+                .io
+                .socket_driver
+                .preflight_begin(e.venue.feed.unwrap(), at)
+                .is_err()
+        );
+    }
+    #[test]
+    fn overflow_keeps_already_revoked_cleanup_authority() {
+        let (mut e, socket) = engine();
+        let feed = e.venue.feed.unwrap();
+        let retired = e.socket_mutate(0., |d, cx| {
+            d.retire(cx, feed, RetireReason::Stopped, false).unwrap()
+        });
+        let epoch = match &retired {
+            Effect::Retired { retirement, .. } => retirement.epoch,
+            _ => unreachable!(),
+        };
+        e.io.socket_effects.push_back(retired);
+        e.socket_enqueue(0., vec![Effect::Ping(epoch); MAX_EFFECTS]);
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(e.io.socket_failed);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
+                .count(),
+            1
+        );
+        assert_eq!(
+            e.venue
+                .events
+                .iter()
+                .filter(|e| matches!(e,LifecycleEvent::Retired{epoch:e,..}if e.socket()==socket))
+                .count(),
+            1
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsSend { .. }))
+        );
+    }
+    #[test]
+    fn refused_native_callback_logs_and_stops_feed() {
+        let (mut e, socket) = engine();
+        e.venue.refuse_ready = true;
+        e.handle(0., Event::WsOpened { socket });
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::Event(LogEvent {
+                code: log_code::SUBSCRIPTION_REJECTED,
+                ..
+            }))
+        )));
+        assert!(actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+        assert!(
+            e.io.socket_driver
+                .preflight_begin(e.venue.feed.unwrap(), 1.)
+                .is_err()
+        );
+    }
+    #[test]
+    fn same_interest_repair_unsubscribes_before_subscribing_without_changing_intent() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let feed = e.venue.feed.unwrap();
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            cx.set_socket_interests(
+                feed,
+                vec![Interest {
+                    key: "book".into(),
+                    wire_args: "native-book".into(),
+                }],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            e.drain_actions()
+                .filter_map(|a| if let Action::WsSend { text, .. } = a {
+                    Some(text)
+                } else {
+                    None
+                })
+                .collect::<Vec<_>>(),
+            vec!["true:native-book"]
+        );
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            cx.repair_socket_interests(feed, vec!["book".into()])
+                .unwrap();
+        }
+        assert_eq!(
+            e.drain_actions()
+                .filter_map(|a| if let Action::WsSend { text, .. } = a {
+                    Some(text)
+                } else {
+                    None
+                })
+                .collect::<Vec<_>>(),
+            vec!["false:native-book", "true:native-book"]
+        );
+        assert_eq!(e.io.socket_driver.state.desired(feed).unwrap().len(), 1);
+    }
+    struct Step;
+    impl crate::SignStep for Step {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            use crate::signing::{Algorithm, Context, KeyRef, Operation, PayloadPart, SignRequest};
+            Ok(SignRequest {
+                receipt: Default::default(),
+                context: Context::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: KeyRef("ref:probe".into()),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: b"native-auth".to_vec(),
+                    }],
+                }],
+            })
+        }
+        fn freshness_ms(&self) -> f64 {
+            5_000.
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &crate::signing::SignResult,
+        ) -> Result<(), crate::signing::SignError> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn retired_parked_signer_and_ready_outbound_never_publish_or_resurrect() {
+        for complete_before_retire in [false, true] {
+            let (mut e, socket) = engine();
+            e.handle(0., Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+            {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                };
+                cx.send_signed(socket, "native-auth".into(), Box::new(Step));
+            }
+            let attempt = e
+                .drain_actions()
+                .find_map(|a| {
+                    if let Action::Sign { attempt, .. } = a {
+                        Some(attempt)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let result = || {
+                Ok(crate::signing::SignResult::new(
+                    vec![vec![0; 32]],
+                    Default::default(),
+                ))
+            };
+            if complete_before_retire {
+                e.handle(
+                    1.,
+                    Event::Signed {
+                        attempt,
+                        result: result(),
+                    },
+                );
+            }
+            stop(&mut e);
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert!(actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+            assert!(!actions.iter().any(|a| matches!(
+                a,
+                Action::Sign { .. } | Action::WsSend { .. } | Action::WsConnect { .. }
+            )));
+            e.handle(
+                2.,
+                Event::Signed {
+                    attempt,
+                    result: result(),
+                },
+            );
+            assert!(e.drain_actions().next().is_none());
+            assert_eq!(e.venue.receipts, 0);
+        }
+    }
+    #[test]
+    fn failed_invalidation_is_coded_and_cannot_authorize_retry() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.venue.refuse_retirement = true;
+        e.handle(1., Event::WsClosed { socket, code: 1006 });
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::WsClose { .. }))
+                .count(),
+            1
+        );
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::Event(LogEvent {
+                level: Level::Error,
+                code: log_code::SUBSCRIPTION_REJECTED,
+                ..
+            }))
+        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. }))
+        );
+        assert!(
+            e.io.socket_driver
+                .preflight_begin(e.venue.feed.unwrap(), 2.)
+                .is_err()
+        );
+    }
+    #[test]
+    fn standalone_ready_one_shot_wakes_drain_without_spinning_after_release() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        assert!(!e.has_actions());
+        let feed = e.venue.feed.unwrap();
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            cx.send_after_socket_interests(feed, "native-follow-up".into())
+                .unwrap();
+        }
+        assert!(e.has_actions());
+        for invalid in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MAX,
+            -f64::MAX,
+        ] {
+            e.handle(invalid, Event::PollScaleChanged { scale: 1. });
+            assert!(!e.drain_actions().any(|a| matches!(
+                a,
+                Action::WsSend { .. } | Action::WsConnect { .. } | Action::Sign { .. }
+            )));
+            assert!(!e.has_actions());
+            assert!(e.drain_actions().next().is_none());
+        }
+        e.prepare_dispatch(0.);
+        assert!(e.has_actions());
+        let sent = e
+            .drain_actions()
+            .filter_map(|a| {
+                if let Action::WsSend { text, .. } = a {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sent, vec!["native-follow-up"]);
+        assert!(!e.has_actions());
+    }
+}

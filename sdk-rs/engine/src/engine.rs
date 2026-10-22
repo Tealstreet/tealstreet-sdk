@@ -1051,6 +1051,9 @@ impl Polls {
     }
 }
 
+#[path = "engine_socket.rs"]
+mod managed_sockets;
+
 struct Io<P> {
     entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
@@ -1091,6 +1094,14 @@ struct Io<P> {
     auth_failure_counted: bool,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
+    socket_driver: crate::socket_driver::Driver,
+    managed_sockets: bool,
+    socket_failed: bool,
+    socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposal_bytes: usize,
+    socket_proposal_next: u64,
+    socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
 }
 
 impl<P> Default for Io<P> {
@@ -1132,6 +1143,14 @@ impl<P> Default for Io<P> {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             retried_failures: HashMap::new(),
+            socket_driver: Default::default(),
+            managed_sockets: false,
+            socket_failed: false,
+            socket_effects: Default::default(),
+            socket_proposals: Default::default(),
+            socket_proposal_bytes: 0,
+            socket_proposal_next: 0,
+            socket_after: Default::default(),
         }
     }
 }
@@ -1186,20 +1205,25 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let spec = spec.into();
+        if self.io.managed_sockets
+            || spec.channel == Some(SocketChannel::Public)
+                && self.io.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            return SocketId(0);
+        }
+        let socket = SocketId(self.io.next());
+        self.queue_socket_transport(socket, spec);
+        socket
+    }
+    fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
         let SocketSpec {
             url,
             channel,
             context,
             headers,
             binary,
-        } = spec.into();
-        if channel == Some(SocketChannel::Public)
-            && self.io.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            // Socket zero is reserved for suppressed feeds; it never reaches a host.
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
+        } = spec;
         if let Some(channel) = &channel {
             self.io
                 .sockets
@@ -1213,7 +1237,6 @@ impl<P> Cx<'_, P> {
             channel,
             context,
         });
-        socket
     }
 
     /// Create an unsigned upgrade and stage it through the shared signing queue.
@@ -1227,6 +1250,10 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 {
             return socket;
         }
+        self.sign_socket_upgrade(socket, step);
+        socket
+    }
+    fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
         let index = self
             .io
             .actions
@@ -1237,10 +1264,12 @@ impl<P> Cx<'_, P> {
             .expect("connect queued its upgrade");
         let outbound = self.io.actions.remove(index);
         self.stage_signed(index, outbound, step);
-        socket
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
@@ -1260,6 +1289,12 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
+        if self.io.managed_sockets {
+            if let Some(epoch) = self.io.socket_driver.state.socket_epoch(socket) {
+                self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
+            }
+            return;
+        }
         self.close_socket_transport(socket);
     }
 
@@ -1413,6 +1448,9 @@ impl<P> Cx<'_, P> {
 
     /// WS authentication uses the same deadline/freshness/generation service.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         let index = self.io.actions.len();
         self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
@@ -1870,6 +1908,37 @@ pub trait Venue {
         self.on_request_failed(cx, pending, error);
     }
 
+    fn socket_control(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _authenticated: bool,
+        _text: &str,
+    ) -> crate::socket_lifecycle::Control {
+        crate::socket_lifecycle::Control::Other
+    }
+    fn socket_startup_ready(&self, _store: &Store) -> bool {
+        false
+    }
+    fn on_socket_event(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _event: crate::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    fn encode_socket_interests(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _subscribe: bool,
+        _items: &[crate::socket_lifecycle::Interest],
+        _emit: &mut dyn FnMut(
+            crate::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), crate::socket_lifecycle::SocketError>,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -2334,12 +2403,14 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.process_socket_work(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.io.dispatch_now = now;
+        self.process_socket_work(now);
         if let Event::Signed { attempt, result } = event {
             self.sign_completed(now, attempt, result);
             if self.venue.cancel_needs_stored_order() {
@@ -2485,6 +2556,19 @@ impl<V: Venue> Engine<V> {
             self.startup_watch_at =
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
+        if self.io.managed_sockets {
+            // Managed ingress shares the ordinary event prelude and epilogue.
+            // In particular health accounting is reset once per host event.
+            if self.handle_managed_socket(now, &event) {
+                self.finish_event(now);
+                return;
+            }
+        }
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
         match event {
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
@@ -2681,6 +2765,10 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_command(&mut cx, command);
             }
         }
+        self.finish_event(now);
+    }
+
+    fn finish_event(&mut self, now: f64) {
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
             if failed && self.venue.fence_uncertain_cancel_all() {
@@ -2703,6 +2791,7 @@ impl<V: Venue> Engine<V> {
                 self.handle(now, Event::Command(command));
             }
         }
+        self.process_socket_work(now);
         self.restore_shared_tickers(false, now);
     }
 
@@ -2882,8 +2971,12 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
-                cx.close(socket);
-                self.venue.on_close(&mut cx, socket, 1006);
+                if cx.io.managed_sockets {
+                    cx.close(socket);
+                } else {
+                    cx.close(socket);
+                    self.venue.on_close(&mut cx, socket, 1006);
+                }
             }
             _ => {}
         }
@@ -2896,6 +2989,11 @@ impl<V: Venue> Engine<V> {
         result: Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         use crate::signing_dispatch::Completion;
+        if let Some((socket, connect)) = self.io.signing.outbound_socket(attempt)
+            && !self.socket_gate(now, socket, connect)
+        {
+            return;
+        }
         let Some(completion) =
             self.io
                 .signing
@@ -2973,6 +3071,26 @@ impl<V: Venue> Engine<V> {
         let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
         loop {
             while let Some(action) = queued.pop_front() {
+                let emitted = self.io.actions.len();
+                let live = if !self.io.managed_sockets {
+                    true
+                } else {
+                    match &action {
+                        Action::Sign { attempt, .. } => {
+                            self.io.signing.outbound_socket(*attempt).is_none_or(
+                                |(socket, connect)| self.socket_gate(now, socket, connect),
+                            )
+                        }
+                        Action::SignedOutbound { outbound, .. } => {
+                            self.gate_socket_action(now, outbound)
+                        }
+                        _ => self.gate_socket_action(now, &action),
+                    }
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                if !live {
+                    continue;
+                }
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.signing.release(
@@ -3108,7 +3226,17 @@ impl<V: Venue> Engine<V> {
 
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        self.process_socket_work(self.io.dispatch_now);
         self.dispatch_actions(self.io.dispatch_now);
+        self.process_socket_work(self.io.dispatch_now);
+        if self.io.managed_sockets {
+            self.fence_socket_actions(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.drain_socket_frames(self.io.dispatch_now);
+            self.process_socket_work(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.fence_socket_actions(self.io.dispatch_now);
+        }
         if self.store.take_rejected_empty_catalogue() {
             push_event(
                 &mut self.io.actions,
@@ -3128,6 +3256,21 @@ impl<V: Venue> Engine<V> {
     pub fn has_actions(&self) -> bool {
         !self.io.actions.is_empty()
             || !self.io.signing_admission.is_empty()
+            || !self.io.socket_effects.is_empty()
+            || !self.io.socket_proposals.is_empty()
+            || self
+                .io
+                .socket_driver
+                .frames_ready(self.io.dispatch_now, |socket| {
+                    self.io.signing.has_socket(socket)
+                })
+            || self.io.socket_after.iter().any(|(epoch, _)| {
+                self.io.socket_driver.one_shot_ready(
+                    *epoch,
+                    self.io.dispatch_now,
+                    self.io.signing.has_socket(epoch.socket()),
+                )
+            })
             || self.io.signing.next_work().is_some()
             || self.store.rejected_empty_catalogue()
     }

@@ -440,3 +440,50 @@ controls. Add caller/audit/quality rows, independent correctness/adversarial
 reviews and draft PR after focused native/strict/SDK checks. Keep #1767 watch;
 #1763 waits actual queued inputs for its next CI/proof. Production allocator
 widening remains a separate post-#1741 PR.
+
+### Live adoption review and bounded cleanup
+
+The shared Engine path now handles open, text, binary, close, signing completion,
+queued outbound, and owned timers; both reference codecs use it. Managed events
+retain the existing event prelude/epilogue and held-cancellation processing.
+Unexpected host closes grant reconnect health evidence once; explicit closes
+remain deliberate. The common stop operation revokes Initial/Waiting/Granted
+feeds as well as active epochs. Callback and admission errors emit bounded coded
+errors; failed invalidation never grants retry. Effect-capacity failure preserves
+already revoked cleanup ownership before stopping every remaining active feed.
+
+Engine probes cover invalid-time timer retention, health reset, retry revocation,
+queued reconnect denial, overflow cleanup, refused callbacks, native forced book
+repair, and parked/ready signer retirement. Existing six original runtime RED
+cases are retained. Compatibility tests must use current epochs: serial retry
+checks now isolate each Bitunix feed, and a REST-recovery test obtains a fresh
+connection rather than delivering an open after its original connect timeout.
+No deadline is extended to accommodate these tests. Native payloads, request
+builders, account/read fences, entropy, and credential custody remain unchanged.
+
+This draft does not widen physical SocketId/TimerId/RequestId or Io.next.
+Production merge is blocked on the separate safe-integer allocator PR after
+actual RequestContext #1741, followed by real integration, final CI/replay proof
+and independent reviews. Other venue families retain their legacy lifecycle
+until adopted; no universal socket-standardisation or cutover closure claim.
+
+Live focused verification: 1,180 native tests pass across Engine, Binance, OKX
+and Bitunix, including all six original runtime RED controls, ten shared Engine
+probes, exact native public batching/ping bytes and all financial reducer
+assertions. Independent correctness review is CLEAR for Engine routing, shared
+stop/overflow cleanup, native codecs and compatibility fixture updates. Strict
+checks, adversarial review, actual dependency integration and CI remain gates;
+this result does not assert WASM/replay or allocator completion.
+
+The final adversarial pass additionally found standalone deferred-frame wakeup:
+`has_actions` now delegates one-shot eligibility to Driver's existing valid-time
+policy. Current ready/nonbarrier frames wake once; invalid raw clocks retain
+ownership without empty-drain spinning and valid time later releases once.
+OKX auth codecs require object-shaped evidence before typed decode; array-shaped
+Serde structs cannot imply acceptance or malformed-login recovery. Borrowed
+EventName/TopicArgs avoid dynamic JSON object graphs. The unchanged Bitunix login
+error literal stays in its original native account module, with no signing
+allowance addition or credential-policy change. Both independent final reviews
+are CLEAR; strict four-crate all-target Clippy, fmt, bans and diff checks pass.
+Final 449 focused unit/runtime controls pass; the complete touched-crate rerun
+remains running before actual dependency integration and draft CI.

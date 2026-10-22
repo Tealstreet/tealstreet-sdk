@@ -115,6 +115,48 @@ pub enum Control {
     Auth(AuthEvidence),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetireReason {
+    Closed,
+    Timeout(Timeout),
+    Authentication,
+    Stopped,
+}
+
+#[derive(Clone, Debug)]
+pub enum LifecycleEvent {
+    Opened(Epoch),
+    Ready {
+        epoch: Epoch,
+        reopened: bool,
+    },
+    Authenticated {
+        epoch: Epoch,
+        first: bool,
+    },
+    AuthFailure {
+        epoch: Epoch,
+        evidence: AuthEvidence,
+        terminal: bool,
+    },
+    Retired {
+        epoch: Epoch,
+        reason: RetireReason,
+    },
+    Ping(Epoch),
+    RetryLogin(Epoch),
+    Reconnect(FeedId),
+    InterestsCommitted {
+        feed: FeedId,
+        proposal: u64,
+    },
+    InterestsRefused {
+        feed: FeedId,
+        proposal: u64,
+        error: SocketError,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Interest {
     pub key: String,
@@ -147,6 +189,8 @@ pub(crate) enum Ingress {
     Open,
     Message,
     Close,
+    Connect,
+    Send,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Admission {
@@ -233,10 +277,69 @@ struct Feed {
 #[derive(Default)]
 pub(crate) struct Lifecycle {
     feeds: Vec<Feed>,
+    external_queue_bytes: usize,
 }
 impl Lifecycle {
+    pub(crate) fn reserve_external(&mut self, bytes: usize) -> Result<(), SocketError> {
+        let total = self
+            .feeds
+            .iter()
+            .try_fold(self.external_queue_bytes, |n, f| {
+                n.checked_add(f.interests.queued_bytes())
+            })
+            .and_then(|n| n.checked_add(bytes))
+            .ok_or(SocketError::Capacity)?;
+        if total > MAX_QUEUED_BYTES {
+            return Err(SocketError::Capacity);
+        }
+        self.external_queue_bytes += bytes;
+        Ok(())
+    }
+    pub(crate) fn release_external(&mut self, bytes: usize) {
+        self.external_queue_bytes = self
+            .external_queue_bytes
+            .checked_sub(bytes)
+            .expect("owned deferred bytes");
+    }
     pub(crate) fn enabled(&self) -> bool {
         !self.feeds.is_empty()
+    }
+    pub(crate) fn feeds(&self) -> Vec<FeedId> {
+        (0..self.feeds.len()).map(FeedId).collect()
+    }
+    pub(crate) fn socket_epoch(&self, socket: SocketId) -> Option<Epoch> {
+        self.feeds
+            .iter()
+            .find_map(|f| f.epoch.filter(|e| e.socket == socket))
+    }
+    pub(crate) fn has_batches(&self, feed: FeedId) -> bool {
+        self.feeds
+            .get(feed.0)
+            .is_some_and(|f| !f.interests.queue.is_empty())
+    }
+    pub(crate) fn ready(&self, epoch: Epoch) -> bool {
+        self.feeds
+            .get(epoch.feed.0)
+            .is_some_and(|f| f.epoch == Some(epoch) && f.phase == Phase::Ready)
+    }
+    pub(crate) fn stop_feed(&mut self, feed: FeedId) -> Option<Retirement> {
+        let f = self.feeds.get_mut(feed.0)?;
+        f.stopped = true;
+        f.phase = Phase::Quarantined;
+        f.authenticated = false;
+        f.interests.queue.clear();
+        f.interests.released.clear();
+        self.retire(feed)
+    }
+    pub(crate) fn stop_all(&mut self) -> Vec<Retirement> {
+        let feeds = self.feeds();
+        for f in &mut self.feeds {
+            f.stopped = true;
+        }
+        feeds
+            .into_iter()
+            .filter_map(|feed| self.retire(feed))
+            .collect()
     }
     pub(crate) fn register(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
         policy.validate()?;
@@ -338,8 +441,8 @@ impl Lifecycle {
             return Admission::Denied;
         };
         let f = &self.feeds[index];
-        if matches!(ingress, Ingress::Open) && f.phase != Phase::Connecting
-            || matches!(ingress, Ingress::Message)
+        if matches!(ingress, Ingress::Open | Ingress::Connect) && f.phase != Phase::Connecting
+            || matches!(ingress, Ingress::Message | Ingress::Send)
                 && !matches!(f.phase, Phase::Authenticating | Phase::Ready)
         {
             return Admission::Denied;
@@ -511,6 +614,34 @@ impl Lifecycle {
         &mut self,
         feed: FeedId,
         interests: Vec<Interest>,
+        encode: impl FnMut(
+            bool,
+            &[Interest],
+            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+        ) -> Result<(), SocketError>,
+    ) -> Result<u64, SocketError> {
+        self.replace_with_repair(feed, interests, &[], encode)
+    }
+    pub(crate) fn repair_interests(
+        &mut self,
+        feed: FeedId,
+        keys: &[String],
+        encode: impl FnMut(
+            bool,
+            &[Interest],
+            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+        ) -> Result<(), SocketError>,
+    ) -> Result<u64, SocketError> {
+        if keys.len() > MAX_INTERESTS {
+            return Err(SocketError::Capacity);
+        }
+        self.replace_with_repair(feed, self.desired(feed)?, keys, encode)
+    }
+    fn replace_with_repair(
+        &mut self,
+        feed: FeedId,
+        interests: Vec<Interest>,
+        repair: &[String],
         mut encode: impl FnMut(
             bool,
             &[Interest],
@@ -581,6 +712,7 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?;
         let available_queue = MAX_QUEUED_BYTES
             .checked_sub(other_queue)
+            .and_then(|n| n.checked_sub(self.external_queue_bytes))
             .ok_or(SocketError::Capacity)?;
         let revision = f
             .interests
@@ -588,16 +720,20 @@ impl Lifecycle {
             .checked_add(1)
             .ok_or(SocketError::Capacity)?;
         let desired: BTreeMap<_, _> = interests.into_iter().map(|i| (i.key.clone(), i)).collect();
+        let forced: BTreeSet<_> = repair.iter().collect();
+        if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
+            return Err(SocketError::InvalidInterest);
+        }
         let removed: Vec<_> = f
             .interests
             .released
             .values()
-            .filter(|i| desired.get(&i.key) != Some(i))
+            .filter(|i| desired.get(&i.key) != Some(i) || forced.contains(&i.key))
             .cloned()
             .collect();
         let added: Vec<_> = desired
             .values()
-            .filter(|i| f.interests.released.get(&i.key) != Some(i))
+            .filter(|i| f.interests.released.get(&i.key) != Some(i) || forced.contains(&i.key))
             .cloned()
             .collect();
         let mut queue = VecDeque::new();

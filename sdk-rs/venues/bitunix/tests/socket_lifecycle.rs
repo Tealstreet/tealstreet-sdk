@@ -85,7 +85,7 @@ fn reconnect(e: &mut TestEngine, timer: TimerId, at: f64, feed: &str, recover: b
                 ..
             } => {
                 assert_eq!(context.feed, feed);
-                assert_eq!(context.recover, recover);
+                assert_eq!(context.recover, recover, "{feed} reconnect at {at}");
                 Some(*socket)
             }
             _ => None,
@@ -106,9 +106,12 @@ fn timers(actions: &[Action]) -> Vec<(TimerId, f64)> {
 
 #[test]
 fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
-    let (mut e, sockets) = ready();
-    let mut now = 1.0;
-    for (feed, mut socket) in sockets {
+    // Isolate each feed: serially advancing another feed through eight retries
+    // would leave this feed beyond its idle deadline before its first close.
+    for index in 0..6 {
+        let (mut e, sockets) = ready();
+        let (feed, mut socket) = sockets[index].clone();
+        let mut now = 1.0;
         for attempt in 0..8 {
             let nominal = (1000.0 * 2f64.powi(attempt)).min(30_000.0);
             let (timer, delay) = retry(&mut e, socket, now);
@@ -151,7 +154,6 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             (750.0..=1000.0).contains(&delay),
             "stable {feed} reset: {delay}"
         );
-        now += 1.0;
     }
 }
 
@@ -538,5 +540,92 @@ fn managed_expired_private_idle_cannot_be_rescued_by_late_pong() {
         e.health().last_private_message_ms,
         last,
         "expired traffic is not health"
+    );
+}
+
+#[test]
+fn public_native_frames_keep_argument_order_and_ping_between_first_and_paced_batches() {
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
+    e.start(0.);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let rows=(0..21).map(|i|format!(r#"{{"symbol":"T{i}USDT","base":"T{i}","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}}"#)).collect::<Vec<_>>().join(",");
+    e.handle(
+        0.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &format!(r#"{{"code":0,"data":[{rows}]}}"#),
+            },
+        },
+    );
+    let ticker = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/tickers") => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0.,Event::HttpResponse{request:ticker.id,response:Response{status:200,headers:"",body:r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"#}});
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                context: Some(c),
+                ..
+            } if c.feed == "ticker:0" => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0., Event::WsOpened { socket });
+    let initial: Vec<_> = e.drain_actions().collect();
+    let frames = initial
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if *s == socket => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let args = (0..20)
+        .map(|i| format!(r#"{{"symbol":"T{i}USDT","ch":"ticker"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let expected = format!(r#"{{"op":"subscribe","args":[{args}]}}"#);
+    assert_eq!(frames, vec![expected.as_str(), r#"{"ping":0}"#]);
+    let timer = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 250. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(249., Event::PollScaleChanged { scale: 1. });
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a,Action::WsSend{socket:s,..}if s==socket))
+    );
+    e.handle(250., Event::TimerFired { timer });
+    let paced = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if s == socket => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paced,
+        vec![r#"{"op":"subscribe","args":[{"symbol":"T20USDT","ch":"ticker"}]}"#]
     );
 }

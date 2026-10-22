@@ -378,3 +378,14 @@ partial healthy peers and failed/stale/lookup nonpublication. Financial progress
 is separate from Store display, terminal IDs and execution-ID retention. Native
 bounded retention and missing-endpoint ambiguity remain documented; this is not
 new live/provenance evidence or closure of Orderly/reporting fan-out.
+
+## Draft Engine socket lifecycle references
+
+OKX and Bitunix adopt one Engine registry/driver for epoch admission, typed auth,
+shared Supervisor deadlines/backoff, transactional complete interests, replay,
+retirement and required Store invalidation. Native codecs retain venue payloads
+and role policies. Original runtime controls pin retired open/close rejection
+and expiry-before-late-pong; shared controls cover bounded queues, health,
+retry revocation, signed-output retirement and transactional same-interest book
+repair. This is a draft two-family adoption, gated on separate physical-ID
+widening and final CI/replay proof; other families remain open.
