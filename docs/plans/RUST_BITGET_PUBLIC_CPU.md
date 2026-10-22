@@ -63,13 +63,13 @@ The one authorized paired diagnostic replay is complete. In 39,454 WS rows,
 material candidate on this tape. The independent stripped-WASM attribution
 confirms public envelope/ticker visitors plus shared JSON number/string scanning
 as hot work. Inclusive profile samples overlap and are not additive; local
-profiled TS/Rust steady CPU412.884/385.182ms are diagnostic, not gate evidence.
-The current Bitget venue crate is already opt-level3; repeating that override is
-ineffective. Baseline matching CI WASM is1044199bytes.
+profiled TS/Rust steady CPU 412.884/385.182 ms are diagnostic, not gate evidence.
+The current Bitget venue crate is already opt-level 3; repeating that override is
+ineffective. Baseline matching CI WASM is 1,044,199 bytes.
 
 First bounded experiment: in build.sh family_args, append exactly
 --config 'profile.release.package.serde_json.opt-level=3'
-when normalized family==bitget. It applies to Bitget and BitgetUSDC standalone
+when normalized family == bitget. It applies to Bitget and BitgetUSDC standalone
 family builds, including --families, after current shared z selection. It does
 not change other family argument lists, combined or native profiles, venue
 source, engine numerical semantics, wasm-opt flags, or any workload/threshold.

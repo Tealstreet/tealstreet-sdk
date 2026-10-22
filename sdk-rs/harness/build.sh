@@ -33,6 +33,10 @@ family_args() {
   # shared z repeatedly missed public CPU gates on unrelated changes.
   # Combined is measured separately; keep every other family's selection.
   if [[ $family != woo && $family != kucoinspot && $family != asterdex ]]; then build_args+=("${wasm_profile_args[@]}"); fi
+  if [[ $family == bitget ]]; then
+    # CI experiment: restore JSON decoder throughput for the ticker-heavy family.
+    build_args+=(--config 'profile.release.package.serde_json.opt-level=3')
+  fi
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
