@@ -359,3 +359,14 @@ facts publish only after whole-page admission and final success; no native
 HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
 is an owned gap, with no new paging algorithm. Income remains the prior slice;
 other families and caller/deployment proof remain open.
+
+## KuCoin Spot cumulative fallback adoption
+
+The native Spot fallback now uses the engine execution helper rather than
+emitting a cumulative amount directly. Original-source fixtures reproduce prefix
+overdelivery; the staged-seed and native-identity controls preserve direct last
+quantities, selected-field presence, binary precision, late/terminal delivery,
+partial healthy peers and failed/stale/lookup nonpublication. Financial progress
+is separate from Store display, terminal IDs and execution-ID retention. Native
+bounded retention and missing-endpoint ambiguity remain documented; this is not
+new live/provenance evidence or closure of Orderly/reporting fan-out.

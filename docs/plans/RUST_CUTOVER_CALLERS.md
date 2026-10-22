@@ -3765,3 +3765,15 @@ values come from exact prepared work, owned public identity and its receipt;
 HTTP does not inherit WS metadata or fixed ids even when query bytes coincide.
 Production routing never imports a TS venue class. Wire-comparison tests retain
 the legacy WS methods only as independent test references.
+
+## KuCoin Spot fallback Fill amounts
+
+KuCoin Spot matches without `matchSize` now deliver only the new suffix of
+`filledSize` beyond an admitted native bootstrap/execution prefix. Previously
+those rows emitted the whole cumulative amount again. Consumers of the Rust
+FILLS stream must accumulate these incremental amounts without applying a second
+cumulative subtraction. The wire shape, IDs (including absent public Fill ID),
+side, direct `matchSize` quantities and late distinct-execution behavior remain.
+The native20,000-order prefix retention is bounded; an authoritative last with
+no cumulative endpoint cannot establish its overlap with a later fallback.
+No caller deployment, TS removal or live evidence claim is bundled.

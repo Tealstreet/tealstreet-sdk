@@ -1085,3 +1085,16 @@ Store rows. At final current, non-lookup commit, only candidates whose identitie
 are admitted by the SnapshotBuilder may seed previously unseen IDs. A failed
 later page or revision mismatch discards all staged seeds. This keeps display
 observations and retained rejected copies out of execution authority.
+
+KuCoin implementation checkpoint: existing engine Cursor now prepares direct
+last/fallback reports; raw REST seed candidates retain provenance until accepted
+current nonlookup commit. Independent source/adversarial reviews found no source
+blocker and required additional lifecycle/identity tests, which are included.
+The final19-fixture cumulative suite was run against the exact original source
+with finally/restore:13 assertion REDs expose the same prefix-overdelivery defect,
+6 compatibility controls pass. Original source SHA256 is
+`3c9993f80b66bb4e7265fbae892a857caf900e827fa66306f244b8840f664e47`.
+The corrected78-test Spot suite and bounded FIFO unit control pass; the broader
+focused engine/KuCoin/Binance run passed919 tests, including the final78 Spot
+controls. Strict all-target Clippy/fmt and root44 typecheck/28 lint pass.
+Full current-head CI and authenticated post-sort replay evidence remain pending.
