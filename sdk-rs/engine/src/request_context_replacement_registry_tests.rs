@@ -361,6 +361,8 @@ impl crate::Venue for PhysicalReplacement {
             WriteResult::Rejected(VenueError::new("native batch refusal")),
         )
         .unwrap();
+        cx.command_error_context(&root, "native batch refused; replacing with singles")
+            .unwrap();
         self.children = cx
             .http_replacement_contexts(&root, &[physical_policy(), physical_policy()])
             .unwrap();
@@ -471,10 +473,22 @@ fn replacement_real_handoff_revokes_parent_but_retains_exact_expired_root_comple
         },
     );
     assert_eq!(engine.venue().callbacks, 1);
-    assert!(!engine.drain_actions().any(|action| matches!(
+    let after: Vec<_> = engine.drain_actions().collect();
+    assert!(!after.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
     )));
+    assert_eq!(
+        after
+            .iter()
+            .filter(|action| matches!(action,
+                Action::Notice(Notice::CommandError { command: 7, message })
+                    if message == "native batch refused; replacing with singles"
+            ))
+            .count(),
+        1,
+        "the original batch diagnostic survives exactly once"
+    );
     // New unrelated work cleans the expired root handle. The very SAME root
     // was both original logical authority and the replaced physical parent.
     let mut cx = Cx {
