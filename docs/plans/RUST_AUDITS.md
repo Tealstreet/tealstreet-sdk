@@ -839,6 +839,14 @@ Remaining resilience and completeness findings are independent of request parity
   actual query command before completion. A native 2,000-row regression checks
   retained financial rows, Warn ownership/order and Error-only delivery.
 
+- Owned-history follow-up: ~~later actual page/stage failure discards accepted
+  history, and inclusive stalls/caps reject the entire accumulated read~~.
+  Existing CursorHistory now owns staged admission, completion, page budget,
+  stage restart and rolling-retention gaps. Actual first/zero-eligible failure
+  rejects typed; later loss retains only admitted output with one owned gap.
+  Native inclusive progress, output mapping/limits and lookup/spot behavior
+  remain. Cross-family fan-out, managed completion and B11 runtime proof stay open.
+
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3

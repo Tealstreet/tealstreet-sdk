@@ -347,10 +347,12 @@ fn full_overlap_page_is_incomplete_instead_of_an_empty_success() {
     let r = read(&mut e);
     let repeated = format!("[{}]", vec![fill(1); 2000].join(","));
     reply(&mut e, &r, 200, &repeated);
-    assert!(
-        e.drain_actions()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-    );
+    // Superseded strict-failure contract: admitted rows now survive with owned
+    // incompleteness; this must still never become an empty complete result.
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let rows = owned_partial(&actions, 1);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "1");
 }
 #[test]
 fn concurrent_heavy_reads_reserve_response_weight_before_dispatch() {
@@ -378,4 +380,464 @@ fn concurrent_heavy_reads_reserve_response_weight_before_dispatch() {
         requests <= 8,
         "must reserve the 120-weight maximum per heavy response"
     );
+}
+
+fn owned_fills_query(symbol: Option<&str>) -> Query {
+    Query::Fills {
+        symbol: symbol.map(str::to_owned),
+        order_id: None,
+        from_ms: Some(1.0),
+        to_ms: Some(5000.0),
+        limit: Some(500),
+    }
+}
+fn owned_partial(actions: &[Action], command: u32) -> Value {
+    assert!(
+        !actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: c, .. }) if *c == command
+        )),
+        "accepted pages must survive a later failure"
+    );
+    let markers: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+                    && event.fields.contains(&(
+                        "command",
+                        safe_cex_engine::Value::Num(f64::from(command)),
+                    )) =>
+            {
+                Some((i, event))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 1, "one marker belongs to this query");
+    assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
+    let done: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::CommandDone { command: c, result }) if *c == command => {
+                Some((i, result))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(done.len(), 1);
+    assert!(markers[0].0 < done[0].0);
+    serde_json::from_str(done[0].1).unwrap()
+}
+fn owned_first_failure(actions: &[Action], command: u32) {
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert!(!actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { command: c, .. }) if *c == command)
+    ));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
+#[test]
+fn owned_history_first_and_zero_eligible_failures_reject_typed() {
+    for filtered in [false, true] {
+        let (mut e, _) = ready("disabled");
+        query(&mut e, owned_fills_query(filtered.then_some("ETH-PERP")));
+        let mut request = read(&mut e);
+        if filtered {
+            reply(&mut e, &request, 200, &format!("[{}]", fill(1)));
+            request = read(&mut e);
+        }
+        reply(&mut e, &request, 503, "unavailable");
+        owned_first_failure(&e.drain_actions().collect::<Vec<_>>(), 1);
+    }
+}
+#[test]
+fn owned_history_later_failures_keep_only_validated_pages() {
+    for terminal in ["http", "malformed", "stream"] {
+        let (mut e, _) = ready("disabled");
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let before_orders = e.store().orders().to_vec();
+        let before_positions = e.store().positions().to_vec();
+        query(&mut e, owned_fills_query(None));
+        let request = read(&mut e);
+        reply(&mut e, &request, 200, &format!("[{}]", fill(1)));
+        let request = read(&mut e);
+        match terminal {
+            "http" => reply(&mut e, &request, 503, "unavailable"),
+            "malformed" => reply(&mut e, &request, 200, &format!("[{},{{}}]", fill(2))),
+            _ => {
+                e.handle(
+                    1000.0,
+                    Event::HttpStart {
+                        request: request.id,
+                        status: 200,
+                        headers: "",
+                    },
+                );
+                let prefix = format!("[{},", fill(2));
+                e.handle(
+                    1000.0,
+                    Event::HttpChunk {
+                        request: request.id,
+                        data: prefix.as_bytes(),
+                    },
+                );
+                e.handle(
+                    1000.0,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "lost partial page",
+                    },
+                );
+            }
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let rows = owned_partial(&actions, 1);
+        assert_eq!(rows.as_array().unwrap().len(), 1, "{terminal}");
+        assert_eq!(rows[0]["id"], "1", "failed-page prefix must not leak");
+        assert_eq!(e.store().orders(), before_orders);
+        assert_eq!(e.store().positions(), before_positions);
+    }
+}
+#[test]
+fn owned_history_income_retains_fills_when_funding_fails() {
+    let (mut e, _) = ready("disabled");
+    e.set_log_level(safe_cex_engine::Level::Error);
+    query(
+        &mut e,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1.0),
+            to_ms: Some(5000.0),
+            limit: None,
+        },
+    );
+    let request = read(&mut e);
+    reply(&mut e, &request, 200, &format!("[{}]", fill(1)));
+    let request = read(&mut e);
+    reply(&mut e, &request, 200, "[]");
+    let funding = read(&mut e);
+    assert_eq!(kind(&funding), "userFunding");
+    reply(&mut e, &funding, 503, "unavailable");
+    let rows = owned_partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert!(rows.as_array().unwrap().iter().all(|r| r["tradeId"] == "1"));
+}
+#[test]
+fn owned_history_concurrent_markers_never_cross_queries() {
+    let (mut e, _) = ready("disabled");
+    e.set_log_level(safe_cex_engine::Level::Error);
+    let mut pending = Vec::new();
+    for command in [11, 12] {
+        e.handle(
+            5000.0,
+            Event::Command(Command::Query {
+                command,
+                query: owned_fills_query(None),
+            }),
+        );
+        let request = read(&mut e);
+        reply(
+            &mut e,
+            &request,
+            200,
+            &format!("[{}]", fill(u64::from(command))),
+        );
+        pending.push((command, read(&mut e)));
+    }
+    let mut actions = Vec::new();
+    for (command, request) in pending.into_iter().rev() {
+        reply(&mut e, &request, 503, "unavailable");
+        actions.extend(e.drain_actions());
+        assert_eq!(
+            owned_partial(&actions, command)[0]["id"],
+            command.to_string()
+        );
+    }
+}
+#[test]
+fn owned_history_full_inclusive_stall_preserves_accepted_rows() {
+    let (mut e, _) = ready("disabled");
+    e.set_log_level(safe_cex_engine::Level::Error);
+    query(&mut e, owned_fills_query(None));
+    let request = read(&mut e);
+    reply(&mut e, &request, 200, &format!("[{}]", fill(1)));
+    let request = read(&mut e);
+    reply(
+        &mut e,
+        &request,
+        200,
+        &format!("[{}]", vec![fill(1); 2000].join(",")),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let rows = owned_partial(&actions, 1);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+#[test]
+fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
+    for positive_pages in [199_u32, 200] {
+        let (mut e, _) = ready("disabled");
+        e.set_log_level(safe_cex_engine::Level::Error);
+        query(&mut e, owned_fills_query(None));
+        let mut request = read(&mut e);
+        for page in 1..=positive_pages {
+            let body = format!("[{}]", fill(u64::from(page)));
+            e.handle(
+                f64::from(page) * 60_000.0,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            if page == 200 {
+                break;
+            }
+            request = read(&mut e);
+            let sent: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                sent["startTime"], 1000,
+                "same-time native identities must advance without changing inclusive bound"
+            );
+        }
+        if positive_pages == 199 {
+            reply(&mut e, &request, 200, "[]");
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+            let data = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(serde_json::from_str::<Vec<Value>>(data).unwrap().len(), 199);
+        } else {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(owned_partial(&actions, 1).as_array().unwrap().len(), 200);
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        }
+    }
+}
+
+#[test]
+fn owned_history_zero_income_rows_cannot_authorize_partial_recovery() {
+    for kind in [None, Some("REALIZED_PNL")] {
+        let (mut e, _) = ready("disabled");
+        query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: kind.map(str::to_owned),
+                from_ms: Some(1.0),
+                to_ms: Some(5000.0),
+                limit: None,
+            },
+        );
+        let request = read(&mut e);
+        let zero = fill(1)
+            .replace("\"closedPnl\":\"2\"", "\"closedPnl\":\"0\"")
+            .replace("\"fee\":\"-0.01\"", "\"fee\":\"0\"");
+        reply(&mut e, &request, 200, &format!("[{zero}]"));
+        let request = read(&mut e);
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["startTime"], 1000);
+        if kind.is_none() {
+            reply(&mut e, &request, 200, "[]");
+            let funding = read(&mut e);
+            assert_eq!(support::kind(&funding), "userFunding");
+            reply(&mut e, &funding, 503, "unavailable");
+        } else {
+            reply(&mut e, &request, 503, "unavailable");
+        }
+        owned_first_failure(&e.drain_actions().collect::<Vec<_>>(), 1);
+    }
+}
+#[test]
+fn owned_history_income_keeps_the_first_gap_through_funding_failure() {
+    let (mut e, _) = ready("disabled");
+    e.set_log_level(safe_cex_engine::Level::Error);
+    query(
+        &mut e,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1.0),
+            to_ms: Some(5000.0),
+            limit: None,
+        },
+    );
+    let mut request = read(&mut e);
+    for page in 1..=200_u32 {
+        let body = format!("[{}]", fill(u64::from(page)));
+        e.handle(
+            f64::from(page) * 60_000.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        request = read(&mut e);
+        assert_eq!(
+            kind(&request),
+            if page == 200 {
+                "userFunding"
+            } else {
+                "userFillsByTime"
+            }
+        );
+    }
+    reply(&mut e, &request, 503, "later funding failure");
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(owned_partial(&actions, 1).as_array().unwrap().len(), 400);
+    let message = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event.message.as_str())
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        message.contains("page cap"),
+        "the original gap must survive a later error: {message}"
+    );
+}
+#[test]
+fn owned_history_order_transition_fold_precedes_filters_and_keeps_first_equal_rank() {
+    let (mut e, _) = ready("disabled");
+    query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: Some("BTC-PERP".into()),
+            from_ms: Some(1500.0),
+            to_ms: Some(5000.0),
+            limit: None,
+        },
+    );
+    let request = read(&mut e);
+    let row = |coin: &str, created: u64| {
+        format!(
+            r#"{{"order":{{"coin":"{coin}","oid":9,"side":"B","limitPx":"90","origSz":"2","sz":"0","orderType":"Limit","timestamp":{created}}},"status":"filled","statusTimestamp":2500}}"#
+        )
+    };
+    reply(
+        &mut e,
+        &request,
+        200,
+        &format!("[{},{}]", row("ETH", 1000), row("BTC", 2000)),
+    );
+    let rows = result(&mut e);
+    assert!(
+        rows.as_array().unwrap().is_empty(),
+        "equal time and rank keep the first transition before symbol/time filters"
+    );
+}
+
+#[test]
+fn owned_history_zero_income_page_still_advances_to_later_eligible_rows() {
+    let (mut e, _) = ready("disabled");
+    query(
+        &mut e,
+        Query::Income {
+            symbol: None,
+            kind: Some("REALIZED_PNL".into()),
+            from_ms: Some(1.0),
+            to_ms: Some(5000.0),
+            limit: None,
+        },
+    );
+    let request = read(&mut e);
+    let zero = fill(1)
+        .replace("\"closedPnl\":\"2\"", "\"closedPnl\":\"0\"")
+        .replace("\"fee\":\"-0.01\"", "\"fee\":\"0\"");
+    reply(&mut e, &request, 200, &format!("[{zero}]"));
+    let request = read(&mut e);
+    reply(&mut e, &request, 200, &format!("[{}]", fill(2)));
+    let request = read(&mut e);
+    reply(&mut e, &request, 200, "[]");
+    let rows = result(&mut e);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["tradeId"], "2");
+    assert_eq!(rows[0]["income"], 2.0);
+}
+#[test]
+fn owned_history_full_inclusive_gap_survives_both_funding_outcomes() {
+    for funding_fails in [false, true] {
+        let (mut e, _) = ready("disabled");
+        e.set_log_level(safe_cex_engine::Level::Error);
+        query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(1.0),
+                to_ms: Some(5000.0),
+                limit: None,
+            },
+        );
+        let request = read(&mut e);
+        reply(&mut e, &request, 200, &format!("[{}]", fill(1)));
+        let request = read(&mut e);
+        reply(
+            &mut e,
+            &request,
+            200,
+            &format!("[{}]", vec![fill(1); 2000].join(",")),
+        );
+        let funding = read(&mut e);
+        assert_eq!(kind(&funding), "userFunding");
+        if funding_fails {
+            reply(&mut e, &funding, 503, "later funding failure");
+        } else {
+            reply(
+                &mut e,
+                &funding,
+                200,
+                r#"[{"time":2000,"hash":"fund","delta":{"coin":"BTC","usdc":"-0.2"}}]"#,
+            );
+            let final_probe = read(&mut e);
+            reply(&mut e, &final_probe, 200, "[]");
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let rows = owned_partial(&actions, 1);
+        assert_eq!(
+            rows.as_array().unwrap().len(),
+            if funding_fails { 2 } else { 3 }
+        );
+        let event = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(event.message.contains("full inclusive page"));
+    }
 }
