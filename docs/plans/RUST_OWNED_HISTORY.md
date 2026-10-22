@@ -750,3 +750,23 @@ budget policy plus native fact mapping, not another venue-local history core.
 Focused engine/WEEX/Binance and shared-history references, strict Clippy/fmt/bans/
 links, exact-head CI/replay and actual predecessor proof before the separate
 guard/merge. No NX writes, B11 closure or deployed-runtime claim.
+
+
+Independent WEEX plan review: feasible, with validated atomic coverage-admission
+APIs on the shared owners. Validate active/finished/poisoned state and range
+row/fact alignment before recording a gap or accepting the page; preserve
+RangeWalk.failed() as an admitted native coverage fact. Lifetime cap reuses
+RangeWalk.requests, with no second counter: only request N+1 is stopped, while
+natural Finished after exactly N remains complete and pause resumption cannot
+step/charge twice. Single-page includes equal bounds and preserves its original
+rows without range filtering/dedupe. A valid empty page advertising a cursor may
+succeed incomplete; a failed page with zero accepted rows must reject. Final
+encoding returns Result, replacing the income expect. Terminal completion removes
+read state and clears retained delay/deferred continuation.
+
+The existing native-backed fixtures/incomplete-query-event.json producer currently
+pins a first-failure marker. Replace that producer with accepted-page/later-failure
+command-1 success under the new contract; regenerate only its exact event and
+adjust linked host/worker test message assertions if pinned. No host runtime or
+protocol edit. Small engine tests cover exact/over budget, lifecycle misuse and
+first-cause retention; existing native lifetime cap covers 10,000 selections.
