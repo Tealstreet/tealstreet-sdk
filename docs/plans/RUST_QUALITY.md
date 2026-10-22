@@ -368,6 +368,17 @@ and actual native-bound restrictions; concurrent owners and Error-only logging
 stay isolated. Saturation intentionally continues USDC with an owned gap; no
 per-venue completeness emitter or positive deployed-runtime claim is introduced.
 
+## KuCoin Spot cumulative fallback adoption
+
+The native Spot fallback now uses the engine execution helper rather than
+emitting a cumulative amount directly. Original-source fixtures reproduce prefix
+overdelivery; the staged-seed and native-identity controls preserve direct last
+quantities, selected-field presence, binary precision, late/terminal delivery,
+partial healthy peers and failed/stale/lookup nonpublication. Financial progress
+is separate from Store display, terminal IDs and execution-ID retention. Native
+bounded retention and missing-endpoint ambiguity remain documented; this is not
+new live/provenance evidence or closure of Orderly/reporting fan-out.
+
 
 GRVT general histories now use one shared CursorHistory/Completion for output
 admission, cursor progress and command-owned coverage. A reusable engine page
