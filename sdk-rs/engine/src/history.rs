@@ -1,8 +1,33 @@
-//! Command-owned history completion. Venues supply rows and endpoint facts;
-//! this path owns semantic completeness and its ordering before the result.
+//! History coverage: command owners bind query completion, while background
+//! account diagnostics have an explicit scope and never claim a query owner.
 use crate::log::code;
 use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stall, Step};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
+
+/// Missing coverage in automatic account reconciliation, not a user query.
+/// Severity is an engine policy; venues report the native coverage fact.
+#[derive(Clone, Copy, Debug)]
+pub enum BackgroundCoverage {
+    Incomplete,
+    Exhausted,
+}
+
+impl BackgroundCoverage {
+    /// No command or caller-provided fields: an automatic reconciliation cannot
+    /// mark whichever unrelated history query happens to be awaiting a response.
+    pub fn report<P>(self, cx: &mut Cx<'_, P>, message: impl Into<String>) {
+        let level = match self {
+            Self::Incomplete => Level::Warn,
+            Self::Exhausted => Level::Error,
+        };
+        cx.event(
+            level,
+            code::HISTORY_INCOMPLETE,
+            message,
+            vec![("scope", Value::Str("account/background".into()))],
+        );
+    }
+}
 
 /// One query owner, retained across all pages and composite stages. Consuming
 /// completion prevents finishing this owner twice; legacy `Cx` APIs still exist
