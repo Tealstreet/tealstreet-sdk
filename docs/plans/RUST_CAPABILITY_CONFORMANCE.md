@@ -121,3 +121,20 @@ mode sends CancelSymbolOrders (empty symbol only for native mode). These belong
 in ingress checks even though their decoder variants are not feature-gated.
 The additional regression selects these from the actual enum values; it adds no
 venue expectation table or production change.
+
+
+## Current landing integration
+
+Actual #1756 `5f6488c7664` is integrated, including the Bybit dispatch signer,
+all queued owned-history slices and the current shipped-family build policy.
+The enum-backed account/cancel-all follow-up `525251fa548` is retained. Every
+unowned tree entry equals this actual landing; the effective scope remains the
+ten conformance workflow, harness, native-fixture and plan/index paths.
+
+All 18 focused controls and all 1,132 harness tests pass after integration.
+The native registry fixture passes against current construction/signing APIs.
+Fresh CI must still prove all combined/standalone aliases and the isolated MEXC
+feature mutant; current source-bound replay/package proof is required before
+merge. Earlier CI and artifact evidence is historical. No production command,
+capability or caller contract changes; other commands' valid-state positive
+handler coverage remains an explicit follow-on.
