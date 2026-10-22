@@ -838,7 +838,7 @@ Preserve native filters, absolute quantity/fee normalization, timestamp units,
 large native IDs, normal/algo order mapping, first-wins symbol|id dedupe across
 windows/endpoints, stable descending fill/order sort and original public-trade
 order/duplicates. Keep native limit clamps (fills/orders1..100, trades1..1000),
-page0, seven-/90-day windows, endpoint sequence, 100ms continuation pacing,
+page0, seven-/90-day windows, immediate endpoint/window continuation,
 shared-pause timing, partial/absent bounds, and no new final truncation. Preserve
 existing handling of endpoint continuation metadata unless an independent plan
 review finds a concrete completeness hole needing an explicit shared gap fact;
@@ -861,3 +861,14 @@ Expected own paths after the exact stack: WEEX history.rs/tests/history.rs and
 only native-backed fixture/host-worker TEST adjustments if required; existing
 AUDITS/QUALITY/CUTOVER_CALLERS/OWNED_HISTORY notes. No engine, signing, dispatch,
 account/financial reducer, metadata, release-admission or scheduler source edits.
+
+
+Independent WEEX list plan review: feasible with no new core API. List
+continuations are immediate; only income uses 100ms pacing. Preserve that exact
+timing and pause-only List.delay. Keep the ratio-budget admission alongside
+shared window-count bounds (they differ near the limit). Explicit
+allAlgoOrders.hasMore:true is a concrete existing omission: admit valid rows
+with an owned gap while keeping the endpoint queue unchanged; absent/false is
+complete and explicitly malformed metadata rejects whole-page admission. No
+new pagination or retries. Cover empty advertised-more responses, malformed
+metadata, public duplicates, immediate/pause continuation and budget boundaries.
