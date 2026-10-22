@@ -233,3 +233,21 @@ alone does not wire the engine's final claim or migrate any venue.
 Send-group configuration defines a fixed gap floor. Individual releases can
 extend the following gap (MEXC currently uses 450 ms or 1500 ms by job); the
 next request cannot weaken the gap recorded by the preceding physical handoff.
+
+Logical context issuance uses the engine's existing checked identity allocator,
+separate from HTTP method or arrival order. A private, nonserialized issuer
+identity rejects a handle from another engine even when both local counters
+match. Context issuance validates policy before committing owner/leg metadata;
+it queues no HTTP, timer, lease or pacing reservation. Command completion retires
+its generation. Expired abandoned owners must release bounded registry capacity,
+and explicit logical completion releases successful background/page-join contexts
+without waiting for their original deadline. Do not retire a logical handle on
+each physical page response. Physical-attempt registration still independently
+checks native retry evidence; validating a retry context alone authorizes no send.
+
+The next executor checkpoint must gate every response entry before auth and
+streaming reducers. Reserve signing/action dependency sequence at creation so
+reversed route readiness cannot reorder dependent HTTP/WS work; independent HTTP
+releases need no new total order. Native actor final readiness check, engine
+claim and prepared API handoff execute synchronously in that order. The registry
+and prepared native transport checkpoints alone do not migrate production HTTP.

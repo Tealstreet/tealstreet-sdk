@@ -856,6 +856,9 @@ struct PendingHttp<P> {
     auth: Option<ReadAuth>,
 }
 
+#[path = "request_context_registry.rs"]
+mod request_context_registry;
+
 fn observe_account_auth<V: Venue>(
     venue: &V,
     pending: &PendingHttp<V::Pending>,
@@ -1051,6 +1054,7 @@ impl Polls {
 }
 
 struct Io<P> {
+    request_contexts: request_context_registry::ContextRegistry,
     entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
@@ -1094,6 +1098,7 @@ struct Io<P> {
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
+            request_contexts: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
             order_locks: crate::order_locks::OrderLocks::default(),
@@ -1671,6 +1676,7 @@ impl<P> Cx<'_, P> {
 
     /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
     pub fn done(&mut self, command: CommandId, result: String) {
+        self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
             self.io.order_locks.finish(command, false);
@@ -1718,6 +1724,7 @@ impl<P> Cx<'_, P> {
     // Out of line so the hundreds of venue call sites share one body (wasm size budget).
     #[inline(never)]
     fn fail_with(&mut self, command: CommandId, error: VenueError) {
+        self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
             self.io.order_locks.finish(command, true);

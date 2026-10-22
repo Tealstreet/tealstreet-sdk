@@ -42,6 +42,23 @@ pub enum RetryEvidence {
     DefinitiveRefusal,
 }
 
+/// A venue declares semantics; the engine assigns ownership generations, leg
+/// and attempt identities and captures the original raw deadline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Policy {
+    pub operation: Operation,
+    pub credential: Option<Credential>,
+    pub timeout_ms: u32,
+    pub pacing: Option<Pacing>,
+    pub retry: RetryPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Command(CommandId),
+    Background,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credential {
     pub slot: CredentialSlot,
@@ -57,6 +74,7 @@ pub struct Pacing {
 /// Immutable across physical retries of a logical leg.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
+    issuer: Option<std::sync::Arc<()>>,
     owner: Owner,
     leg: u64,
     operation: Operation,
@@ -99,6 +117,7 @@ impl Context {
             return Err(Error::Invalid);
         }
         Ok(Self {
+            issuer: None,
             owner,
             leg,
             operation,
@@ -111,6 +130,14 @@ impl Context {
 
     pub fn owner(&self) -> Owner {
         self.owner
+    }
+    pub(crate) fn bind_issuer(&mut self, issuer: &std::sync::Arc<()>) {
+        self.issuer = Some(issuer.clone());
+    }
+    pub(crate) fn issued_by(&self, issuer: &std::sync::Arc<()>) -> bool {
+        self.issuer
+            .as_ref()
+            .is_some_and(|own| std::sync::Arc::ptr_eq(own, issuer))
     }
     pub fn leg(&self) -> u64 {
         self.leg
