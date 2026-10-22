@@ -69,3 +69,8 @@ pub fn seeded_entropy(seed: u64) -> crate::entropy::Entropy {
 pub fn seeded_engine<V: Venue>(venue: V) -> Engine<V> {
     Engine::new(venue, Some(seeded_entropy(0x7365_6564_6564_4944))).unwrap()
 }
+
+/// Permanently exhaust the order-read admission domain for lifecycle controls.
+pub fn exhaust_order_snapshots(store: &mut crate::Store) {
+    store.exhaust_order_snapshots_for_test();
+}
