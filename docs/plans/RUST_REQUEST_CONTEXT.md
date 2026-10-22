@@ -1023,3 +1023,17 @@ unrelated balance/ticker siblings during unchanged total waits; no original
 assertion, native target row, endpoint or clock deadline is weakened. History,
 session-token writes and Bybit remain separately tracked, so this checkpoint is
 not whole-PR readiness or complete raw replay proof.
+
+Owner scope correction (2026-10-22): land #1741 with shared core and the Binance
+reference once proven; ordinary Bybit adoption moves to the immediate next PR,
+after shared replacement-group/supersession and known-partial-effects facts are
+engine-tested. A definitively refused batch replaced by individual requests
+needs a recovered parent join; partial cancellations with effects but no IDs
+need a typed fact that is neither Accepted, retry-safe Rejected nor invented
+Unknown. Native gateway/malformed success cannot patch Store optimistically.
+Hyro stays legacy/inventoried with no whole-Bybit claim; shared multi-owner
+observer fanout and reconciliation-proven retry are first follow-ups and hard
+cutover blockers. Preserve generation-bound preflight/delay roots and typed
+native retry evidence in that plan. Binance history/session-token sites stay
+explicitly legacy under the existing bridge-empty cutover gate; shared managed
+Completion remains history-lane work. No additional reference fanout in #1741.
