@@ -735,3 +735,14 @@ Paradex/Binance plus history reference tests, strict Clippy/fmt and independent
 plan/correctness/adversarial review; architecture gate must state this reuses the
 shared engine owner rather than adding per-venue policy. Integrate actual shared
 dependencies before final CI/proof, then normal queue and separate guard/merge.
+
+
+Paradex plan-audit refinements: permit only narrow `Pending::History` arms in
+lib.rs preparation/JWT-queue failure and signing-failure dispatch to invoke the
+strict owner rejection path; actual HTTP/stream failures keep recoverable-page
+routing. Never classify these by error-message text. Existing `raw_rows` is a
+query-accumulated count, not reset per page: preserve its fills-fallback trigger
+(empty raw traversal, not a final empty page after earlier raw rows). Early found
+lookup and fallback must admit and terminate the validated stage before owner
+finish/restart. Preserve open-lookup stage-budget transition as a nondefinitive
+proof boundary, without introducing a new warning or a second paging counter.
