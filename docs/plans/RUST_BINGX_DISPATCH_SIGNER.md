@@ -177,3 +177,60 @@ adding real managed release/provider tests. The legacy request inventory must
 shrink, with every unrelated entry unchanged. Hosted admission stays disabled.
 Metadata #1747 consumes the actual family recipe/context seam after this port;
 WEEX is the next family ahead of the remaining HMAC queue.
+
+## Managed rebuild audit and session disposition
+
+Read-only actual-API audit confirms ordinary financial requests can use the
+shared core after actual #1780. Preserve the native selected identity even for
+quote REST: Markets/Daily/Premium/Candles sign secondary GET when credentials
+exist; public history Trades explicitly stays unsigned. Pending labels alone
+must not determine credential authority. Identity has a separate builder and
+must migrate too. Stream shapes and every existing account/metadata revision,
+settings generation and publication fence remain native codec constraints.
+
+The owner explicitly permits exactly one temporary `sign_http` staging site for
+listen-key POST/keepalive PUT only, using primary opaque API-key Present (no
+HMAC/timestamp). Keep the existing two HTTP transport sites for that session
+boundary; do not generalize this adapter to financial or quote signing. Record
+the exact final fingerprint in the PR body and independently verify that the
+whole legacy inventory still shrinks. Remove that allowance when uufub4's shared
+background-session Context lands. Sessions are not financial Reads or invented
+commands; the shared extension owns their eventual retry/expiry/token boundary.
+Move actual-engine test drivers out of production source, preserving assertions.
+
+Before production wiring, map each logical command/query and physical leg's
+Context lifetime explicitly. Account snapshots have background Read authority;
+metadata's two reads retain command generation, history owns pages/windows, and
+trading retains command-wide evidence with bounded child legs. A multi-page
+query must not silently inherit a first-page 20s budget, and an issued leg must
+never gain a fresh deadline on signature retry. Mint/retire page authority at
+the actual bounded page boundary and preserve any enclosing command bound.
+Bring an unrepresentable native lifetime to the owner rather than fabricate it.
+
+Managed mutation release requires `capture_http_reconciliation`; use bounded
+nonsecret correlation or the landed reference's bounded empty capture/no-op late
+codec where ordinary fenced reconciliation owns healing. Never bypass default
+capture refusal. Record each validated native ACK/refusal with `http_write_result`
+before cancellation/settings patches, native job advance, sibling issue or
+Context retirement. Separate validation from the current parsing closure's
+mutations enough to preserve that ordering. Shared RequestContext owns aggregate
+outcomes; native planning and accepted-ID correlation do not become a new ledger.
+No late ACK may resurrect a command or acquire financial authority from advisory
+fields. Actual release, empty-ID effects, partial replace and stale/refused
+recording controls are mandatory.
+
+One native signature retry remains eligible only for a definitive native refusal.
+The old broad message-text or code-100001 matcher cannot by itself prove a
+financial write was rejected: gateway 408/5xx and unclassified/malformed ACKs
+remain Unknown and must not authorize another mutation. Record the exact rejected
+attempt before `http_retry_context(DefinitiveRefusal)`, preserve immutable intent,
+client IDs, slot, stream shape and the original raw leg deadline. Provider/route
+refusal is not venue auth evidence and never enters native signature retry.
+
+Required regressions cover actual managed route/sign/release, original-deadline
+expiry, definitive refusal versus text/gateway unknown, released-first sibling
+failure in both orders, empty-ID settings/cancel effects, capture refusal versus
+functional release, strict later-page history/provider refusal, stale account
+reservation/session cleanup, both metadata-stage failures, and the temporary
+session-only fingerprint. Hosted admission remains disabled. Architecture gate:
+codec/owner adapters consume shared provider/lifecycle/evidence APIs only.
