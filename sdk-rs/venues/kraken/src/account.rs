@@ -2,7 +2,7 @@
 use crate::{Kraken, Pending, wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
     Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
@@ -18,7 +18,6 @@ use std::{
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
-const SKIP_LOG_LIMIT: usize = 4_096;
 /// Recent execution deduplication and terminal fences survive reconnects without
 /// retaining every historical identity for the lifetime of the engine.
 #[derive(Default)]
@@ -112,39 +111,24 @@ pub struct Account {
     snapshot_settings_revision: u64,
     snapshot_positions_seen: bool,
     read_failures: u32,
-    unlisted_logged: HashSet<String>,
+    unlisted_logged: RowReports<String>,
     /// `order:`/`position:` + identity (empty when unreadable) of REST skips already logged.
-    skip_logged: HashMap<String, bool>,
+    skip_logged: RowReports<String>,
 }
 impl Account {
     /// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
     fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
-        if self.skip_logged.len() >= SKIP_LOG_LIMIT {
-            self.skip_logged.clear();
-        }
-        let error = level == Level::Error;
-        if self
-            .skip_logged
-            .get(&key)
-            .is_some_and(|&errored| errored || !error)
-        {
-            return;
-        }
-        self.skip_logged.insert(key, error);
-        cx.notice(level, code::ROW_SKIPPED, message);
+        self.skip_logged.report(cx, key, level, message);
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
     fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
-        if clean {
-            self.skip_logged.retain(|key, _| !key.starts_with(prefix));
-        } else {
-            for id in ids {
-                self.skip_logged.remove(&format!("{prefix}{id}"));
-            }
-        }
+        self.skip_logged
+            .rearm_namespace(prefix, clean, ids.iter().map(String::as_str));
     }
     pub(crate) fn new() -> Self {
         Self {
+            skip_logged: RowReports::new(RowRepeat::ErrorUpgrade),
+            unlisted_logged: RowReports::unbounded(RowRepeat::Once),
             supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 15_000.0,
                 ping_interval_ms: Some(10_000.0),
@@ -594,13 +578,10 @@ impl Kraken {
     /// market skipped as malformed (`skipped_markets`) holds the snapshot.
     fn account_unlisted(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
         for symbol in symbols {
-            if self.account.unlisted_logged.insert(symbol.clone()) {
-                cx.notice(
-                    Level::Warn,
-                    code::ROW_SKIPPED,
-                    format!("Kraken {symbol} is not a listed market; its rows are skipped"),
-                );
-            }
+            let message = format!("Kraken {symbol} is not a listed market; its rows are skipped");
+            self.account
+                .unlisted_logged
+                .report(cx, symbol, Level::Warn, message);
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
