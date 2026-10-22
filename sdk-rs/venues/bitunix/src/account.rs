@@ -3,6 +3,7 @@ use crate::sign::{self, Params};
 use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
+use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -36,71 +37,6 @@ fn decode_symbol_settings(response: &Response<'_>) -> Option<SymbolSettings> {
         .and_then(|body| serde_json::from_str::<SymbolSettings>(body).ok())
         .filter(|settings| settings.leverage.is_finite() && settings.leverage > 0.0)
 }
-#[derive(Default)]
-pub struct RejectedOrderRows {
-    keys: HashSet<String>,
-    unidentified: bool,
-    overflowed: bool,
-}
-impl RejectedOrderRows {
-    fn merge(&mut self, other: Self) {
-        self.unidentified |= other.unidentified;
-        self.overflowed |= other.overflowed;
-        for key in other.keys {
-            self.reject(Some(key));
-        }
-    }
-    fn reject(&mut self, key: Option<String>) {
-        match key {
-            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
-                self.keys.insert(key);
-            }
-            Some(_) => {
-                self.unidentified = true;
-                self.overflowed = true;
-            }
-            None => self.unidentified = true,
-        }
-    }
-    fn holds(&self, raw: &str) -> bool {
-        self.unidentified || self.keys.contains(raw)
-    }
-    fn conflicts(&self, raw: &str) -> bool {
-        self.overflowed || self.keys.contains(raw)
-    }
-    pub(crate) fn any(&self) -> bool {
-        self.unidentified || !self.keys.is_empty()
-    }
-}
-#[derive(Default)]
-pub struct RejectedPositionRows {
-    keys: HashSet<String>,
-    unidentified: bool,
-    overflowed: bool,
-}
-impl RejectedPositionRows {
-    fn reject(&mut self, key: Option<String>) {
-        match key {
-            Some(key) if self.keys.len() < 4096 || self.keys.contains(&key) => {
-                self.keys.insert(key);
-            }
-            Some(_) => {
-                self.unidentified = true;
-                self.overflowed = true;
-            }
-            None => self.unidentified = true,
-        }
-    }
-    fn holds(&self, symbol: &str) -> bool {
-        self.unidentified || self.keys.contains(symbol)
-    }
-    fn conflicts(&self, symbol: &str) -> bool {
-        self.overflowed || self.keys.contains(symbol)
-    }
-    pub(crate) fn any(&self) -> bool {
-        self.unidentified || !self.keys.is_empty()
-    }
-}
 pub struct PositionAdmission {
     id: String,
     symbol: String,
@@ -116,26 +52,26 @@ pub struct Read {
     pub serial: u64,
     pub after: Option<u32>,
     pub positions: Vec<Position>,
-    pub position_rejected: RejectedPositionRows,
+    pub position_rejected: RowAdmission<String>,
     pub position_admitted: Vec<PositionAdmission>,
     pub identities: Vec<(String, String)>,
     pub orders: Vec<Order>,
-    pub order_rejected: RejectedOrderRows,
+    pub order_rejected: RowAdmission<String>,
     pub order_accepted: HashSet<String>,
-    pub order_newer: RejectedOrderRows,
+    pub order_newer: RowAdmission<String>,
     pub native: Vec<(String, NativeOrder)>,
     pub invalid: bool,
     pub baselines: Vec<(String, (f64, f64))>,
 }
 impl Read {
     pub(crate) fn partial_orders(&self) -> bool {
-        self.order_rejected.any() || self.order_newer.overflowed
+        self.order_rejected.any() || self.order_newer.overflowed()
     }
     fn reject_order(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
-        self.order_rejected.reject(order_identity(item));
-        cx.notice(
+        self.order_rejected.skip(
+            cx,
+            order_identity(item),
             Level::Warn,
-            code::ROW_SKIPPED,
             "Bitunix malformed order row; keeping its cached native family",
         );
     }
@@ -174,10 +110,10 @@ impl Read {
             .ok()
             .filter(|v| !v.symbol.is_empty())
             .map(|v| v.symbol.into_owned());
-        self.position_rejected.reject(key);
-        cx.notice(
+        self.position_rejected.skip(
+            cx,
+            key,
             Level::Warn,
-            code::ROW_SKIPPED,
             "Bitunix malformed position row; keeping its cached scope",
         );
     }
@@ -202,8 +138,8 @@ pub struct OrderReadProgress {
     issued: f64,
     timer: TimerId,
     dirty: bool,
-    newer: RejectedOrderRows,
-    rejected: RejectedOrderRows,
+    newer: RowAdmission<String>,
+    rejected: RowAdmission<String>,
 }
 #[derive(Default)]
 pub struct AccountState {
@@ -671,9 +607,9 @@ impl BitunixFutures {
             && let Some(progress) = self.account.order_reads[slot].as_mut()
             && progress.serial == read.serial
         {
-            read.order_newer.merge(std::mem::take(&mut progress.newer));
+            read.order_newer.extend(std::mem::take(&mut progress.newer));
             read.order_rejected
-                .merge(std::mem::take(&mut progress.rejected));
+                .extend(std::mem::take(&mut progress.rejected));
         }
     }
     fn observe_order(
@@ -692,9 +628,9 @@ impl BitunixFutures {
             } else {
                 &mut progress.rejected
             };
-            let previous = coverage.overflowed;
+            let previous = coverage.overflowed();
             coverage.reject(raw.clone());
-            overflow |= !previous && coverage.overflowed;
+            overflow |= !previous && coverage.overflowed();
         }
         if let Some(read) = self.account.initial_orders[slot].as_mut() {
             let coverage = if newer {
@@ -702,9 +638,9 @@ impl BitunixFutures {
             } else {
                 &mut read.order_rejected
             };
-            let previous = coverage.overflowed;
+            let previous = coverage.overflowed();
             coverage.reject(raw);
-            overflow |= !previous && coverage.overflowed;
+            overflow |= !previous && coverage.overflowed();
         }
         if overflow {
             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "Bitunix order overlap coverage exceeded its bound; keeping cached endpoint families");
@@ -1512,9 +1448,9 @@ impl BitunixFutures {
                 self.observe_order(cx, m.ch == "tpsl", None, false);
                 self.account.generations[2] += 1;
                 self.debounce(cx, Axis::Orders);
-                cx.notice(
+                row_skipped(
+                    cx,
                     Level::Warn,
-                    code::ROW_SKIPPED,
                     "Bitunix order event missing data; keeping cached families",
                 );
             }
@@ -1555,11 +1491,7 @@ impl BitunixFutures {
                         self.observe_order(cx, tpsl, order_identity(text), false);
                         self.account.generations[2] += 1;
                         self.debounce(cx, Axis::Orders);
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            "Bitunix order event missing identity",
-                        );
+                        row_skipped(cx, Level::Warn, "Bitunix order event missing identity");
                         return;
                     }
                     let emitted = self.account.filled.get(raw).map_or(0.0, |v| v.0);
@@ -1836,9 +1768,9 @@ impl BitunixFutures {
                     }
                 } else {
                     self.observe_order(cx, tpsl, order_identity(text), false);
-                    cx.notice(
+                    row_skipped(
+                        cx,
                         Level::Warn,
-                        code::ROW_SKIPPED,
                         "Bitunix malformed order event; keeping its cached native family",
                     );
                 }
