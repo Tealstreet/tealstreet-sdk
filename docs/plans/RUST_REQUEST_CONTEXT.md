@@ -1205,3 +1205,21 @@ shape; all original clocks, sends, gaps and assertions are unchanged. These are
 local/debug checks, not rebuilt-WASM replay or timing/size evidence. Independent
 integration/factory/ratchet reviews CLEAN, architecture No. Fresh CI, complete
 authenticated raw/gate/package proof and separate guard remain required.
+
+CI746817 integration follow-up plan: the actual combined-WASM SDK/server checks
+pass, but MCP's recorded Binance public ticker test times out before its first
+managed catalogue request. Its shared offline consumer fixture still implements
+only request(), so managed startup correctly refuses that custom transport.
+Add the existing test-only prepareRecordedHttp hook to this fixture factory,
+keeping all MCP/CLI quote-change, socket, polling, clocks and timeout assertions
+verbatim. This is the same canned-route compatibility change already applied to
+SDK fixtures, with no production fallback or protocol change. Re-run MCP type/
+lint/unit tests and the existing helper controls locally; fresh CI must prove the
+actual recorded ticker test. The failed run has no Binance replay ledger/package
+and cannot serve as final proof. No timing retry or assertion relaxation.
+
+MCP fixture follow-up local verification: MCP35 tests and existing preparation
+helper3 tests pass; MCP typecheck/lint pass. Independent review confirms only
+the shared hook wiring changed and the real ticker test's assertions, timeout,
+clock/socket/polling logic remain exact. Architecture gate No (reuse of the
+shared test transport seam). Fresh rebuilt-WASM CI still owns recovery proof.
