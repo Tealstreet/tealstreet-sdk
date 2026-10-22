@@ -323,3 +323,29 @@ retirement, and invalid recipe versus capacity errors with continuations intact.
 Independent checkpoint review is clean. Mutations, central command aggregation,
 late-write reconciliation, SDK proxy/HOW preparation, venue references and the
 legacy-call ratchet still remain before PR readiness.
+
+### SDK route and HOW preparation phase
+
+Extend the existing SDK HTTP wrapper and HOW adapter with prepare/bind/dispatch;
+legacy requests call that same executor. Finish proxy authorization and tunnel
+connection/authentication before readiness. Bind exact signed bytes only after
+readiness, validate/serialize before claim, then invoke fetch or raw WS send
+synchronously without an authorization/logging/route await. Preserve the original
+HTTP timeout through every stage and streaming response; cancel only the owned
+request/listener, never a peer's shared tunnel.
+
+The SDK maps explicit public/primary/secondary intent to its configured route,
+including POST reads, with no credential-header fabrication or method inference.
+Add optional non-secret credential intent to provider route selection; legacy
+callers retain their existing policy until migration. Missing custom prepare
+support fails typed Unsupported. Capture tunnel connection/auth generation at
+readiness, reject a changed generation before claim, and avoid immediate reprepare
+loops for unusable transports. The direct runtime receives an explicitly resolved
+route; it never independently substitutes primary routing for a secondary read.
+
+Regressions cover parked authorization/no HTTP, cold HOW/no rpc.http before claim,
+reconnect/auth changes, signed-byte preservation at bind, synchronous handoff,
+original deadlines, cancellation/disposal while parked or reading, and concurrent
+peer requests. Existing transport/Workers/legacy tests remain intact. Files are
+SDK transport/tealstreet types and tests, existing HOW adapter/socket and docs;
+no venue signing/remote wire or scheduler algorithm changes.
