@@ -14,10 +14,15 @@ Old checkpoint54b72 evidence predates clock1722 and is not used.
    override Aster venue package to3. Retain historical Binance z when linked.
    Preserve all other27 family argument arrays and combined arguments exactly,
    plus wasm-opt -Oz. Audit expanded arrays without executing cargo.
-3. Baseline authentic current-landing/source-equivalent #1726 Rust39735053247,
-   final successful attempt2, frozen289a469c5c371207cebd3f69bad68c045109791e.
-   Validate actual merge tree/ancestors and source fingerprints before use.
-   Baseline follows signer, integer-stamp and clock1722 changes. No old proof.
+3. Final baseline: actual #1731
+   `06b321192a65562db61489b2cbcdcfe4fce5d055`, including actual #1729
+   `6e10b0e8a23dbb8d34f761e8199a83c6068fadb1`; fresh landing-push
+   Rust run `39738818151` builds that exact source tree. The green #1731 PR
+   head predates #1729 and is not whole-tree-equivalent to the actual merge.
+   Authenticate the push event/ref/head/job/archive, source fingerprint and
+   package hashes. #1726's 918473-byte baseline and the initial rollback run
+   are historical/provisional only. This experiment's final four-file delta
+   is measured against actual #1731, after both predecessors are real-integrated.
 4. CI owns release WASM, size and timing. Require complete3 Aster workloads:
    public1 correctness+9 performance per implementation, privatev1/v3 one each:
    24/24 full raw outputs,12 Rust; exact stable hashes within each mode,
