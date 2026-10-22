@@ -5,8 +5,10 @@ Owner: codex-mxb4mq. Base: actual Aster #1756
 Status: plan/API committed before implementation; shared core and both native
 references implemented, final CI/raw proof pending. Owner priority
 is this shared core with Binance and Bitunix references, before remaining
-cumulative fan-out and reporting. #1737 has the next landing slot; integrate its
-actual shared inputs before final proof. RequestContext and metadata owners
+cumulative fan-out and reporting. Actual #1737 is integrated through the owner-
+approved exact frozen #1757 stack; #1757 must actually land before this PR.
+Any predecessor head change requires real integration and fresh CI/proof.
+RequestContext and metadata owners
 review the API before implementation; their unmerged work is not claimed here.
 
 ## Problem and boundary
@@ -209,3 +211,30 @@ Architecture gate: YES, a cross-cutting concern handled in one engine primitive
 and Store admission entry, with two distinct native consumers. Metadata adoption,
 remaining venue snapshot fan-out and RequestContext safe late patches remain
 follow-ons. Final authenticated CI evidence and actual merge receipt are pending.
+
+## Final predecessor integration checkpoint
+
+Owner authorized exact-head stacking of reviewed #1757 after actual #1737.
+Porcelain merge `4fa76dd09e01` incorporates frozen #1757
+`74724d0e36b3206c37c9bca2acdec98edfe7810a`, which contains actual #1737
+`4c4df7c99dc52a5192f5c5ff24c64dd4653edda1`. Independent correctness and
+adversarial reviews verify the full 5,271-path tree, all incoming files, 19
+unchanged owned files and both patch sets in five shared files. Exactly 24 owned
+paths remain against that frozen predecessor, including the owner-approved
+historical public-prose secret-scan fingerprint; no rule/path bypass exists.
+Integrated engine/Binance/Bitunix: 899 native tests pass; touched strict Clippy,
+fmt/bans and root typecheck/lint pass (44 tasks, 31 cached; 28 tasks, 26 cached).
+These source checks do not certify an unmerged predecessor or final replay proof.
+
+Earlier diagnostic head `52b52375165` had full green CI. Its strict 976-output
+comparison retained all 488 Rust outputs unchanged, three documented TS-reference
+classes (ApeX/TxFlow multiplicity and WOO checkpoint-zero books), and an identical
+MEXC failure multiset with reversed list order. No comparison was normalized.
+For this PR's fresh final proof the owner explicitly accepts that MEXC ordering
+condition only when both raw TS and Rust canonical hashes are unchanged and the
+failure strings form an identical multiset; retain the strict unequal report.
+The four standing TS classes still require both complete pre-change variants
+independently authenticated. Anything else blocks. A separate small harness PR
+will sort failure lists deterministically AFTER this core lands. Fresh integrated
+head CI/proof, actual #1757 verification and the separate final guard/merge remain
+pending.
