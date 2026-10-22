@@ -55,6 +55,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Construction and capabilities | Retained plan/evidence | Changing engine construction, option validation or capability-driven runtime behavior. | [RUST_VENUE_OPTIONS.md](RUST_VENUE_OPTIONS.md) |
 | Credentialed evidence | Tooling / live evidence prerequisite | Planning approved live validation; scripted checks do not prove live private behavior. | [RUST_LIVE_GATE.md](RUST_LIVE_GATE.md) |
 | Credentialed evidence | Tooling / live evidence prerequisite | Credentialed lifecycle recording, approval, environment fences and cleanup. | [RUST_LIVE_SMOKE.md](RUST_LIVE_SMOKE.md) |
+| Credentials and attribution | Scoped production repair | Changing Hyperliquid fee-tier account/vault identity or role discovery. | [RUST_HYPERLIQUID_FEE_SUBJECT.md](RUST_HYPERLIQUID_FEE_SUBJECT.md) |
 | Credentials and attribution | Retained plan/evidence | Changing credential selection, auth evidence, identity or broker routing. | [RUST_AUTH_RESULTS.md](RUST_AUTH_RESULTS.md) |
 | Credentials and attribution | Retained plan/evidence | Changing credential selection, auth evidence, identity or broker routing. | [RUST_AUTH_RESULTS_SLICE_A.md](RUST_AUTH_RESULTS_SLICE_A.md) |
 | Credentials and attribution | Retained plan/evidence | Changing credential selection, auth evidence, identity or broker routing. | [RUST_AUTH_RESULTS_SLICE_B.md](RUST_AUTH_RESULTS_SLICE_B.md) |
