@@ -744,3 +744,24 @@ test('Workers obtains opaque signer refs and provider from deployment setup only
     assert.equal(calls[2], 'installed');
   } finally { object.leave(client); }
 });
+
+test('Workers releases managed local signer allocation after failed host construction', async () => {
+  let frees = 0;
+  const Object = createEngineObject({
+    accountToken: () => 'fixture-token',
+    loadEngine: async () => ({ WasmEngine: class {
+      requiresExternalSigner() { return true; }
+      free() { frees++; }
+    } }),
+  });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const messages = [];
+  const client = { send(message) { messages.push(message); } };
+  object.clients.add(client);
+  await object.receive(client, '{"op":"start","venue":"binance"}');
+  assert.equal(frees, 1);
+  assert.equal(object.host, undefined);
+  assert.ok(messages.some((message) => message.includes('Engine start failed')));
+  object.leave(client);
+  assert.equal(frees, 1);
+});

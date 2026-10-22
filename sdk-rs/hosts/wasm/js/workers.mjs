@@ -250,6 +250,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
         // A new start replaces any failure reported by an earlier engine lifetime.
         this.startupFailure = undefined;
         let host;
+        let engine;
         try {
           const { WasmEngine } = await loadEngine(message.venue);
           if (this.starting !== attempt || !this.clients.has(client)) return;
@@ -264,8 +265,9 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
           const raw = workersTransport();
           const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
           if (this.starting !== attempt || !this.clients.has(client)) return;
+          engine = new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...(signing ? { signing: signing.identities } : {}), ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders }));
           host = new EngineHost(
-            new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...(signing ? { signing: signing.identities } : {}), ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
+            engine,
             transport,
             {
               onFrame: (frame) => this.broadcast(frame),
@@ -287,7 +289,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
                 for (const optedIn of this.accountAuthClients) this.reply(optedIn, { op: 'accountAuth', ...result });
               },
             },
-            signing ? { signer: signing.signer } : {},
+            { ownsEngine: true, ...(signing ? { signer: signing.signer } : {}) },
           );
           if (this.starting !== attempt || !this.clients.has(client)) { host.dispose(); return; }
           this.host = host;
@@ -297,6 +299,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
           if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
         } catch {
           host?.dispose();
+          if (!host) { try { engine?.free?.(); } catch { /* Best-effort failed construction cleanup. */ } }
           if (this.host === host) this.host = undefined;
           this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine start failed' });
         } finally {

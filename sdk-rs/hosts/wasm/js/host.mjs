@@ -241,6 +241,7 @@ export class EngineHost {
     this.primitiveSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
+    this.ownsEngine = options.ownsEngine === true;
     this.transport = transport;
     this.handlers = handlers;
     this.sockets = new Map();
@@ -513,6 +514,12 @@ export class EngineHost {
     this.wsScratch = undefined;
     this.timers.clear();
     attempt(() => this.transport.dispose?.());
+    // Release provider-owned keys on normal disposal instead of retaining the
+    // wasm allocation (and an injected callback) until garbage collection.
+    this.signer = undefined;
+    const ownsEngine = this.ownsEngine;
+    this.ownsEngine = false;
+    if (ownsEngine) attempt(() => this.engine.free?.());
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */

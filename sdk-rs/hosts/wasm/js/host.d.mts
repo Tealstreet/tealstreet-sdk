@@ -242,6 +242,10 @@ export interface SignRequest {
 export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<number[][]> | number[][];
 
 export interface EngineHostOptions {
+  /** Transfer raw engine allocation ownership after successful construction.
+   * Defaults false; borrowed callers dispose the host, then free their engine.
+   * Trap cleanup is best effort. */
+  ownsEngine?: boolean;
   /** Overrides local signing before startup. Context is advisory, not an allowlist. */
   signer?: Signer;
   /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
@@ -331,6 +335,8 @@ export interface EngineConstruction {
 }
 
 export interface WasmEngineLike {
+  /** Optional native allocation cleanup; managed EngineHosts opt into ownership. */
+  free?(): void;
   /** Configure before startup; optional only for older/fake engines without injection. */
   setEntropy?(source: EntropyProvider): void;
   setSigningEntropy?(source: EntropyProvider): void;

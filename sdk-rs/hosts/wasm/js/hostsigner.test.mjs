@@ -83,3 +83,30 @@ test('opaque signing refs require the host provider before startup', () => {
   const host = new EngineHost({ ...engine, useExternalSigner() {} }, {}, {}, { signer: () => [] });
   host.dispose();
 });
+
+
+test('disposal releases the local-provider allocation and injected callback exactly once', () => {
+  let frees = 0;
+  const host = new EngineHost({ useExternalSigner() {}, free() { frees++; } }, {}, {}, { signer: () => [], ownsEngine: true });
+  assert.equal(typeof host.signer, 'function');
+  host.dispose();
+  host.dispose();
+  assert.equal(frees, 1);
+  assert.equal(host.signer, undefined);
+});
+
+
+test('borrowed engines keep caller ownership and owned trap cleanup frees once', () => {
+  for (const ownsEngine of [undefined, false, true]) {
+    let frees = 0;
+    let host;
+    const engine = {
+      start() { throw new WebAssembly.RuntimeError('unreachable'); },
+      free() { frees++; host.dispose(); },
+    };
+    host = new EngineHost(engine, { now: () => 1 }, {}, { ownsEngine });
+    host.start();
+    host.dispose();
+    assert.equal(frees, ownsEngine ? 1 : 0);
+  }
+});

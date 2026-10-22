@@ -892,34 +892,40 @@ export class RustEngineExchange extends BaseExchange {
       }),
       this.signerSetup,
     );
-    if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
-    // Set from the engine's record before startup: venues that take the host clock as-is get the synced one.
+    // Construction transfers allocation ownership only when EngineHost succeeds.
     let hostClock = false;
-    const host = new EngineHost(
-      engine,
-      { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
-      {
-        onFrame: this.receiveFrame,
-        onLog: this.receiveLog,
-        onEvent: this.receiveEvent,
-        onSocketChange: this.syncSocketHealthToStore,
-        onDead: this.receiveEngineFailure,
-        onCommandProgress: this.receiveCommandProgress,
-        onAccountAuth: this.receiveAccountAuth,
-        onDeactivate: () => {
-          this.noteAuthFailure();
-          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
-          for (const wake of this.startupWaiters) wake();
-          this.emitter.emit('deactivate');
+    let host: EngineHost;
+    try {
+      if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
+      host = new EngineHost(
+        engine,
+        { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
+        {
+          onFrame: this.receiveFrame,
+          onLog: this.receiveLog,
+          onEvent: this.receiveEvent,
+          onSocketChange: this.syncSocketHealthToStore,
+          onDead: this.receiveEngineFailure,
+          onCommandProgress: this.receiveCommandProgress,
+          onAccountAuth: this.receiveAccountAuth,
+          onDeactivate: () => {
+            this.noteAuthFailure();
+            this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
+            for (const wake of this.startupWaiters) wake();
+            this.emitter.emit('deactivate');
+          },
+          onStartupFailed: (detail) => {
+            // Keeps kind/venueCode so start() and validateAccount can branch on them.
+            this.startupFailure ??= new ExchangeError(detail.message, detail);
+            for (const wake of this.startupWaiters) wake();
+          },
         },
-        onStartupFailed: (detail) => {
-          // Keeps kind/venueCode so start() and validateAccount can branch on them.
-          this.startupFailure ??= new ExchangeError(detail.message, detail);
-          for (const wake of this.startupWaiters) wake();
-        },
-      },
-      { commandTimeoutMs: this.commandTimeoutMs },
-    );
+        { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true },
+      );
+    } catch (error) {
+      try { engine.free?.(); } catch { /* Keep the original construction error. */ }
+      throw error;
+    }
     try {
       const capabilities = host.capabilities();
       hostClock = capabilities.hostClock;

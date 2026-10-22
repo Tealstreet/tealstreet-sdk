@@ -83,7 +83,11 @@ independent deadlines, ordered completion, freshness rechecks and late-reply fen
 
 Native callers supply `Engine::set_signer`, `Host::with_signer`, or the trusted
 `FrameServer::add_venue_with_signer` registration. Raw JS hosts use
-`EngineHost(..., options: { signer })`; Workers deployments may supply
+`EngineHost(..., options: { signer })`; managed SDK/Workers hosts also transfer
+allocation ownership with `ownsEngine: true`, while raw borrowed callers retain
+their existing explicit `free()` responsibility. Disposal drops callbacks and
+owned local-provider allocations; freeing after a WASM trap is best effort.
+Workers deployments may supply
 `createSigner(state, env, venue) -> { signer, identities }`. Only refs enter
 `EngineOptions.signing`; the Workers command wire cannot supply provider callbacks.
 Unmigrated families reject these refs/providers rather than pretending to use them.

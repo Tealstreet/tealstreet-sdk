@@ -118,8 +118,8 @@ it('contains a trap, wakes failed startup, and keeps a sibling native account us
   const fail = new Set<WasmEngineLike>();
   // Keep real native objects and module initialization; intercept just the
   // entry boundary to reproduce a runtime trap deterministically.
-  const Wrapped = function (venue: string, options: string) {
-    const native = new module.WasmEngine(venue, options);
+  const Wrapped = function (venue: string, options: string, signerSetupJson?: string) {
+    const native = new module.WasmEngine(venue, options, signerSetupJson);
     engines.push(native);
     return new Proxy(native, {
       get(target, key) {
@@ -167,8 +167,8 @@ it('contains a trap, wakes failed startup, and keeps a sibling native account us
   setRustEngineTransport(() => startupInput.transport);
   setWasmEngineLoader(async () => ({
     WasmEngine: class extends Wrapped {
-      constructor(venue: string, options: string) {
-        super(venue, options);
+      constructor(venue: string, options: string, signerSetupJson?: string) {
+        super(venue, options, signerSetupJson);
         fail.add(engines.at(-1)!);
       }
     },
