@@ -303,3 +303,49 @@ variants, HTTP/native errors, missing/null/truncated lists, row decode, exact
 completion, typed route/provider refusal, duplicate callbacks and a retry parked
 until the original20s boundary. Metadata, writes and full inventory closure
 remain separate unfinished implementation phases.
+
+### Actual unsigned-header integration and paired metadata API audit
+
+Actual #1780 `02340e17712780fa526f4e07a029cd4e20fb00f5` is genuinely
+integrated at `812c9d0654a`. Both preservation reviews retain all 33 non-CALLERS
+owned blobs, the complete 5,281 unowned incoming entries and all shared engine
+header blobs. Caller content is the entire incoming document plus the own BingX
+append once. Construction adds only the authorized BingX dispatch flag. All 497
+BingX/Binance native targets, strict Clippy and fmt pass. Hosted admission stays
+off; this integration is not full-family readiness.
+
+The next metadata slice is the existing serial leverage/margin read, with its
+existing settings revision, symbol generation and pending-write publication
+fences unchanged. The planned adapter carries one engine-issued command Read
+root through both stages, and a separate 20s child per stage. The root bound is
+40s (two original 20s logical-leg bounds); a native signature retry retains its
+child's original deadline. No continuation mints a new command root. The root
+stays in the existing metadata pending record; the Signed wrapper owns the
+currently delivered child. Terminal success/failure uses root `done_context` or
+`fail_context`; numeric completion remains only before authority is created.
+Each child retires only after its logical stage and all attempts complete.
+
+API review with the shared owner found a true prerequisite. Actual #1783's
+parent API admits and fences a delivered child, but exposes no external
+prepublication read validator for the pair. The shared follow-on will provide
+`validate_read_http_delivery(root, leg)`: exact delivered-leg identity, live
+issued Read, matching original root owner/generation, and read-only completion
+authority before Store mutation. uufub4 owns this extension. Production metadata
+wiring waits for its actual pin or an explicitly authorized frozen stack; no
+venue validator, numeric fallback or unmerged API assumption is permitted.
+Original-RED controls can establish the actual builder's legacy transport while
+that shared API is completed.
+
+After the prerequisite, retain the existing account metadata codec, success
+bytes, current-rails fallback and all write/WS/read freshness fences. Validate
+root/child before any Store setting mutation or companion completion. Pass the
+same root into stage two and preserve each child's credential slot and immutable
+native query on retry. Strict failures in either stage, provider/route refusal,
+original deadlines, duplicate/late callbacks, stale settings and newer-query
+supersession need actual managed route/sign/bind/claim controls. Adapt existing
+fixtures without weakening their wire/state assertions. Existing history/session
+legacy ownership and its single temporary provider stage remain separate.
+
+Write adoption is still a subsequent audit/implementation slice. Consume the
+landed command journal and shared execution-group authority; do not reproduce a
+multi-leg ledger, outcome aggregator or bounded group lifecycle in BingX.
