@@ -1379,6 +1379,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
+Owned-list follow-on: ~~a later fill-window/algo failure discards already valid
+history~~ now returns accepted rows with shared command-owned incompleteness.
+Missing fill identities and explicit algo hasMore facts are admitted only after
+whole-response validation; the engine publishes coverage once before success.
+First/zero-accepted failure rejects typed, preparation remains strict notSent,
+and native mapping, sequencing, pause and dedupe are preserved. This completes
+WEEX general-history owner adoption, not all-family or B11/deployment closure.
+
 - ~~WEEX's five query-associated omissions~~ now flow through the shared income
   owner. First/zero-accepted failures reject typed without a coverage marker;
   later failures immediately retain only accepted pages with one command-owned

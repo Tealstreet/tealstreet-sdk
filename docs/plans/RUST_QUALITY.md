@@ -335,3 +335,12 @@ can publish one owned gap. First/zero-accepted failure rejects; later actual
 failure stops and retains accepted pages. Fills/order/public-trade lists and their
 remaining native completeness fact still need conversion; this is not universal
 history enforcement or B11/deployment closure.
+
+
+WEEX fills/orders/public-trade lists now adopt the existing CursorHistory owner
+across native windows and paired normal/algo reads. Shared owner dedupe and
+window generation replace native accepted-row/dedupe/window-loop state. Coverage
+facts publish only after whole-page admission and final success; no native
+HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
+is an owned gap, with no new paging algorithm. Income remains the prior slice;
+other families and caller/deployment proof remain open.

@@ -1101,3 +1101,104 @@ host/worker ownership tests passing through corepack. No host runtime/protocol,
 financial reducer, scheduler/release or signing edits. All remaining actual
 shared/build dependencies, exact-head CI/replay proof and owner hold/queue still
 apply before merge; no deployed caller completion claim.
+
+
+## WEEX follow-on: fills, orders and public-trade list completion
+
+Plan from owner-pinned actual `5743c485d44e348e3d29039c4ebe83f6a78f0186`,
+exact-head stacked on reviewed #1751 `f9753aa6bb2ce1a0c6e689f449c1ba833f9c6c26`
+under explicit owner authorization. The stack is needed for validated native
+omission admission through CursorHistory::advance_with_coverage; this follow-on
+adds no engine API. Keep #1748/#1750/#1751 watched and honor the #1746/#1728
+hold and owner queue. Integrate actual predecessors before final proof/guard.
+
+Replace WEEX Read::List's accepted Rows/vector and query-local dedupe set with
+one boxed engine CursorHistory<ListRow>, shared across every native fill window
+or paired normal/algo order read. Keep typed response-local Rows until the whole
+HTTP/root-or-orders-list/stream/row verdict succeeds, then use shared identity
+dedupe, stage rows and admit the single-page native stage. Advance/restart only
+through the owner; a pause resumes the selected native Fetch without advancing
+again. Keep Fetch descriptors as native endpoint/parameter facts; replace the
+hand-rolled bounded-window calculation with the existing engine paging::windows
+helper while retaining the exact current budget/admission and partial-bound
+contracts. Do not add venue-local cursor/page/request counters or resends.
+
+First/zero-accepted actual HTTP/native-response/transport/stream/list/row failure
+rejects typed without a success marker. A later actual failure returns accepted
+earlier windows/endpoints with one owner Warn before success, stopping the native
+queue; an invalid response's prefix is excluded. In particular, a good normal
+order read followed by failed algo orders now retains good normal rows with an
+owned gap instead of discarding the query. Synchronous signing preparation
+failure remains strict after accepted rows and gains Internal/notSent. Existing
+admission/keyless/no-I/O behavior stays unchanged. Multiplexed callbacks retain
+Internal rather than inventing Network classification.
+
+Missing fill IDs remain omitted without invented identities, after the existing
+symbol/order/time filters. Stage that coverage fact on Request until a whole
+valid response is admitted. Only then emit its once-per-query native Warn
+row.skipped(field id) and pass the omission to the shared owner; the engine emits
+one history.incomplete at successful finalization. No failed response may mark
+coverage or consume the valid-page diagnostic latch. A valid all-omitted page may
+succeed incomplete []; a later actual failure with no admitted rows still rejects.
+Retain the native empty-fill event text/fixture and translated host/worker owner
+proof, updating tests only for intentionally deferred publication/partial success.
+
+Preserve native filters, absolute quantity/fee normalization, timestamp units,
+large native IDs, normal/algo order mapping, first-wins symbol|id dedupe across
+windows/endpoints, stable descending fill/order sort and original public-trade
+order/duplicates. Keep native limit clamps (fills/orders1..100, trades1..1000),
+page0, seven-/90-day windows, immediate endpoint/window continuation,
+shared-pause timing, partial/absent bounds, and no new final truncation. Preserve
+existing handling of endpoint continuation metadata unless an independent plan
+review finds a concrete completeness hole needing an explicit shared gap fact;
+never invent another pagination algorithm. Income #1751 behavior remains exact.
+Terminal completion clears retained list state/timer so late work cannot resume.
+
+Before production edits, commit original-RED controls for typed first failure,
+accepted-only later fill-window and normal/algo recovery, zero-accepted rejection,
+failed-prefix exclusion, missing-list validation, concurrent owner isolation at
+Error-only logging, deferred omission publication, failed-page latch isolation,
+strict signing/pause and exact native shaping/request-sequence preservation.
+Preserve native-backed empty-fill fixture proof and update the deliberately old
+whole-query-rejection test. Review plan, correctness and adversarial gates must
+state this is existing engine owner adoption, not a per-venue paging/coverage
+implementation. Focused engine/WEEX/Binance plus shared-history reference tests,
+strict Clippy/fmt/bans/links, exact-head CI/replay and actual dependencies before
+separate guard/merge. No local WASM release/replay/timing sweep or NX writes.
+
+Expected own paths after the exact stack: WEEX history.rs/tests/history.rs and
+only native-backed fixture/host-worker TEST adjustments if required; existing
+AUDITS/QUALITY/CUTOVER_CALLERS/OWNED_HISTORY notes. No engine, signing, dispatch,
+account/financial reducer, metadata, release-admission or scheduler source edits.
+
+
+Independent WEEX list plan review: feasible with no new core API. List
+continuations are immediate; only income uses 100ms pacing. Preserve that exact
+timing and pause-only List.delay. Keep the ratio-budget admission alongside
+shared window-count bounds (they differ near the limit). Explicit
+allAlgoOrders.hasMore:true is a concrete existing omission: admit valid rows
+with an owned gap while keeping the endpoint queue unchanged; absent/false is
+complete and explicitly malformed metadata rejects whole-page admission. No
+new pagination or retries. Cover empty advertised-more responses, malformed
+metadata, public duplicates, immediate/pause continuation and budget boundaries.
+
+
+WEEX list implementation receipt: original31 controls pass and seven new behavior
+groups fail by assertion before source edits (regression-only f5d529491f8).
+Corrected38 history controls pass, and final39 add the legacy ratio boundary and
+complete paused normal/algo resumption. The native private preparation control
+revokes test setup between accepted normal rows and preparing algo orders;
+original source rejects without kind/outcome, corrected source rejects strictly
+Internal/notSent with no marker/partial/second request. The fixture lives in
+native test support, not a production setup holder, and adds no signer allowlist
+exception. Exact original-source RED/current restored-source GREEN are retained.
+Two unchanged native-backed empty-fill host/worker fixture tests pass.
+
+Independent plan/correctness/adversarial reviews are CLEAN. Focused engine/WEEX/
+Binance831 tests and strict Clippy pass before final test refinements; final
+WEEX tests/strict Clippy/fmt/bans/links run before freeze. Source needs no engine
+API and preserves income. The explicit owner authorization now permits exact
+preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f9ec,
+which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
+Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
+separate guard/merge remain required; no landing/deployment claim.
