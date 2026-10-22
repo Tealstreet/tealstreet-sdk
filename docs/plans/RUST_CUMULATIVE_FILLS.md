@@ -684,3 +684,25 @@ Actual provider seam #1731 was porcelain-integrated at1b590e62d702 before this
 verification; all seven incoming files are preserved. Remaining shared inputs,
 full CI, exact archived raw/package proof and final independent evidence review
 remain merge gates. No local release build or replay sweep was run.
+
+Phase 3 landed as #1736 at `288155e8d5be4e63ebcc77f4916514dd14e01df5`
+with all 43 applicable checks green and the expected PR-only browser skip.
+Independent evidence review verified all 112 full non-metric raw outputs
+(56 Rust), 32 stable groups, 11 unchanged ordered gate reports and four CI
+packages/12 hashes on exact tested-head fingerprints, without fallback.
+Actual frozen Aster prerequisite #1734 was verified before the fresh seven-file
+guard and separate merge. No healthy fixture, manifest or comparator change.
+
+### Phase 4: Kraken Spot execution preparation (plan; not implemented)
+
+Fresh branch `feat/rust-cumulative-krakenspot` starts from actual #1736 `288155e8d5be4e63ebcc77f4916514dd14e01df5`. Re-verify source and coordinate the whole Kraken signing family with its owner. This plan is committed before native tests or production edits. Architecture gate: YES, adopt the existing engine execution preparation path; do not add a second financial derivation helper, delivery ledger or new retention policy.
+
+Source hypothesis only: a live trade without `last_qty` computes its amount from the stored order's cumulative quantity. A nonpositive native price currently suppresses the Fill while committing the new order quantity. A corrected report at that same quantity may therefore lose eligibility. First add separate native original-source RED controls proving the lost correction and any poisoned timestamp/terminal state; no production-defect claim without those assertions. Exercise healthy siblings, explicit native execution IDs and both single-frame and same-batch corrections. Keep original source receipts.
+
+Use existing `Cursor::prepare`, `Report::Last` for explicitly supplied last quantity and `Report::Cumulative` with `CumulativePrice::Direct` otherwise, with native Binary arithmetic. Keep `last_price.or(avg_price).unwrap_or(order.price)` precedence. The existing average-price fallback is native compatibility policy, not a claimed interval-price oracle. Validate before staging native times, terminal/provenance, order rows, Fill queue or dedup effects; rejected rows go through the existing engine-backed admission path, preserving their stored copy and healthy peers. Quiet zero-growth/zero-quantity cases remain quiet.
+
+Preserve snapshot/history and nontrade lifecycle suppression, timestamp/cumulative regression fences, accepted-row order within a frame, explicit-last authority, execution-ID/fallback-key identity and 4096-entry dedup retention. A separately accepted `filled` lifecycle row may legitimately advance/terminate the order even if a trade is invalid; do not promise fallback recovery beyond that boundary. Any demonstrated need for a retained independent delivery anchor requires a separately reviewed seed/retention decision before implementation.
+
+After original RED: independent concrete integration/API review, minimal adapter adoption, native engine/Kraken/Binance tests and strict/fmt/bans/root checks, code/adversarial review, docs audit entries only for proven defects, then fresh exact-head full CI. Freeze every current Kraken Spot and Binance workload and compare all authenticated indexed raw outputs except top-level metrics, ordered gate status/failures/fixers, and exact matching CI packages/fingerprints without fallback. No fixture/allowance/comparator changes. Final evidence review, fresh separate guard, separate merge and actual-parent/tree/source-preservation report.
+
+Primary schema read 2026-10-22: https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/executions . Trade and filled are separate event types; cumulative quantity/value and native trade identity are distinct fields. Actual live recapture remains outside this offline financial slice.
