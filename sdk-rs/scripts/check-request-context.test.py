@@ -190,7 +190,7 @@ class RequestContextBan(unittest.TestCase):
             'venues/cryptocom/src/history.rs': (15, 10, '8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c', '0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6'),
             'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
         }
-        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs'}, set(ban.HISTORY_BOOTSTRAPS))
+        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs', 'venues/bingx/src/account.rs'}, set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
             with self.subTest(path=path):
                 old, landed = ban.HISTORY_BOOTSTRAPS[path]
@@ -311,6 +311,22 @@ class RequestContextBan(unittest.TestCase):
         reviewed = ban.git('show', '400e12b5e1258c53025990e7826f46cb3e3efdfb' + ':sdk-rs/' + path)
         self.assertEqual(dict(ban.fingerprints(original)), old)
         self.assertEqual(dict(ban.fingerprints(reviewed)), new)
+
+    def test_exact_metadata_bootstrap_and_weex_pruning_source_maps(self):
+        path = 'venues/bingx/src/account.rs'
+        old, new = ban.HISTORY_BOOTSTRAPS[path]
+        self.assertEqual((sum(old.values()), sum(new.values())), (21, 16))
+        self.assertEqual(hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest(), '20b2bfcffb3a7c883a3905b86831230c392741eb4b5e289f31b764fd9c2a04d4')
+        self.assertEqual(hashlib.sha256(json.dumps(new, sort_keys=True).encode()).hexdigest(), '40341a16e57a7dc18a5006378de88d5682e390e1a7a2ea83a4fdc27721796e62')
+        for path in ('venues/bingx/src/account.rs', 'venues/weex/src/lib.rs'):
+            original = ban.git('show', 'a3a89719d4079c97d56297bb4738fdc13c659ceb' + ':sdk-rs/' + path)
+            reviewed = ban.git('show', 'aeb317c256364d8e58a1b015564d434e49614bbf' + ':sdk-rs/' + path)
+            before, after = dict(ban.fingerprints(original)), dict(ban.fingerprints(reviewed))
+            if path == 'venues/bingx/src/account.rs':
+                self.assertEqual((before, after), ban.HISTORY_BOOTSTRAPS[path])
+            else:
+                self.assertEqual((sum(before.values()), sum(after.values())), (19, 15))
+                self.assertTrue(all(count <= before.get(digest, 0) for digest, count in after.items()))
 
 if __name__ == '__main__':
     unittest.main()

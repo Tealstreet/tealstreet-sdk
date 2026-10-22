@@ -296,3 +296,28 @@ join without deadline extension, per-leg denial and exact once-only terminal
 delivery. Publication freshness remains separate from observer/read liveness.
 No numeric managed completion, raw-secret signing recipe, public-credential
 placeholder or legacy-header compatibility path is introduced.
+
+## Exact legacy inventory checkpoint and remaining conversion
+
+The integrated source includes actual RequestContext #1741, common snapshot epoch
+#1759 and Hyperliquid history #1765. The complete native regression run passes
+1,238 tests; all 31 metadata controls, 40 SDK hook controls and strict all-target
+Clippy pass. Production private metadata requests remain on the explicit legacy
+bridge until the family signer migrations and shared observer-group authority
+land; the release controls above exercise unsigned shared-engine probes only.
+
+The legacy inventory prunes WEEX `lib.rs` from 19 to 15 sites. BingX `account.rs`
+shrinks from 21 to 16 under one exact owner-approved old/new map: three GET calls
+have re-expressed pending payloads, and one genuinely new `cx.fail(command, error)`
+reports metadata admission refusal before a request is issued. This last site is
+not described as a same-call rehash. The landed history Completion still calls
+numeric completion, and this legacy entry owns no Context; manufacturing a new
+HTTP Context solely to reject can itself fail capacity/state/time checks and
+cannot guarantee that refusal. The owner therefore approved the bounded map,
+with no new HTTP, signing recipe or site kind and no general exemption.
+
+**Required follow-up:** replace that pre-request numeric refusal with the shared
+observer-group completion authority when it lands, together with the joined
+metadata read conversion. The exact-map tests pin both source revisions and map
+hashes; existing controls reject regrowth, altered original maps, unrelated paths
+and attempts to override a newer pruned map. Every other inventory map is retained.
