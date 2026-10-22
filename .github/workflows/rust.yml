@@ -157,7 +157,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # Measurements never lengthen PR CI and carry no timing threshold. Every
+  # Measurements never lengthen PR CI and carry no timing-failure gate. Every
   # sample uses fresh Chrome/profile + DedicatedWorker, with same-run web bytes.
   browser:
     name: Rust / browser cold start
