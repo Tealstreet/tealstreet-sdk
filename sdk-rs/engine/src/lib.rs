@@ -53,6 +53,6 @@ pub use error::{
 };
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
-pub use store::Store;
+pub use store::{OrderSnapshotToken, Store};
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
