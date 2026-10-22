@@ -44,6 +44,9 @@ struct Driver {
     timers: Vec<(f64, TimerId)>,
     now: f64,
     result: Option<Result<String, String>>,
+    events: Vec<safe_cex_engine::log::LogEvent>,
+    completed: Vec<(u32, bool)>,
+    error: Option<safe_cex_engine::VenueError>,
 }
 impl Driver {
     fn new(private: bool, symbol: &str, cfm: bool) -> Self {
@@ -63,6 +66,9 @@ impl Driver {
             timers: vec![],
             now: NOW,
             result: None,
+            events: vec![],
+            completed: vec![],
+            error: None,
         }
     }
     fn query(&mut self, q: Query) {
@@ -84,9 +90,21 @@ impl Driver {
                 Action::Notice(Notice::CommandDone {
                     command: 77,
                     result,
-                }) => self.result = Some(Ok(result)),
+                }) => {
+                    self.completed.push((77, true));
+                    self.result = Some(Ok(result));
+                }
                 Action::Notice(Notice::CommandFailed { command: 77, error }) => {
-                    self.result = Some(Err(error.legacy_text()))
+                    self.completed.push((77, false));
+                    self.result = Some(Err(error.legacy_text()));
+                    self.error = Some(error)
+                }
+                Action::Notice(Notice::Event(event)) => self.events.push(event),
+                Action::Notice(Notice::CommandDone { command, .. }) => {
+                    self.completed.push((command, true))
+                }
+                Action::Notice(Notice::CommandFailed { command, .. }) => {
+                    self.completed.push((command, false))
                 }
                 _ => {}
             }
@@ -221,7 +239,7 @@ fn proof_token_failure_is_not_an_empty_ledger() {
     assert!(d.result().unwrap_err().contains("proof token"));
 }
 #[test]
-fn failed_second_page_returns_error_without_partial_success() {
+fn failed_second_page_returns_accepted_rows_with_owned_gap() {
     let mut d = Driver::new(true, "BTC-USD", false);
     d.query(fills(2));
     let r = d.request();
@@ -229,10 +247,10 @@ fn failed_second_page_returns_error_without_partial_success() {
     d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next"}}"#));
     let r = d.request();
     d.reply(r, 503, "unavailable");
-    assert!(d.result().is_err());
+    assert_partial(&mut d, &["a"]);
 }
 #[test]
-fn repeated_cursor_and_conflicting_execution_identity_reject() {
+fn repeated_cursor_and_conflicting_execution_identity_keep_prior_pages_only() {
     for conflict in [false, true] {
         let mut d = Driver::new(true, "BTC-USD", false);
         d.query(fills(2));
@@ -246,7 +264,7 @@ fn repeated_cursor_and_conflicting_execution_identity_reject() {
             a
         };
         d.reply(r, 200, &format!(r#"{{"fills":[{b}],"cursor":"same"}}"#));
-        assert!(d.result().is_err());
+        assert_partial(&mut d, &["a"]);
     }
 }
 #[derive(Deserialize)]
@@ -516,3 +534,212 @@ const PINNED: [&str; 4] = [
     "/api/v3/brokerage/orders/historical/batch?limit=5&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=BTC-USD&product_type=SPOT&start_date=2024-01-01T00%3A00%3A00.000Z&end_date=2024-01-01T00%3A00%3A01.001Z",
     "/api/v3/brokerage/orders/historical/batch?limit=5&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=BTC-USD&product_type=SPOT&start_date=2024-01-01T00%3A00%3A00.000Z&end_date=2024-01-01T00%3A00%3A01.001Z&cursor=o1",
 ];
+
+fn assert_partial(d: &mut Driver, expected: &[&str]) {
+    let rows: serde_json::Value = serde_json::from_str(&d.result().unwrap()).unwrap();
+    assert_eq!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let gaps: Vec<_> = d
+        .events
+        .iter()
+        .filter(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        .collect();
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        gaps[0].fields,
+        vec![("command", safe_cex_engine::Value::Num(77.0))]
+    );
+}
+
+#[test]
+fn first_history_failures_are_typed_and_do_not_emit_success_or_gap() {
+    for (status, body) in [
+        (503, "unavailable"),
+        (200, r#"{"fills":[{}]}"#),
+        (200, r#"{"error":"bad envelope"}"#),
+    ] {
+        let mut d = Driver::new(true, "BTC-USD", false);
+        d.query(fills(3));
+        let r = d.request();
+        d.reply(r, status, body);
+        assert!(d.result().is_err());
+        assert_eq!(
+            d.error.unwrap().kind,
+            Some(safe_cex_engine::ErrorKind::Internal)
+        );
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        );
+    }
+}
+
+#[test]
+fn later_failed_pages_never_publish_their_valid_prefix() {
+    for mode in 0..4 {
+        let mut d = Driver::new(true, "BTC-USD", false);
+        d.e.set_log_level(safe_cex_engine::Level::Error);
+        d.query(fills(4));
+        let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+        let r = d.request();
+        d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next"}}"#));
+        let b = fill("bad-prefix", "100", "1", false, "2024-01-01T00:00:01Z");
+        let r = d.request();
+        match mode {
+            0 => d.reply(r, 200, &format!(r#"{{"fills":[{b},{{}}],"cursor":""}}"#)),
+            1 => d.reply(r, 200, &format!(r#"{{"fills":[{b}],"cursor":null}}"#)),
+            2 => d.reply(r, 503, &format!(r#"{{"fills":[{b}],"cursor":""}}"#)),
+            _ => d.e.handle(
+                d.now,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "fixture transport failed",
+                },
+            ),
+        }
+        assert_partial(&mut d, &["a"]);
+        // The slot was removed, so the same external command can start again.
+        d.query(fills(1));
+        let r = d.request();
+        d.reply(r, 200, r#"{"fills":[],"cursor":""}"#);
+        assert_eq!(d.result().unwrap(), "[]");
+    }
+}
+
+#[test]
+fn filtered_or_empty_prior_pages_do_not_authorize_partial_success() {
+    for row in [
+        String::new(),
+        fill("old", "100", "1", false, "2023-12-31T23:59:00Z"),
+    ] {
+        let mut d = Driver::new(true, "BTC-USD", false);
+        d.query(history("BTC-USD"));
+        // Orders use has_next so even an empty, valid page may continue.
+        let r = d.request();
+        let body = if row.is_empty() {
+            r#"{"orders":[],"has_next":true,"cursor":"next"}"#.into()
+        } else {
+            format!(
+                r#"{{"orders":[{}],"has_next":true,"cursor":"next"}}"#,
+                order("BTC-USD", "0", "").replace("2024-01-01T00:00:00Z", "2023-12-31T23:59:00Z")
+            )
+        };
+        d.reply(r, 200, &body);
+        let r = d.request();
+        d.reply(r, 503, "bad page");
+        assert!(d.result().is_err());
+        assert_eq!(
+            d.error.unwrap().kind,
+            Some(safe_cex_engine::ErrorKind::Internal)
+        );
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        );
+    }
+}
+
+fn strict_later_preparation(signer_failure: bool) {
+    {
+        let mut d = Driver::new(true, "BTC-USD", false);
+        d.query(fills(3));
+        let r = d.request();
+        let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+        d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next"}}"#));
+        if signer_failure {
+            d.e.set_signing_entropy(Box::new(|_| Err("fixture signer refusal".into())))
+                .unwrap();
+            assert!(d.collect().is_empty());
+            d.timers.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (at, t) = d.timers.remove(0);
+            d.e.handle(at, Event::TimerFired { timer: t });
+        } else {
+            let r = d.request();
+            d.reply(r, 200, r#"{"fills":[],"proof_token_required":true}"#);
+        }
+        assert!(d.result().is_err());
+        assert_eq!(
+            d.error.as_ref().unwrap().kind,
+            Some(safe_cex_engine::ErrorKind::Internal)
+        );
+        if signer_failure {
+            assert_eq!(
+                d.error.unwrap().outcome,
+                Some(safe_cex_engine::Outcome::NotSent)
+            );
+        }
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        );
+    }
+}
+
+#[test]
+fn later_proof_token_requirement_stays_strict() {
+    strict_later_preparation(false);
+}
+#[test]
+fn later_queued_signer_refusal_stays_strict_and_not_sent() {
+    strict_later_preparation(true);
+}
+
+#[test]
+fn cursor_budget_is_owned_incomplete_not_discarded_history() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(fills(1000));
+    for i in 0..50 {
+        let r = d.request();
+        let row = fill(&i.to_string(), "100", "1", false, "2024-01-01T00:00:00Z");
+        d.reply(
+            r,
+            200,
+            &format!(r#"{{"fills":[{row}],"cursor":"next-{i}"}}"#),
+        );
+    }
+    let result = d.result().unwrap();
+    let rows: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 50);
+    assert_eq!(
+        d.events
+            .iter()
+            .filter(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+            .count(),
+        1
+    );
+    assert!(d.collect().is_empty());
+}
+
+#[test]
+fn concurrent_queries_bind_only_the_incomplete_owner_at_error_level() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.e.set_log_level(safe_cex_engine::Level::Error);
+    d.query(fills(3));
+    let first = d.request();
+    d.e.handle(
+        d.now,
+        Event::Command(Command::Query {
+            command: 88,
+            query: fills(1),
+        }),
+    );
+    let second = d.request();
+    let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+    d.reply(first, 200, &format!(r#"{{"fills":[{a}],"cursor":"next"}}"#));
+    d.reply(second, 200, r#"{"fills":[],"cursor":""}"#);
+    let third = d.request();
+    d.reply(third, 503, "later failure");
+    assert_partial(&mut d, &["a"]);
+    assert!(d.completed.contains(&(88, true)));
+    assert_eq!(d.completed.iter().filter(|(id, _)| *id == 77).count(), 1);
+}

@@ -751,3 +751,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/history_family.rs"]
+mod family_tests;
