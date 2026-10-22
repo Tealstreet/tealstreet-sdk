@@ -432,6 +432,23 @@ and final order-transition folding preserve native behavior; mixed income keeps
 its first gap through funding. Spot and lookup remain separate legacy paths;
 other families, managed completion and B11/deployment proof remain open.
 
+
+## Grouped and deferred row-reporting compatibility
+
+Shared `RowCount` and `RowKeys` keep the two native grouping contracts explicit.
+Crypto.com counts every rejection; WOO preserves ordered unique known IDs and
+every anonymous rejection, including its move-based order-pagination progress.
+An emitted summary increments health exactly once at the original site,
+regardless of group size or host filtering; absent or repeat-suppressed summaries
+do not. The shared optional-summary reporter
+forgets only its key on None; Some(empty text) remains an observable report.
+Bybit deferred Once memory is unbounded, separate per product, never re-armed by
+clean rows, and flushed only at accepted joined-read publication after native
+cached-row restoration. Partial admitted joins still report unsupported rows.
+Original native compatibility controls cover failed/incomplete/stale joins,
+terminal-ACK invalidation, retained exposure and account swapping; no defect RED
+or complete persistent-reporter fan-out claim. See RUST_ROW_ADMISSION.md.
+
 Kraken futures histories now adopt existing CursorHistory for staged admission,
 identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
 No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
