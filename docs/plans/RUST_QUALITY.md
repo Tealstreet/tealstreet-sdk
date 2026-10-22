@@ -396,6 +396,19 @@ retains native strict proof checks. No new engine API, copied marker emitter or
 paging/retention implementation; other adapters and caller runtime coverage
 remain open. [Scope](RUST_OWNED_HISTORY.md).
 
+## Orderly observed-average execution adoption
+
+Orderly's selected-last/average derivation now uses the additive engine
+`prepare_observed_average` operation. A separate observation may commit before
+native dedup; inferred quote may enrich only a live same-endpoint cursor after
+unique positive Fill delivery. Original-source public price assertions expose
+the missing/zero-average quote-poisoning defect; compatibility controls preserve
+native arbitrary-last quotient pricing, gaps, quiet/duplicate observations,
+field presence, overflow, REST non-seeding, late identity and bounded eviction.
+Whole-growth inference is Binary-only and best-effort, with supplied evidence
+validated before effects. Shared row-reporting policy/fan-out remains separate;
+this does not claim new live captures or universal financial contract coverage.
+
 Hyperliquid perp histories now adopt the existing engine CursorHistory owner for
 staged admission, page budget, stage restart, retention gaps and terminal marker
 ownership. No history-local HISTORY_INCOMPLETE emitter remains. Actual first or

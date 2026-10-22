@@ -3874,6 +3874,23 @@ B11 request-scoped incomplete-query ingestion/coverage and typed rejection
 handling remain required; other adapters, runtime proof and managed Context
 completion remain separate work. [Scope and controls](RUST_OWNED_HISTORY.md).
 
+## Orderly incremental Fill quote correction
+
+Orderly broker Fill consumers continue to receive incremental native amounts in
+the existing FILLS shape, with the same side, IDs, identity admission and late
+delivery policy. From a known preceding quote or an empty prefix, a uniquely
+delivered direct Fill that exactly covers cumulative growth now retains its
+proven quote even when the cumulative average is missing or zero. The next
+average-priced suffix is therefore priced from that quote:
+1@100 followed by cumulative2/average100 yields another1@100, rather than1@200.
+No consumer-side cumulative subtraction or compensating reprice is needed.
+
+The native arbitrary-last quote-delta quotient remains unchanged for reports
+that do not establish the whole interval. Quiet and duplicate observations may
+advance native totals without inventing a delivered quote; blind gaps and bounded
+4096 terminal retention retain their documented limits. No broker/wire API change, deployed
+caller migration, live/provenance evidence or TypeScript removal is bundled.
+
 ### Hyperliquid perp histories: shared inclusive-page ownership
 
 Perp fills, orders, income and public trades now use the engine CursorHistory
