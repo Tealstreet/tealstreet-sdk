@@ -174,3 +174,30 @@ already prove financial authority boundaries and must remain intact. Bybit's
 per-coin joins and Hyro cumulative-fill paths stay outside the reference slice.
 Architecture gate: this extends one engine scheduling policy and one shared
 release boundary; adapters map identity and outcomes, not another scheduler.
+
+RequestContext coordination refinement: add `Scheduler::admit(token, raw_now)`
+in the policy phase. It returns a live raw lease deadline, starts the lease only
+on the first actual release, and validates later legs/pages without renewal.
+All new physical releases consult the same group pause; already-issued responses
+may still make validated progress. Existing `mark_issued` keeps first-issue-only
+semantics. The RequestContext owner caps this returned deadline by the original
+request lifecycle and distinguishes admission cancellation from network/auth
+failure. No dispatcher, request metadata or signer receipt code changes here.
+
+Policy implementation evidence: separate retained notification intent now takes
+its minimum with queued refresh intent before retry and pause floors. A review
+regression reproduced a notification incorrectly waiting at 100ms behind a slow
+refresh instead of its own 11ms deadline; the fix also retains that first deadline
+across completion and raw-clock rollback and produces no extra covered read.
+Neutral completion retains failure history; unjittered response expiry does not
+increment or reset it. Idempotent admission gates every physical release without
+renewing the lease; `mark_issued` remains first-only. Eleven additional regression
+groups cover these policies and their pause/cancel/continuation interactions.
+Focused engine/Binance verification passes 578 native tests, denied-warning
+Clippy, formatting and bans; independent correctness/adversarial review is clear.
+This remains pure shared policy: no venue, dispatch or startup adapter edits.
+Fault-disabling refresh selection, retry floors, unjittered expiry, neutral failure
+history and continuation lease stability produces the corresponding new test
+failures (five controls, seven named regressions). The restored implementation
+passes all 25 scheduler tests. The real first-notification regression also failed
+before its fix; no existing financial or lifecycle assertions were weakened.
