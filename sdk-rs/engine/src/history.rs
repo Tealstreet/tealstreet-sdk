@@ -263,6 +263,21 @@ impl<T> CursorHistory<T> {
         step
     }
 
+    /// A fully validated native page can still advertise coverage the adapter
+    /// cannot consume. Record that fact atomically with admission, never from a
+    /// failed response or after the owner has completed.
+    pub fn advance_with_coverage(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
+        if self.finished || self.lifecycle_error.is_some() {
+            self.lifecycle_error
+                .get_or_insert("history cursor coverage admitted after completion");
+            return CursorStep::Done;
+        }
+        if let Some(message) = gap {
+            self.rows.completion.incomplete(message);
+        }
+        self.advance(page)
+    }
+
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
         let encode = self.rows.encode;
         self.finish_with(cx, result, |rows| encode(&rows));
@@ -306,6 +321,7 @@ pub struct RangeHistory<T> {
     finished: bool,
     lifecycle_error: Option<&'static str>,
     incomplete_message: fn(u32) -> String,
+    request_budget: Option<(u32, String)>,
 }
 
 impl<T> RangeHistory<T> {
@@ -323,7 +339,19 @@ impl<T> RangeHistory<T> {
             finished: false,
             lifecycle_error: None,
             incomplete_message,
+            request_budget: None,
         }
+    }
+
+    /// Bound selected native requests across every chunk, using the walk's
+    /// existing count. A deferred fetch is selected once and resumed as-is.
+    pub fn with_request_budget(mut self, budget: u32, message: impl Into<String>) -> Self {
+        if budget == 0 || self.walk.requests != 0 || self.active.is_some() || self.finished {
+            self.lifecycle_error = Some("history range request budget must be set before fetching");
+        } else {
+            self.request_budget = Some((budget, message.into()));
+        }
+        self
     }
 
     pub fn command(&self) -> CommandId {
@@ -348,6 +376,12 @@ impl<T> RangeHistory<T> {
     /// Call only after HTTP/native status and the entire page parse succeed.
     /// A malformed page must finish with Err instead; its prefix stays staged.
     pub fn accept_page(&mut self) {
+        self.accept_page_with_coverage(None);
+    }
+
+    /// Missing native cursor coverage is an admitted page fact. Validate all
+    /// lifecycle and row/fact invariants before retaining it or advancing bounds.
+    pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
         if self.lifecycle_error.is_some()
             || self.finished
             || self.active.is_none()
@@ -356,6 +390,10 @@ impl<T> RangeHistory<T> {
             self.lifecycle_error
                 .get_or_insert("history range admitted without an active fetch");
             return;
+        }
+        if let Some(message) = gap {
+            self.rows.completion.incomplete(message);
+            self.walk.failed();
         }
         let (from, to) = self.active.take().expect("active checked");
         let selected = self.walk.page(from, to, &self.pending_facts);
@@ -379,6 +417,14 @@ impl<T> RangeHistory<T> {
             return Step::Finished;
         }
         let step = self.walk.step();
+        if matches!(step, Step::Fetch { .. })
+            && let Some((budget, message)) = &self.request_budget
+            && self.walk.requests > *budget
+        {
+            self.rows.completion.incomplete(message.clone());
+            self.finished = true;
+            return Step::Finished;
+        }
         match step {
             Step::Fetch { from, to } => self.active = Some((from, to)),
             Step::Finished => self.finished = true,
