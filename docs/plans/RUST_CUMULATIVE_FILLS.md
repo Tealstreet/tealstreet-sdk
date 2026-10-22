@@ -442,3 +442,41 @@ blocking defect. Full exact-head CI,134 complete raw comparisons plus matching
 CI-package fingerprints, final independent evidence review and separate guard/
 merge remain mandatory. Scheduler-only1723 exception is scoped to its actual
 read_scheduler.rs+plan diff and conflict-free trial, not a blanket source waiver.
+
+### Refreshed dependency cycle before landing
+
+The first3c2a979 head completed43 applicable checks SUCCESS/browser SKIP and
+134/134 full raw outputs equal (67 Rust,38 stable groups,6 PASS/7 known FAIL),
+plus six matching CI packages/18 file hashes. Initial Rust39728909641;
+proof SHA256cccd23b98bc68debf36aeb21d88d53798de1cf272aa6309bc22d984323a3e659.
+This is historical iteration evidence after landing advanced, not the merge gate.
+
+Actual history #1724 22550c4050c33a2f0c0b5bd84b26c027883650e0 changed shared
+history/paging and Binance. Owner confirmed real integration was required and
+renewed the relevant source hold. Clean porcelain integrationb751e95187fc keeps
+all11 nonshared incoming and7 nonshared owned blobs, plus both shared documents'
+signed patch sequences. The financial implementation remains identical to3c.
+Actual scheduler #1723 08b9c12f4861237f474578928e8ab606da1e1236 then arrived
+before the new push. It was also cleanly integrated99d0cf1b5cb1, preserving all
+nine owned and both incoming blobs, so candidate CI packages match the exact
+commit under test. Its only delta is read_scheduler.rs and its existing plan;
+both blobs equal independently reviewed green2a0a1115db3e. No signing or other
+financial source edit was introduced by this refresh.
+
+Owner-approved scheduler independence permits retaining actual history22550 /
+green56300f5f94bd830d32f67e7155ab6f1f88e5e919 /Rust39728501722 as the frozen
+baseline. Candidate source changes since that baseline explicitly enumerate
+nine owned files PLUS the two integrated scheduler dependency files; the PR
+diff against actual scheduler08b9 remains exactly nine. Proof tooling pins the
+dependency's actual parents [22550,2a0], exact two-file delta and both immutable
+blobs, and proves the candidate contains it. Every CI package must still match
+its own tested head's19-input fingerprint, with no artifact fallback. Compare
+all134 full outputs against this baseline; no narrowed suite or new exclusions.
+
+Fresh1509 combined six-crate native tests, strict six-crate all-target Clippy,
+fmt and bans pass after both actual integrations. Root44 typecheck/28 lint remain
+passing with their TS inputs unchanged. New baseline all134 outputs and three
+matching CI packages authenticated; input fingerprint
+4c5563177dfe72b68f7236071197db7e8ba1ea90e828783b654dced427b2249e.
+Fresh exact-head CI/full candidate proof and final independent preservation/
+evidence reviews remain required before a separate guard and merge.
