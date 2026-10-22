@@ -559,3 +559,29 @@ The generic history_failed callback intentionally retains the common Internal
 default because both transport and stream malformed/missing-list callbacks use
 it; a blanket Network label would misclassify decode failures. Caller wording
 records these metadata changes and includes later filtered-fill recovery.
+
+## Background account coverage notice follow-on
+
+Plan from landing `361a4ccafad` after the BloFin general-history merge. The six
+remaining account/background `history.incomplete` diagnostics are not query
+results: Bitunix has one unresolved execution-metadata notice; Lighter has
+three outage-backfill notices; TxFlow has two reconciliation exhaustion notices.
+Never invent a command ID to make these look query-owned.
+
+Add one engine `history::BackgroundCoverage` reporter with native facts
+`Incomplete` and `Exhausted`, mapping centrally to the existing Warn and Error
+levels. It emits the existing `history.incomplete` code with
+`scope: "account/background"` and no `command` field. Replace exactly those six
+venue emitters; preserve messages, trigger conditions, retries, account/fill
+state, caps, and query completion. No dispatch, signing, clock, host or wire
+change is intended. Coordinate account-file overlap with the financial lane.
+
+Verify original-red/corrected-green native cases for each venue and both
+exhaustion paths, plus engine scope/severity/Error-only visibility and an
+unrelated pending query which must not become incomplete or completed. Run
+focused engine/Bitunix/Lighter/TxFlow plus Binance tests, strict touched-crate
+Clippy/fmt and full CI. Independent plan/correctness/adversarial reviews must
+answer the architecture gate: this is one engine choke point, not three local
+policies. Record the caller boundary without claiming full history fan-out or
+NX/runtime closure. After this phase, the owner ordered capability/feature
+conformance CI next; other unconverted paged histories remain separate work.
