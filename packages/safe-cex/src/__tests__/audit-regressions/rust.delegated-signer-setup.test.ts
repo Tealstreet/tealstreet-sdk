@@ -51,7 +51,8 @@ describe('trusted delegated signer setup capsule', () => {
         expect(text).not.toContain('public-primary');
         expect(text).not.toContain('public-read');
       }
-      for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase', 'remoteSigner', 'payloadSigner', 'localSigner', 'readCredentials']) expect(config).not.toHaveProperty(field);
+      for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase', 'remoteSigner', 'localSigner', 'readCredentials']) expect(config).not.toHaveProperty(field);
+      expect(config).toMatchObject({ remoteSigning: true, payloadSigner: true, publicMode: { payloadSigner: true, remoteSigner: false } });
       expect(config.signing.primary).not.toHaveProperty('stableId');
       expect(setup.primaryComplete).toBe(true);
       expect(setup.hasSecondary).toBe(true);
@@ -89,6 +90,53 @@ describe('trusted delegated signer setup capsule', () => {
     await setup.signer(request(config.signing, true), callContext());
     expect(callback).toHaveBeenCalledWith({ exchangeName: 'binance', key: 'public-read', payload: 'Apublic-read', scheme: 'hmac-sha256', encoding: 'hex' });
     setup.dispose();
+  });
+
+  it('binds PayloadSigner to an immutable private public-metadata snapshot for the selected slot', async () => {
+    const receivers: Record<string, unknown>[] = [];
+    const callback = function (this: Record<string, unknown>, work: { key: string }) {
+      receivers.push(this);
+      expect(this.key).toBe(work.key);
+      return { signature: hex };
+    };
+    const input = options({ payloadSigner: callback, testnet: true, subaccount: 'owned-subaccount', extra: { recvWindow: 7000 } });
+    const setup = new DelegatedSignerSetup('binance', input);
+    const { config } = construct(setup);
+    Object.assign(input, { key: 'changed', testnet: false, subaccount: 'changed' });
+    input.extra!.recvWindow = 1;
+    await setup.signer(request(config.signing), callContext());
+    await setup.signer(request(config.signing, true), callContext());
+    expect(receivers.map((receiver) => receiver.key)).toEqual(['public-primary', 'public-read']);
+    for (const receiver of receivers) {
+      expect(receiver).not.toBe(input);
+      expect(Object.isFrozen(receiver)).toBe(true);
+      expect(Object.isFrozen(receiver.extra)).toBe(true);
+      expect(receiver).toMatchObject({ testnet: true, subaccount: 'owned-subaccount', extra: { recvWindow: 7000 } });
+      for (const field of ['secret', 'passphrase', 'secondary_secret', 'secondary_passphrase', 'auth', 'localSigner', 'remoteSigner', 'payloadSigner']) expect(receiver).not.toHaveProperty(field);
+      expect(JSON.stringify(receiver)).not.toContain('audit-secret-sentinel');
+    }
+    setup.dispose();
+  });
+
+  it('keeps captured callback and feed intent despite mutated options or forged engine JSON', () => {
+    const input = options({ remoteSigner: remote(), publicDataOnly: false });
+    const setup = new DelegatedSignerSetup('binance', input);
+    Object.assign(input, { remoteSigner: undefined, payloadSigner: undefined, publicDataOnly: true });
+    const { config } = construct(setup, 'binance', JSON.stringify({ payloadSigner: false, remoteSigning: false,
+      publicMode: { requested: true, payloadSigner: false, remoteSigner: false } }));
+    expect(setup.intent).toEqual({ remoteSigner: true, payloadSigner: true });
+    expect(config).toMatchObject({ remoteSigning: true, payloadSigner: true,
+      publicMode: { requested: false, payloadSigner: true, remoteSigner: true } });
+    setup.dispose();
+  });
+
+  it('never falls back when a configured callback is malformed, including null or a lower-precedence callback', () => {
+    for (const callbacks of [
+      { remoteSigner: null, payloadSigner: payloadSigner() },
+      { remoteSigner: {}, payloadSigner: payloadSigner() },
+      { remoteSigner: remote(), payloadSigner: null },
+      { payloadSigner: 'not-callable' },
+    ]) expectInvalid(() => new DelegatedSignerSetup('binance', { ...options(), ...callbacks } as unknown as ExchangeOptions));
   });
 
   it('keeps RemoteSigner authority ahead of PayloadSigner and local secrets; refuses actual secondary signing only at the provider', async () => {

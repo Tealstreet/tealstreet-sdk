@@ -30,17 +30,23 @@ export class DelegatedSignerSetup {
   #abort = new AbortController();
   #pending = new Set<AbortController>();
   #venue: ExchangeName;
+  #publicMode: Readonly<{ requested: boolean | null; remoteSigner: boolean; payloadSigner: boolean; apiKeyIndexPresent: boolean }>;
+  readonly intent: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
     const metadata = parseLocalSignerMetadata(options.localSigner);
+    this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     const remoteSigner = options.remoteSigner;
     const payloadSigner = remoteSigner ? undefined : options.payloadSigner;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
-    if (remoteSigner ? typeof remoteSigner.sign !== 'function' || typeof remoteSigner.isAvailable !== 'function'
-      || typeof remoteSigner.onAvailabilityChange !== 'function' : typeof payloadSigner !== 'function') invalid();
+    if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
+      || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
+      || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
+    this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
+      ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
     const primary = publicCredential(options.key, metadata.primary?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, metadata.secondary?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
@@ -64,6 +70,7 @@ export class DelegatedSignerSetup {
         },
         remoteSigner,
         payloadSigner,
+        payloadSignerMetadata: options,
       });
     } catch { invalid(); }
     this.#venue = name;
@@ -103,7 +110,8 @@ export class DelegatedSignerSetup {
       const {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
-      return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities }));
+      return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
+        remoteSigning: true, payloadSigner: this.intent.payloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();
       throw error;
@@ -118,3 +126,9 @@ export class DelegatedSignerSetup {
     this.#pending.clear();
   }
 }
+
+/** Only admitted delegated setups remove callbacks; legacy families retain theirs. */
+export const withoutDelegatedSigning = (options: ExchangeOptions): ExchangeOptions => {
+  const { remoteSigner: _remote, payloadSigner: _payload, ...safe } = withoutSigningCredentials(options);
+  return safe as ExchangeOptions;
+};

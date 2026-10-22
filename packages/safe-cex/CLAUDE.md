@@ -90,9 +90,16 @@ signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
-This signing-side bridge does not itself enable keyless `remoteSigner` or
-`PayloadSigner` routing to Rust. That separate companion must preserve REST-only
-PayloadSigner feeds, result headers and explicit account/secondary selection.
+The shared delegated-provider companion admits keyless `remoteSigner` and
+`PayloadSigner` accounts only for aliases enabled in construction-rules.json.
+RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
+remote signing is refused. PayloadSigner retains REST-only private feeds and
+declared native result-header precedence. Its ordinary-function receiver is a
+private frozen public-metadata snapshot with the selected public key, excluding
+all secret/passphrase fields and arbitrary nested caller objects. Callbacks must
+hold their own secret instead of reading `this.secret`; generic exchange options
+retain neither credentials nor callbacks. Provision callbacks in the executing
+host/worker because ordinary worker initialization cannot serialize functions.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and

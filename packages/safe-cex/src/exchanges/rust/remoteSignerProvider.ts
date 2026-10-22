@@ -1,5 +1,5 @@
 import type { Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, PayloadSigner, RemoteSigner } from '../../types';
+import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
 import { nanoid } from 'nanoid';
 
@@ -14,11 +14,11 @@ export interface RemoteSignerProviderOptions {
   identities: { primary?: RemoteSignerIdentity; secondary?: RemoteSignerIdentity };
   remoteSigner?: RemoteSigner;
   payloadSigner?: PayloadSigner;
+  /** Setup input is projected onto declared non-secret metadata, never retained. */
+  payloadSignerMetadata?: Partial<ExchangeOptions>;
 }
 
-/** Attempt-owned metadata, pending the shared native header admission policy.
- * This standalone provider is deliberately not installed by runtime construction.
- */
+/** Metadata belongs only to the current validated signing attempt. */
 export type RemoteSignerResult = SignResult & { headers?: [string, string][] };
 
 const MAX_PAYLOAD = 1_048_576;
@@ -114,13 +114,35 @@ function guarded<T>(signal: AbortSignal, remote: RemoteSigner | undefined, invok
   });
 }
 
+/** Explicit projection avoids retaining secrets hidden in nested setup, callback,
+ * transport or arbitrary caller objects. Each slot gets its selected public key.
+ */
+function payloadReceiver(options: Partial<ExchangeOptions> | undefined, key: string): Readonly<Record<string, unknown>> {
+  const receiver: Record<string, unknown> = { key };
+  for (const field of ['testnet', 'enableSpotMarkets', 'enableOptionMarkets', 'enableInverseMarkets',
+    'bybitSiteId', 'publicDataOnly', 'privateOnly', 'engine', 'subaccount', 'hostedMode',
+    'tealstreetProxy', 'tealstreetTunnel', 'tealstreetWsRoute', 'proxyRegion'] as const) {
+    const value = options?.[field];
+    if (typeof value === 'string' || typeof value === 'boolean') receiver[field] = value;
+  }
+  if (options?.extra) {
+    const extra: Record<string, unknown> = {};
+    for (const field of ['tickInterval', 'rustCommandTimeoutMs', 'recvWindow', 'hyrotraderMode'] as const) {
+      const value = options.extra[field];
+      if (typeof value === 'number' || typeof value === 'string') extra[field] = value;
+    }
+    receiver.extra = Object.freeze(extra);
+  }
+  return Object.freeze(receiver);
+}
+
 /** Bridge only trusted account-owned public identities to legacy HMAC callbacks.
  * Advisory SignRequest.context never establishes key or account authority.
  */
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
   let accountName: string | undefined;
-  const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean }>();
+  const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean; receiver: Readonly<Record<string, unknown>> }>();
   const credentials = new Map<string, { bytes: number[]; identity: RemoteSignerIdentity }>();
   try {
     accountName = remoteSigner?.accountName;
@@ -134,7 +156,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         || typeof identity.publicCredential !== 'string' || !identity.publicCredential
         || /[\r\n\x00]/.test(identity.publicCredential)) throw refused();
       const bytes = Array.from(utf8(identity.publicCredential));
-      const entry = { identity, primary: slot === 'primary' };
+      const entry = { identity, primary: slot === 'primary', receiver: payloadReceiver(options.payloadSignerMetadata, identity.publicCredential) };
       owned.set(identity.signing, entry);
       owned.set(identity.credential, entry);
       credentials.set(identity.credential, { bytes, identity });
@@ -204,7 +226,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
           values.push(mac(response.wsAuthSignature));
         } else {
-          const response = await guarded(signal, undefined, () => payloadSigner!({
+          const response = await guarded(signal, undefined, () => payloadSigner!.call(item.entry.receiver, {
             exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
             scheme: 'hmac-sha256', encoding: 'hex',
           }));

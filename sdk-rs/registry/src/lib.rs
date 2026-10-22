@@ -605,6 +605,44 @@ fn local_signer_from_json_with_policy(
     Ok((std::sync::Arc::new(signer), identities))
 }
 
+/// A boolean cannot substitute for an injected provider. Validate the same
+/// declaration before legacy setup consumes raw options and at the owned path.
+fn payload_signing_rules(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    let public = construction::resolve(venue, options)
+        .map_or(options.public_data_only, |mode| mode.public_data_only);
+    if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
+        return Ok(());
+    }
+    let policy = remote_signing_policy(venue);
+    let identity_ready = options
+        .signing
+        .as_ref()
+        .and_then(|refs| refs.primary.as_ref())
+        .is_some_and(|identity| identity.validate().is_ok());
+    if policy.enabled && policy.payload_supported && provider_ready && identity_ready {
+        return Ok(());
+    }
+    let message = if !policy.payload_supported
+        && construction::bridge(venue, options).dispatch_signing
+        && policy.protected_headers.is_some()
+    {
+        format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
+    } else if policy.enabled {
+        format!("Rust {venue} payloadSigner requires a configured injected signing provider")
+    } else {
+        format!(
+            "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+        )
+    };
+    Err(VenueError::new(message)
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent))
+}
+
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
@@ -612,6 +650,7 @@ pub fn build<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
     #[cfg(feature = "dispatch-signing")]
@@ -667,11 +706,7 @@ pub fn build_with_signer<T: Visit>(
         options.public_data_only = mode.public_data_only;
         options.account_startup = !mode.public_data_only;
     }
-    if options.payload_signer && venue != "paradex" && !options.public_data_only {
-        return Err(VenueError::new(format!("Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."))
-            .kind(ErrorKind::Unsupported)
-            .outcome(safe_cex_engine::Outcome::NotSent));
-    }
+    payload_signing_rules(venue, &options, signer.is_some())?;
     #[cfg(feature = "bybit")]
     if venue == "hyrotrader"
         && let Some(config) = options.hyrotrader.take()

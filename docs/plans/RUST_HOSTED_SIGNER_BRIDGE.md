@@ -362,3 +362,30 @@ reviews clear the declaration-only slice, fixture/test and optional-provider
 type narrowing. These checks do not yet prove keyless SDK setup, actual-WASM
 provider round trips, Bybit feed/header adoption or worker caller migration.
 Those runtime gates and the same-PR caller-contract section remain required.
+
+
+Half-2 runtime admission checkpoint: Binance's four enabled aliases now select a
+private DelegatedSignerSetup before generic options are retained. The captured
+callback/public/feed intent overrides forged native JSON; RemoteSigner wins,
+configured malformed callbacks reject, and no raw local material can become a
+fallback. Host initialization failure and disposal retire even retained signer
+wrappers. Registry admission independently requires enabled policy, supported
+PayloadSigner lifecycle, injected provider and valid primary refs; a bare flag
+is rejected before legacy local credentials are consumed. Native four-alias
+startup verifies callback-header precedence and no private socket/listen-key work.
+
+Owner-approved receiver contract: PayloadSigner is bound to a frozen private
+snapshot containing the selected public key and declared non-secret metadata.
+Secret/passphrase fields and nested signing/callback/transport objects are
+excluded. Callbacks reading this.secret must hold their own material. The new
+receiver regression was observed RED on the unbound call and GREEN after the
+shared snapshot projection; caller documentation is included in this PR.
+
+Verification: 77 focused SDK tests, package typecheck/lint, native construction
+and delegated-provider tests and strict registry all-target Clippy pass. Two
+independent reviews clear shared admission/lifetime and receiver authority.
+Architecture gate: one setup/provider/registry path plus per-venue declarations;
+no new crypto, retry, socket state or timing mechanism. These checks are native
+and mocked SDK boundaries, not actual-WASM proof. Actual-WASM paired hosted
+round trips, MCP guard adoption, Bybit feed/header adoption, current landing
+integration and complete CI/replay proof remain required before readiness.
