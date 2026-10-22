@@ -155,7 +155,7 @@ fn symbol_selects_its_category_and_options_are_refused() {
 }
 
 #[test]
-fn a_venue_rejection_fails_the_whole_read_instead_of_returning_a_partial_history() {
+fn later_page_rejection_returns_accepted_rows_but_first_page_rejection_fails() {
     let mut h = startup(Variant::Linear, true);
     fetch(&mut h, 5, None, Some(1.0), Some(2.0));
     h.respond("/v5/position/closed-pnl", 200, &page(&[ROW_A], "more"));
@@ -166,10 +166,14 @@ fn a_venue_rejection_fails_the_whole_read_instead_of_returning_a_partial_history
     );
     assert_eq!(
         h.result(5),
-        Some(&Err(
-            "bybit closed-PnL fetch failed: params error".to_owned()
-        ))
+        Some(&Ok(format!("[{ROW_A}]"))),
+        "later failure retains accepted rows"
     );
+    assert!(h.notices.iter().any(|notice| matches!(notice,
+        safe_cex_engine::Notice::Event(event)
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            && event.fields == vec![("command", safe_cex_engine::Value::Num(5.0))]
+    )));
     // 10002 is Bybit's receive-window rejection; its text is replaced so no signed
     // payload reaches a notice (#1351).
     fetch(&mut h, 15, None, Some(1.0), Some(2.0));
@@ -254,4 +258,109 @@ fn inverse_reads_inverse_spot_refuses_and_keyless_is_empty() {
     fetch(&mut h, 9, None, None, None);
     assert_eq!(h.result(9), Some(&Ok("[]".to_owned())));
     assert!(!h.has_request("/v5/position/closed-pnl"));
+}
+
+#[test]
+fn malformed_success_and_first_failure_never_become_complete_empty_history() {
+    for body in [
+        r#"{"retCode":0,"retMsg":"OK"}"#,
+        r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":null}}"#,
+        r#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
+    ] {
+        let mut h = startup(Variant::Linear, true);
+        h.notices.clear();
+        fetch(&mut h, 40, None, Some(1.0), Some(2.0));
+        h.respond("/v5/position/closed-pnl", 200, body);
+        assert!(
+            matches!(h.result(40), Some(Err(_))),
+            "missing/failed page must reject, not return empty history"
+        );
+        assert!(h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::CommandFailed { command: 40, error } if error.kind.is_some()
+        )), "first-page error must be typed");
+        assert!(!h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        )));
+    }
+}
+
+#[test]
+fn capped_window_keeps_its_owner_and_rows_across_a_fresh_cursor_budget() {
+    for fail in [false, true] {
+        let mut h = startup(Variant::Linear, true);
+        h.notices.clear();
+        h.engine.set_log_level(safe_cex_engine::Level::Error);
+        let to = 1_700_000_000_000.0;
+        let from = to - 10.0 * DAY;
+        fetch(&mut h, 41, None, Some(from), Some(to));
+        for i in 0..20 {
+            h.respond(
+                "/v5/position/closed-pnl",
+                200,
+                &page(&[ROW_A], &format!("c{i}")),
+            );
+        }
+        assert!(h.result(41).is_none());
+        assert!(!h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        )), "coverage must precede the final result, not a still-pending stage");
+        let older = h.take("/v5/position/closed-pnl");
+        assert!(older.url.contains(&format!("startTime={from}")));
+        assert!(!older.url.contains("cursor="));
+        if fail {
+            h.reply(
+                older.id,
+                200,
+                r#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
+            );
+        } else {
+            // Cursor reused from a previous window is legal after stage reset.
+            h.reply(older.id, 200, &page(&[ROW_B], "c0"));
+            let last = h.take("/v5/position/closed-pnl");
+            assert!(last.url.contains("cursor=c0"));
+            h.reply(last.id, 200, EMPTY);
+        }
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(h.result(41).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(
+            rows.len(),
+            if fail { 20 } else { 21 },
+            "raw duplicate rows must be retained"
+        );
+        let notices: Vec<_> = h.notices.iter().filter(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        ) || matches!(notice, safe_cex_engine::Notice::CommandDone { command: 41, .. }
+            | safe_cex_engine::Notice::CommandFailed { command: 41, .. })).collect();
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0], safe_cex_engine::Notice::Event(event)
+            if event.fields == vec![("command", safe_cex_engine::Value::Num(41.0))]
+            && event.message.contains("20-page cap")));
+        assert!(matches!(
+            notices[1],
+            safe_cex_engine::Notice::CommandDone { command: 41, .. }
+        ));
+    }
+}
+
+#[test]
+fn repeated_cursor_stops_with_owned_incomplete_and_raw_duplicate_rows() {
+    for cursors in [&["a", "a"][..], &["a", "b", "a"][..]] {
+        let mut h = startup(Variant::Linear, true);
+        fetch(&mut h, 42, None, Some(1.0), Some(2.0));
+        for cursor in cursors {
+            h.respond("/v5/position/closed-pnl", 200, &page(&[ROW_A], cursor));
+        }
+        assert!(
+            !h.has_request("/v5/position/closed-pnl"),
+            "cycle must not keep requesting pages"
+        );
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(h.result(42).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(rows.len(), cursors.len());
+        assert!(h.notices.iter().any(|notice| matches!(notice,
+        safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            && event.fields == vec![("command", safe_cex_engine::Value::Num(42.0))]
+    )));
+    }
 }

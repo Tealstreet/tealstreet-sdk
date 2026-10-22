@@ -84,6 +84,62 @@ impl Venue for Fixture {
                 completion.finish(cx, result);
             }
             Read::Cursor(mut history) => {
+                if matches!(response.body, "restart-stage" | "premature-restart") {
+                    assert!(history.fresh("shared".into()));
+                    history.stage("1".into());
+                    assert!(matches!(
+                        history.advance(CursorPage {
+                            next: Some("a".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        }),
+                        CursorStep::More(_)
+                    ));
+                    if response.body == "premature-restart" {
+                        let _ignored = history.restart_stage();
+                        history.finish(
+                            cx,
+                            Err("later failure cannot hide a lifecycle error".into()),
+                        );
+                        return;
+                    }
+                    history.stage("2".into());
+                    assert_eq!(
+                        history.advance(CursorPage {
+                            next: Some("b".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        }),
+                        CursorStep::Stalled(Stall::PageBudget)
+                    );
+                    assert!(history.restart_stage());
+                    assert!(!history.fresh("shared".into()));
+                    assert_eq!(history.cursor(), None);
+                    history.stage("3".into());
+                    assert_eq!(
+                        history.advance(CursorPage {
+                            next: Some("a".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        }),
+                        CursorStep::More("a".into())
+                    );
+                    history.stage("4".into());
+                    assert_eq!(
+                        history.advance(CursorPage {
+                            next: None,
+                            rows: 1,
+                            fresh: 1,
+                            want_more: false,
+                        }),
+                        CursorStep::Done
+                    );
+                    history.finish(cx, Ok(()));
+                    return;
+                }
                 if response.body == "premature-after-accepted" {
                     history.stage("1".into());
                     assert!(matches!(
@@ -403,4 +459,65 @@ fn an_accepted_page_does_not_turn_premature_success_into_partial_history() {
         matches!(&notices[0], Notice::CommandFailed { command: 14, error }
         if error.kind == Some(ErrorKind::Internal))
     );
+}
+
+#[test]
+fn stage_restart_keeps_owner_rows_and_incomplete_cause_but_not_cursor_or_budget() {
+    for body in ["restart-stage", "premature-restart"] {
+        let mut engine = support::seeded_engine(Fixture);
+        engine.set_log_level(Level::Error);
+        engine.handle(
+            0.,
+            Event::Command(Command::Query {
+                command: 15,
+                query: Query::Income {
+                    symbol: None,
+                    kind: Some("two-pages".into()),
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+            }),
+        );
+        let request = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(request) => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            0.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let notices: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(notice) => Some(notice),
+                _ => None,
+            })
+            .collect();
+        if body == "restart-stage" {
+            assert_eq!(notices.len(), 2);
+            assert!(matches!(&notices[0], Notice::Event(event)
+                if event.code == code::HISTORY_INCOMPLETE && event.message == "page cap"
+                && event.fields == vec![("command", Value::Num(15.0))]));
+            assert!(
+                matches!(&notices[1], Notice::CommandDone { command: 15, result } if result == "[1,2,3,4]")
+            );
+        } else {
+            assert_eq!(notices.len(), 1);
+            assert!(
+                matches!(&notices[0], Notice::CommandFailed { command: 15, error }
+                if error.kind == Some(ErrorKind::Internal) && error.message.contains("restarted"))
+            );
+        }
+    }
 }
