@@ -121,8 +121,14 @@ transport receipts, commands and checkpoints stay in repeatability comparisons.
   benefit is unwarranted. No source batch is scheduled by this audit. A future
   demonstrated wrong-key or missing-read-key defect requires its own focused
   regression and review; preserve external JSON, controls and computations.
-- **Harness owner (codex-mxb4mq):** Hyperliquid's normalized nonce/signature and
-  absent independent request validator mean its proof is repeatability-only.
+- **Harness owner (codex-mxb4mq):** ~~Hyperliquid lacks an independent request
+  validator, so its proof is repeatability-only.~~ The follow-up
+  [independent L1 oracle](HARNESS_HYPERLIQUID_REQUEST_VALIDATION.md) authenticates
+  original signatures/nonce/network/vault/subjects and binds generated-ID intent
+  before normalization, committing aliases only after eligible ACK matching.
+  Published vectors and adversarial Tape controls cover the observed contract;
+  full current-head CI/five-pair proof remains the merge gate. Existing private
+  account FAILs and synthetic/live evidence limits remain.
   Orderly's existing unstaged mutation ACKs/current command-snapshot visibility
   remain a causality caveat. #1694 closes the sweep's exact 50-name effective-clock
   assertion and 20 stale WEEX fee keys; its complete ten-output proof and exact

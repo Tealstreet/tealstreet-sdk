@@ -423,7 +423,7 @@ focused harness tests, fresh current-head CI proof, all three mandatory cases,
 zero unexpected/unused private declarations and full green CI. Guard separately
 from merge, audit actual parents/files and report before Orderly.
 
-Verification gap: this catalog has no independent request validator; its
+Historical verification gap at #1689: this catalog had no independent request validator; its
 existing request normalization removes action nonce/signature. This phase
 proves repeatability of the existing harness, not fresh cryptographic request
 verification. Preserve that policy and document the gap; no validator expansion,
@@ -489,3 +489,18 @@ complete outputs excluding only measured metrics, and require both mandatory
 cases, zero unexpected/unused keys, independent code/raw reviews and full CI.
 Run the fresh dependency guard separately from merge, audit/report the actual
 merge and finish the sweep. No further priority window is requested.
+
+
+## Hyperliquid independent request validation follow-up
+
+[HARNESS_HYPERLIQUID_REQUEST_VALIDATION.md](HARNESS_HYPERLIQUID_REQUEST_VALIDATION.md)
+adds an independent L1 oracle for the perp and embedded Spot replay. It checks
+original signatures, nonce bounds, network/vault/subjects and creation/reference
+ID intent before normalization. Generated aliases commit only after an eligible
+ACK match. Official external vectors and adversarial Tape regressions cover the
+previous normalized-signature and wrong-reference acceptance paths. Standalone
+Spot's existing verifier and both synthetic fixture byte streams are preserved.
+This closes the absent request-validator implementation gap for observed wires;
+full current-head CI and five-pair evidence are the merge gate. The six/eight
+account differences still fail strictly; this is not private parity or live
+certification. Orderly ACK fencing is the next separate phase.

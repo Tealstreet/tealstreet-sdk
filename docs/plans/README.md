@@ -70,6 +70,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_UNKNOWN_CANCEL.md](RUST_UNKNOWN_CANCEL.md) |
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_WEEX_EMPTY_FILL_IDENTITY.md](RUST_WEEX_EMPTY_FILL_IDENTITY.md) |
 | GRVT perpetuals Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md) |
+| Gate integrity | Active harness implementation | Hyperliquid L1 request authentication, generated-ID intent binding and matched-ACK validation. | [HARNESS_HYPERLIQUID_REQUEST_VALIDATION.md](HARNESS_HYPERLIQUID_REQUEST_VALIDATION.md) |
 | Gate integrity | Retained implementation evidence | Understanding fixer isolation, strict comparison and verifier design. | [RUST_GATE_HONESTY.md](RUST_GATE_HONESTY.md) |
 | Gate integrity | Historical result ledger | Tracing original known FAIL classifications; use fresh reports for current results. | [RUST_GATE_HONESTY_RESULTS.md](RUST_GATE_HONESTY_RESULTS.md) |
 | Historical gate receipts | Retained JSON evidence | Checking the named historical gate set; not a current CI certificate. | [venue-ports/KUCOIN_GATES.json](venue-ports/KUCOIN_GATES.json) |

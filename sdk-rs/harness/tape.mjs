@@ -307,7 +307,11 @@ export class Tape {
     this.callerIds = callerIdsOf(records);
     this.socketUrlKeys = new Map();
     this.validateRequest = this.auditEnabled
-      ? venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest
+      ? venue.createRequestValidator?.(this.options, {
+        callerIds: this.callerIds,
+        getCommandIndex: () => this.commandIndex,
+        getExpectedWrite: () => ({ key: this.expectedWrites[0], record: this.responses.queues.get(this.expectedWrites[0])?.[0] }),
+      }) ?? venue.validateRequest
       : undefined;
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
@@ -511,8 +515,11 @@ export class Tape {
   }
 
   respond(method, url, body, headers) {
+    // Stateful validators may return a commit callback. Run it only after a
+    // response is eligible and matched; rejected/premature attempts bind no IDs.
+    let commitValidation;
     try {
-      this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds });
+      commitValidation = this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds });
       this.requestAudit?.validate({ method, url, body, headers });
     } catch (error) {
       this.invalidSignatures++;
@@ -544,10 +551,11 @@ export class Tape {
     const unservedBefore = this.responses.unserved;
     let response;
     try {
-      response = this.bitget || (this.auditEnabled && this.venue.validateMatchedRequest) || this.selectedPollingResponses
+      response = typeof commitValidation === 'function' || this.bitget || (this.auditEnabled && this.venue.validateMatchedRequest) || this.selectedPollingResponses
         ? this.responses.respond(method, url, body, stage, (record) => {
           this.validateBitgetMatch(record, method, url, body);
           if (this.auditEnabled) this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+          if (typeof commitValidation === 'function') commitValidation(record);
           if (this.selectedPollingResponses && !this.responses.isWrite(method, url)) {
             this.polledRequestKeys.add(actualKey);
             this.selectedPollingResponses.add(record);
