@@ -109,6 +109,48 @@ state-machine tests precede native consumer adoption.
 | Group/observer/evidence capacity exhausted | Existing work/facts survive, no leaked identity or action, no manufactured NotSent for sent work. |
 | Last observer detached | Unsent work is revoked; released write evidence and late custody follow existing bounded lifecycle policy. |
 
+## Initial plan audit refinements
+
+Hyro currently drains and completes waiters on a pause or signing failure while
+retaining its immutable plan, orderLinkIds and uncertainty. An explicit later
+caller can resume it. Preserve that behavior with separate states for suspended
+intent, sealed observer and terminal physical execution. An expired execution
+cannot be reopened or have its deadline extended. A later caller needs a new,
+independently bounded execution plus an engine-validated continuation of the
+retained identity/evidence, not a new order identity or reset sent flags. This
+continuation/reconciliation authority must be audited before Hyro adoption;
+metadata reads do not need a retained write intent. Native absence or a matching
+string key alone cannot mint it. Test pause, all observers terminal, then explicit
+new caller both before and after the old execution cap; no automatic replay.
+
+Initial observer composition is exclusive whole-command equivalence. Admission
+rejects a command that already has an independent physical leg or membership in
+another group. An empty declared Mutation root is not itself an independent
+physical write. Do not seal a command's unrelated sibling journal, overwrite
+its prior evidence or claim support for arbitrary multi-group commands. Test a
+partially sent independent command attempting to join, and an owner attempting
+to observe two groups: rejection leaves original work and outcome authority
+unchanged. Future composition must aggregate under the existing journal rather
+than weakening this boundary.
+
+Audit fan-out capacity before publication. Reserve bounded observer/report/result
+bookkeeping at admission; validate every surviving generation before publishing
+or marking terminal. A stale observer or a refused join must not erase shared
+facts, strand another valid observer, or borrow its completion authority. Account
+for bounded progress/terminal queues explicitly before implementation; capacity
+pressure cannot drop native IDs or turn unknown effects into success. A duplicate
+join of the same owner generation is idempotent with no second receipt, capacity
+charge or completion. A late join may receive validated retained progress, but
+that notification must not pretend another physical send occurred.
+
+After all observers detach, unsent execution has no publication authority.
+Released writes retain only the existing fenced late-evidence/reconciliation
+rights: no renewed command completion or publication for a new same-key group.
+Add real-release controls for detach while provider parked, duplicate join,
+late-join progress, all-detach followed by same-key/new-generation execution, and
+the old ACK arriving after that replacement. Financial snapshot admission and
+command/group liveness remain separate checks.
+
 ## Committable sequence and ownership
 
 1. Independently audit this plan and the concrete authority/deadline/API choices
