@@ -3395,3 +3395,23 @@ The separate closed-position query is unchanged. No SDK argument or required new
 NX handler is introduced; B11's incomplete-query coverage and typed rejection
 handling remain required. Other histories/background notices still need fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+## Background account coverage: explicit scope without a query owner
+
+The six automatic account-reconciliation diagnostics now use the shared engine
+`history::BackgroundCoverage` reporter. The existing `history.incomplete` code
+carries `scope: "account/background"` and no `command`: Bitunix's unreconciled
+fill metadata and Lighter's three outage-backfill diagnostics remain Warn;
+TxFlow's execution coverage/deduplication exhaustion diagnostics remain Error.
+Native messages, triggers, caps, retries and reconciliation state are unchanged.
+Repeated triggers still deliver repeated notices, including at Error-only logging.
+
+These notices describe account coverage, not the completeness of a pending
+history query. Raw/native/hosted consumers must not associate them with whichever
+query is awaiting a response. The JS host already requires a matching
+`fields.command` before flagging query rows; no host protocol or SDK argument
+changes. Background coverage does not resolve, reject or flag an unrelated
+query. B11's request-scoped ingestion/coverage work remains required, and other
+unconverted paged histories remain open; this follow-on does not close the full
+history fan-out or prove deployed NX behavior.

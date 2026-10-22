@@ -3,6 +3,7 @@ use crate::{Lighter, Pending, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
+use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -1908,7 +1909,7 @@ impl Lighter {
                         self.request_backfill(cx, run);
                         return;
                     }
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+                    BackgroundCoverage::Incomplete.report(cx,
                         "Lighter fill backfill stopped before the outage start; older fills may be missing",
                     );
                 }
@@ -2404,7 +2405,7 @@ impl Lighter {
     }
     fn backfill_failed(&mut self, cx: &mut Cx<'_, Pending>, mut run: Backfill, error: String) {
         if run.retried {
-            cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+            BackgroundCoverage::Incomplete.report(cx,
                 format!("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect: {error}"),
             );
             return;
@@ -2421,18 +2422,18 @@ impl Lighter {
         self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
     }
     fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
-        let auth =
-            match self.account_auth(cx) {
-                Ok(auth) => auth,
-                Err(e) => {
-                    cx.notice(Level::Warn, code::HISTORY_INCOMPLETE,
+        let auth = match self.account_auth(cx) {
+            Ok(auth) => auth,
+            Err(e) => {
+                BackgroundCoverage::Incomplete.report(
+                    cx,
                     format!(
                         "Lighter fill backfill skipped; fills during the outage may be missing: {e}"
                     ),
                 );
-                    return;
-                }
-            };
+                return;
+            }
+        };
         let account = self.account.account_index.unwrap();
         let mut url = format!(
             "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",
