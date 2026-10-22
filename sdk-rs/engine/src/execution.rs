@@ -71,6 +71,22 @@ pub struct Prepared {
 }
 
 impl Prepared {
+    /// Round only the public execution. Its cumulative anchor retains the
+    /// native unrounded quantity and quote for the next report.
+    pub fn rounded(self, rounding: ExecutionRounding) -> Result<Self, Rejection> {
+        let amount = rounding.apply(self.amount)?;
+        let price = rounding.apply(self.price)?;
+        if amount <= 0.0 {
+            return Err(Rejection::InvalidQuantity);
+        }
+        positive_price(price)?;
+        Ok(Self {
+            amount,
+            price,
+            ..self
+        })
+    }
+
     pub fn amount(self) -> f64 {
         self.amount
     }
@@ -86,6 +102,56 @@ impl Prepared {
 }
 
 impl Cursor {
+    /// Bind an average to its cumulative quantity, or extend the historical
+    /// quote with a native-authorized direct price for the new suffix only.
+    pub fn prepare_average(
+        self,
+        quantity: f64,
+        average: Option<f64>,
+        fallback: Option<f64>,
+        arithmetic: Arithmetic,
+    ) -> Result<Option<Prepared>, Rejection> {
+        nonnegative(quantity, Rejection::InvalidQuantity)?;
+        if quantity <= self.quantity {
+            return self.prepare(
+                Report::Cumulative {
+                    quantity,
+                    price: CumulativePrice::Value {
+                        cumulative: None,
+                        fallback: None,
+                    },
+                },
+                arithmetic,
+            );
+        }
+        let value = match average {
+            Some(average) => {
+                nonnegative(average, Rejection::InvalidValue)?;
+                finite(average * quantity)?
+            }
+            None => {
+                let price = fallback.ok_or(Rejection::Unpriced)?;
+                positive_price(price)?;
+                let previous = self
+                    .value
+                    .or((self.quantity == 0.0).then_some(0.0))
+                    .ok_or(Rejection::Unpriced)?;
+                let delta = arithmetic.subtract(quantity, self.quantity)?;
+                finite(previous + finite(delta * price)?)?
+            }
+        };
+        self.prepare(
+            Report::Cumulative {
+                quantity,
+                price: CumulativePrice::Value {
+                    cumulative: Some(value),
+                    fallback: None,
+                },
+            },
+            arithmetic,
+        )
+    }
+
     pub fn seed(quantity: f64, value: Option<f64>) -> Result<Self, Rejection> {
         nonnegative(quantity, Rejection::InvalidQuantity)?;
         if let Some(value) = value {
@@ -601,6 +667,75 @@ mod tests {
             .unwrap()
             .commit()
             .map(|delivery| (delivery.price(), delivery.amount()))
+    }
+
+    #[test]
+    fn average_and_direct_quote_preparation_keep_the_historical_anchor() {
+        let seed = Cursor::seed(1.0, Some(100.0)).unwrap();
+        let direct = seed
+            .prepare_average(2.0, None, Some(112.0), Arithmetic::Binary)
+            .unwrap()
+            .unwrap();
+        assert_eq!((direct.amount(), direct.price()), (1.0, 112.0));
+        assert_eq!(direct.next(), Cursor::seed(2.0, Some(212.0)).unwrap());
+        let average = direct
+            .next()
+            .prepare_average(3.0, Some(110.0), Some(999.0), Arithmetic::Binary)
+            .unwrap()
+            .unwrap();
+        assert_eq!((average.amount(), average.price()), (1.0, 118.0));
+        assert_eq!(average.next(), Cursor::seed(3.0, Some(330.0)).unwrap());
+    }
+
+    #[test]
+    fn rounded_execution_keeps_unrounded_cumulative_quote_and_quantity() {
+        let seed = Cursor::seed(1.0, Some(100.0)).unwrap();
+        let raw = seed
+            .prepare_average(1.4, Some(1000.1), None, Arithmetic::Binary)
+            .unwrap()
+            .unwrap();
+        let rounded = raw.rounded(ExecutionRounding::Significant15).unwrap();
+        assert_eq!((rounded.price(), rounded.amount()), (3250.35, 0.4));
+        assert_eq!(rounded.next(), raw.next());
+        assert_eq!(rounded.next().quantity(), 1.4);
+        assert_eq!(rounded.next().value(), Some(1000.1 * 1.4));
+    }
+
+    #[test]
+    fn average_quote_rejections_do_not_invent_a_baseline_or_use_a_fallback() {
+        let missing = Cursor::seed(1.0, None).unwrap();
+        assert_eq!(
+            missing.prepare_average(2.0, Some(110.0), Some(100.0), Arithmetic::Binary),
+            Err(Rejection::Unpriced)
+        );
+        assert_eq!(
+            missing.prepare_average(2.0, None, Some(100.0), Arithmetic::Binary),
+            Err(Rejection::Unpriced)
+        );
+        let seed = Cursor::seed(1.0, Some(100.0)).unwrap();
+        for average in [f64::NAN, f64::INFINITY, -1.0, 1e308] {
+            assert!(
+                seed.prepare_average(2.0, Some(average), Some(100.0), Arithmetic::Binary)
+                    .is_err()
+            );
+        }
+        assert!(
+            seed.prepare_average(2.0, None, Some(f64::INFINITY), Arithmetic::Binary)
+                .is_err()
+        );
+        let huge = Cursor::seed(1.0, Some(1e308)).unwrap();
+        assert_eq!(
+            huge.prepare_average(2.0, None, Some(1e308), Arithmetic::Binary),
+            Err(Rejection::NonFiniteArithmetic)
+        );
+        assert_eq!(
+            seed.prepare_average(1.0, Some(f64::NAN), None, Arithmetic::Binary),
+            Ok(None)
+        );
+        assert_eq!(
+            seed.prepare_average(0.5, Some(100.0), None, Arithmetic::Binary),
+            Err(Rejection::QuantityRegressed)
+        );
     }
 
     #[test]

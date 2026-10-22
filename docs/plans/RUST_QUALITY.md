@@ -174,7 +174,10 @@ Medium:
    WOO/Bitrue adopt it with five more original-RED/core-GREEN controls. An
    exclusive borrow keeps prepared interval decisions current until consuming
    commit, which precedes Fill emission; aggregate VWAP cannot price a clipped
-   subset. Remaining cumulative consumers still need fan-out before reporting
+   subset. Bitunix and Coinbase(+spot) now share checked average/direct-suffix
+   quote preparation; emitted rounding preserves unrounded anchors. Native
+   compatibility controls cover equal-endpoint quote refresh, invalid-value retry
+   and Spot/INTX/CFM units. Remaining cumulative consumers need fan-out before reporting
    and snapshot freshness, rather than independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;

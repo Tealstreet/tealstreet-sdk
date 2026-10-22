@@ -552,3 +552,19 @@ separate missing historical quote warning/poll versus invalid incremental value
 warning/poll; never reconstruct the former from the current average. Add equal-
 endpoint average correction and non-unit INTX quantity-scale coverage. Engine
 preparation errors must never consume native execution eligibility.
+
+Phase-2 implementation extends the engine first and adopts it in Bitunix and
+Coinbase live fills. Three engine controls cover historical average/direct quote
+mixing, rounded outputs with exact anchors, and invalid/missing/overflow/equal/
+regressing evidence. Two native Coinbase controls cover cumulative VWAP and
+equal-endpoint correction across Spot, INTX (unit and non-unit contract metadata)
+and CFM (non-unit quantity conversion), plus invalid incremental value retry and
+duplicates. These pass on unchanged production source before implementation:
+compatibility evidence, not new production-defect claims. Initial test fixture
+omitted Spot sizing provenance and was corrected with typed base-size metadata;
+that fixture failure is not an original-RED production claim.
+
+Independent API/code/adversarial review is CLEAN; architecture YES. Focused
+engine/Bitunix/Coinbase/Binance native suite passes 1,020 tests. Root typecheck
+44 tasks and lint28 pass (cached). Full CI and authenticated raw/package proof
+remain required before merge. No local release build or replay sweep was run.

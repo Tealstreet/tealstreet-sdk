@@ -149,8 +149,11 @@ High:
   distinct, and late direct executions deliver without rewinding their anchor.
   [Scope, evidence and remaining fan-out](RUST_CUMULATIVE_FILLS.md). This first
   core now also supports observed suffixes and bounded priced intervals with
-  WOO/Bitrue consumers. Bitunix, Coinbase(+spot), BloFin, BingX, AsterDEX,
-  Kraken Spot, Orderly and the KuCoin Spot fallback still need adoption before
+  WOO/Bitrue consumers. Checked average/direct-suffix quote binding and public
+  execution rounding now also serve Bitunix and Coinbase(+spot); compatibility
+  controls preserve historical quotes, equal-endpoint corrections and native
+  Spot/INTX/CFM quantity units. BloFin, BingX, AsterDEX, Kraken Spot, Orderly
+  and the KuCoin Spot fallback still need adoption before
   row reporting and snapshot freshness. ApeX cumulative events still never
   emit public fills; synthetic history remains distinct. No live capture claim.
 - ~~WOO advances its delivered cumulative anchor on a zero/negative last

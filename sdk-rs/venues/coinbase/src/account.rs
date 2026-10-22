@@ -2,6 +2,7 @@ use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{Arithmetic, Cursor};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -2415,53 +2416,63 @@ impl Coinbase {
                     }
                 });
         }
-        if let Some(previous) = old {
-            let delta = o.filled - previous;
-            if delta > 0.0 {
-                let new_value = mapped.average * o.filled;
-                let old_value = if previous == 0.0 {
-                    Some(0.0)
-                } else {
-                    self.account.stream_values.get(&o.id).copied().or_else(|| {
-                        self.account
-                            .snapshot
-                            .as_ref()
-                            .and_then(|s| s.fill_values.get(&o.id))
-                            .copied()
-                    })
-                };
-                let Some(old_value) = old_value else {
-                    cx.notice(
-                        Level::Warn,
-                        code::ROW_SKIPPED,
-                        "Coinbase fill baseline lacks cumulative execution value",
-                    );
-                    self.account_poll(cx, true);
-                    return;
-                };
-                let price = (new_value - old_value) / delta;
-                if !price.is_finite() || price <= 0.0 {
-                    cx.notice(
-                        Level::Warn,
-                        code::ROW_SKIPPED,
-                        "Coinbase invalid incremental execution value",
-                    );
-                    self.account_poll(cx, true);
-                    return;
-                }
-                if price > 0.0 {
-                    cx.fill(Fill {
-                        id: None,
-                        order_id: o.id.clone(),
-                        symbol: o.symbol.clone(),
-                        side: o.side,
-                        price,
-                        amount: delta,
-                    });
-                }
-            }
+        // Equal-quantity receipts refresh the native quote without a new Fill.
+        // Mapping has already validated this cumulative average/quantity pair.
+        let Ok(mut anchor) = Cursor::seed_with_average(o.filled, None, Some(mapped.average)) else {
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
+                "Coinbase invalid incremental execution value",
+            );
+            self.account_poll(cx, true);
+            return;
+        };
+        if let Some(previous) = old
+            && o.filled > previous
+        {
+            let old_value = if previous == 0.0 {
+                Some(0.0)
+            } else {
+                self.account.stream_values.get(&o.id).copied().or_else(|| {
+                    self.account
+                        .snapshot
+                        .as_ref()
+                        .and_then(|s| s.fill_values.get(&o.id))
+                        .copied()
+                })
+            };
+            let Some(old_value) = old_value else {
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
+                    "Coinbase fill baseline lacks cumulative execution value",
+                );
+                self.account_poll(cx, true);
+                return;
+            };
+            let prepared = Cursor::seed(previous, Some(old_value)).and_then(|cursor| {
+                cursor.prepare_average(o.filled, Some(mapped.average), None, Arithmetic::Binary)
+            });
+            let Ok(Some(prepared)) = prepared else {
+                cx.notice(
+                    Level::Warn,
+                    code::ROW_SKIPPED,
+                    "Coinbase invalid incremental execution value",
+                );
+                self.account_poll(cx, true);
+                return;
+            };
+            anchor = prepared.next();
+            cx.fill(Fill {
+                id: None,
+                order_id: o.id.clone(),
+                symbol: o.symbol.clone(),
+                side: o.side,
+                price: prepared.price(),
+                amount: prepared.amount(),
+            });
         }
-        self.stream_baseline(cx, &o.id, o.filled, mapped.average * o.filled);
+        self.stream_baseline(cx, &o.id, anchor.quantity(), anchor.value().unwrap_or(0.0));
         self.trading_observed_order(cx, &o);
         if let Some(client) = &o.client_order_id {
             self.account.pending_clients.remove(client);
