@@ -81,6 +81,42 @@ physical sends must still retain the gap rather than bunch after engine drain.
 No local SignStep/apply/receipt pacing workaround. Trusted MEXC credential setup
 normalization is owned separately by codex-5c57jl, outside this PR.
 
+## Transport handshake and permit boundary
+
+Use distinct route-preparing, prepared/ready, signing, permit-issued, dispatched
+and settled states for each physical attempt. A ready message proves only route
+preparation. It consumes neither a read lease nor a pacing slot and never proves
+sent. Freeze configured `request_timeout` at the first dispatch preparation,
+measured from logical creation; later attempts and route/sign preparation retain
+that original raw upper bound. A later timeout adjustment may shorten it only.
+
+Extend the existing native/JS/Workers executor with preparation and a synchronous
+final claim/handoff. Finish route selection, proxy authorization and HOW setup
+before final permission. Prepared transport state stays in its host; the engine
+gets only an opaque preparation identity and optional raw expiry. Bind a
+single-use permit to logical leg, physical request/attempt, generation, credential
+route, prepared transport, raw deadline and protocol revision. If delivery stalls,
+revalidate at the final claim: expire, reprepare or re-sign within the original
+deadline; never send an old permission merely because it once passed a check.
+
+The final claim calls the shared engine admission hook, starts the logical read
+lease once and advances the group's physical-send timestamp. Then the prepared
+executor immediately hands the request to the transport API, without another
+route/token/HOW await. “Physical send” means that final controllable transport
+handoff, not remote receipt or TCP delivery. Native actor and JS synchronous
+claim paths must share this contract. The host cannot independently renew a
+scheduler lease, reserve a pacing slot or infer outcomes.
+
+Custom/native/Workers transports must explicitly implement this preparation/
+claim contract; missing support is a typed construction/protocol failure, never
+a silent managed-request fallback. Keep the legacy bridge explicitly unsealed.
+Bound preparation, readiness, permits, cancellation, disposal and lost callbacks
+by the original deadline. Fence early/duplicate responses before auth/reducers;
+retain late write ACK/identity reconciliation without reopening a sealed command
+or releasing another attempt. Add delayed-permit, expired-route, early-response,
+same-group concurrent-ready, lost-message and disposal race controls in addition
+to the owner cases above. Each retry retains all prior per-leg release evidence.
+
 ## Shared command-outcome aggregation
 
 | Engine concern | Contract | Reference migrations and regression proof |
