@@ -193,17 +193,20 @@ fn cumulative_preparation_classic_late_direct_fill_does_not_rewind_prefix() {
     let execution = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0.4","accBaseVolume":"0.8","fillPrice":"99","price":"90","side":"buy","orderType":"limit","status":"partially_filled","tradeId":"newer"}]}"#;
     h.private_message(execution);
     assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
-    let late = execution.replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"0.4\"")
+    let late = execution
+        .replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"0.4\"")
         .replace("newer", "older");
     h.private_message(&late);
     assert_eq!(delivered_fills(&mut h), vec![(99.0, 0.4)]);
-    let caught_up = execution.replace("\"baseVolume\":\"0.4\",", "")
+    let caught_up = execution
+        .replace("\"baseVolume\":\"0.4\",", "")
         .replace("newer", "cumulative-catchup");
     h.private_message(&caught_up);
     assert!(delivered_fills(&mut h).is_empty());
     h.private_message(&late);
     assert!(delivered_fills(&mut h).is_empty());
-    let higher = caught_up.replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"1.2\"")
+    let higher = caught_up
+        .replace("\"accBaseVolume\":\"0.8\"", "\"accBaseVolume\":\"1.2\"")
         .replace("cumulative-catchup", "higher");
     h.private_message(&higher);
     assert_eq!(delivered_fills(&mut h), vec![(99.0, 1.2 - 0.8)]);

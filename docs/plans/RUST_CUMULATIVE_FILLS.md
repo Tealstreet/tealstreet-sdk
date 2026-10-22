@@ -141,3 +141,31 @@ invalid bootstrap must reject rather than silently default to zero. Native
 financial decoding, bootstrap source selection and lifecycle remain native.
 Actual signer #1714 ad0e6fa1e42df883b8fe947e6b4c04eda0da2f7d will be integrated
 before implementation and final proof, with all incoming files preserved.
+
+Independent code review found two seed/recovery edges. The existing negative
+quote recovery is a compatibility control (original source passes); preserve
+ValueRegressed classification for a finite negative quote below a known value.
+The missing-quote/zero-average recovery test is a fifth real fill-price defect:
+original source emits .6@176.66666666666669 instead of authorized fallback106.
+Owner explicitly approved this fifth repair: zero average is unavailable, never
+a synthesized Some(0); explicit supplied quote0 stays distinct. Scope is now
+frozen to these five defects plus same-contract controls; further unrelated
+findings go to follow-up. Original tests compiled (1 RED/1 PASS) with byte-for-byte
+source restoration recorded in /tmp/codex-cumulative-seed-original-controls.json.
+
+Actual signer integration `782034a45659bde6f8c6f6e566340832b5bb56ac` preserves
+all83 incoming file blobs and both complete README row sets. All four initial
+native regressions were independently rerun after it and remain assertion RED
+on original production source. Baseline replay CI39719358789/head0343e497e0ce
+has the exact actual signer tree. Four authenticated archive ZIP digests match
+GitHub: Bybit/Bitget/Bitget-USDC/Binance; frozen24 cases/246 outputs/123 Rust,
+70 stable implementation/mode groups. Full candidate comparison still pending.
+
+Local readiness:1120 engine/Bybit/Bitget/Binance native tests pass, including all
+five distinct defect regressions and negative-quote recovery compatibility.
+Strict touched four-crate all-target Clippy, engine/Bybit/Bitget fmt, bans and
+root44 typecheck/28 lint tasks pass. Independent plan and revised code/adversarial
+reviews CLEAN (architecture YES, engine core first); reviewed controls retain
+bootstrap/healthy-poll separation, native dedup/retention and direct UTA behavior.
+Full exact-head CI and complete246-output candidate proof are still merge gates,
+not claims established by this local readiness receipt.
