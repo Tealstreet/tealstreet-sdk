@@ -148,6 +148,89 @@ pub fn row_skipped<P>(cx: &mut Cx<'_, P>, level: Level, message: impl Into<Strin
     cx.notice(level, code::ROW_SKIPPED, message);
 }
 
+/// Duplicate-inclusive row count with an exact first-label distinction.
+/// Anonymous and empty labels are different; a later row never replaces either.
+#[derive(Default)]
+pub struct RowCount {
+    count: usize,
+    first: Option<Option<String>>,
+}
+
+impl RowCount {
+    pub fn add(&mut self, id: Option<&str>) {
+        self.count += 1;
+        self.first.get_or_insert_with(|| id.map(str::to_owned));
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn any(&self) -> bool {
+        self.count > 0
+    }
+
+    pub fn first(&self) -> Option<Option<&str>> {
+        self.first.as_ref().map(|id| id.as_deref())
+    }
+
+    pub fn summary(&self, format: impl FnOnce(&Self) -> String) -> Option<String> {
+        self.first.as_ref().map(|_| format(self))
+    }
+}
+
+/// First-seen unique known IDs, plus every anonymous or empty-ID row.
+#[derive(Default)]
+pub struct RowKeys {
+    ids: Vec<String>,
+    anonymous: usize,
+}
+
+impl RowKeys {
+    pub fn add(&mut self, id: Option<&str>) {
+        match id.filter(|id| !id.is_empty()) {
+            Some(id) if !self.ids.iter().any(|known| known == id) => self.ids.push(id.into()),
+            Some(_) => (),
+            None => self.anonymous += 1,
+        }
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn into_ids(self) -> Vec<String> {
+        self.ids
+    }
+
+    pub fn anonymous(&self) -> usize {
+        self.anonymous
+    }
+
+    pub fn count(&self) -> usize {
+        self.ids.len() + self.anonymous
+    }
+
+    pub fn any(&self) -> bool {
+        !self.ids.is_empty() || self.anonymous > 0
+    }
+
+    pub fn summary(&self, format: impl FnOnce(&Self) -> String) -> Option<String> {
+        self.any().then(|| format(self))
+    }
+}
+
+/// Report one native group, independently of its row count and host filtering.
+pub fn row_summary<P>(cx: &mut Cx<'_, P>, level: Level, summary: Option<String>) -> bool {
+    match summary {
+        Some(message) => {
+            row_skipped(cx, level, message);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Repeat policy for persistent row diagnostics; independent of row admission.
 #[derive(Clone, Copy)]
 pub enum RowRepeat {
@@ -206,6 +289,23 @@ impl<K> RowReports<K> {
 }
 
 impl<K: Eq + Hash> RowReports<K> {
+    /// An empty group re-arms only this key; a present empty string is a report.
+    pub fn report_summary<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: K,
+        level: Level,
+        summary: Option<String>,
+    ) -> bool {
+        match summary {
+            Some(message) => self.report(cx, key, level, message),
+            None => {
+                self.forget(&key);
+                false
+            }
+        }
+    }
+
     /// Return whether repeat suppression admitted a call to `row_skipped`.
     /// Host filtering never changes memory, this result, or health accounting.
     pub fn report<P>(
@@ -357,7 +457,8 @@ impl<K: Eq + Hash, T> SnapshotBuilder<K, T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RowAdmission, RowRepeat, RowReports, SnapshotBuilder, SnapshotCoverage, row_skipped,
+        RowAdmission, RowCount, RowKeys, RowRepeat, RowReports, SnapshotBuilder, SnapshotCoverage,
+        row_skipped, row_summary,
     };
     use crate::book::Book;
     use crate::{Action, Command, Cx, Level, Notice, Response, SocketId, TimerId, Venue};
@@ -717,5 +818,129 @@ mod tests {
                 .drain_actions()
                 .any(|a| matches!(a, Action::Notice(Notice::Event(_))))
         );
+    }
+
+    #[test]
+    fn grouped_collectors_preserve_distinct_count_and_first_label_policies() {
+        let mut count = RowCount::default();
+        assert!(!count.any());
+        assert_eq!(count.first(), None);
+        assert_eq!(count.summary(|_| panic!("empty formatter")), None);
+        for first in [None, Some(""), Some("z")] {
+            let mut count = RowCount::default();
+            for label in [first, Some("a"), Some("a"), None] {
+                count.add(label);
+            }
+            assert_eq!(count.count(), 4);
+            assert!(count.any());
+            assert_eq!(count.first(), Some(first));
+            let mut calls = 0;
+            assert_eq!(
+                count.summary(|_| {
+                    calls += 1;
+                    String::new()
+                }),
+                Some(String::new())
+            );
+            assert_eq!(calls, 1);
+        }
+        count.add(None);
+        assert_eq!(count.first(), Some(None));
+        let mut keys = RowKeys::default();
+        assert!(!keys.any());
+        assert_eq!(keys.summary(|_| panic!("empty formatter")), None);
+        for label in [Some("z"), Some("a"), Some("z"), None, Some("")] {
+            keys.add(label);
+        }
+        assert_eq!(keys.ids(), ["z", "a"]);
+        assert_eq!(keys.anonymous(), 2);
+        assert_eq!(keys.count(), 4);
+        assert!(keys.any());
+        let mut calls = 0;
+        assert_eq!(
+            keys.summary(|_| {
+                calls += 1;
+                "group".into()
+            })
+            .as_deref(),
+            Some("group")
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(keys.into_ids(), ["z", "a"]);
+    }
+
+    fn summary_probe(cx: &mut Cx<'_, ()>) {
+        assert!(!row_summary(cx, Level::Error, None));
+        assert!(row_summary(cx, Level::Error, Some("group".into())));
+        assert!(row_summary(cx, Level::Warn, Some(String::new())));
+        let mut reports = RowReports::unbounded(RowRepeat::ChangedMessage);
+        for (key, summary, expected) in [
+            ("a", Some("A"), true),
+            ("b", Some("B"), true),
+            ("a", Some("A"), false),
+            ("a", None, false),
+            ("b", Some("B"), false),
+            ("a", Some("A"), true),
+            ("a", Some(""), true),
+        ] {
+            assert_eq!(
+                reports.report_summary(cx, key, Level::Warn, summary.map(str::to_owned)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn grouped_summary_rearm_preserves_peers_empty_messages_codes_levels_and_health() {
+        for filtered in [false, true] {
+            let mut engine = crate::test_support::seeded_engine(AdmissionProbe(summary_probe));
+            if filtered {
+                engine.set_log_level(Level::Error);
+            }
+            engine.start(1.0);
+            assert_eq!(engine.health().rows_skipped, 6);
+            let events: Vec<_> = engine
+                .drain_actions()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::Event(event)) => Some(event),
+                    _ => None,
+                })
+                .collect();
+            let expected: &[&str] = if filtered {
+                &["group"]
+            } else {
+                &["group", "", "A", "B", "A", ""]
+            };
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|e| e.message.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for (i, event) in events.iter().enumerate() {
+                assert_eq!(event.code, crate::log::code::ROW_SKIPPED);
+                assert_eq!(event.level, if i == 0 { Level::Error } else { Level::Warn });
+            }
+        }
+    }
+
+    fn empty_capacity_probe(cx: &mut Cx<'_, ()>) {
+        let mut reports = RowReports::default();
+        for key in 0..4096 {
+            assert!(reports.report_summary(cx, key, Level::Warn, Some("seen".into())));
+        }
+        assert!(!reports.report_summary(cx, usize::MAX, Level::Warn, None));
+        assert!(!reports.report_summary(cx, 0, Level::Warn, None));
+        assert!(!reports.report_summary(cx, 1, Level::Error, Some("remembered peer".into())));
+        assert!(reports.report_summary(cx, 0, Level::Error, Some(String::new())));
+    }
+
+    #[test]
+    fn empty_summary_at_capacity_forgets_only_its_key_without_clearing_peers() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(empty_capacity_probe));
+        engine.set_log_level(Level::Error);
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 4097);
     }
 }
