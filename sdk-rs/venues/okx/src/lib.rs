@@ -448,17 +448,27 @@ impl Okx {
         self.subscribe(cx, channel);
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        if let Some(feed) = self.connections[channel].feed {
-            let desired = self.desired_socket_interests(cx.store, channel);
-            if let Err(error) = cx.set_socket_interests(feed, desired) {
-                cx.notice(
-                    Level::Error,
-                    code::SUBSCRIPTION_REJECTED,
-                    format!("Managed socket interest admission refused: {error:?}"),
-                );
+        if let Err(error) = self.propose_interests(cx, channel) {
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Managed socket interest admission refused: {error:?}"),
+            );
+            if let Some(feed) = self.connections[channel].feed {
                 cx.stop_socket_feed(feed);
             }
         }
+    }
+    fn propose_interests(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        channel: usize,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if let Some(feed) = self.connections[channel].feed {
+            let desired = self.desired_socket_interests(cx.store, channel);
+            cx.set_socket_interests(feed, desired)?;
+        }
+        Ok(())
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, message: wire::Message<'_>) {

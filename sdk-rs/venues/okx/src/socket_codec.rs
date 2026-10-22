@@ -202,7 +202,7 @@ impl Okx {
             }
             LifecycleEvent::Ready { epoch, reopened } => {
                 let channel = self.feed_channel(epoch.feed()).ok_or(SocketError::Stale)?;
-                self.subscribe(cx, channel);
+                self.propose_interests(cx, channel)?;
                 if channel == PUBLIC || self.credentials.is_none() {
                     cx.send_after_socket_interests(epoch.feed(), "ping".into())?;
                 }

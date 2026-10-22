@@ -485,5 +485,15 @@ EventName/TopicArgs avoid dynamic JSON object graphs. The unchanged Bitunix logi
 error literal stays in its original native account module, with no signing
 allowance addition or credential-policy change. Both independent final reviews
 are CLEAR; strict four-crate all-target Clippy, fmt, bans and diff checks pass.
-Final 449 focused unit/runtime controls pass; the complete touched-crate rerun
-remains running before actual dependency integration and draft CI.
+Final 449 focused unit/runtime controls pass; the complete four-crate native
+rerun finished with 1,182 tests passing. Actual hosted-presentation #1763 at
+d05c5ede4b86409e1a8d9798e64b79b1c1c888f4 is genuinely integrated; all owned
+source/test blobs and the complete incoming unowned tree are preserved. Four
+shared doc/index append conflicts retained incoming first and both blocks
+verbatim once under standing authorization; no source/test conflict occurred.
+Integrated focused verification passes 583 tests, with strict four-crate
+all-target Clippy, bans and fmt checks. A final OKX Ready-path correction
+propagates synchronous interest admission failure before account refresh;
+catalogue/command callers retain the common coded-error-and-stop wrapper.
+Independent review is CLEAR, and 42 OKX account/socket controls plus strict
+all-target Clippy pass after that correction. Draft CI remains pending.
