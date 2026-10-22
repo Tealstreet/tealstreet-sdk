@@ -61,9 +61,9 @@ Focused SDK 18 tests, typecheck, lint, strict Bybit/standalone registry Clippy p
 Independent source review and CI/replay evidence are still required.
 
 Owner sequencing: cumulative-fill #1725 first, shared wire-stamp PR second,
-this Bybit migration third. Replace temporary local canonical flooring with that
-actual shared DispatchContext.stamp_ms API before merge; keep the independent old
-oracle unchanged. RequestContext is a later shared fan-out, not a gate on this
+this Bybit migration third. The frozen shared DispatchContext.stamp_ms API is now consumed by both REST and
+WS recipes; the independent old oracle keeps its original flooring. Actual
+prerequisite merge pins still need verification before this PR can merge. RequestContext is a later shared fan-out, not a gate on this
 signer migration; the existing legacy bridge remains explicit until that adoption.
 
 Command outcome aggregation remains an explicit RequestContext consolidation
@@ -84,3 +84,12 @@ existing sanitized failure/reconciliation path, yielding Unknown; no second
 mutation is sent and planned identity/body stay immutable. Precise native
 Rejected versus transport Unknown provenance remains RequestContext work.
 These cases compiled and failed before the change; all thirteen groups pass now.
+
+Integration checkpoint: actual financial #1725 `64bc8d60147` is a real ancestor.
+Frozen stamp #1726 `283add0ff27` (tree-identical to `cca20d878841`) and frozen
+history #1727 `2cf4366867cc` are preintegrated, explicitly unmerged dependencies.
+A preservation review verified the exact 47-file Bybit manifest against the stamp
+head, every other blob including the financial changes intact, and both index
+rows retained. 1,025 focused engine/Binance/Bybit/registry/host tests and strict
+checks pass after stamp integration; registry/host gates pass again after the
+history integration. Final CI/replay proof and actual dependency pins remain open.
