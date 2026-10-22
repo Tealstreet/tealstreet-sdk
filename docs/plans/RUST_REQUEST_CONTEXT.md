@@ -555,3 +555,13 @@ engine Clippy pass. Replacing the deadline clamp with a maximum fails the exact
 fractional-deadline assertion; restoration passes. Independent API review CLEAN
 (architecture No). Existing expiry probes now issue actual unrelated Read policy,
 preserving all prior assertions under the explicit background-mutation rejection.
+
+
+Managed history publication prerequisite: expose crate-only
+Cx.validate_completion_context(&Context) -> Result<(), Error>, using the same
+read-only issuer/owner/generation/current-delivery validation as central sealing.
+Shared Completion validates before emitting history.incomplete, then calls
+done_context synchronously; no numeric fallback, state mutation, deadline extension
+or new send permission. Completion remains allowed after the raw deadline where
+the existing logical completion contract allows it. Pin foreign, background,
+retired/reused and old-attempt rejection plus valid post-deadline completion.
