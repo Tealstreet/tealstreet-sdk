@@ -138,7 +138,10 @@ fn count_fills(e: &mut TestEngine) -> u32 {
     0
 }
 fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
-    fill_values(e).into_iter().map(|(_, amount)| amount).collect()
+    fill_values(e)
+        .into_iter()
+        .map(|(_, amount)| amount)
+        .collect()
 }
 fn fill_values(e: &mut TestEngine) -> Vec<(f64, f64)> {
     let Some(frame) = e.take_frame(100.0) else {
@@ -1370,7 +1373,11 @@ fn invalid_last_does_not_consume_cumulative_correction(last: f64) {
     let correction = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000,"tradeId":"correctable-last"}}"#;
     ws(&mut e, socket, 71.0, correction);
     let fills = fill_values(&mut e);
-    assert_eq!(fills.len(), 1, "valid correction must deliver its execution");
+    assert_eq!(
+        fills.len(),
+        1,
+        "valid correction must deliver its execution"
+    );
     assert_eq!(fills[0].0, 59000.0);
     assert!((fills[0].1 - 0.001).abs() < 1e-12);
     assert_eq!(e.store().positions()[0].contracts, 0.01);
@@ -1386,6 +1393,34 @@ fn zero_last_quantity_keeps_cumulative_correction_eligible() {
 #[test]
 fn negative_last_quantity_keeps_cumulative_correction_eligible() {
     invalid_last_does_not_consume_cumulative_correction(-0.001);
+}
+
+#[test]
+fn unpriced_last_without_cumulative_does_not_double_count_the_correction() {
+    for price in [0.0, -1.0] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        e.take_frame(60.0);
+        let report = |price| {
+            format!(
+                r#"{{"topic":"executionreport","data":{{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"executedQuantity":0.001,"executedPrice":{price},"tradeId":"correctable-price"}}}}"#
+            )
+        };
+        ws(&mut e, socket, 70.0, &report(price));
+        assert!(fill_values(&mut e).is_empty());
+        assert_eq!(e.store().positions()[0].contracts, 0.01);
+        ws(&mut e, socket, 71.0, &report(59000.0));
+        assert_eq!(fill_values(&mut e), [(59000.0, 0.001)]);
+        assert!(
+            (e.store().order("9007199254740993").unwrap().filled - 0.006).abs() < 1e-12,
+            "the unpriced report and its correction describe one execution"
+        );
+        assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+        ws(&mut e, socket, 72.0, &report(59000.0));
+        assert!(fill_values(&mut e).is_empty());
+        assert!((e.store().order("9007199254740993").unwrap().filled - 0.006).abs() < 1e-12);
+        assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+    }
 }
 
 // Private reads start before the ticker seed. A stop read then cannot be

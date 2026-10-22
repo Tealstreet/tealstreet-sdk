@@ -148,9 +148,25 @@ High:
   delivered progress, zero average means unavailable, explicit quote0 stays
   distinct, and late direct executions deliver without rewinding their anchor.
   [Scope, evidence and remaining fan-out](RUST_CUMULATIVE_FILLS.md). This first
-  core has two reference consumers; nine other cumulative public-Fill crates
-  and ApeX synthetic history still need engine adoption, including interval/gap
-  extensions before WOO/Bitrue. No caller API or live capture claim.
+  core now also supports observed suffixes and bounded priced intervals with
+  WOO/Bitrue consumers. Bitunix, Coinbase(+spot), BloFin, BingX, AsterDEX,
+  Kraken Spot, Orderly and the KuCoin Spot fallback still need adoption before
+  row reporting and snapshot freshness. ApeX cumulative events still never
+  emit public fills; synthetic history remains distinct. No live capture claim.
+- ~~WOO advances its delivered cumulative anchor on a zero/negative last
+  quantity, losing the same-ID cumulative-only correction. Bitrue replaces a
+  trusted REST quote anchor with an overflowing cumulative-average product,
+  suppressing the next valid VWAP suffix.~~ The shared observed-suffix and
+  priced-interval paths validate before delivered/quote state commits. Two WOO
+  native original-RED/core-GREEN controls recover .001@59000 without moving
+  the position twice; a Bitrue original-RED/core-GREEN control preserves the
+  REST30/quote3300 anchor and delivers the valid10@130 suffix. These are real
+  financial defects on the previous landing, within the helper contract;
+  A fourth original-RED/core-GREEN control prevents WOO last-only unpriced
+  reports and their same-ID correction from doubling displayed quantity (.007
+  instead of .006). Deliberately, inferred last-only observations now wait for
+  a valid financial receipt; explicit cumulative observations stay independent.
+  Complete exact-head CI/raw-artifact proof remains required before merge.
 - ~~Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
   (`binance/src/account.rs:1186`).~~ Fixed: late native executions emit independently of lifecycle terminal state.
 - ~~Binance USD-M amend re-places the full original size when the order filled
@@ -1388,7 +1404,12 @@ Signing, integer scaling, tx encoding and nonces match TS.
   size for price-only amendments; explicit replacement quantities are preserved.
 
 ### WOO
-No confirmed highs; valid data matches TS.
+- High: ~~zero/negative last quantity consumes delivered cumulative progress
+  before a valid same-ID correction.~~ Shared observed-suffix preparation
+  retains correction eligibility, while valid display observations remain
+  separate; two native original-RED/core-GREEN controls cover the lost fill.
+  A third prevents last-only unpriced/corrected receipts from doubling display
+  quantity; inferred observation now requires the valid financial receipt.
 - Medium: ~~algo child rows don't inherit the parent's side/status/reduceOnly, so
   fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
   position row freezes positions (`account.rs:749,949`); one unmappable
@@ -1444,6 +1465,10 @@ Mostly matches TS.
   visibly only when no row maps. Placement still validates the batch before writes.
 
 ### Bitrue
+- High: ~~a finite average whose cumulative product overflows overwrites a
+  trusted REST quote anchor and loses a later valid execution.~~ Shared checked
+  quote preparation keeps the trusted anchor; native original-RED/core-GREEN
+  control proves the10@130 suffix, with interval dedup/floor/cap preserved.
 - High: ~~orders refused on symbols with no account leverage data, and a fresh
   account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
   default margin to Cross and take leverage from a successful change, never

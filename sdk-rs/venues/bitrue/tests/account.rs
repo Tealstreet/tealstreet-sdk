@@ -629,7 +629,11 @@ fn overflowing_average_cannot_replace_a_trusted_rest_quote_basis() {
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"3","ap":"1e308"}}"#);
     assert!(h.fills().is_empty());
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
-    assert_eq!(h.fills(), [(130.0, 10.0)], "the valid suffix keeps its trusted REST quote basis");
+    assert_eq!(
+        h.fills(),
+        [(130.0, 10.0)],
+        "the valid suffix keeps its trusted REST quote basis"
+    );
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert!(h.fills().is_empty());
 }

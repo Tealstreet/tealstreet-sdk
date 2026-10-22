@@ -364,3 +364,28 @@ WOO native order observation/ID selection and refresh/position application remai
 native; all delivery derivation goes through ObservedProgress. Add partial-
 overlap aggregate-VWAP rejection control plus exact direct-price overlap/late/
 bridge/floor/cap, abandoned proposal, checked overflow and correction controls.
+
+Phase 1 checkpoint review CLEAN before implementation: the exclusive mutable
+borrow plus consuming interval commit prevents stale/reused proposals; current
+Bitrue aggregate-VWAP partial clipping is unreachable under its monotone delivered
+basis, but the engine explicitly rejects unsupported subsets. Binary last-size
+coverage is checked before rounded interval construction. Native code now uses
+ObservedProgress for WOO and Bitrue basis selection; native retention/identity
+and wire ordering remain separate. The old Bitrue decimal wrapper had no other
+callers and was removed after moving its exact conversion into engine num.
+Fourteen engine execution tests and all91 WOO/Bitrue account tests pass, including
+the three actual original-source regressions. Broader focused native/strict and
+exact-head CI/raw replay proof remain pending, not established by this receipt.
+
+The first code review identified one deliberate observation-policy correction:
+without cumulative evidence, WOO previously inferred display quantity from an
+unpriced positive last, then added it again on the same-ID price correction.
+A fourth native original-RED control proves final display .007 instead of .006,
+although only one .001@59000 is delivered. The shared helper already avoids that
+rejected receipt: inferred last-only progress waits for validated quantity/price;
+explicit cumulative observations still advance independently of delivery.
+Corrected same-ID receipt produces display .006, position .011 and exactly one
+fill; its duplicate changes none. Original byte restoration is verified in
+/tmp/codex-cumulative-fanout-woo-unpriced-original-receipt.json. This additional
+financial fix is within the owner's standing same-contract approval and was
+reported explicitly; it is not a claim that all observation behavior is unchanged.

@@ -4,6 +4,10 @@ use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{
+    Cursor, ExecutionRounding, IntervalDelivery, IntervalHistory, ObservedProgress, PricedInterval,
+    QuantityInterval, Rejection, scaled_quantity,
+};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -24,6 +28,7 @@ const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/list
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
+const EXECUTION_ROUNDING: ExecutionRounding = ExecutionRounding::Significant15;
 /// Consecutive event-fenced snapshots discarded before one commits anyway.
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
@@ -179,7 +184,7 @@ pub struct Account {
     quotes: HashMap<String, (f64, f64)>,
     execution_fills: HashMap<String, f64>,
     execution_quotes: HashMap<String, (f64, f64)>,
-    execution_intervals: HashMap<String, Executions>,
+    execution_intervals: HashMap<String, IntervalHistory>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
@@ -201,41 +206,6 @@ struct OrderProgress {
     amount: f64,
     time: f64,
 }
-#[derive(Default)]
-struct Executions {
-    floor: f64,
-    intervals: Vec<(f64, f64)>,
-}
-impl Executions {
-    fn take(&mut self, start: f64, end: f64) -> f64 {
-        let start = start.max(self.floor);
-        if end <= start {
-            return 0.0;
-        }
-        let mut amount = end - start;
-        for &(from, to) in &self.intervals {
-            amount -= (end.min(to) - start.max(from)).max(0.0);
-        }
-        self.intervals.push((start, end));
-        self.intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut merged = 0;
-        for index in 0..self.intervals.len() {
-            let interval = self.intervals[index];
-            if merged > 0 && interval.0 <= self.intervals[merged - 1].1 {
-                self.intervals[merged - 1].1 = self.intervals[merged - 1].1.max(interval.1);
-            } else {
-                self.intervals[merged] = interval;
-                merged += 1;
-            }
-        }
-        self.intervals.truncate(merged);
-        if self.intervals.len() > HISTORY_LIMIT {
-            self.floor = self.intervals.remove(0).1;
-        }
-        decimal(amount.max(0.0))
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Listen<'a> {
@@ -430,9 +400,6 @@ pub(crate) fn order_type(value: &str) -> Option<OrderType> {
         _ => return None,
     })
 }
-fn decimal(value: f64) -> f64 {
-    format!("{value:.14e}").parse().unwrap_or(value)
-}
 fn terminal(status: OrderStatus) -> bool {
     matches!(status, OrderStatus::Closed | OrderStatus::Canceled)
 }
@@ -451,15 +418,19 @@ fn trigger(value: f64) -> Option<StopTriggerType> {
     }
 }
 impl Account {
-    fn execution_amount(&mut self, id: &str, start: f64, end: f64) -> f64 {
+    fn execution(
+        &mut self,
+        id: &str,
+        proof: PricedInterval,
+    ) -> Result<Option<IntervalDelivery>, Rejection> {
         let baseline = self.execution_fills.get(id).copied().unwrap_or(0.0);
-        self.execution_intervals
-            .entry(id.to_owned())
-            .or_insert_with(|| Executions {
-                floor: baseline,
-                intervals: vec![],
-            })
-            .take(start, end)
+        let history = match self.execution_intervals.entry(id.to_owned()) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(IntervalHistory::new(baseline, HISTORY_LIMIT)?)
+            }
+        };
+        Ok(history.prepare(proof)?.commit())
     }
     fn progress(&mut self, id: &str, filled: f64, amount: f64, time: f64) {
         if !self.progress.contains_key(id) {
@@ -972,9 +943,14 @@ impl Bitrue {
         let amount = if row.q.0 > 0.0 {
             row.q.0
         } else {
-            row.volume.0 * scale
+            let Ok(amount) = scaled_quantity(row.volume.0, scale, ExecutionRounding::Binary) else {
+                return;
+            };
+            amount
         };
-        let filled = decimal(row.z.0 * scale);
+        let Ok(filled) = scaled_quantity(row.z.0, scale, EXECUTION_ROUNDING) else {
+            return;
+        };
         if amount < 0.0 || filled < 0.0 || !amount.is_finite() || !filled.is_finite() {
             return;
         }
@@ -995,10 +971,11 @@ impl Bitrue {
             .copied()
             .unwrap_or(0.0);
         // Beyond a blind REST interval, only the new suffix has an execution-price proof.
-        let execution_previous = if filled > previous {
-            reported.max(previous)
-        } else {
-            reported
+        let Ok(observed) = ObservedProgress::new(previous, Some(filled)) else {
+            return;
+        };
+        let Ok(execution_previous) = observed.delivery_start(reported) else {
+            return;
         };
         let execution_quotes = if execution_previous > reported {
             &self.account.quotes
@@ -1009,76 +986,68 @@ impl Bitrue {
             .get(&id)
             .filter(|(qty, _)| *qty == execution_previous)
             .map(|(_, value)| *value);
-        let last_quantity = row.l.map(|quantity| decimal(quantity.0 * scale));
-        let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0).or_else(|| {
-            (row.execution_price.0 > 0.0
-                && filled > execution_previous
-                && last_quantity.is_some_and(|last| {
-                    last > 0.0 && last <= filled && last >= filled - execution_previous
-                })
-                && (execution_previous == 0.0 || prior_quote.is_some()))
-            .then_some(
-                prior_quote.unwrap_or(0.0) + (filled - execution_previous) * row.execution_price.0,
-            )
-        });
-        let execution_price = if row.execution_price.0 > 0.0 && last_quantity.is_some() {
-            row.execution_price.0
-        } else if filled > execution_previous
-            && (execution_previous == 0.0
-                || execution_quotes
-                    .get(&id)
-                    .is_some_and(|(qty, _)| *qty == execution_previous))
-        {
-            quote.map_or(0.0, |value| {
-                (value - execution_quotes.get(&id).map_or(0.0, |(_, value)| *value))
-                    / (filled - execution_previous)
-            })
+        let basis = Cursor::seed(execution_previous, prior_quote).ok();
+        let suffix = QuantityInterval::new(execution_previous, filled).ok();
+        // Retain presence separately: a rejected last quantity is not missing evidence.
+        let last_quantity = row
+            .l
+            .map(|quantity| scaled_quantity(quantity.0, scale, EXECUTION_ROUNDING));
+        let covers_suffix = match last_quantity {
+            Some(Ok(last)) => {
+                last > 0.0
+                    && last <= filled
+                    && suffix.is_some_and(|interval| last >= interval.length())
+            }
+            Some(Err(_)) => false,
+            None => true,
+        };
+        let quote = if row.ap.0 > 0.0 {
+            Cursor::seed_with_average(filled, None, Some(row.ap.0)).ok()
+        } else if row.execution_price.0 > 0.0 && last_quantity.is_some() && covers_suffix {
+            basis.and_then(|basis| basis.direct_suffix(filled, row.execution_price.0).ok())
         } else {
-            0.0
+            None
+        };
+        let proof = if row.execution_price.0 > 0.0 && last_quantity.is_some() {
+            last_quantity.and_then(Result::ok).and_then(|last| {
+                QuantityInterval::suffix(filled, last, EXECUTION_ROUNDING)
+                    .and_then(|interval| {
+                        PricedInterval::uniform(interval, row.execution_price.0, EXECUTION_ROUNDING)
+                    })
+                    .ok()
+            })
+        } else if covers_suffix {
+            basis
+                .zip(quote)
+                .and_then(|(from, to)| PricedInterval::quotes(from, to, EXECUTION_ROUNDING).ok())
+        } else {
+            None
         };
         let mut delivery_known = false;
-        if row.x == "TRADE" && execution_price.is_finite() && execution_price > 0.0 {
-            let start = match last_quantity {
-                // L prices only this execution, never a blind cumulative gap.
-                Some(last) if last > 0.0 && last <= filled && row.execution_price.0 > 0.0 => {
-                    Some(decimal(filled - last))
-                }
-                Some(last)
-                    if row.execution_price.0 <= 0.0
-                        && last > 0.0
-                        && last <= filled
-                        && last >= filled - execution_previous
-                        && filled > execution_previous =>
-                {
-                    Some(execution_previous)
-                }
-                None if filled > execution_previous => Some(execution_previous),
-                _ => None,
-            };
-            if let Some(start) = start {
-                delivery_known = true;
-                let amount = self.account.execution_amount(&id, start, filled);
-                if amount > 0.0 {
-                    cx.fill(Fill {
-                        id: None,
-                        order_id: id.clone(),
-                        symbol: market.symbol.clone(),
-                        side,
-                        price: decimal(execution_price),
-                        amount,
-                    });
-                }
+        if row.x == "TRADE"
+            && let Some(proof) = proof
+            && let Ok(delivery) = self.account.execution(&id, proof)
+        {
+            delivery_known = true;
+            if let Some(delivery) = delivery {
+                cx.fill(Fill {
+                    id: None,
+                    order_id: id.clone(),
+                    symbol: market.symbol.clone(),
+                    side,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
+                });
             }
         }
         if row.x == "TRADE"
             && delivery_known
-            && execution_price > 0.0
             && filled >= execution_previous
-            && let Some(quote) = quote.filter(|v| v.is_finite())
+            && let Some(value) = quote.and_then(Cursor::value)
         {
             self.account
                 .execution_quotes
-                .insert(id.clone(), (filled, quote));
+                .insert(id.clone(), (filled, value));
         }
         if row.x == "TRADE" && delivery_known {
             self.account
@@ -1086,9 +1055,9 @@ impl Bitrue {
                 .insert(id.clone(), filled.max(execution_previous));
         }
         if filled >= previous
-            && let Some(quote) = quote
+            && let Some(value) = quote.and_then(Cursor::value)
         {
-            self.account.quotes.insert(id.clone(), (filled, quote));
+            self.account.quotes.insert(id.clone(), (filled, value));
         }
         self.account.progress(&id, filled, amount, time);
         if terminal(status) {
@@ -1588,11 +1557,14 @@ impl Bitrue {
                         if row.avg_price.0 > 0.0
                             && !row.condition_order
                             && !matches!(&*row.kind, "STOP_MARKET" | "TAKE_PROFIT_MARKET")
+                            && let Ok(anchor) = Cursor::seed_with_average(
+                                row.executed_qty.0,
+                                None,
+                                Some(row.avg_price.0),
+                            )
+                            && let Some(value) = anchor.value()
                         {
-                            let value = row.executed_qty.0 * row.avg_price.0;
-                            if value.is_finite() {
-                                quotes.insert(row.order_id.to_string(), value);
-                            }
+                            quotes.insert(row.order_id.to_string(), value);
                         }
                         self.map_order_tree(cx, symbol, &row, None)
                     });
