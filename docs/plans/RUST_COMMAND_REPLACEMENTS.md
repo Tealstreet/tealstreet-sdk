@@ -285,3 +285,14 @@ reused command generations, absent/wrong current Delivery and Never-policy
 parent. Add full atomicity snapshots and real Engine old-preparation/permit/
 callback fences before claiming the registry phase complete. Private unit
 Delivery construction is not a substitute for engine-scoped attempt generation.
+
+Local follow-on checkpoint after real-integrating core746817: added an actual
+Engine prepare/bind/final-claim/refusal/replacement callback test, using the same
+Context as logical root and physical parent. It rejects old completion, facts,
+retry, diagnostic, preparation and duplicate physical callback; after expired
+handle cleanup only exact root logical completion remains, reservations seal
+Unknown, and reused command generations reject the old root. Focused test is
+GREEN. Other previously listed authority/atomicity controls and final phase audit
+remain pending; no ordinary Bybit production migration or publication claim.
+Priority returns to #1741 after its fresh Binance CI failure; this branch stays
+local and unpublished.

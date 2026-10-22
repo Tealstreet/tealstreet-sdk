@@ -316,3 +316,197 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
     assert!(cx.io.pending.is_empty());
     assert!(cx.io.actions.is_empty());
 }
+
+#[derive(Default)]
+struct PhysicalReplacement {
+    root: Option<Context>,
+    children: Vec<Context>,
+    callbacks: usize,
+}
+
+fn physical_policy() -> Policy {
+    Policy {
+        credential: None,
+        pacing: None,
+        ..policy()
+    }
+}
+
+impl crate::Venue for PhysicalReplacement {
+    type Pending = Context;
+    fn capture_http_reconciliation(
+        &self,
+        _: &Context,
+    ) -> Result<crate::request_context::ReconciliationData, Error> {
+        crate::request_context::ReconciliationData::new("replacement-native-evidence".into())
+    }
+    fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        let root = cx
+            .http_context(Scope::Command(7), physical_policy())
+            .unwrap();
+        cx.request_managed(
+            root.clone(),
+            crate::Method::Post,
+            "https://replacement.test/write".into(),
+            None,
+            root.clone(),
+        )
+        .unwrap();
+        self.root = Some(root);
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Context>, root: Context, _: crate::Response<'_>) {
+        self.callbacks += 1;
+        cx.http_write_result(
+            &root,
+            WriteResult::Rejected(VenueError::new("native batch refusal")),
+        )
+        .unwrap();
+        self.children = cx
+            .http_replacement_contexts(&root, &[physical_policy(), physical_policy()])
+            .unwrap();
+        // This is the actual original HTTP callback, not fabricated Delivery.
+        // Passing the retained root cannot launder superseded physical authority.
+        assert_eq!(cx.done_context(&root, "[]".into()), Err(Error::Revoked));
+        assert_eq!(cx.fail_context(&root, "old callback"), Err(Error::Revoked));
+        assert_eq!(
+            cx.command_error_context(&root, "old diagnostic"),
+            Err(Error::Revoked)
+        );
+        assert!(
+            cx.http_write_result(&root, WriteResult::Accepted { order_ids: vec![] })
+                .is_err()
+        );
+        assert!(
+            cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal)
+                .is_err()
+        );
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Context>, _: crate::SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, Context>, _: crate::SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, Context>, _: crate::SocketId, _: u16) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, error: &str) {
+        panic!("unexpected physical failure: {error}");
+    }
+    fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: crate::TimerId) {}
+    fn on_command(&mut self, _: &mut Cx<'_, Context>, _: crate::Command) {}
+    fn book(&self, _: &str) -> Option<&crate::book::Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+#[test]
+fn replacement_real_handoff_revokes_parent_but_retains_exact_expired_root_completion() {
+    use crate::request_context::{Claim, HttpAction, Prepared};
+    use crate::{Action, Event, Notice};
+    let mut engine = crate::test_support::seeded_engine(PhysicalReplacement::default());
+    engine.start(0.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let preparation = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_prepared(
+        1.,
+        preparation,
+        Prepared {
+            id: 55,
+            expires_at: None,
+        },
+    );
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        engine.claim_http(2., permit),
+        Ok(Claim::Released(_))
+    ));
+    engine.handle(
+        3.,
+        Event::HttpResponse {
+            request: preparation.attempt().request,
+            response: crate::Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert_eq!(engine.venue().callbacks, 1);
+    let root = engine.venue().root.as_ref().unwrap().clone();
+    assert_eq!(engine.venue().children.len(), 2);
+    assert!(engine.claim_http(4., permit).is_err());
+    engine.http_prepared(
+        4.,
+        preparation,
+        Prepared {
+            id: 55,
+            expires_at: None,
+        },
+    );
+    engine.handle(
+        4.,
+        Event::HttpResponse {
+            request: preparation.attempt().request,
+            response: crate::Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert_eq!(engine.venue().callbacks, 1);
+    assert!(!engine.drain_actions().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+    )));
+    // New unrelated work cleans the expired root handle. The very SAME root
+    // was both original logical authority and the replaced physical parent.
+    let mut cx = Cx {
+        now: 100.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.http_context(
+        Scope::Background,
+        Policy {
+            operation: Operation::Read,
+            retry: RetryPolicy::Never,
+            ..physical_policy()
+        },
+    )
+    .unwrap();
+    assert!(!cx.io.request_contexts.contexts.contains_key(&root.leg()));
+    assert_eq!(
+        cx.io.request_contexts.validate(&root, cx.now),
+        Err(Error::TimedOut)
+    );
+    let altered = root.clone().with_retry(RetryPolicy::Never).unwrap();
+    assert_eq!(cx.done_context(&altered, "[]".into()), Err(Error::Revoked));
+    cx.fail_context(&root, "logical deadline").unwrap();
+    assert!(
+        matches!(cx.io.actions.last(), Some(Action::Notice(Notice::CommandFailed { command: 7, error, .. })) if error.outcome == Some(Outcome::Unknown))
+    );
+    assert_eq!(cx.fail_context(&root, "duplicate"), Err(Error::Revoked));
+    let next = cx
+        .http_context(Scope::Command(7), physical_policy())
+        .unwrap();
+    assert_ne!(next.owner(), root.owner());
+    assert_eq!(cx.done_context(&root, "[]".into()), Err(Error::Revoked));
+    assert_eq!(cx.validate_completion_context(&next), Ok(()));
+}
