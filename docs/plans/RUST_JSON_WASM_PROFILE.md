@@ -164,3 +164,12 @@ Any TS-reference variation needs exact pre-change full-output control receipts
 and owner disposition; no new exclusions. Old 51c5 data/body/guard remain
 historical, never relabeled. Fresh independent source/data reviews, fixed-head
 separate guard and separate merge are required for the adjusted candidate.
+
+
+Adjusted implementation checkpoint: the central conditional now excludes only
+Aster from the common size defaults. Capture of all 39 aliases confirms only
+WOO and KuCoin Spot gain the eight existing shared arguments; Aster and every
+other family, combined settings, family driver and native Cargo profiles match
+the actual bridge baseline. Shell syntax passes without invoking a build.
+Independent concrete source/argument review is CLEAN. Fresh adjusted CI and
+artifact evidence remain required; no old all-size guard is valid for this head.
