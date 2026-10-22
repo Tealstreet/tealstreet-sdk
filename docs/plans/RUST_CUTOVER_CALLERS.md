@@ -3429,8 +3429,10 @@ excluded. A full raw page with no accepted mapped rows does not qualify for
 partial recovery. The legacy transport/stream-decode callback uses the engine's
 `internal` fallback, rather than claiming every failure is `network`.
 
-Header/signing preparation refusal remains strict with `notSent`, even after
-accepted rows. Native cursor stalls and page caps still finish with incomplete
+Header/signing preparation refusal remains strict even after accepted rows. It
+now reports `internal`/`notSent`, where the old rejection had neither kind nor
+outcome (the missing-credential guard uses `authInvalid`/`notSent`; keyless queries
+still short-circuit before signing). Native cursor stalls and page caps still finish with incomplete
 coverage. Single-page fills, order time cursors, income offsets, raw progress
 before mapping filters, 50-order/100-income page budgets, native financial
 mapping, final sorting/limits, keyless and unknown-fill-market no-I/O, and

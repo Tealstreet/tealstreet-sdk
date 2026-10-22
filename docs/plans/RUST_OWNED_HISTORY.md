@@ -670,8 +670,9 @@ Original-RED checkpoint e2aae0aa398 failed all six new failure-contract groups
 against the old implementation (15 preservation tests passed). The shared-owner
 implementation passes those controls plus four boundary controls: genuine empty
 termination, invalid unbounded first cursor, unchanged explicit endTime, and
-final-only requested order limit. Existing signing preparation remains strict
-notSent; callbacks multiplexing transport and decode retain the shared Internal
+final-only requested order limit. Signing preparation remains strict, now with
+typed notSent metadata instead of an unclassified rejection; callbacks
+multiplexing transport and decode retain the shared Internal
 fallback rather than inventing a Network classification. The owner is the sole
 command identity and emits incompleteness only at successful finalization.
 
