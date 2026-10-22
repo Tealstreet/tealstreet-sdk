@@ -765,3 +765,41 @@ batch planning continues only after validated per-item native refusals; signer,
 transport, gateway, malformed or top-level failures still stop subsequent lots.
 Keep the old first-lot/second-lot proof and accepted IDs, while the central final
 result honestly reports a known partial instead of optimistic batch success.
+
+
+### Full retained-evidence budget (required before core readiness)
+
+Review found that report bounds do not bound accepted ID vectors or full
+VenueError fields retained across sequential callbacks and historical retries.
+Fix this once in CommandWrites, before committing any result; preserve issuer,
+attempt, release, outcome and Partial.total/failed_index facts. No venue budget
+implementation or empty-report bypass may evade it.
+
+Proposed generous command bounds: 4,096 exact retained IDs and 256 KiB for their
+String bytes plus Vec element storage; an individual ID above 1 KiB cannot be
+retained as an exact identifier. Never truncate an ID into a different order ID.
+Keep the exact prefix that fits and mark the remainder as evidence overflow.
+An overflowed sent attempt is Unknown and forbids automatic retry/success, even
+when its retained prefix is empty or a sibling was definitely refused. Existing
+accepted IDs remain available in the partial result; reconcile the unretained
+remainder through reads. No-release commands still project NotSent.
+
+Bound presentation strings (message, venue code and venue message) to 4 KiB each
+and 64 KiB of retained content per command, including historical attempts. Append
+an explicit [truncated] marker whenever content is shortened. Reserve a fixed
+three-marker allowance per bounded attempt so an exhausted content budget can
+still retain the marker. Reallocate into exact-sized owned buffers; input spare
+capacity cannot bypass the budget. Retain kind, outcome, retry delay, builder
+authorization and partial counts unchanged. Apply the same normalization to the
+terminal fallback; do not claim a whole-engine heap ceiling from these bounds.
+
+Validate state/provenance and report capacity before committing projected budget
+counters, facts and reports atomically. A report-only capacity refusal leaves the
+fact unmodified and supports the existing explicit empty-report fallback; it does
+not disable evidence normalization. Guard retry, succeed, fail and terminal error
+selection against the overflow flag. Test exact ID preservation, oversized IDs,
+count/byte limits across attempts and retries, UTF-8 text boundaries, hostile
+String/Vec capacities, exhausted-text markers, no-release/partial/Unknown joins,
+retry refusal, and unchanged ordinary result/partial schema. Add compiled fault
+controls for optimistic success and erased prior retained IDs. Native Binance
+count-mismatched batches must reject before iterating/retaining their rows.
