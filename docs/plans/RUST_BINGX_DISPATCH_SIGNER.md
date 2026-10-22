@@ -154,3 +154,26 @@ Default-feature registry/generation/provider suites pass 51 tests; the standalon
 BingX registry build passes. Five focused SDK suites pass 105 tests, plus package
 typecheck and lint. Correctness and adversarial reviews cover the adapter and
 late controls; CI, full replay proof and hosted acceptance remain pending.
+
+## Post-RequestContext integration: managed admission required
+
+Actual #1776 `35ba549959cfb6e00fe7bccf2fb06826fc1b10f7` is genuinely
+integrated. Two independent reviews preserve all incoming content, all 27
+nonoverlapping source/test/config blobs and both appended caller/index blocks
+verbatim once. The checkpoint passes the BingX native targets, but is not ready
+for cutover: the new RequestContext inventory rejects its legacy staging delta.
+
+Owner disposition is no growth. Move source-local request-driver tests into
+integration tests, consume the separate shared SignStep unsigned-header
+projection prerequisite, then put private request builders on
+`request_signed_managed` with explicit semantic Context and the existing opaque
+SignStep. The same static public-header data must serve legacy rendering and
+managed unsigned intent; credentials and signatures remain provider/apply-owned.
+Do not weaken unsigned attestation, exempt legacy staging, manufacture a public
+Context for a private read or duplicate release/pacing/outcome ownership.
+
+Preserve original typed-failure and prior-sent uncertainty regressions while
+adding real managed release/provider tests. The legacy request inventory must
+shrink, with every unrelated entry unchanged. Hosted admission stays disabled.
+Metadata #1747 consumes the actual family recipe/context seam after this port;
+WEEX is the next family ahead of the remaining HMAC queue.
