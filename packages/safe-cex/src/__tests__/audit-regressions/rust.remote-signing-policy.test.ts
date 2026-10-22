@@ -19,6 +19,17 @@ describe('shared delegated signing declarations', () => {
   it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
     for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
     for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
-    for (const name of ['okx', 'mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+    for (const name of ['mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+  });
+  it.each([
+    ['okx', 'OK-ACCESS-PASSPHRASE'], ['okxeu', 'OK-ACCESS-PASSPHRASE'],
+    ['okxdemo', 'OK-ACCESS-PASSPHRASE'], ['okxeudemo', 'OK-ACCESS-PASSPHRASE'],
+    ['bitget', 'ACCESS-PASSPHRASE'], ['bitgetinverse', 'ACCESS-PASSPHRASE'], ['bitgetusdc', 'ACCESS-PASSPHRASE'],
+  ] as const)('%s declares presentation without enabling dispatch or remote admission', (name, passphraseHeader) => {
+    const policy = deriveRemoteSigningPolicy(name);
+    expect(policy).toMatchObject({ signatureEncoding: 'base64', passphraseHeader });
+    expect(policy?.enabled).not.toBe(true);
+    expect(policy?.payloadSupported).not.toBe(true);
+    expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(false);
   });
 });

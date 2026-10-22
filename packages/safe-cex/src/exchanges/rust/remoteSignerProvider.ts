@@ -9,6 +9,9 @@ export interface RemoteSignerIdentity {
   credential: string;
   signing: string;
   publicCredential: string;
+  passphrase?: string;
+  /** Trusted setup input, consumed into Present-only provider custody. */
+  passphraseValue?: string;
 }
 
 export interface RemoteSignerProviderOptions {
@@ -51,7 +54,27 @@ function validRef(value: unknown): value is string {
     && utf8(value).length <= 256;
 }
 
-function mac(value: unknown): number[] {
+function mac(value: unknown, encoding: 'hex' | 'base64'): number[] {
+  if (encoding === 'base64') {
+    // A SHA-256 MAC has 32 bytes: exactly 43 data characters and one '='.
+    // Nonzero unused pad bits are not a second spelling of the same MAC.
+    if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(value)) throw refused();
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    if ((alphabet.indexOf(value[42]) & 3) !== 0) throw refused();
+    const bytes: number[] = [];
+    let accumulator = 0;
+    let bits = 0;
+    for (const char of value.slice(0, -1)) {
+      accumulator = (accumulator << 6) | alphabet.indexOf(char);
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((accumulator >>> bits) & 255);
+      }
+    }
+    if (bytes.length !== 32) throw refused();
+    return bytes;
+  }
   if (typeof value !== 'string' || !/^[0-9a-fA-F]{64}$/.test(value)) throw refused();
   return Array.from({ length: 32 }, (_, i) => Number.parseInt(value.slice(i * 2, i * 2 + 2), 16));
 }
@@ -175,16 +198,23 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   const { exchangeName, remoteSigner, payloadSigner } = options;
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
   const wire = declaration && { ...declaration };
+  const presentation = deriveRemoteSigningPolicy(exchangeName);
+  const encoding = presentation?.signatureEncoding ?? 'hex';
+  const passphraseHeader = presentation?.passphraseHeader;
   let accountName: string | undefined;
   const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean; receiver: Readonly<Record<string, unknown>> }>();
   const credentials = new Map<string, { bytes: number[]; identity: RemoteSignerIdentity }>();
+  // Passphrases may be presented with owned signing work, never interpolated.
+  const passphrases = new Map<string, number[]>();
   try {
+    if (encoding !== 'hex' && encoding !== 'base64') throw refused();
     accountName = remoteSigner?.accountName;
     if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
     for (const [slot, source] of Object.entries(options.identities)) {
       if (!source) continue;
       if (slot !== 'primary' && slot !== 'secondary') throw refused();
-      const identity = { ...source };
+      const identity: RemoteSignerIdentity = { credential: source.credential, signing: source.signing,
+        publicCredential: source.publicCredential, ...(source.passphrase === undefined ? {} : { passphrase: source.passphrase }) };
       if (!validRef(identity.credential) || !validRef(identity.signing)
         || identity.signing === identity.credential || owned.has(identity.signing) || owned.has(identity.credential)
         || typeof identity.publicCredential !== 'string' || !identity.publicCredential
@@ -194,7 +224,19 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       owned.set(identity.signing, entry);
       owned.set(identity.credential, entry);
       credentials.set(identity.credential, { bytes, identity });
+      if (identity.passphrase !== undefined || source.passphraseValue !== undefined) {
+        if (!passphraseHeader || !validRef(identity.passphrase) || owned.has(identity.passphrase)
+          || typeof source.passphraseValue !== 'string' || !source.passphraseValue) throw refused();
+        // Reuse the shared callback-header grammar/value/total bounds. The
+        // resulting bytes stay in this provider's separate Present-only map.
+        headers({ [passphraseHeader]: source.passphraseValue });
+        const material = Array.from(utf8(source.passphraseValue));
+        const previous = passphrases.get(identity.passphrase);
+        if (previous && (previous.length !== material.length || previous.some((byte, index) => byte !== material[index]))) throw refused();
+        passphrases.set(identity.passphrase, material);
+      }
     }
+    for (const key of passphrases.keys()) if (owned.has(key)) throw refused();
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
 
@@ -211,10 +253,11 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       const work = Array.from(request.operations, (operation) => {
         if (operation.kind === 'present') {
           const item = credentials.get(operation.key);
-          if (!item) throw refused();
-          total += item.bytes.length;
+          const material = item?.bytes ?? passphrases.get(operation.key);
+          if (!material) throw refused();
+          total += material.length;
           if (total > MAX_PAYLOAD) throw refused();
-          return { kind: 'present' as const, bytes: item.bytes.slice() };
+          return { kind: 'present' as const, key: operation.key, passphrase: item === undefined, bytes: material.slice() };
         }
         if (operation.kind !== 'sign' || operation.algorithm !== 'hmacSha256') throw refused();
         const entry = owned.get(operation.key);
@@ -244,6 +287,10 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited) : undefined;
         return { kind: 'sign' as const, entry, payload: text, extraData };
       });
+      for (const item of work) {
+        if (item.kind === 'present' && item.passphrase
+          && !work.some((candidate) => candidate.kind === 'sign' && candidate.entry.identity.passphrase === item.key)) throw refused();
+      }
       const signatures = work.filter((item) => item.kind === 'sign').length;
       const values: number[][] = [];
       let metadata: [string, string][] | undefined;
@@ -258,21 +305,21 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
             type: 'ws-auth',
             exchangeName: extraData ? (wire?.exchangeName ?? exchangeName) : exchangeName,
             ...(accountName === undefined ? {} : { accountName }),
-            wsAuth: { toSign: item.payload, outputFormat: 'hex', ...(extraData === undefined ? {} : { extraData }) },
+            wsAuth: { toSign: item.payload, outputFormat: encoding, ...(extraData === undefined ? {} : { extraData }) },
           }));
           if (!record(response) || response.id !== id
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
-          values.push(mac(response.wsAuthSignature));
+          values.push(mac(response.wsAuthSignature, encoding));
         } else {
           const response = await guarded(signal, undefined, () => payloadSigner!.call(item.entry.receiver, {
             exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
-            scheme: 'hmac-sha256', encoding: 'hex',
+            scheme: 'hmac-sha256', encoding,
           }));
           if (!record(response)) throw refused();
           const extra = headers(response.headers);
           if (extra !== undefined && signatures !== 1) throw refused();
           metadata = extra;
-          values.push(mac(response.signature));
+          values.push(mac(response.signature, encoding));
         }
       }
       if (signal.aborted) throw canceled();
