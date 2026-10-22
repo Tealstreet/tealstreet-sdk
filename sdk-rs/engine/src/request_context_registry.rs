@@ -163,6 +163,11 @@ impl ContextRegistry {
         if now >= context.deadline() {
             return Err(Error::TimedOut);
         }
+        self.validate_handle(context)
+    }
+
+    /// Retirement authority only; expiry cannot create fresh send permission.
+    fn validate_handle(&self, context: &Context) -> Result<(), Error> {
         if !context.issued_by(&self.issuer)
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
@@ -555,8 +560,9 @@ impl<P> Cx<'_, P> {
     /// Retire a fully completed logical read/page join or write leg. Do not call
     /// for each physical page: all remaining attempts must retain their owner.
     /// Command generation stays live until done/fail or its final bound expires.
+    /// Expired current handles may retire; this grants no send/retry permission.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_handle(context)?;
         self.io.retire_http_leg(context);
         self.io.request_contexts.contexts.remove(&context.leg());
         Ok(())
@@ -909,6 +915,75 @@ mod tests {
         assert_eq!(fresh.deadline(), 1_000.);
         assert_eq!(registry.contexts.len(), 1);
         assert_eq!(registry.commands.len(), 1);
+    }
+
+    #[test]
+    fn expired_cleanup_retires_only_the_registered_handle_without_send_rights() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 100.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut foreign = super::super::Io::<()>::default();
+        let mut foreign_store = Store::default();
+        let mut other = Cx {
+            now: 100.,
+            store: &mut foreign_store,
+            io: &mut foreign,
+        };
+        let foreign_handle = other.http_context(Scope::Background, policy()).unwrap();
+        for _ in 0..CAPACITY * 2 {
+            let context = cx.http_context(Scope::Background, policy()).unwrap();
+            cx.now = context.deadline();
+            assert_eq!(
+                cx.http_retry_context(&context, RetryEvidence::ReadFailure),
+                Err(Error::TimedOut)
+            );
+            assert_eq!(cx.finish_http_context(&foreign_handle), Err(Error::Revoked));
+            cx.finish_http_context(&context).unwrap();
+            assert_eq!(cx.finish_http_context(&context), Err(Error::Revoked));
+            assert!(cx.io.request_contexts.contexts.is_empty());
+        }
+        let old = cx.http_context(Scope::Command(7), policy()).unwrap();
+        cx.now = old.deadline();
+        let replacement = cx.http_context(Scope::Command(7), policy()).unwrap();
+        assert_ne!(old.owner(), replacement.owner());
+        assert_eq!(cx.finish_http_context(&old), Err(Error::Revoked));
+        assert!(
+            cx.io
+                .request_contexts
+                .validate(&replacement, cx.now)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn retiring_background_read_frees_capacity_before_followup_admission() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 100.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut contexts = Vec::new();
+        for _ in 0..CAPACITY {
+            contexts.push(cx.http_context(Scope::Background, policy()).unwrap());
+        }
+        assert_eq!(
+            cx.http_context(Scope::Background, policy()),
+            Err(Error::Capacity)
+        );
+        cx.finish_http_context(&contexts.remove(0)).unwrap();
+        let replacement = cx.http_context(Scope::Background, policy()).unwrap();
+        assert_eq!(cx.io.request_contexts.contexts.len(), CAPACITY);
+        cx.finish_http_context(&replacement).unwrap();
+        for context in contexts {
+            cx.finish_http_context(&context).unwrap();
+        }
+        assert!(cx.io.request_contexts.contexts.is_empty());
     }
 
     #[test]

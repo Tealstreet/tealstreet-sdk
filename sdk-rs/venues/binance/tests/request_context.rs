@@ -525,9 +525,12 @@ fn mismatched_batch_rows_keep_only_reconciliation_ids_without_claiming_acceptanc
 
 #[test]
 fn background_catalogue_waits_for_shared_route_preparation() {
-    use safe_cex_engine::request_context::HttpAction;
     use safe_cex_engine::Action;
-    let mut engine = support::engine(Options { public_data_only: true, ..Options::default() });
+    use safe_cex_engine::request_context::HttpAction;
+    let mut engine = support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
     engine.start(1_000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(action)
@@ -537,7 +540,10 @@ fn background_catalogue_waits_for_shared_route_preparation() {
 
 #[test]
 fn background_catalogue_reply_at_its_deadline_cannot_publish_markets() {
-    let mut h = Harness::started(Options { public_data_only: true, ..Options::default() });
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
     let request = h.take("exchangeInfo");
     h.now += 20_000.;
     h.reply(request.id, 200, "", support::EXCHANGE_INFO);
@@ -555,4 +561,78 @@ fn background_account_reply_at_its_deadline_cannot_publish_balance() {
     h.reply(request.id, 200, "", r#"{"totalInitialMargin":"48","totalWalletBalance":"1000","availableBalance":"952","assets":[{"asset":"USDT","walletBalance":"1000","unrealizedProfit":"10","marginBalance":"1010","maintMargin":"3.8","initialMargin":"48","availableBalance":"952"}],"positions":[]}"#);
     assert_eq!(h.engine.store().balance(), &before);
     assert!(!h.engine.store().loaded().balance);
+}
+
+#[test]
+fn background_preparation_refusal_releases_account_joins_for_fresh_polling() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    use safe_cex_engine::{Action, ErrorKind, Response, VenueError};
+    let mut h = Harness::started(Options {
+        key: Some("primary-key".into()),
+        secret: Some("primary-secret".into()),
+        ..Options::default()
+    });
+    let catalogue = h.take("exchangeInfo");
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: support::EXCHANGE_INFO,
+            },
+        },
+    );
+    let actions: Vec<_> = h.engine.drain_actions().collect();
+    let mut account = 0;
+    // Preserve the native account-poll timer while this control intercepts
+    // prepared routes rather than using Harness.collect for the first batch.
+    h.timers
+        .extend(actions.iter().filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        }));
+    for action in &actions {
+        if let Action::ManagedHttp(action) = action
+            && let HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } = action.as_ref()
+        {
+            if request.url.contains("/fapi/v3/account") {
+                account += 1;
+            }
+            assert!(request.headers.is_empty());
+            assert!(!request.url.contains("signature="));
+            h.engine.http_preparation_failed(
+                h.now,
+                *preparation,
+                Error::State,
+                VenueError::new("route refused").kind(ErrorKind::AuthPermission),
+            );
+        }
+    }
+    assert_eq!(account, 1);
+    assert!(
+        !actions.iter().any(
+            |a| matches!(a, Action::Http(request) if request.url.contains("/fapi/v3/account"))
+        )
+    );
+    h.collect();
+    assert!(h.done.is_empty());
+    h.advance(76_000.);
+    assert!(
+        h.has_request("/fapi/v3/account"),
+        "preparation refusal must clear account_in_flight"
+    );
+    assert!(
+        h.has_request("/fapi/v3/positionRisk"),
+        "preparation refusal must clear the positions join"
+    );
+    assert!(
+        h.has_request("/fapi/v1/openOrders"),
+        "preparation refusal must clear the orders join"
+    );
 }

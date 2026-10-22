@@ -4,7 +4,24 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Policy, RetryPolicy, Scope,
 };
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Venue, VenueError};
+use safe_cex_engine::{CommandId, CredentialSlot, Cx, ErrorKind, Method, Venue, VenueError};
+
+pub(crate) struct Read {
+    pub url: String,
+    pub credentials: Option<Credentials>,
+    pub query: Query,
+    pub stream: Option<ArrayAt>,
+}
+
+fn policy(credential: Option<Credential>) -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 impl BinanceFutures {
     pub(crate) fn read_context(
@@ -12,49 +29,101 @@ impl BinanceFutures {
         command: CommandId,
         credential: Option<Credential>,
     ) -> Result<Context, VenueError> {
-        cx.http_context(
-            Scope::Command(command),
-            Policy {
-                operation: Operation::Read,
-                credential,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
+        cx.http_context(Scope::Command(command), policy(credential))
+            .map_err(|_| {
+                VenueError::new("Binance read lifecycle is unavailable").kind(ErrorKind::Internal)
+            })
+    }
+
+    pub(crate) fn background_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Read,
+        credential: Option<Credential>,
+        pending: Pending,
+    ) {
+        let context = match cx.http_context(Scope::Background, policy(credential)) {
+            Ok(context) => context,
+            Err(_) => {
+                self.on_sign_error(
+                    cx,
+                    pending,
+                    VenueError::new("Binance read lifecycle is unavailable")
+                        .kind(ErrorKind::Internal),
+                );
+                return;
+            }
+        };
+        let pending = Pending::Background(context.clone(), Box::new(pending));
+        self.managed_read(cx, context, read, pending);
+    }
+
+    /// Explicit native account snapshots, independent of session-token writes.
+    pub(crate) fn background_signed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        query: Query,
+        stream: Option<ArrayAt>,
+        pending: Pending,
+    ) {
+        let (credentials, slot) = match &self.options.read_credentials {
+            Some(credentials) => (credentials, CredentialSlot::Secondary),
+            None => match &self.credentials {
+                Some(credentials) => (credentials, CredentialSlot::Primary),
+                None => {
+                    self.on_sign_error(
+                        cx,
+                        pending,
+                        VenueError::new("Binance read requires credentials")
+                            .kind(ErrorKind::InvalidInput),
+                    );
+                    return;
+                }
             },
-        )
-        .map_err(|_| {
-            VenueError::new("Binance read lifecycle is unavailable").kind(ErrorKind::Internal)
-        })
+        };
+        self.background_read(
+            cx,
+            Read {
+                url: format!("{}{path}", self.urls.account_rest),
+                credentials: Some(credentials.clone()),
+                query,
+                stream,
+            },
+            Some(Credential {
+                slot,
+                reference: credentials.credential.clone(),
+            }),
+            pending,
+        );
     }
 
     pub(crate) fn managed_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         context: Context,
-        url: String,
-        credentials: Option<Credentials>,
-        stream: Option<ArrayAt>,
+        read: Read,
         pending: Pending,
     ) {
-        let queued = match credentials {
+        let queued = match read.credentials {
             Some(credentials) => cx.request_signed_managed(
                 context,
                 Method::Get,
-                url,
+                read.url,
                 None,
                 Box::new(sign::Http::new(
                     credentials,
-                    Query::new(),
+                    read.query,
                     self.options.recv_window,
                     true,
                 )),
                 pending,
             ),
-            None => cx.request_managed(context, Method::Get, url, None, pending),
+            None => cx.request_managed(context, Method::Get, read.url, None, pending),
         };
         match queued {
             Ok(request) => {
-                if let Some(at) = stream {
+                if let Some(at) = read.stream {
                     cx.stream_response(request, at);
                 }
             }

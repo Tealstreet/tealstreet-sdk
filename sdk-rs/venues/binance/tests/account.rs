@@ -798,8 +798,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -880,8 +880,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
@@ -1176,8 +1176,20 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
 
+// Keep unrelated balance polls responsive while the position/order fixture
+// advances its original total time; their new engine deadlines are real.
+fn advance_with_account_replies(h: &mut Harness, ms: f64) {
+    let until = h.now + ms;
+    while h.now < until {
+        h.advance((until - h.now).min(1_000.0));
+        while h.has_request("/fapi/v3/account") {
+            h.respond("/fapi/v3/account", 200, ACCOUNT);
+        }
+    }
+}
+
 fn advance_to_position_read(h: &mut Harness, rows: &str) {
-    h.advance(75_000.0);
+    advance_with_account_replies(h, 75_000.0);
     h.respond("/fapi/v3/positionRisk", 200, rows);
     h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
 }
@@ -1320,10 +1332,25 @@ fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_part
     h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
     assert!(!h.engine.store().loaded().positions);
     assert!(h.errors.is_empty());
+    // These siblings are outside the malformed-position assertion, but must
+    // finish before their own engine deadlines while this test waits 75 s.
+    h.respond("/fapi/v3/account", 200, ACCOUNT);
+    h.respond(
+        "/fapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/fapi/v1/openOrders", 200, "[]");
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
 
     // Once discovery settles, the row is skipped and, with nothing stored, reported.
     h.advance(1_000.0);
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    // Catalogue refresh starts a new ticker seed. Complete those siblings so
+    // discovery remains settled during the original position-refresh wait.
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
     advance_to_position_read(&mut h, &format!("[{malformed}]"));
     assert!(h.engine.store().loaded().positions);
     assert_eq!(
@@ -1459,7 +1486,7 @@ fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
     let refresh = |h: &mut Harness, orders: &[String]| {
         let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
         h.message("/private/ws", event);
-        h.advance(10_000.0);
+        advance_with_account_replies(h, 10_000.0);
         h.respond(
             "/fapi/v1/openOrders",
             200,

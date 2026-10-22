@@ -110,9 +110,12 @@ impl BinanceFutures {
         self.managed_read(
             cx,
             context.clone(),
-            format!("{}{path}", self.urls.account_rest),
-            Some(credentials),
-            None,
+            crate::reads::Read {
+                url: format!("{}{path}", self.urls.account_rest),
+                credentials: Some(credentials),
+                query: crate::Query::new(),
+                stream: None,
+            },
             Pending::Identity(context),
         );
     }

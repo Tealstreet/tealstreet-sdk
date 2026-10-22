@@ -1001,3 +1001,25 @@ before weight observation to avoid duplicate processing. Test expired/foreign/
 reused cleanup and first-free-capacity replacement. No expiry extension or new
 send permission. Independent plan audit: architecture No; these are shared
 retirement semantics, with native reference adoption only.
+
+Mandatory migration acceptance (not a #1741 core merge gate): WOO must declare
+its existing 100-ms write / 200-ms PUT / 500-ms algo gaps through shared actual-
+release pacing. A parked signer followed by fast ACKs must retain those physical
+send gaps; queue-time next_write/next_algo updates cannot establish them. This
+blocks WOO signer adoption/cutover, alongside MEXC's physical 450-ms acceptance
+and Phemex's raw-deadline projection test. Do not add a venue signing callback,
+new clock mirror or per-venue pacing executor.
+
+Background-read checkpoint: all three new preparation/deadline controls failed
+on the original adapter, then pass with the managed path. The fourth control
+refuses actual prepared routes and verifies fresh native account/position/order
+polling after their unchanged cadence. Shared expired cleanup/foreign/reused
+handle and capacity tests pass. All 282 Binance tests and 453 engine tests with
+order locks pass; strict engine/Binance Clippy, formatting and bans pass. Inventory
+shrinks 1,276 -> 1,274 (only two public legacy queue calls removed); every other
+map is unchanged. Independent implementation/fixture reviews CLEAN, architecture
+No. Canned fixtures prepare/claim at original event times and answer otherwise
+unrelated balance/ticker siblings during unchanged total waits; no original
+assertion, native target row, endpoint or clock deadline is weakened. History,
+session-token writes and Bybit remain separately tracked, so this checkpoint is
+not whole-PR readiness or complete raw replay proof.
