@@ -753,3 +753,15 @@ path maps in enforcement; only an original-map baseline may use this transition.
 All unaffected entries stay identical, and every landed/pruned baseline still
 rejects subsequent regrowth. Test extra sites/counts, altered baselines, unrelated
 paths and post-refresh regrowth. This grants no legacy execution guarantees.
+
+
+Reference audit refinement: extend the existing engine command ingress duplicate
+check to every live managed owner, before placement-ACK bookkeeping or venue
+dispatch, including builds without optional order locks. Preserve the original
+command/journal and emit the existing command.duplicate event; never seal it with
+a numeric failure or maintain a venue-local duplicate table. Native response
+codecs must not apply benign-code success exceptions on 408/5xx. Non-inverse
+batch planning continues only after validated per-item native refusals; signer,
+transport, gateway, malformed or top-level failures still stop subsequent lots.
+Keep the old first-lot/second-lot proof and accepted IDs, while the central final
+result honestly reports a known partial instead of optimistic batch success.
