@@ -1077,3 +1077,22 @@ and bans (11 inventory adversarial controls). Independent implementation review
 CLEAN; architecture No: shared aggregation policy with a native codec fact, not
 a venue-owned command finalizer. This is local reference verification, not final
 CI, complete raw replay equivalence or whole-PR readiness.
+
+Final canned-transport integration plan (before editing): provisional CI at
+edd9376e0a4 runs 579 actual-WASM SDK tests and exposes nine failures in three
+files after Binance background/identity reads become managed. The three signer
+controls and shared realVenue canned transport implement request() only; use the
+already-tested test-only prepareRecordedHttp hook in those two fixture builders.
+Do not add production fallback, alter provider/signature/refusal expectations,
+change event clocks, extend startup timeouts or weaken any Store/frame assertion.
+The six real startup/frame failures consume that same fixture. Verify shared
+helper unit tests, SDK typecheck/lint and fresh CI compiled-WASM tests; local
+existing binaries are not current-core proof. Audit: no production path changes,
+no new lifecycle; architecture No.
+
+Timing tally update: provisional edd9376e0a4 / Rust39799401878 Bitget public steady
+CPU is TS483.837ms / Rust437.171ms versus435.4533ms allowance (about0.39% over).
+Private gates remain declared diagnostics. Bitget stays on its original speed
+profile. Final integrated CI must remeasure; a repeat requires inspecting shared
+public-path work before treating it as runner variation, not a profile/budget
+change. This failed provisional run is not final replay proof.
