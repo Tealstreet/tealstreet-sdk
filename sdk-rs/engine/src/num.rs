@@ -71,6 +71,13 @@ pub fn round_half_up(value: f64) -> f64 {
     (value + 0.5).floor()
 }
 
+/// Existing TS safe-math subtraction, rounded to the larger input decimal
+/// count. Callers handling untrusted values must validate inputs and output.
+pub fn decimal_subtract(a: f64, b: f64) -> f64 {
+    let factor = 10f64.powi(decimals(a).max(decimals(b)) as i32);
+    round_half_up((a - b) * factor) / factor
+}
+
 /// Round `value` to the nearest multiple of `step`, then trim float noise to
 /// the step's decimal places.
 pub fn adjust(value: f64, step: f64) -> f64 {

@@ -357,3 +357,16 @@ the actual clock merge. Owner queue is history #1712 first, then this PR; signer
 and install-retry infra follow-up hold. The owner permits a clean trial against
 actual #1712 only if its real diff and dependency review show no overlap with
 this change; otherwise integrate it and refresh normally. No general waiver.
+
+Phase-3 actual receipt: #1715 merged `2972949f896da9449655011d7e1f36a6f01396f3`
+after actual history #1712 `0e15f31a874d33a877a155c9698bc83531eb37fb`, using
+the owner-approved independently verified history dependency trial. Green head
+`2ad1adefbed937654c91a596f3a90a72d05d37ab`, Rust CI `39717118698`, all43
+applicable checks SUCCESS and expected browser SKIP. Full138/138 raw outputs
+(69 Rust,24 cases,58 stable groups) match actual clock baseline CI39714718741;
+only top-level metrics excluded,4 PASS/20 known FAIL unchanged. Independent raw
+review CLEAN, fresh separate guard exact6 then separate merge; actual parents,
+tree and every incoming/owned blob verified. Architecture answer YES for the
+financial derivation concern: this bounded Orderly repair was explicitly owner
+approved, and the next fresh plan is [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md).
+Admission/reporting fan-out and snapshot token remain open in owner order.
