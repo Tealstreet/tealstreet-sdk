@@ -732,3 +732,24 @@ independent plan/correctness/adversarial architecture reviews, then full exact-
 head CI/replay with actual shared/build predecessors before separate guard/merge.
 Expected own paths: Coinbase history.rs/history tests (native test support only
 if strict preparation needs it), existing OWNED_HISTORY/AUDITS/QUALITY/CALLERS.
+
+Coinbase independent plan review refinement: shared CursorHistory on actual1746
+is sufficient. Per-family output is accepted-length baseline plus validated
+candidates; family completion precedes restart, and CFM reaching its own limit
+still proceeds to Spot. Native fingerprint comparison stays before UTC filters
+and shared freshness; a conflict invalidates the entire page and follows the
+same actual-mapping-failure policy (prior accepted-only partial, typed rejection
+if none). Identical repeats add no output; do not enable a new no-new-rows cursor
+termination policy. Preserve the pre-finalization 2*MAX_OUTPUT safety bound.
+
+One narrow preparation routing addition is necessary: Coinbase rest.rs signs
+queued requests in dispatch(), and fail_unsent currently sends History through
+ordinary response-failure handling. Add only its Pending::History match arm to
+strict owner rejection, preserving all signer/queue/dispatch behavior; otherwise
+later credential/entropy refusal would incorrectly resolve prior rows. Existing
+request() consumes Pending before returning immediate queue/path refusal; keep
+that direct active cleanup and typed Internal/notSent rejection rather than
+cloning or reconstructing the owner. Include rest.rs in owned scope. No shared
+signing/dispatch change is introduced. Native preparation and CFM-family tests
+may use existing cfg(test) private access, never a production mutator. Rows lane
+confirmed no current Coinbase history/request-builder ownership conflict.
