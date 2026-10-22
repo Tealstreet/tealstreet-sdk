@@ -733,3 +733,23 @@ refused. Compiled faults pin terminal logical-leg ordering and historical byte
 accounting, and both restored controls pass. Existing logical error selection
 and Partial.total/failed_index assertions are retained verbatim. This checkpoint
 adds the shared seam; it does not claim the venue adapters or final raw proof.
+
+
+Owner-approved native reconciliation boundary (2026-10-22): initial Binance and
+Bybit late callbacks are read-only. Retire unresolved writes as Unknown and use
+ordinary fenced reads to reconcile; keep ordinary ACK native known-filled,
+terminal ownership and snapshot fences unchanged. Store-only revision checks do
+not prove that an older in-flight native snapshot cannot overwrite a late patch.
+Safe native late patches wait for the shared financial snapshot freshness token
+owned by the row-admission lane; do not pull that prerequisite into this PR.
+
+Initial inventory integration exception: actual #1748
+(`265870747c0c646331b62bb00f0d1f00e042a67c`) landed before this core. The owner
+authorized exactly its Paradex history bootstrap refresh, 19 to 14 conservative
+lexical sites (eight removed, three changed). The three changed entries are the
+existing matches! macro-reference form (two lookup checks and one public-trades
+check), not new opaque request/completion calls. Pin the original and landed
+path maps in enforcement; only an original-map baseline may use this transition.
+All unaffected entries stay identical, and every landed/pruned baseline still
+rejects subsequent regrowth. Test extra sites/counts, altered baselines, unrelated
+paths and post-refresh regrowth. This grants no legacy execution guarantees.
