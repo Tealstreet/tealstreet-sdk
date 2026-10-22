@@ -291,3 +291,47 @@ its native-readCredentials scrub finding is fixed with hostile-input coverage.
 Final independent delta review and integration checks remain required.
 No half-2 source is pushed or merge-ready. Finish #1728 first on actual #1746,
 then resume this branch and integrate the actual predecessors before final proof.
+
+
+### Half-2 runtime integration plan after the actual Bybit landing
+
+Actual Bybit #1728 `3b20e602258` and KuCoin Spot profile #1753 `35949503f7f`
+are now integrated by porcelain merges. Independent integration review retained
+all incoming and existing source; the only conflict combined Bybit dispatch
+flags with the existing remote policy declarations. Seventy focused SDK tests
+and seven shared registry code-generation tests pass. This is not runtime
+remote-signing verification.
+
+Next committable phase, Binance first:
+
+- Extend the existing shared construction declaration with closed delegated
+  admission, consumed by native construction and the central SDK factory
+  predicate. Declaring headers/feed behavior alone never enables a family.
+- Select `DelegatedSignerSetup` before generic options are retained; capture
+  public-mode and callback intent, remove callback functions as well as raw
+  credentials, and install its owned provider into the existing `EngineHost`.
+  RemoteSigner has authority precedence with no local fallback; configured
+  PayloadSigner intent still selects REST-only feeds if both callbacks exist.
+- Narrow native payload rejection only for the admitted provider-owned path.
+  Preserve all public bypass, secondary read-routing metadata and unsupported
+  family behavior. Close the capsule on construction/host initialization failure
+  and disposal; do not add a provider queue or another signing timeout.
+- Prove all four Binance private-feed guards, owned canonical signing/headers
+  and genuine REST account readiness. Add factory/SDK tests and actual-WASM
+  browser-half1-to-keyless-half2 round trips with independent MAC expectations.
+  Keep callback provisioning worker-local; functions are never serialized in
+  ordinary worker init messages. Review/narrow the existing MCP caller guard.
+- Include the actual contract, callers, remaining deployment/worker limitations
+  and mapping requirements in `RUST_CUTOVER_CALLERS.md` in this same PR.
+
+Bybit follows on this branch only after its native header/feed adoption and
+regressions. Hyro's WS-owned readiness makes PayloadSigner REST-only admission a
+separate explicit protocol boundary: the TS subclass also inherits a payload
+connection guard that prevents its handshake. This was reported to the overseer;
+no fake readiness, weakened snapshot invariant or new recovery policy is planned.
+RemoteSigner streaming and the four ordinary Bybit aliases remain independent.
+
+Architecture gate: one trusted setup/provider/host admission path plus declared
+codec policy, not a per-venue signing, scheduling, auth or session service. The
+RequestContext lane retains HTTP release/managed lifecycle ownership; this lane
+owns result headers before bind and construction/feed configuration only.
