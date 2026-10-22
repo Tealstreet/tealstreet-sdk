@@ -1118,6 +1118,19 @@ that fail on the old checker; run existing conformance tests and bans. This is
 required new-wire recognition in the existing harness choke point, not another
 capability policy or a valid-state proof exemption. Architecture No.
 
+Independent conformance plan review: preparation sequence zero is valid;
+request/generation and permit sequence are nonzero. Compare preparation/permit
+request and generation only: the permit's third field is a host resource id,
+not the preparation sequence. Structurally allow a zero resource id and optional
+u32 timeout zero, matching the native parsers/encoder. Use BigInt only after
+canonical ASCII decimal validation; keep wire strings unchanged. Packet optional
+validation must read the nested packet, not the outer action. Closed route enum
+is primary/direct/publicCors, and intent is independent public/primary/secondary.
+No requirement for a prior Prepare in this one-batch passive checker. Temporary
+exact-incoming-checker controls reproduce assertion RED on valid Prepare/Bind
+and Cancel (unknown managedHttp), before repository implementation. Review CLEAN,
+architecture No; actual dependency integration still precedes source changes.
+
 Bitget public-path source audit after repeated provisional timing misses:
 independent review finds common-event custody pruning/managed admission checks
 and delivery-scope save/restore, plus an empty managed-map lookup for legacy
