@@ -219,3 +219,49 @@ claim per-leg physical-release deadline enforcement, completed scheduler
 adoption, final replay equivalence or production readiness. The actual merged
 API, lease/denial controls and final shipped-artifact/replay CI proof are still
 required before readiness. Other families remain future adoption.
+
+## Landed-core continuation and exact remaining dependencies
+
+Actual #1741 `b2fe97324763e1e2702c69ac5b839da37102928b` and #1759
+`9bf754a01149d373c522728edbebb46abc5ae5b2` are integrated. This continuation
+replaces metadata's independent scalar clock with the existing issuer-bound
+`fence::Epoch/Stamp`. Token and Observation become opaque Clone values; attempt
+identity, symbol/global mutation stamps, background issue floors and account
+settings revision retain their distinct policy. Compare stamps only through the
+one metadata Epoch; never use its latest revision as a universal publication
+fence. Foreign-Store observations/tokens and permanent exhaustion fail closed.
+Native financial order/position fences remain unchanged.
+
+Add one shared metadata scheduler adapter around `read_scheduler::Scheduler`,
+with bounded logical reservations, original raw deadline, same-attempt
+continuations and neutral retirement. Admission delegates to `admit_http` at
+physical release; stale/revoked/paused/expired attempts return Denied, never
+Unscheduled. Tests cover no lease at queue time, first-release anchoring,
+continuation nonrenewal, pause/revocation/expiry, invalid times and cleanup.
+The scheduler response lease is an observation, not a replacement physical
+timeout: actual lifecycle deadlines and cleanup must be wired before any
+production-adoption claim.
+
+Owner clarified the additional prerequisite on 2026-10-23: private WEEX/BingX
+metadata cannot use managed HTTP until their real dispatch-signer migrations
+land. `request_managed` does not carry native signed headers, and no raw-secret
+recipe, public credential placeholder or legacy-header compatibility seam is
+authorized. BingX checkpoint `e912867d991` is future work; WEEX follows it.
+Existing metadata rails routes in these two adapters are private. Public-only
+hooks continue to skip private I/O; no fictional public rails endpoint is added.
+Unsigned managed-read machinery may be exercised through the shared boundary
+without claiming private production wiring.
+
+Managed coalesced completion also needs shared engine group authority: every
+joined owner retains its own generation/deadline/cancellation, while a physical
+delivery for the first owner cannot numerically complete another owner. Keep
+the current adapters explicitly legacy until that authority and actual expiry
+cleanup are integrated. The history managed Completion bridge remains separate.
+
+Verification: add original-RED cross-Store token/observation controls before
+Epoch implementation; retain all existing coalescing/settings/financial tests.
+Then run focused engine/WEEX/BingX/Binance tests with four Cargo jobs, strict
+Clippy/fmt and existing SDK metadata-hook controls via Corepack Yarn. Independent
+correctness/adversarial reviews precede the final checkpoint. Fresh current
+landing integration, CI and source-bound proof are still required. This is one
+engine policy boundary, not per-venue scheduler/signing workarounds.
