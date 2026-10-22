@@ -32,10 +32,9 @@ family_args() {
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
-  # WOO, KuCoin Spot and Aster need their original host/engine/dependency defaults:
-  # shared z repeatedly missed public CPU gates on unrelated changes.
-  # Combined is measured separately; keep every other family's selection.
-  if [[ $family != woo && $family != kucoinspot && $family != asterdex ]]; then build_args+=("${wasm_profile_args[@]}"); fi
+  # Apply common size defaults to every family; explicit package overrides
+  # below retain their existing selections.
+  build_args+=("${wasm_profile_args[@]}")
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')

@@ -16,9 +16,9 @@ serde_json at3 gains only an explicit equivalent selection. Every family and
 combined now share one declared JSON policy; no per-family fallback is selected.
 
 Commit the updated plan and obtain independent concrete-policy review before
-source edits. Capture all39 alias argument lists and combined/families behavior
+source edits. Capture all 39 alias argument lists and combined/families behavior
 without invoking cargo or bind. Run focused checks; all exact-head CI jobs must
-pass. Authenticate complete baseline/candidate CI raw archives for all32 suites,
+pass. Authenticate complete baseline/candidate CI raw archives for all 32 suites,
 all indexed modes/runs and every ordered diagnostic; only top-level metrics may
 be excluded. Authenticate package input fingerprints/tools/flags/file hashes.
 Report per-family optimized wasm byte deltas against each unchanged budget and
@@ -52,31 +52,33 @@ complete evidence precede any adoption.
 
 Phase 1 merged as #1744 at
 `2c5c5f6987f35cafc0e272282e54da37c0a66d4f`. Exact green candidate
-`740390bdf946b5fddde89645d0f273c479243b57` passed all43 applicable checks,
-all28 web/node family budgets, and an independently authenticated976-output
-comparison (488 Rust,304 stable groups,110 ordered gates). Full proof and
-per-family/42-public-workload matrices are in #1744. The global policy is
-selected; the earlier Bitget-only condition never landed. WOO's already-level3
+`740390bdf946b5fddde89645d0f273c479243b57` passed all 43 applicable checks,
+all 28 web/node family budgets, and an independently authenticated 976-output
+comparison (488 Rust, 304 stable groups, 110 ordered gates). Full proof and
+per-family and 42-public-workload matrices are in #1744. The global policy is
+selected; the earlier Bitget-only condition never landed. WOO's already-level 3
 JSON path did not establish a margin repair.
 
-Fresh Phase2 starts from that actual pin. Before source edits, independently
+Fresh Phase 2 starts from that actual pin. Before source edits, independently
 review this plan and the concrete argument change. Replace only the conditional
-that excludes WOO/KuCoinSpot/Aster from wasm_profile_args with one unconditional
+that excludes WOO/KuCoin Spot/Aster from wasm_profile_args with one unconditional
 application for all standalone families. Keep the shared serde_json=3 policy,
-all explicit venue package overrides and combined/native settings unchanged.
-Consequences are explicit: WOO inherits venue levelz; KuCoinSpot retains the
-existing package-kucoin level3 override; Aster retains its existing explicit
-venue level3 override. Host/engine/inherited dependency size profiles become
-uniform across families. Add no new exception or per-venue parser.
+all existing explicit venue package overrides and combined/native settings unchanged.
+Consequences are explicit: WOO retains its existing explicit venue level z;
+KuCoin Spot retains the
+existing package-kucoin level 3 override; Aster retains its existing explicit
+venue level 3 override. Host/engine/inherited dependency size profiles become
+common defaults across families; existing explicit overrides, such as the
+Paradex engine profile, still apply. Add no new exception or per-venue parser.
 
-Capture before/after all39 aliases and combined without building: only the
+Capture before/after all 39 aliases and combined without building: only the
 three named standalone families may gain the existing shared-size argument
 array. Other family arguments and combined must be identical. Run shell syntax
-and appropriate focused checks; CI owns release builds, all28 family budgets
-and all32 replay suites. Authenticate exact actual-landing baseline and candidate
-fingerprints, package hashes, every976 raw output and110 ordered diagnostics;
+and appropriate focused checks; CI owns release builds, all 28 family budgets
+and all 32 replay suites. Authenticate exact actual-landing baseline and candidate
+fingerprints, package hashes, all 976 raw output and 110 ordered diagnostics;
 exclude only top-level metrics. Keep combined evidence limited to unchanged
-settings plus ordinary build/size/SDK checks. WOO, KuCoinSpot and Aster public
+settings plus ordinary build/size/SDK checks. WOO, KuCoin Spot and Aster public
 CPU/memory results must be individually reported with raw samples, including
 runner variation. No local replay or release build is authorized.
 
@@ -84,8 +86,13 @@ This is a distinct candidate, not a claim that all exceptions can be removed.
 If any unchanged budget/objective fails, preserve complete available diagnostics
 and report the per-family result for an owner policy decision. Do not invent a
 one-off fallback, normalize differences or relax thresholds. Because #1745's
-hosted bridge is already receiving actual1744 integration/fresh proof, coordinate
+hosted bridge is already receiving actual #1744 integration/fresh proof, coordinate
 merge order before landing another build-input change; keep this probe in CI
 without forcing an unannounced dependency race. Normal integration/trial rules,
 independent evidence review, a fresh separate guard and a separate exact-head
 merge remain required for any selected follow-up.
+
+Concrete source/argument review confirmed that WOO already has an explicit
+venue-level z override in Cargo.toml. This probe changes its shared host/engine/
+inherited dependency defaults from 3 to z; its venue level stays z. All existing
+venue overrides remain unchanged.
