@@ -392,6 +392,27 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    pub(super) fn unproven_result(
+        &mut self,
+        delivery: &Delivery,
+        status: u16,
+        capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.validate_handle(&delivery.context)?;
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let writes = self
+            .command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?;
+        if writes.latest(delivery.context.leg()) != Some(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
+        writes.unproven_result(delivery.attempt.request, status, capture)
+    }
+
     fn result_with_reports(
         &mut self,
         delivery: &Delivery,

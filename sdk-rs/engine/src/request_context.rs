@@ -8,6 +8,8 @@ use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
 #[path = "http_evidence.rs"]
 mod evidence;
+pub(crate) use evidence::ResponseProof;
+pub use evidence::UnprovenEvidence;
 #[path = "http_reconciliation.rs"]
 mod reconciliation;
 pub use reconciliation::ReconciliationData;
@@ -1112,6 +1114,38 @@ impl CommandWrites {
             RejectionReports::default()
         };
         self.result_with_reports(id, result, reports)
+    }
+
+    /// Record an unproven released response using the same retained-evidence
+    /// quota. No native callback runs until the attempt has passed admission.
+    pub(crate) fn unproven_result(
+        &mut self,
+        id: RequestId,
+        status: u16,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|attempt| attempt.id == id)
+            .ok_or(Error::Invalid)?;
+        let attempt = &self.attempts[index];
+        if self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if !attempt.released || attempt.result.is_some() {
+            return Err(Error::State);
+        }
+        let mut evidence = UnprovenEvidence::new(self.evidence, status)?;
+        capture(&mut evidence);
+        let (budget, error, overflow) = evidence.finish();
+        self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].id_overflow = overflow;
+        self.evidence = budget;
+        Ok(())
     }
 
     /// Atomic native fact plus bounded presentation metadata. A metadata refusal

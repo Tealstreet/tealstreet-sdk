@@ -650,3 +650,40 @@ Concrete engine-only evidence/guard seam, before source:
   Then wire the original hostile native/late engine controls to this shared seam
   before adopting Binance and ordinary Bybit. Native evidence ID namespaces need
   a separate read-only audit before those two family adapters are implemented.
+
+
+Engine response-proof implementation checkpoint (local, before family adoption):
+521 engine order-lock unit tests and 503 default unit tests pass; strict
+order-lock all-target Clippy, formatting, diff check and the ban/ratchet controls
+pass. Original ordinary/late hostile-codec RED controls are now GREEN. Additional
+real handoff controls cover one-shot native evidence and owner-generation
+cleanup, auth-looking code/message without account-auth observations or terminal
+auth counters, prior Accepted/KnownPartial exact IDs, queued/released/parked
+siblings, reused numeric command IDs, duplicate/late provider and HTTP events,
+and immediate engine-owned rejection of an uncertain deferred cancel-all.
+The unchanged successful response/deferred-command controls remain GREEN.
+
+Two assertion adjustments preserve the existing contract: the new quota test now
+expects the selected failure's exact IDs before appended prior facts (the
+established prefix order), and the old 429/503 auth test retains both original
+statuses/clocks but expects only the 429 native callback/auth counter. Its 503
+now explicitly asserts VenueUnavailable/Unknown and reset auth scope. The new
+deferred cancellation control expects the existing reconcile-before-cancel
+failure rather than granting a cancel while effects remain uncertain.
+
+Runtime investigation: an initial bounded unit execution produced no first test
+line. A bounded --list probe of the same binary sampled macOS _dyld_start before
+Rust main (803/803 samples); it then listed tests successfully. The following
+full unit execution finished in about one second of test time. Retain
+/tmp/codex-response-proof-startup/{sample.txt,receipt.json} and the original empty
+timeout log; do not call this a hung Rust test or relax lifecycle assertions.
+Verification logs are /tmp/codex-response-proof-engine-{unit-final,default,
+final-clippy,bans}.log. This is engine-only proof, not a native Bybit migration,
+whole-family completion, CI/raw replay proof or authorization to merge during
+another lane's landing window.
+
+Independent final correctness/adversarial engine-only review: CLEAN. No concrete
+blocker in quota charging, issuer/generation/latest-attempt admission, seal before
+native cleanup, sibling retirement or late custody. Architecture gate: No; the
+policy is centralized in the shared engine. Family evidence codecs/adapters and
+whole follow-on approval remain pending.
