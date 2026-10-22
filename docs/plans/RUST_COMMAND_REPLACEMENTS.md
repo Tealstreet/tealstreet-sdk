@@ -316,3 +316,19 @@ no queued resource/action, monotonic burned identities and subsequent valid
 admission are asserted without changing an old assertion. Architecture No.
 Signed-child/provider/permit and complete atomicity acceptance remain pending;
 ordinary Bybit production is still unchanged and its original RED test remains.
+
+Next local acceptance slice, after genuine corea0c528 integration: extend only
+the existing PhysicalReplacement test venue with an opt-in signed mode, opaque
+test SignStep and child-callback completion count. Production journal/registry
+stays unchanged. Drive actual managed preparation, parked Sign actions, validated
+provider results, bind permits and final physical claims for parent and children.
+Cover all accepted replacement children; one accepted child followed by provider
+refusal (Unknown with exact accepted ID); and provider refusal plus a result at
+the original raw deadline (Unknown, no child release). The fixture deliberately
+calls optimistic done_context only after both child callbacks; engine facts must
+override it. Preserve the existing plain-handoff assertions verbatim. Confirm no
+bind/send before provider completion, no deadline extension, single command seal,
+late/duplicate parent/provider/permit rejection and retained original diagnostic.
+Review the test plan before edits. Use focused --lib replacement controls and
+strict engine Clippy; no local WASM/replay. No PR/push until actual #1741, whose
+exact-head CI/archive watches remain active. Return for any core failure/dependency.
