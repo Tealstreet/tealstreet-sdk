@@ -178,3 +178,18 @@ assertion failure is retained in /tmp/codex-command-replacement-gateway-original
 the existing fallback/client-identity diagnostic assertions remain untouched.
 This branch is intentionally RED until the reviewed shared lifecycle/native-fact
 adoption phase; do not push or open a PR before actual #1741.
+
+Pure journal representation selected before implementation: retain the existing
+flat physical-attempt array and add a bounded logical-leg array. Each leg has its
+opaque id, optional (parent index, declared child ordinal) and superseded flag.
+No retained path vectors or packed integers. Count attempts plus unissued
+reserved children against the existing capacity; first registration consumes a
+reservation, retries consume new physical capacity. Atomic replace validates
+latest released effects-free parent, all fresh child ids and total capacity,
+reserves storage, then marks parent and appends children without further failure.
+A bounded parent-index walk defines root-rank/child ordering and detects prior
+ancestor release; latest() excludes superseded parents. Terminal projection must
+include active reserved leaves, preserve historical attempt uncertainty, and
+keep child-provider failure after ancestor release Unknown. Root completion/
+registry wiring remains the separately audited next phase. No venue may call
+the pure numeric journal directly; ordinary Bybit uses the context bridge.
