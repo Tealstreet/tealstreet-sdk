@@ -275,6 +275,14 @@ impl CursorWalk {
         }
     }
 
+    /// Construct a walk whose first request already has an endpoint bound.
+    pub fn starting_at(max_pages: u32, cursor: String) -> Self {
+        let mut walk = Self::new(max_pages);
+        walk.cursors.insert(cursor.clone());
+        walk.cursor = Some(cursor);
+        walk
+    }
+
     /// Stall when a page holds no rows but carries a cursor.
     pub fn stall_on_empty_page(mut self) -> Self {
         self.stall_on_empty_page = true;

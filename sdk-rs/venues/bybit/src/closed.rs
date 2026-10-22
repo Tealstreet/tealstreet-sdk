@@ -3,8 +3,8 @@
 use crate::history::windows;
 use crate::sign::Query;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
-use safe_cex_engine::Level;
-use safe_cex_engine::log::code;
+use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{CommandId, Cx, Response};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -18,27 +18,24 @@ const MAX_PAGES: u32 = 20;
 const LOOKBACK_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
 
 pub struct Request {
-    command: CommandId,
+    history: CursorHistory<String>,
     category: Category,
     symbol: Option<String>,
     windows: VecDeque<(Option<f64>, Option<f64>)>,
     window: (Option<f64>, Option<f64>),
-    cursor: Option<String>,
-    pages: u32,
-    rows: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct Page<'a> {
-    #[serde(borrow, default)]
-    result: Option<PageResult<'a>>,
+    #[serde(borrow)]
+    result: PageResult<'a>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PageResult<'a> {
-    #[serde(borrow, default)]
-    list: Option<Vec<&'a RawValue>>,
+    #[serde(borrow)]
+    list: Vec<&'a RawValue>,
     #[serde(borrow, default)]
     next_page_cursor: Option<Cow<'a, str>>,
 }
@@ -52,8 +49,9 @@ impl BybitLinear {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     ) {
+        let completion = Completion::new(command);
         if self.variant.is_spot() {
-            cx.fail(command, "Bybit spot has no closed positions");
+            completion.finish(cx, Err("Bybit spot has no closed positions".into()));
             return;
         }
         let category = if self.variant.is_inverse() {
@@ -65,27 +63,34 @@ impl BybitLinear {
         };
         if category == Category::Option {
             let symbol = symbol.unwrap_or_default();
-            cx.fail(
-                command,
-                format!("Bybit has no closed PnL for options ({symbol})"),
+            completion.finish(
+                cx,
+                Err(format!("Bybit has no closed PnL for options ({symbol})").into()),
             );
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, "[]".into());
+            completion.finish(cx, Ok("[]".into()));
             return;
         }
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - LOOKBACK_MS);
         let mut request = Request {
-            command,
+            history: CursorHistory::new(
+                completion,
+                CursorWalk::new(MAX_PAGES),
+                |reason| {
+                    match reason {
+                Stall::PageBudget => format!("Closed-PnL paging hit the {MAX_PAGES}-page cap; older rows in this window were not fetched"),
+                _ => "Closed-PnL paging repeated a cursor; older rows in this window were not fetched".into(),
+            }
+                },
+                |rows| Ok(format!("[{}]", rows.join(","))),
+            ),
             category,
             symbol,
             windows: windows(Some(from), Some(to)),
             window: (None, None),
-            cursor: None,
-            pages: 0,
-            rows: Vec::new(),
         };
         request.window = request.windows.pop_front().unwrap_or_default();
         self.request_closed_page(cx, request);
@@ -98,7 +103,7 @@ impl BybitLinear {
             .opt_num("startTime", request.window.0)
             .opt_num("endTime", request.window.1)
             .num("limit", PAGE_LIMIT)
-            .opt_str("cursor", request.cursor.as_deref());
+            .opt_str("cursor", request.history.cursor());
         self.send(
             cx,
             Rest::get("/v5/position/closed-pnl", query).signed(),
@@ -123,54 +128,40 @@ impl BybitLinear {
         let page = match page {
             Ok(page) => page,
             Err(message) => {
-                cx.fail(
-                    request.command,
-                    format!("bybit closed-PnL fetch failed: {message}"),
+                request.history.finish(
+                    cx,
+                    Err(format!("bybit closed-PnL fetch failed: {message}").into()),
                 );
                 return;
             }
         };
-        let result = page.result.unwrap_or(PageResult {
-            list: None,
-            next_page_cursor: None,
-        });
-        request.rows.extend(
-            result
-                .list
-                .unwrap_or_default()
-                .into_iter()
-                .map(|row| row.get().to_owned()),
-        );
-        request.pages += 1;
+        let result = page.result;
+        let count = result.list.len();
+        for row in result.list {
+            request.history.stage(row.get().to_owned());
+        }
         let cursor = result
             .next_page_cursor
             .filter(|cursor| !cursor.is_empty())
             .map(Cow::into_owned);
-        match cursor {
-            Some(cursor) if request.pages < MAX_PAGES => {
-                request.cursor = Some(cursor);
-                self.request_closed_page(cx, request);
-            }
-            cursor => {
-                if cursor.is_some() {
-                    // Newest first, so the cap drops the oldest rows of this window.
-                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
-                        format!(
-                            "Closed-PnL paging hit the {MAX_PAGES}-page cap; older rows in this window were not fetched"
-                        ),
-                        vec![("command", safe_cex_engine::Value::Num(f64::from(request.command)))],
-                    );
-                }
-                match request.windows.pop_front() {
-                    Some(window) => {
-                        request.window = window;
-                        request.cursor = None;
-                        request.pages = 0;
-                        self.request_closed_page(cx, request);
+        match request.history.advance(CursorPage {
+            next: cursor,
+            rows: count,
+            fresh: count,
+            want_more: true,
+        }) {
+            CursorStep::More(_) => self.request_closed_page(cx, request),
+            CursorStep::Done | CursorStep::Stalled(_) => match request.windows.pop_front() {
+                Some(window) => {
+                    request.window = window;
+                    if !request.history.restart_stage() {
+                        request.history.finish(cx, Ok(()));
+                        return;
                     }
-                    None => cx.done(request.command, format!("[{}]", request.rows.join(","))),
+                    self.request_closed_page(cx, request);
                 }
-            }
+                None => request.history.finish(cx, Ok(())),
+            },
         }
     }
 }

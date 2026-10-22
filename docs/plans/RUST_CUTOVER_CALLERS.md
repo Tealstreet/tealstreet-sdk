@@ -241,9 +241,10 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 
 | Merged PR / landing commit | Contract and caller effect |
 | --- | --- |
+| #1709 / `6f815755c37` | Shared synchronized SDK clock ingress now covers every Rust venue; the per-venue `hostClock` capability is removed and wire bit14 reserved. This supersedes #1520/#1648/#1693 clock opt-ins. Explicit injected clocks remain authoritative. Upgrade paired SDK/engine artifacts; no new account or constructor argument. See the clock supersession below. |
 | #1476 / `0741419bf2` | Local signing-credential validation moves from TS into `safe-cex-venues`, shared by WASM/native construction. The existing error text and `start()` rejection remain; engine loading now precedes this validation. B2's hosted TS hedge and #1531's payload-signer routing remain in force. |
 | #1519 / `9363852438` | One options blob reaches every venue; each Rust arm consumes its fields. No caller edit. A non-AsterDEX secondary read key without a secret now gets `Secondary read credentials require a nonempty key and secret`, replacing a decode error; AsterDEX keeps its separate read-agent rules. |
-| #1520 / `418e4f6ebc` | Engine capability `hostClock` (CAPABILITIES bit 14) replaces the bridge's virtual-clock name list for Backpack, Coinbase/spot and Orderly. Same corrected signing time; no caller edit. Ship matching engine and reader. |
+| #1520 / `418e4f6ebc` | Engine capability `hostClock` (CAPABILITIES bit 14) replaces the bridge's virtual-clock name list for Backpack, Coinbase/spot and Orderly. Same corrected signing time; no caller edit. Ship matching engine and reader. Historical opt-in superseded by #1709; bit14 is now reserved. |
 | #1392 / `48aeec3783` (earlier merge, stale caller row corrected here) | Resolved Base polling policy now scales every Rust venue's periodic reconciliation, including server multipliers and auth backoff; `Infinity` pauses and a finite update resumes. Socket supervision, startup and explicit reads are unaffected. Existing caller configuration works unchanged. |
 | #1529 / `ea39da2a1b` | BloFin historical-order `amount`/`filled` use base units, as fills/open orders already do; unknown-market rows are omitted. The owner-run `historical_orders` backfill remains required before Rust ingestion. |
 | #1531 / `a4d17f8a88` | Only private Bybit/Binance-family `payloadSigner` accounts fall back to TS. Other non-Paradex private Rust accounts refuse the option as `unsupported`/`notSent`; the construction row below already records the MCP effect. |
@@ -303,7 +304,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1641 / `f156e3dc0` | Ordinary Bitunix position reads can publish financial snapshots despite intervening WS routing-ID notifications. Reads coalesce around an active serial with bounded lost-read replacement; accepted leverage/margin/mode writes still fence older snapshots, and command-owned preflight keeps full generation checks. Caller APIs and write retries stay unchanged. |
 | #1643 / `163929bc0` | Malformed typed Bitunix position rows retain the affected symbol's cached hedge legs, settings and REST routing IDs while valid peers advance. Unknown identity protects absence; valid explicit zero rows can still close positions. Partial mode conflicts discard atomically; partial reads cannot establish initial readiness or approve trading preflight. |
 | #1645 / `6642e5146` | Malformed Bitunix regular/TP-SL REST rows retain rejected native-ID families and routing metadata while admitted peers advance. Unknown identity holds absence within its endpoint scope; admitted parents can remove obsolete children. Only admitted groups advance execution baselines, and partial initial/preflight reads remain insufficient. Order/TP-SL WS scheduling and global generation fences are separate. |
-| #1648 / `205ceb3fe` | Bitunix advertises the existing `hostClock` capability, so the SDK supplies synchronized virtual-clock time before first engine start and later callbacks, including private login. REST/login timestamp units and signing formats stay unchanged; callers add no account field or constructor argument. |
+| #1648 / `205ceb3fe` | Bitunix advertises the existing `hostClock` capability, so the SDK supplies synchronized virtual-clock time before first engine start and later callbacks, including private login. REST/login timestamp units and signing formats stay unchanged; callers add no account field or constructor argument. Historical hostClock opt-in superseded by #1709: flag removed, bit14 reserved, shared SDK ingress for all venues. |
 | #1649 / `fc5ab9224` | Missing/null/malformed private login results now emit sanitized Warn `stream.malformed`; explicit boolean false retains Error `auth.rejected`. The existing two-second same-socket login retry coalesces repeated failures; success/retirement cancel it and stale timers cannot sign on a replacement. Deactivation and trading retry policy stay unchanged. |
 | #1650 / `b2059cce9` | With a routing-capable transport, explicit Bitunix `tealstreetWsRoute: true` selects each channel's declared fallback proxy from the first connection and on reconnect. False/unset keeps the existing two-attempt direct-first policy. A direct-only provider stays direct and warns; callers must choose a routing-capable provider to force proxy use. Existing options and native routing-plan schema stay unchanged. |
 | #1655 / `ba3d5bc69` | Bitunix regular/TP-SL reads keep independent serials and ten-second lost-read deadlines; ordinary notifications coalesce without postponing the first one-second repair. Earlier reconciliation can retire venue-terminal orders sooner than TS. The private replay declaration adds exactly 44 tape-pinned terminal-removal/index-shift paths; other checks and all prior declarations stay intact. |
@@ -323,7 +324,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1686 / `850bc25e5` | GRVT adds an unsigned request-owned MDG REST book query. Known markets POST `{i: nativeId, d: 50}` to `/lite/v1/book`, correcting the TS request against the official schema; caller limit is ignored. Unknown markets resolve an owned empty book without HTTP. Full/lite aliases retain native order and cumulative base-amount totals, without IDs/version or decimal rescaling. Query failures do not refresh the private session. |
 | #1687 / `90df20d2f` | Paradex adds unsigned request-owned REST books on live/testnet roots with encoded raw symbols, default depth20 and explicit caller depth unchanged. Native order, duplicates and zero quantities remain; each level's `total` is price × amount in quote units, not cumulative. No IDs/version, scaling or subscription publication is added. |
 | #1690 / `2ff8452aa` | WEEX adds an owned unsigned Contract V3 REST book query, default limit200 and explicit limit unchanged. Native order, null-coalesced aliases, cumulative base-amount totals and exact string `lastUpdateId` remain; no contractVal scaling or level IDs. Strict malformed financial/version parsing rejects atomically. Shared GET pause may defer a new owner without retrying the failed owner. |
-| #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. The newly enabled perp hostClock adopts synchronized SDK time for all perpetual engine work/signing, not only scheduling. |
+| #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. The newly enabled perp hostClock adopts synchronized SDK time for all perpetual engine work/signing, not only scheduling. Historical hostClock opt-in superseded by #1709: flag removed, bit14 reserved, shared SDK ingress for all venues. |
 | #1701 / `b1510f267` | Hyperliquid perpetual fee-tier reads use the configured vault ahead of the trading account (`applicationId`), rather than the API signer. Unresolved private identity waits for existing `userRole` discovery before queuing `userFees`. Signer inputs, existing `Market.makerFee`/`takerFee`, options and fee arithmetic stay unchanged. No new NX field or call is required; the analogous TS defect remains separate owner work. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
@@ -424,7 +425,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `instanceof BlofinExchange` | web `components/reactiveStateHelper/exchangeReactiveStateHelper/BlofinExchangeReactiveStateHelper.tsx:6,20` | true for TS BloFin | false for Rust, but pinned NX audit finds no production import/render of this helper; active containers use the generic helper | unused-source/test cleanup before class deletion; not a demonstrated live Rust UI failure |
 | `RUST_VENUES` becomes `ReadonlySet` (#1400) | none | | | none |
 | `Exchange` gains `fetchEngineSnapshot`; #1400 adds `capabilities`/`loadCapabilities` | no `implements Exchange` downstream; only `as Exchange` casts (`apps/cli/src/repl.ts:713,1517-1925`, `cross-trade-daemon.ts:222`, web tests) | | casts still compile | none |
-| #1476/#1519/#1520 construction and clock policy | factory/worker creation and MCP config callers above | TS local-credential check, per-venue options/clock name lists | shared Rust validation, uniform options and engine `hostClock`; no caller edit. Missing secondary-secret errors are now specific; #1531 still narrows payload-signer fallback | RT validation text; same signing clock |
+| #1476/#1519/#1520 construction and clock policy | factory/worker creation and MCP config callers above | TS local-credential check, per-venue options/clock name lists | shared Rust validation and uniform options; #1709 supersedes engine `hostClock` with one synchronized SDK clock ingress; no caller edit. Missing secondary-secret errors are now specific; #1531 still narrows payload-signer fallback | RT validation text; same signing clock |
 | Construction metadata/public mode (#1563/#1567) | saved-account/factory/worker callers above; web `components/customModules/monacoTypesString.ts` already declares the Aster override and `publicDataOnly` | synchronous venue branches and derived public-mode hint | shared rules preserve synchronous getters; after WASM loading they adopt native `canSign`/`publicDataOnly` when present, while Aster STP reads native `asterdexApiVersion`. `WasmEngineLike.construction()` remains optional; missing fields use TS fallback. See the input/compatibility boundaries below | none for application callers; additive host API |
 
 #### Construction metadata and public mode (#1563, #1567)
@@ -2623,12 +2624,13 @@ direct default producer or new caller argument.
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
 now dispatches a signed native control, with `scheduleCancel` at appended
-capability flag bit25. It also newly sets hostClock true on the perpetual
-engine: the existing SDK clock path supplies synchronized time before start
-and on later callbacks, affecting all perpetual engine work/signing rather
-than only scheduleCancel. Upgrade the SDK/host capability readers and producer
-together. Native spot retains unsupported/`notSent` and hostClock false; prior
-capability positions remain unchanged.
+capability flag bit25. At #1693 it also enabled hostClock on the perpetual
+engine, affecting all perpetual work/signing rather than only scheduleCancel.
+**#1709 supersedes that opt-in:** the flag is removed, bit14 is reserved, and
+the default SDK synchronized clock now applies to every venue, including spot.
+Upgrade paired SDK/host artifacts; explicit injected clocks remain authoritative.
+Native spot scheduleCancel still returns unsupported/`notSent`; later capability
+positions, including bit25, are unchanged.
 
 To arm, pass a safe integer absolute UTC timestamp in milliseconds at least
 five seconds beyond synchronized current time. SDK validation precedes JSON
@@ -3004,9 +3006,11 @@ threshold, tape or integrity rule was relaxed.
 
 ### Bitunix host time and login controls (#1648/#1649)
 
-Bitunix now sets the existing `hostClock` capability true. The SDK adopts the
-record before startup and supplies `virtualClock.getCurrentTimeMs()` to the first
-engine start and later callbacks, including private socket open. REST requests
+At #1648 Bitunix enabled the existing `hostClock` capability. **#1709 now
+supersedes that opt-in:** the capability is removed, bit14 is reserved, and one
+shared SDK clock ingress supplies synchronized time to every venue. The bound
+clock is read before startup and on later callbacks, including private socket
+open; an explicitly injected clock remains authoritative. REST requests
 and private login sign with that engine time using their existing timestamp units
 and signing formats. SDK callers add no account field or constructor argument.
 Venue server-time synchronization and signature-rejection recovery remain
@@ -3128,6 +3132,8 @@ notice. Deployment is Sam's call; neither logging PR deploys anything.
 
 ## Owned history completion core: BloFin reference
 
+Merged #1710 at `1910baa65a3` (source and caller section audited at that pin).
+
 BloFin closed positions now finish through the shared engine history owner and
 cursor pager. The successful partial-result contract stays the same: an owned
 Warn `history.incomplete` precedes retained rows, including at Error-only log
@@ -3139,5 +3145,47 @@ still reject. A repeated non-adjacent continuation now stops with an owned incom
 cycling to the page cap; short pages, repeated identities and immediate unchanged
 cursors keep the existing termination behavior. No SDK method arguments, worker
 completeness envelope or NX ingestion requirement changes. B11 remains open for
-NX query association and coverage; other venue histories have not migrated to
-this core yet. [Implementation scope](RUST_OWNED_HISTORY.md).
+NX query association and coverage; subsequent closed-position migrations are
+scoped below and general-history fan-out remains active. [Implementation scope](RUST_OWNED_HISTORY.md).
+
+
+### Windowed / seeded closed-position fan-out
+
+Bybit and OKX closed-position reads now use the same staged/accepted history
+owner and cursor core. First failures before accepted rows are typed rejections;
+later failures return only accepted rows with one command-owned incomplete marker
+before the final result. Callers must carry this through B11's request-scoped
+completeness transport and avoid claiming complete history coverage.
+
+Bybit requires the successful `result.list`; missing/null/malformed data no
+longer becomes an empty complete result. Its 20-page budget resets per window,
+raw duplicate rows stay intact, and one owner retains earlier incompleteness
+across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
+early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
+bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
+non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+change. This slice covers closed-position reads only; both venues' general
+history reads and the broader query-marker fan-out remain unfinished. No NX
+migration, deployment or B11 closure is claimed.
+
+## Shared SDK clock ingress supersedes venue opt-ins (#1709)
+
+Actual merge `6f815755c37` removes `host_clock`/`hostClock` from the native
+capability record, JS reader/types and all five venue opt-ins. Wire bit14 is
+reserved rather than reused; later fields keep their positions. The historical
+#1520, #1648 and #1693 rows above describe their earlier merges, not a current
+capability to test or set. Ship paired SDK/native artifacts; do not depend on
+`capabilities.hostClock` or a venue-name clock policy.
+
+The default SDK provider awaits shared initial synchronization before engine
+startup and reads synchronized time dynamically for later events. All Rust
+venues use that ingress, including commands, HTTP/WS/sign callbacks and timers.
+The bound clock also supplies SDK schedule-deadline validation and default
+Bybit/WOO journal windows. An explicit host/transport/replay clock stays dynamic
+and authoritative; it is never replaced by synchronized wall time. Custom
+native/server/Workers hosts remain responsible for the clock they supply.
+
+Existing account/factory callers add no argument. This is not evidence of a
+particular NX deployment or live signing session. Bybit/Aster protocol-time
+calibration remains separate from this merged ingress change; see
+[RUST_ENGINE_CLOCK.md](RUST_ENGINE_CLOCK.md).
