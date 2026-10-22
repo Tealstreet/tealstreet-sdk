@@ -617,6 +617,23 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
 
+#[test]
+fn overflowing_average_cannot_replace_a_trusted_rest_quote_basis() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","ap":"100"}}"#);
+    assert_eq!(h.fills(), [(100.0, 10.0)]);
+    h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":2334151155877155281,"type":"LIMIT","side":"BUY","status":"PART_FILLED","action":"OPEN","price":100,"origQty":100,"executedQty":30,"avgPrice":110}]}"#);
+    assert_eq!(h.e.store().orders()[0].filled, 30.0);
+    // Every input is finite, but 30 * 1e308 is not a usable quote anchor.
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"3","ap":"1e308"}}"#);
+    assert!(h.fills().is_empty());
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
+    assert_eq!(h.fills(), [(130.0, 10.0)], "the valid suffix keeps its trusted REST quote basis");
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
+    assert!(h.fills().is_empty());
+}
+
 const LOG_SECRET: &str = "audit-private-stream-secret";
 const SIGNED_STREAM_URL: &str =
     "wss://fapiws.bitrue.com/stream?listenKey=futures-key&signature=audit-private-stream-signature";
