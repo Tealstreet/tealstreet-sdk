@@ -942,3 +942,15 @@ refusal fixture now prepares its route before exercising the original signer
 failure/timer assertions. Inventory shrinks by four more sites, 1,280 to 1,276.
 This is not full Binance/whole-PR readiness: the separately approved ambiguous
 short-batch ID correction, account/history reads and Bybit migration remain.
+
+Fresh integrated CI at f7a0adc0e94 passed all 579 actual-WASM SDK tests, plus
+11 server / 5 MCP / 2 CLI and 2 ancillary checks. The Binance gate then stopped
+before replay because the raw-WASM entropy probe still inspected only immediate
+http actions; no replay ledger was produced, so no replay parity is claimed.
+Keep all deterministic/production/randomness/exception assertions and add a
+bounded immediate raw-WASM fixture driver for Prepare -> Prepared -> Bind ->
+Claim. Surface the final canonical packet only after successful engine claim;
+reject delegated/parked/pacing paths that this fixture does not model. Reuse it
+for the probe's startup and order actions without a production legacy fallback.
+This validates entropy through the actual compiled engine boundary, not network
+or proxy preparation; CI must rerun the probe before emitting replay artifacts.
