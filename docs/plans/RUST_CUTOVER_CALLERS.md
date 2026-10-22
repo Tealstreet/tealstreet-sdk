@@ -208,8 +208,9 @@ The next query/measurement batch checks Crypto.com #1685 (`84f150c76dd`) and
 browser cold-start #1688 (`b6cb612bc7c`). Browser observations below identify
 their own dispatch head and do not certify a deployed NX runtime.
 The next REST-book batch checks GRVT #1686 (`850bc25e51e`) and Paradex
-#1687 (`90df20d2f14`) at their actual merges. WEEX and Hyperliquid's
-`scheduleCancel` remain pending.
+#1687 (`90df20d2f14`) at their actual merges. The final B8 batch checks
+WEEX #1690 (`2ff8452aa53`) and Hyperliquid #1693 (`fa960d9cfcf`), closing
+the listed SDK-method gaps without closing separate caller or owner work.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -317,6 +318,8 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1688 / `b6cb612bc` | Adds landing-push/manual-dispatch Chrome DedicatedWorker module-readiness observations for 28 production family-loader paths plus a combined-web diagnostic, three fresh processes/profiles each. Measurement integrity errors fail; no latency threshold is imposed. No production API/default-loader or mandatory NX caller change is added, and B1 delivery remains open. |
 | #1686 / `850bc25e5` | GRVT adds an unsigned request-owned MDG REST book query. Known markets POST `{i: nativeId, d: 50}` to `/lite/v1/book`, correcting the TS request against the official schema; caller limit is ignored. Unknown markets resolve an owned empty book without HTTP. Full/lite aliases retain native order and cumulative base-amount totals, without IDs/version or decimal rescaling. Query failures do not refresh the private session. |
 | #1687 / `90df20d2f` | Paradex adds unsigned request-owned REST books on live/testnet roots with encoded raw symbols, default depth20 and explicit caller depth unchanged. Native order, duplicates and zero quantities remain; each level's `total` is price × amount in quote units, not cumulative. No IDs/version, scaling or subscription publication is added. |
+| #1690 / `2ff8452aa` | WEEX adds an owned unsigned Contract V3 REST book query, default limit200 and explicit limit unchanged. Native order, null-coalesced aliases, cumulative base-amount totals and exact string `lastUpdateId` remain; no contractVal scaling or level IDs. Strict malformed financial/version parsing rejects atomically. Shared GET pause may defer a new owner without retrying the failed owner. |
+| #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -334,7 +337,7 @@ execution-ID attribution and FILLS revision 2; #1430 did not introduce either.
 | B5 | **Resolved; no tealstreet-next edit** | #1388 (merged `f9e21a8f37`), #1450 (merged `5ff7ebde6c`) | **Socket health and recovery.** Before #1450, `store.socketHealth` was never written by frames, `reconnect`/`recoverAfterOffline` were no-ops/`true`, `getAllSockets()` returned `[]` and `authFailureStreak` stayed 0. #1450 writes `socketHealth` through the TS summarizer on every socket change and every 5 s, makes `reconnect`/`recoverAfterOffline` close open engine sockets (code 1006) so the venue reopens them (`false` only after dispose or engine death), returns per-channel handles from `getAllSockets` (`isReadonlyFallbackActive()` is always `false`), raises `authFailureStreak` on credential rejections, and teaches the CLI's `findKeyRejection` the engine's wording. Every caller listed then works unchanged; a private stream counts as healthy for 60 s of silence (TS: 20 s), and a socket already in venue backoff (up to 30 s) is not hurried. | web `exchangeAccountController.ts:3391-3415`, `utils/exchange/getWebSocketStatus.ts:27-55`, `getExchangeAppearsConnected.tsx:34`, `components/connectionStatus/{ConnectionStatusIndicator.tsx:39,97,ReconnectingBanner.tsx:157-261}`, `nudges/hostedServerForInstability.ts:66`, `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82`, `order/createLimitOrder.ts:221-222`; CLI `packages/cli-core/src/commands/BaseCommand.ts:173`, `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `apps/cli/src/repl.ts:2831,2903`; exchange-server `public-exchange-manager.ts:95,459` | all Rust venues |
 | B6 | **Resolved; no tealstreet-next edit** | #1441 (merged `ae3a1fc122`) | **In-process shared public data.** Rust accepts exchange-server's `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) unchanged. `serveInProcessPublicData` (`exchanges/rust/publicFeed.ts`) speaks the shared-feed protocol over an in-memory port pair, so the account ingests natively and validates the catalog as with `RustPublicFeedProvider`. Like the TS adapter it is lenient: private startup continues after 30 s without a loaded source, and account markets the source has not listed yet are tolerated (their book/candle requests wait). It follows the server's re-attaching source across public-exchange restarts and re-announces a changed catalog. Real field mismatches still fail, so the source must run on the same engine (at cutover the public exchange is Rust too). One hub per source broadcasts changed tickers every 250 ms. Websocket gateways still reject. Optional exchange-server edit: `createSharedPublicDataSource` keys by venue only, so testnet accounts receive the mainnet source; Rust ignores it for testnet and runs its own feed, while TS prices testnet off mainnet. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
 | B7 | **Resolved; no tealstreet-next edit** | #1439 (merged `0ced7ccf1e`) | **Per-account proxy token across async engine work.** Each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
-| B8 | **Partial: remaining SDK methods** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets), #1680 (merged `6e14b6a0ef9`), #1681 (merged `3db712f0446`), #1685 (merged `84f150c76dd`), #1686 (merged `850bc25e51e`), #1687 (merged `90df20d2f14`) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. Still open: WEEX REST book queries and Hyperliquid `scheduleCancel`. Backpack, Crypto.com, GRVT and Paradex REST queries now work; MEXC standalone JSON admission matches its existing query implementation. Definitive GRVT builder failures now preserve validated code/reason/raw caps through command replies; the NX structural-handler migration below remains required. WEEX metadata refresh now uses native `onReadAndMetadata` with the shared bridge path. See [Cutover tail audit](RUST_CUTOVER_TAIL_AUDIT.md). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | remaining SDK method gaps |
+| B8 | **Resolved: listed SDK method gaps** | #1445 (merged `fc771ab13d`), #1447 (merged `8f29096de9`), #1453 (merged `fe43821c3e`), #1451 (merged `a0f4e7c53c`, superseded), #1501 (Hyperliquid spot markets), #1680 (merged `6e14b6a0ef9`), #1681 (merged `3db712f0446`), #1685 (merged `84f150c76dd`), #1686 (merged `850bc25e51e`), #1687 (merged `90df20d2f14`), #1690 (merged `2ff8452aa53`), #1693 (merged `fa960d9cfcf`) | **Missing per-venue methods.** `fetchClosedPnl` serves engine closed-position rows (`fetchClosedPositions` venue action) through the TS mappers for bybit, bybitdemo, hyrotrader, bybitinverse, the four okx names and blofin (#1445); `fetchHistoricalPositions` follows each TS declaration for bybit/bybitdemo/hyrotrader, okx (linear), blofin, bitget*, hyperliquid and paradex (#1447); Bybit's five names sync the raw REST wallet account into `balance.info` every 2 s (`fetchBalanceInfo`, #1453). All use the existing call shapes. Hyperliquid with `enableSpotMarkets` runs on Rust: the perp engine merges spot pairs (TS display alias), spot holdings (`balance.coins`) and spot orders, as the TS venue does. The listed method gaps are closed: Backpack, Crypto.com, GRVT, Paradex and WEEX REST queries now work, and Hyperliquid perpetual `scheduleCancel` arms/clears natively; spot remains unsupported. Renewal stays caller-owned. No default direct NX/CLI/MCP producer was established by the bounded audit; MEXC standalone JSON admission matches its existing query implementation. Definitive GRVT builder failures now preserve validated code/reason/raw caps through command replies; the NX structural-handler migration below remains required. WEEX metadata refresh now uses native `onReadAndMetadata` with the shared bridge path. See [Cutover tail audit](RUST_CUTOVER_TAIL_AUDIT.md). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229`, `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | listed SDK methods; separate caller work remains |
 | B9 | **Resolved in the SDK; caller migration remains** | #1377, #1383, #1401, #1424, #1482, #1483, #1484, #1583 (merged); venue PRs merged for the listed families | **Typed errors.** `ExchangeError` (exported from `@tealstreet/safe-cex`, `kind`/`outcome`/`venueCode`/`venueMessage`/`retryAfterMs`/partial-batch fields) now rejects **command promises** on the main thread. Through the worker it arrives as a plain `Error` with the same fields (`serializeCommandError`/`deserializeCommandError`), so callers must read fields, not `instanceof`. Classified venues: apexomni, asterdex, backpack, binance, bingx, bitget, bitrue, bitunix (#1589), blofin, breakoutprop, bybit (+variants, #1479, which also fixes the invalid-options hang), coinbase (+spot, #1478), cryptocom, grvt, hyperliquid, kraken (+spot), kucoin (+spot), lighter (#1475), mexc, okx, orderly (#1471), paradex, phemex, polymarket, txflow (#1473), weex, woo. Since #1482 `start()` rejects with an `ExchangeError` carrying the startup `kind` (a credential deactivation is `authInvalid`), and `validateAccount` returns `{ error, kind }` with unchanged `error` text. #1483 tags worker Sentry reports with closed-set `error_kind`/`error_category`/`error_outcome`/`venue_code` (`exchangeErrorTags`). #1484 adds `classified: { kind?, outcome?, venueCode? }` to the `'error'` event options on the main thread and through the worker, and `ExchangeHealthMonitor.processMessage(message, isError, classified?)` prefers a specific classified kind over text patterns. **Left (tealstreet-next):** pass `opts.classified` for ordinary command/legacy errors; for coded diagnostics, adopt #1583's `engine-event`/metadata, `processEvent` and `processHealth`. Suppress a duplicate legacy diagnostic only when its matching event metadata is present. Preserve auth/reload behavior and the caller inventory below. See [Error strings](#error-strings-that-must-move-to-codes). | see [Error strings](#error-strings-that-must-move-to-codes) | all |
 | B10 | **Resolved, given B1** | #1375 (merged `b6c4f006a6`) | **candle-server public exchanges never started.** `fetchMarkets` (`exchange-pool.ts:265`) now starts the engine and waits ≤30 s for native data; it still needs the engine loadable in that image (B1). See [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
 | B11 | **Open: NX history ingestion and coverage** | #1542, #1554, #1593, #1591; SDK transport/mapping #1666 (merged `bba1f43126c`) | **Partial history must not become complete coverage.** Command-owned partial arrays now retain their assertion through SDK worker/hosted JSON, SDK derived history and MCP serialization. Upgrade SDK sender and receiver together. NX must inspect completeness before transforming rows, preserve incomplete derived axes and leave coverage uncompleted. See [Incomplete history](#incomplete-history-1542-1554). | NX `ExchangeServerWorker` (matching SDK upgrade), `collectAccountAxes`, `runHistoricalWindow`; MCP consumers (flagged envelope) | affected Rust history reads and any fill/position axis derived from them |
@@ -2574,6 +2577,67 @@ admission unchanged. The bounded audit found no default direct NX/CLI/MCP
 snapshot producer; the existing TS method's explicitly capped Market/IOC
 quote path is recorded separately above and does not become a new caller
 feature through this query implementation.
+
+### WEEX REST book queries (#1690)
+
+The existing snapshot method now sends unsigned
+`GET /capi/v3/market/depth?symbol=...&limit=N`, using the encoded raw symbol,
+default limit200 and explicit limit unchanged. Native queries need no catalogue
+seed or private credentials; existing SDK capability-readiness rules apply.
+
+Sides use `bids ?? b` and `asks ?? a`; missing/null sides become empty arrays.
+Preserve server order, duplicates, zero quantities and cumulative base-amount
+totals, without contractVal scaling or level IDs. `lastUpdateId` retains its
+exact string, including integers beyond u64; missing/null yields an empty
+string. Malformed non-null shapes, financial fallback/prefix input, nonfinite
+values or cumulative overflow reject the whole query. This tightens permissive
+TS financial parsing without changing method arguments. Native code0/200/absent
+is accepted; malformed explicit code is rejected.
+
+The query shares existing GET pause handling. HTTP429 keeps header/window delay
+precedence and the 60-second bound; later queries may defer with their owner
+intact, while the failed query is not retried. Native/HTTP/transport failures
+remain owned non-auth `notSent`. REST completion/failure does not publish
+subscription depth or replace streaming generation, ticker/account,
+metadata/settings or fill-completeness state. Existing TS internal snapshot
+seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
+direct default producer or new caller argument.
+
+### Hyperliquid signed cancellation scheduling (#1693)
+
+The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
+now dispatches a signed native control, with `scheduleCancel` at appended
+capability flag bit25 and the existing hostClock enabled. Upgrade the SDK/host
+capability readers and producer together. Native spot retains unsupported/
+`notSent`; prior capability positions remain unchanged.
+
+To arm, pass a safe integer absolute UTC timestamp in milliseconds at least
+five seconds beyond synchronized current time. SDK validation precedes JSON
+and worker forwarding; the mirror forwards the owned call without starting
+another engine. Direct `EngineHost.command` also rejects unsafe/negative input
+before JSON can turn NaN/Infinity into a clear. That host guard does not itself
+enforce the five-second bound; native admission and immediately-before-signing
+checks do. A deadline can expire in the existing paced FIFO and then fail
+`notSent` before signing. Existing network/vault-aware signing and the shared
+monotonic nonce remain. Invalid/missing signing credentials or public-only mode
+cannot dispatch even a clear.
+
+Null or omitted time clears by signing an action without `time`. Do not coerce
+an invalid input or failed arm into a null/omitted retry. The SDK returns void
+only after the owning accepted control completion. The implementation accepts
+HTTP2xx `status: ok` with response `type: default` and absent/null data or an
+empty statuses array. This strict ACK shape is derived from the SDK model;
+no live schedule ACK capture validates it. A structured `status: err` with a
+string response on a non408 HTTP status below500 proves `rejected`; HTTP408/5xx
+and other malformed/unproven ACKs remain `unknown`.
+
+Transport loss, command timeout, host disposal and worker interruption preserve
+unknown write outcomes. No failed schedule write is replayed, late completion
+cannot revive its retired owner, and account/order snapshots do not prove an
+arm or clear. There is no automatic lifecycle arm/clear, renewal or application
+watchdog. Caller strategies own renewal, deadline slack and uncertainty
+handling. The bounded audit found no default NX/CLI/MCP schedule producer or
+renewal loop; manual and third-party SDK callers still own this contract.
 
 ### MEXC port-review snapshot and plan corrections
 
