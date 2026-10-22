@@ -115,3 +115,23 @@ production credential, local release build or load/timing sweep.
 Independent plan review: CLEAN before implementation; architecture answer **No**.
 Review explicitly checked unknown versus overflow, silent freshness propagation,
 accepted-row precedence and deferred/deduplicated Bybit unsupported-row Errors.
+
+## Phase 1 local implementation evidence
+
+Plan committed as `af161605e8c` before source changes. `RowAdmission` replaces
+all three Bybit/Bitunix collectors; original diagnostic messages, levels and
+report ordering are retained. Deferred unsupported-order reports use the
+shared reporter without adding coverage. Freshness propagation remains silent.
+The existing `allows_absence(&K)` signature is retained for compatibility;
+new borrowed `holds`/`conflicts` support native `String`/`str` lookups.
+
+1,045 engine/Bybit/Bitunix/Binance native tests pass, including all existing
+mixed-row/continuous-WS/freshness regressions. Ten focused coverage tests pass;
+three deliberate mutations fail assertions for unknown-row peer starvation,
+incorrect merged rejection counts and duplicate diagnostics, then restored
+source passes. Strict touched-crate Clippy, fmt, bans, 44 root typecheck and
+28 lint tasks pass. Independent implementation/adversarial review is CLEAN;
+architecture answer **No** (engine choke point plus two consumers).
+
+Final Signer integration, current-head full CI and complete raw replay
+comparison remain merge requirements; this local receipt does not claim them.
