@@ -691,3 +691,58 @@ its two incoming files and all unowned source are preserved. Fresh full
 CI/current-head raw proof, final data reviews and separate guard/merge remain
 required. This checkpoint makes no product-RED,
 private parity or all-venue fan-out completion claim.
+
+## Next bounded Once consumers: MEXC, Phemex, Polymarket (2026-10-24)
+
+Start from actual #1780 `02340e17712780fa526f4e07a029cd4e20fb00f5`.
+Architecture gate: YES, this is a cross-cutting reporting consumer migration;
+reuse engine `RowReports<String>` default bounded Once, `report`, `forget`,
+`clear` and `rearm_namespace`. No engine API or reporting policy extension.
+Scope: the three account.rs files, their existing account tests, and existing
+ROW_ADMISSION/AUDITS/QUALITY/CALLERS docs (ten paths). BingX, WEEX, OKX and
+Bitget, signing/request/identity/session/lifecycle/history paths remain outside
+this slice. Carry the exact three-line #1782 CALLERS proof/status deletion;
+CALLERS describes behavior only. Existing queue order is unchanged.
+
+1. MEXC: replace its 4096-entry skip set and thin report/rearm adapters. Keep
+   coin/position/order namespaces, raw and anonymous labels, severity, default
+   construction and clear-before-lookup rollover. Keep `mapped_ids` and its
+   `allows_absence` filter unchanged, including all three order scopes sharing
+   one namespace. Balance rearm remains inside its revision guard; position
+   rearm stays before newer-stream filtering; failed or incomplete pages never
+   gain rearm. No row-admission or financial changes.
+2. Phemex: replace the shared two-currency skip set and thin report adapter.
+   Keep currency:symbol and currency: anonymous labels and Once suppression
+   even when severity increases. Rearm stays inside cycle/write/slice admission,
+   with only the admitted currency cleared after a clean read. Partial rearm
+   filters accepted position leg IDs with `allows_absence`, then forgets each
+   native symbol key. Preserve all contexts, versions, rails and balances.
+3. Polymarket: replace the asset-keyed set and report adapter. Preserve both
+   native early-forget sites: a valid zero holding and a mapped priced holding
+   forget before complete-response admission, including later invalid reads.
+   Keep clean whole-memory clear only after native StaleGuard admission;
+   rejected stale reads do not clear, admitted stale reads still may clear.
+   Empty identity, unlisted-asset memory, duplicate refusal and native page
+   budget remain unchanged. No signing or order/fill changes.
+
+Before production edits, add bounded native compatibility controls and run them
+on unchanged production, sealing source/test/log hashes. Pin namespace isolation,
+rejected-identity filtering, clean versus partial recovery and early-forget
+ordering. These are original-GREEN controls, not a product defect/RED claim.
+After independent plan review, commit this plan first; implement using only the
+existing engine policy and rerun unchanged controls. Independently audit source,
+test design and caller text for constructor defaults and rearm timing.
+
+Verify focused engine/MEXC/Phemex/Polymarket/Binance native suites, strict
+all-target Clippy, scoped fmt, bans and root checks with CARGO_BUILD_JOBS=4.
+No local release WASM, replay sweeps or timing/size matrices. Open a draft PR
+when checks and independent reviews are clean; keep CI watches active. Queue
+order remains unchanged. Actual dependencies, current full CI and authenticated
+complete raw/ordered-gate proof are required before a separate guard and merge.
+
+Plan review guardrails: Phemex mapping diagnostics may consume suppression even
+when final write/slice admission rejects the response, but cannot rearm there.
+For partial recovery controls, use a named unrelated rejection: an unknown
+identity intentionally blocks `allows_absence`. Polymarket valid-zero controls
+must pass asset/size/average validation first, then include a later invalid
+sibling so whole-response clean clearing cannot explain the observed rearm.
