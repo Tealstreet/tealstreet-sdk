@@ -542,3 +542,13 @@ queued #1726 request-stamp core when landed. Notify the signer lane before
 account.rs overlap; Bitunix balance scheduler adoption remains separate from WS
 execution admission. Later BloFin/Kraken Spot then BingX/AsterDEX/KuCoin Spot and
 Orderly cumulative consumers precede reporting and snapshot freshness work.
+
+Independent phase-2 plan audit at fbd4e288b4a is CLEAN to start native controls.
+Before API code: Bitunix keeps `(previous_quote + delta*fallback - previous_quote)
+/ delta`, then Significant15 on emitted price/amount only; next anchor is
+unrounded. Coinbase equal quantity is only a Fill no-op: it still refreshes a
+checked equal-endpoint quote and native terminal/display state. Preserve its
+separate missing historical quote warning/poll versus invalid incremental value
+warning/poll; never reconstruct the former from the current average. Add equal-
+endpoint average correction and non-unit INTX quantity-scale coverage. Engine
+preparation errors must never consume native execution eligibility.
