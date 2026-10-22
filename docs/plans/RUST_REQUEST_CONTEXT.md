@@ -667,3 +667,26 @@ known partial IDs, transport loss after release, and late cancellation revision
 fencing. The common journal owns outcome and rejected-leg publication; codecs
 supply native facts/reporting metadata, including per-item batch messages,
 without duplicating aggregation or first-error logic.
+
+
+Independent reference-plan audit resolutions: no-I/O jobs issue only a read
+completion authority before any mutation declaration and complete through
+done_context; that authority cannot later grant a mutation child. Nonempty jobs
+declare mutation authority. Preflight all known planned attempt counts and native
+reconciliation payload sizes before emitting their first packet; predictable
+capacity refusal is NotSent, while dynamic later refusal joins existing effects.
+
+Before adapters, extend the existing shared write journal with RejectionReports:
+a validated collection of at most 256 messages, 8 KiB per message and 64 KiB
+aggregate retained capacity. Default Rejected facts retain the current one-message
+reporting; explicit native facts may supply bounded per-item messages or an empty
+collection for silent codes. Failed native facts may supply reports, while engine
+provider/transport failures keep their normal typed final result. One atomic
+result_with_reports path validates provenance/state before recording facts plus
+metadata. Central sealing publishes only terminal-attempt reports in logical
+registration order; recovered retry reports disappear. No codec-side duplicate
+command_error publication. Keep existing WriteResult variants/classification and
+provide one Cx.http_write_result_with_reports entry delegating to that same journal.
+Test bound failures leave evidence untouched, silence, native batch messages,
+recovered retries, callback order and stale delivery. This same seam serves
+Binance and Bybit, not a venue-specific outcome/reporting implementation.
