@@ -44,6 +44,9 @@ use safe_cex_engine::{
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+mod managed_http;
+use managed_http::{HttpPacket, HttpPhaseOut};
+
 trait AnyEngine {
     fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError>;
     fn prepare_dispatch(&mut self, now: f64);
@@ -55,6 +58,32 @@ trait AnyEngine {
         Err(entropy_configuration_error())
     }
 
+    fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
+        false
+    }
+    fn http_prepared(
+        &mut self,
+        _: f64,
+        _: safe_cex_engine::request_context::Preparation,
+        _: safe_cex_engine::request_context::Prepared,
+    ) {
+    }
+    fn http_preparation_failed(
+        &mut self,
+        _: f64,
+        _: safe_cex_engine::request_context::Preparation,
+        _: safe_cex_engine::request_context::Error,
+        _: safe_cex_engine::VenueError,
+    ) {
+    }
+    fn claim_http(
+        &mut self,
+        _: f64,
+        _: safe_cex_engine::request_context::Permit,
+    ) -> Result<safe_cex_engine::request_context::Claim, safe_cex_engine::request_context::Error>
+    {
+        Err(safe_cex_engine::request_context::Error::Revoked)
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities;
     fn apply_public_feed(
         &mut self,
@@ -89,6 +118,38 @@ impl<V: Venue> AnyEngine for Engine<V> {
         } else {
             Engine::set_entropy(self, fill)
         }
+    }
+
+    fn http_preparation_pending(
+        &self,
+        token: safe_cex_engine::request_context::Preparation,
+    ) -> bool {
+        Engine::http_preparation_pending(self, token)
+    }
+    fn http_prepared(
+        &mut self,
+        now: f64,
+        token: safe_cex_engine::request_context::Preparation,
+        resource: safe_cex_engine::request_context::Prepared,
+    ) {
+        Engine::http_prepared(self, now, token, resource);
+    }
+    fn http_preparation_failed(
+        &mut self,
+        now: f64,
+        token: safe_cex_engine::request_context::Preparation,
+        reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        Engine::http_preparation_failed(self, now, token, reason, error);
+    }
+    fn claim_http(
+        &mut self,
+        now: f64,
+        token: safe_cex_engine::request_context::Permit,
+    ) -> Result<safe_cex_engine::request_context::Claim, safe_cex_engine::request_context::Error>
+    {
+        Engine::claim_http(self, now, token)
     }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -191,16 +252,12 @@ enum ActionOut<'a> {
         socket: u32,
     },
     Http {
-        request: u32,
-        method: &'static str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        route: Option<&'static str>,
-        #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
-        timeout_ms: Option<u32>,
-        url: &'a str,
-        headers: Vec<(&'a str, &'a str)>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        body: Option<&'a str>,
+        #[serde(flatten)]
+        packet: HttpPacket<'a>,
+    },
+    ManagedHttp {
+        #[serde(flatten)]
+        phase: HttpPhaseOut<'a>,
     },
     Sign {
         attempt: u32,
@@ -312,23 +369,10 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::WsClose { socket } => ActionOut::WsClose { socket: socket.0 },
             Action::Http(request) => ActionOut::Http {
-                request: request.id.0,
-                method: request.method.as_str(),
-                route: request.route.map(safe_cex_engine::RequestRoute::as_str),
-                timeout_ms: request.timeout_ms,
-                url: &request.url,
-                headers: request
-                    .headers
-                    .iter()
-                    .map(|(name, value)| (*name, value.as_str()))
-                    .chain(
-                        request
-                            .signer_headers
-                            .iter()
-                            .map(|(name, value)| (name.as_str(), value.as_str())),
-                    )
-                    .collect(),
-                body: request.body.as_deref(),
+                packet: HttpPacket::from(request),
+            },
+            Action::ManagedHttp(action) => ActionOut::ManagedHttp {
+                phase: HttpPhaseOut::from(action.as_ref()),
             },
             Action::SignedOutbound { .. } => unreachable!("engine drain unwraps signed outbound"),
             Action::Sign {

@@ -469,6 +469,7 @@ pub enum Action {
         socket: SocketId,
     },
     Http(HttpRequest),
+    ManagedHttp(Box<crate::request_context::HttpAction>),
     /// Internal outbound queue wrapper; always unwrapped/validated by drain.
     SignedOutbound {
         attempt: RequestId,
@@ -859,6 +860,9 @@ struct PendingHttp<P> {
 #[path = "request_context_registry.rs"]
 mod request_context_registry;
 
+#[path = "http_lifecycle.rs"]
+mod http_lifecycle;
+
 fn observe_account_auth<V: Venue>(
     venue: &V,
     pending: &PendingHttp<V::Pending>,
@@ -1055,6 +1059,8 @@ impl Polls {
 
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
+    managed_http: HashMap<RequestId, http_lifecycle::Managed>,
+    http_pacing: crate::request_context::SendPacing,
     entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
@@ -1099,6 +1105,8 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             request_contexts: Default::default(),
+            managed_http: HashMap::new(),
+            http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
             order_locks: crate::order_locks::OrderLocks::default(),
@@ -1676,6 +1684,7 @@ impl<P> Cx<'_, P> {
 
     /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
     pub fn done(&mut self, command: CommandId, result: String) {
+        self.io.retire_http_command(command);
         self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
@@ -1724,6 +1733,7 @@ impl<P> Cx<'_, P> {
     // Out of line so the hundreds of venue call sites share one body (wasm size budget).
     #[inline(never)]
     fn fail_with(&mut self, command: CommandId, error: VenueError) {
+        self.io.retire_http_command(command);
         self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
@@ -1798,6 +1808,35 @@ pub enum SigningTarget<'a, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Fixed per-engine send-group floors; individual attempts may only extend
+    /// the gap following their physical transport handoff.
+    fn http_pacing(&self) -> &[crate::request_context::Pacing] {
+        &[]
+    }
+
+    /// Final synchronous admission. This callback cannot queue more work or
+    /// alter the engine's clocks, preparation/signing state or original bound.
+    fn on_http_release(
+        &mut self,
+        _pending: &mut Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
+        Ok(crate::request_context::Admission::Unscheduled)
+    }
+
+    /// Typed setup/bind/denial failures are pre-send facts, distinct from a
+    /// transport failure after release. Read schedulers can retire denied work
+    /// neutrally rather than count another network/authentication failure.
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        _reason: crate::request_context::Error,
+        error: VenueError,
+    ) {
+        self.on_sign_error(cx, pending, error);
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2015,11 +2054,16 @@ impl<V: Venue> Engine<V> {
         })?;
         let mut store = Store::default();
         store.set_quantity_units(venue.capabilities().quantity_units);
+        let http_pacing =
+            crate::request_context::SendPacing::new(venue.http_pacing()).map_err(|_| {
+                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
+            })?;
         Ok(Self {
             venue,
             store,
             io: Io {
                 entropy: Some(entropy),
+                http_pacing,
                 ..Io::default()
             },
             started: false,
@@ -2308,6 +2352,18 @@ impl<V: Venue> Engine<V> {
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.io.dispatch_now = now;
+        if self.expire_http_timer(now, &event) || !self.admit_http_event(now, &event) {
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
+        let completed_http = match &event {
+            Event::HttpResponse { request, .. }
+            | Event::HttpEnd { request }
+            | Event::HttpFailed { request, .. } => Some(*request),
+            _ => None,
+        };
         if let Event::Signed { attempt, result } = event {
             self.sign_completed(now, attempt, result);
             if self.venue.cancel_needs_stored_order() {
@@ -2333,6 +2389,9 @@ impl<V: Venue> Engine<V> {
         }
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
+        }
+        if let Some(request) = completed_http {
+            self.settle_http_event(request);
         }
     }
 
@@ -2694,6 +2753,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn http_chunk(&mut self, now: f64, request: RequestId, data: &[u8]) {
+        let managed = self.io.managed_preparation(request);
         let Some(incoming) = self.io.incoming.get_mut(&request) else {
             return;
         };
@@ -2713,11 +2773,15 @@ impl<V: Venue> Engine<V> {
         };
         let venue = &mut self.venue;
         splitter.feed(data, |item| {
-            venue.on_item(&mut cx, &mut pending.value, item)
+            if managed.is_none_or(|token| cx.io.managed_response_live(request, token, now)) {
+                venue.on_item(&mut cx, &mut pending.value, item)
+            }
         });
-        self.io.pending.insert(request, pending);
-        if let Some(incoming) = self.io.incoming.get_mut(&request) {
-            incoming.splitter = Some(splitter);
+        if managed.is_none_or(|token| self.io.managed_response_live(request, token, now)) {
+            self.io.pending.insert(request, pending);
+            if let Some(incoming) = self.io.incoming.get_mut(&request) {
+                incoming.splitter = Some(splitter);
+            }
         }
     }
 

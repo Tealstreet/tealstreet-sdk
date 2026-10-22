@@ -5,6 +5,7 @@
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod managed_http;
 mod routing;
 mod server;
 mod transport;
@@ -45,6 +46,14 @@ pub enum HostEvent {
     HttpChunk(RequestId, Vec<u8>),
     HttpEnd(RequestId),
     HttpFailed(RequestId, String),
+    HttpPrepared(
+        safe_cex_engine::request_context::Preparation,
+        Result<Box<dyn PreparedHttp>, HttpPrepareError>,
+    ),
+    HttpWake(
+        safe_cex_engine::request_context::Preparation,
+        safe_cex_engine::request_context::Permit,
+    ),
     Signed(
         RequestId,
         Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>,
@@ -79,6 +88,7 @@ pub struct Host<V: Venue, T: Transport> {
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
     timers: HashMap<TimerId, AbortHandle>,
+    managed_http: managed_http::Requests,
     clock: fn() -> f64,
 }
 
@@ -92,6 +102,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             inbox,
             sockets: HashMap::new(),
             timers: HashMap::new(),
+            managed_http: Default::default(),
             clock: now_ms,
         }
     }
@@ -163,6 +174,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
 
     fn stop(&mut self) {
         self.inbox.close();
+        self.managed_http.clear();
         self.sockets.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
@@ -173,6 +185,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
+            HostEvent::HttpPrepared(preparation, result) => {
+                self.complete_http_preparation(preparation, result);
+            }
+            HostEvent::HttpWake(preparation, permit) => {
+                self.wake_http(preparation, permit);
+            }
             HostEvent::PublicFeedUpdate(update) => {
                 if let Err(error) = engine.apply_public_feed(now, update) {
                     // A configuration error is observable through the normal notice path.
@@ -254,8 +272,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn execute(&mut self, on_notice: &mut impl FnMut(Notice)) {
+        while self.execute_batch(on_notice) {}
+    }
+
+    fn execute_batch(&mut self, on_notice: &mut impl FnMut(Notice)) -> bool {
         self.engine.prepare_dispatch((self.clock)());
         let actions: Vec<Action> = self.engine.drain_actions().collect();
+        let had_actions = !actions.is_empty();
         for action in actions {
             match action {
                 Action::WsConnect {
@@ -287,6 +310,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.sockets.remove(&socket);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
+                Action::ManagedHttp(action) => self.execute_managed_http(*action),
                 Action::SignedOutbound { .. } => {
                     unreachable!("engine drain unwraps signed outbound")
                 }
@@ -350,6 +374,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::Notice(notice) => on_notice(notice),
             }
         }
+        had_actions
     }
 }
 

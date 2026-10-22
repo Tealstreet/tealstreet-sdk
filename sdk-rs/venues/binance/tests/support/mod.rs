@@ -96,6 +96,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
+                Action::ManagedHttp(_) => {
+                    panic!("managed HTTP preparation is not configured in this harness yet")
+                }
                 Action::SignPayload { .. }
                 | Action::Sign { .. }
                 | Action::SignedOutbound { .. } => {

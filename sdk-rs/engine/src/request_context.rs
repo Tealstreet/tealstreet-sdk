@@ -205,6 +205,25 @@ pub struct Prepared {
     pub expires_at: Option<f64>,
 }
 
+/// Preparation and binding use the host's existing HTTP executor. Neither
+/// message grants permission to send; the bound executor must claim its permit.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HttpAction {
+    Prepare {
+        preparation: Preparation,
+        intent: RoutingIntent,
+        request: crate::HttpRequest,
+    },
+    Bind {
+        preparation: Preparation,
+        permit: Permit,
+        request: crate::HttpRequest,
+    },
+    Cancel {
+        preparation: Preparation,
+    },
+}
+
 /// One observation supplies both clock domains. Durations remain raw time.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReleaseTime {
@@ -463,6 +482,14 @@ impl Lifecycle {
         Ok(())
     }
 
+    pub fn expects_preparation(&self, token: Preparation) -> bool {
+        token == self.preparation() && self.state == State::Preparing
+    }
+
+    pub fn is_current_permit(&self, permit: Permit) -> bool {
+        matches!(self.state, State::Permitted(_, expected) if expected == permit)
+    }
+
     pub fn begin_signing(&mut self) -> Result<Preparation, Error> {
         let State::Prepared(route) = self.state else {
             return Err(Error::State);
@@ -622,6 +649,7 @@ impl Lifecycle {
 
 /// Fixed per-engine group floors. A request may extend the gap after its own
 /// handoff, never weaken the group floor or erase the previous release's gap.
+#[derive(Default)]
 pub struct SendPacing {
     groups: Vec<(Pacing, Option<f64>)>,
 }

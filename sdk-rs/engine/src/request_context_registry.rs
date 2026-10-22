@@ -84,7 +84,7 @@ impl ContextRegistry {
         Ok(context)
     }
 
-    fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
+    pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
@@ -141,6 +141,7 @@ impl<P> Cx<'_, P> {
     /// Command generation stays live until done/fail or its final bound expires.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
         self.io.request_contexts.validate(context, self.now)?;
+        self.io.retire_http_leg(context);
         self.io.request_contexts.contexts.remove(&context.leg());
         Ok(())
     }

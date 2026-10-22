@@ -258,3 +258,31 @@ reversed route readiness cannot reorder dependent HTTP/WS work; independent HTTP
 releases need no new total order. Native actor final readiness check, engine
 claim and prepared API handoff execute synchronously in that order. The registry
 and prepared native transport checkpoints alone do not migrate production HTTP.
+
+### Prepared public-read host checkpoint
+
+The shared lifecycle now has an unsigned-public-read entry point, original-deadline
+engine timer, native actor preparation/binding/final claim, and lossless WASM/JS
+preparation tokens. Default fetch and Workers use the same prepared executor for
+legacy and managed entry points. Unsupported custom transports fail explicitly;
+managed calls never fall back to their legacy request method. Claim returns only
+release/wait/denial status, without draining actions or invoking another provider
+before the synchronous transport handoff.
+
+Managed response admission rejects pre-release responses, premature end/chunk,
+duplicate start and stale preparation generations. Retirement inside a streaming
+row stops the remaining rows and cannot restore a removed continuation. Host
+cancellation stops body iteration before another potentially hung read. Unready
+prepared resources settle once, and post-release diagnostic failures cannot
+relabel a sent request as a preparation failure or strand its response promise.
+
+This is an implementation checkpoint, not production migration or merge proof.
+The unsigned entry point rejects mutations and credential-bearing contexts until
+signed dispatch, central command evidence and late-write reconciliation are wired.
+The native delayed-route/fast-ACK probe verifies the release boundary's 450 ms gap;
+the parked primitive-provider probe remains required. SDK proxy/HOW preparation,
+signed HTTP, Binance/Bybit reference aggregation, the legacy ratchet and complete
+final CI/replay proof remain open. Local compiled-WASM integration tests currently
+find a stale single-family artifact (unsupported Binance/Phemex); native WASM-host
+unit tests and JS host/Workers unit checks are separate evidence, not a rebuilt
+combined-WASM claim.
