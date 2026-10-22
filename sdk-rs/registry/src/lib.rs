@@ -36,6 +36,8 @@ compile_error!(
 );
 
 mod construction;
+#[cfg(feature = "dispatch-signing")]
+pub mod hosted_signing;
 pub use construction::{
     BridgeConstruction, PublicMode, signer_setup_policy, signer_setup_public_data_only,
 };

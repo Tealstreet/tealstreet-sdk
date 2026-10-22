@@ -24,6 +24,7 @@ mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
 pub mod signing;
+pub mod signing_capture;
 mod signing_dispatch;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;

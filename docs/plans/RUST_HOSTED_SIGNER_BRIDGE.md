@@ -47,6 +47,20 @@ concern, solved at one host/provider choke point. Venue recipes may describe
 canonical bytes; no venue-local crypto executor or retained-secret fallback.
 Source implementation starts only after the inventory/concrete API audit.
 
+Implementation checkpoint: half 1 uses the small standalone request interceptors
+shared by existing TS clients and the capture-only facade; no API factory or TS
+venue class is constructed. These modules and their pure codec/site tables plus
+capture utility are the only TS retained specifically for remote signing after
+cutover. Native provider work and capture use one atomic primitive builder.
+Local capture validates/consumes its token before exposing any result; injected
+capture shares host abort/timeout/result validation and fatal-engine handling.
+Unsigned public requests bypass provider access entirely. Full keyless routing,
+REST-only feed policy, result headers and secondary/account binding remain half 2.
+Actual Bybit provider HTTP/WS positives gate #1728 integration: this prerequisite
+does not enable Bybit dispatch admission early. Its current legacy positive
+fixture is retained, and its closed-admission assertion must be replaced with
+the actual migrated positive flow there.
+
 ## Owner-confirmed scope and implementation sequence
 
 Remote signing remains supported on Rust. Existing sign-request/sign-response
@@ -145,3 +159,19 @@ Serialization stays in existing helpers; family code supplies canonical data.
 Private-feed eligibility and result-header custody are shared policies, not
 venue-local workarounds. The later owner-assigned socket auth/epoch core follows
 the bridge and Bybit migration and is not silently implemented in this slice.
+
+### Half 1 local verification checkpoint
+
+Shared capture/provider policy and standalone request interceptors are implemented.
+Local checks pass: 1,063 native engine/Binance/Bybit/registry/WASM tests, 173 JS
+host unit tests, 43 focused SDK tests plus five lint-rule tests, SDK typecheck/
+lint and Rust format/bans. Five capture fault controls prove revision, raw lease,
+single-use retirement, result shape and receipt fences; three transport-timer
+regressions prove arm/clear/inline-callback failures before the shared fix.
+Independent correctness/adversarial reviews are clear after public unsigned
+provider bypass, fatal-engine handling, closed credential schema and local
+finalization fixes. Ratchet additions are exact shared-work-builder descriptors
+and cfg(test) fixtures, with no new runtime secret holders or crypto execution.
+The actual-WASM HTTP/WS fixture requires rebuilt CI artifacts; no local release
+build or replay was run. Fresh CI, replay preservation and final separate guard
+remain gates, and half 2 is unimplemented.
