@@ -317,6 +317,73 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
     assert!(cx.io.actions.is_empty());
 }
 
+#[test]
+fn public_replacement_requires_current_delivery_and_retry_permission() {
+    for case in 0..3 {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let parent_policy = Policy {
+            retry: if case == 2 {
+                RetryPolicy::Never
+            } else {
+                RetryPolicy::DefinitiveRefusal
+            },
+            ..policy()
+        };
+        let parent = io
+            .request_contexts
+            .issue(1, Scope::Command(7), parent_policy.clone(), 0.)
+            .unwrap();
+        let correct = refusal(&mut io.request_contexts, &parent, 11);
+        io.http_delivery = match case {
+            0 => None,
+            1 => Some(Delivery {
+                attempt: Attempt {
+                    request: RequestId(99),
+                    generation: 99,
+                },
+                ..correct.clone()
+            }),
+            _ => Some(correct.clone()),
+        };
+        io.next_id = 20;
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let expected = match case {
+            0 => Error::State,
+            1 => Error::Revoked,
+            _ => Error::RetryForbidden,
+        };
+        assert_eq!(
+            cx.http_replacement_contexts(&parent, std::slice::from_ref(&parent_policy)),
+            Err(expected)
+        );
+        unchanged(&cx.io.request_contexts, &parent, 11, 1);
+        assert_eq!(
+            cx.io.request_contexts.contexts.get(&parent.leg()),
+            Some(&parent)
+        );
+        assert_eq!(cx.io.next_id, if case == 0 { 20 } else { 21 });
+        assert!(cx.io.pending.is_empty());
+        assert!(cx.io.actions.is_empty());
+        if case != 2 {
+            cx.io.http_delivery = Some(correct);
+            let children = cx
+                .http_replacement_contexts(&parent, std::slice::from_ref(&parent_policy))
+                .unwrap();
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0].leg(), if case == 0 { 20 } else { 21 });
+            assert_eq!(
+                cx.io.request_contexts.validate(&parent, 1.),
+                Err(Error::Revoked)
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 struct PhysicalReplacement {
     root: Option<Context>,

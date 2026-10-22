@@ -308,3 +308,11 @@ refusal must still admit children after a wrong callback was denied. These are
 coverage controls, not a claimed new production bug. Signed parked-provider,
 stale permit and full atomicity controls remain pending. Keep core CI watching
 and return for actual #1764 integration; no publication before actual #1741.
+
+The added callback-authority control and20 existing replacement-filtered engine
+controls pass; strict engine Clippy and formatting pass. Independent coverage
+review CLEAN: distinct refusal reasons, exact parent/latest/pending preservation,
+no queued resource/action, monotonic burned identities and subsequent valid
+admission are asserted without changing an old assertion. Architecture No.
+Signed-child/provider/permit and complete atomicity acceptance remain pending;
+ordinary Bybit production is still unchanged and its original RED test remains.
