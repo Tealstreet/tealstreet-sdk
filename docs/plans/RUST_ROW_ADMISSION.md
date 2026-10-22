@@ -685,7 +685,9 @@ actual #1775 production before migration. The original source/test/log receipt
 is `aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`.
 Independent plan/test-design/source/caller reviews are CLEAN. Migrated checks
 pass1253 focused native tests across68 groups, strict all-target Clippy, scoped
-fmt, bans and root44 typecheck/28 lint (root tasks cached). #1781 integration,
-fresh full CI/current-head raw proof, final data reviews and separate guard/merge
-are still required. This checkpoint makes no product-RED,
+fmt, bans and root44 typecheck/28 lint (root tasks cached). Actual #1781
+`ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated conflict-free;
+its two incoming files and all unowned source are preserved. Fresh full
+CI/current-head raw proof, final data reviews and separate guard/merge remain
+required. This checkpoint makes no product-RED,
 private parity or all-venue fan-out completion claim.

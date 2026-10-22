@@ -1944,4 +1944,6 @@ and unbounded reporter consumers remain open; see RUST_ROW_ADMISSION.md.
 Migrated engine/BloFin/Kraken/Binance focused suites pass1253 native tests across
 68 groups; strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint
 (root tasks cached) pass. Both independent source/caller reviews are CLEAN.
-Full green CI and current-head artifact proof remain pending after #1781.
+Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
+without conflicts, preserving both incoming files. Full green CI and current-head
+artifact proof remain pending.
