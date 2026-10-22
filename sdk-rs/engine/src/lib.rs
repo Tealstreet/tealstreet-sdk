@@ -20,6 +20,7 @@ mod order_locks;
 pub mod paging;
 mod placement_acks;
 pub mod public_feed;
+pub mod read_scheduler;
 pub mod signing;
 mod signing_dispatch;
 pub use signing_dispatch::SignStep;
