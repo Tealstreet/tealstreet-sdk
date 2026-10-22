@@ -7,18 +7,17 @@ its dispatch preparation continues to consume `Cx.now: f64` epoch milliseconds.
 
 ## Contract and phases
 
-1. Audit clock ingress, existing venue calibration and tape-clock injection.
-   Production SDK engine transports use the shared synchronized clock before
-   startup and on every later event. Explicit host/replay clock providers remain
+1. PR1: audit clock ingress and tape-clock injection. The default SDK transport
+   waits for shared clock startup and dynamically reads synchronized time before
+   startup and on every later event. Concurrent starts join an in-flight initial
+   synchronization. Explicit host/replay clock providers remain
    authoritative, dynamic and common to commands, HTTP/WS completions, timers,
    nonces, expiry and signer dispatch; never overwrite an injected tape clock.
    All venues consume the same engine event-time contract without name lists.
 2. Retire `host_clock` / `hostClock` as a per-venue policy and remove its native,
    SDK and fixture opt-ins. Preserve binary flag positions: reserve former bit14;
    never shift later fields. Update capability/frame tests and nearby specs.
-   Re-verify venue server-time correction paths; retain protocol-specific parsing
-   but route any shared clock policy through the engine boundary. Document any
-   justified exception explicitly; no new per-venue clock implementation.
+   Existing Bybit/Aster server calibration is deferred to PR2 as directed below.
 3. Regress formerly unsynchronized venue families and former opt-ins through
    startup, commands, WS authentication, HTTP/sign callbacks and timer deadlines;
    prove resynchronization is read dynamically. Regress injected tape clocks even
@@ -33,6 +32,12 @@ its dispatch preparation continues to consume `Cx.now: f64` epoch milliseconds.
    merge green reviewed head, verify actual tree/parents and report the pin.
 
 ## Coordination and limits
+
+Owner decision: PR2 follows the actual signer-core merge. Add one engine
+clock-calibration service fed by Bybit 10002 server observations and Aster `/time`
+observations; delete their venue-local offsets. Signing reads the engine clock at
+send. Explicitly document and replay-test the resulting timer/output-domain
+change. PR1 preserves these existing protocol paths and adds no calibration.
 
 No change to the `Cx.now` accessor or primitive Signer clock stamping: signer
 primitives sign exact bytes and do not sample independent wall time. Coordinate
