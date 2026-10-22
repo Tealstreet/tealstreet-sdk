@@ -39,15 +39,21 @@ returns a publication boolean. A typed attempt token binds the symbol,
 read identity/epoch, settings/write revision and publication eligibility. Keep
 state and joined command waiters bounded and fail closed on exhaustion.
 
-1. Admission joins an eligible same-symbol read and retains each command owner;
-   one native logical read serves the joined commands. Different symbols remain
-   independent. A new read after a completed/failed attempt receives a new token.
+1. Admission joins a same-symbol read only when its revision/eligibility is
+   current; retain each command owner. A caller needing a newer write/config
+   revision cannot join an obsolete attempt. A later waiter cannot upgrade an
+   attempt's sticky publication restriction. One native logical read serves an
+   eligible group: one request per leg (BingX leverage plus margin; WEEX config).
+   Different symbols remain independent. New attempts receive globally distinct
+   tokens even after bounded state is retired and the symbol is recreated.
    Retired/duplicate/late tokens cannot publish or finish another attempt.
 2. Stage a complete validated metadata proposal before committing. BingX's
    leverage response alone cannot publish; its margin leg belongs to the same
    attempt. WEEX's setting and native config cache move together. Core admission
    owns atomic settings publication; the adapter retains native codec/cache data
    and performs any approved native-cache update in the same synchronous commit.
+   Do all fallible validation beforehand; no parsing, await or fallible work may
+   separate approved Store publication from native-cache replacement.
 3. Settings writes/config events invalidate the relevant symbol or explicit
    account-wide scope. An accepted-write revision is never bypassed for progress.
    Reads admitted while a write is pending retain their publication restriction
@@ -125,8 +131,8 @@ WEEX/BingX metadata overlap; its first scheduler adoption is Bitunix balance.
    whole change independently, and run final focused gates/full CI. Remaining
    families, native auth behavior and NX/live adoption stay open.
 
-For each family prove: cached and uncached/flat symbols; one physical read per
-joined group; both owners receive one success/error; independent symbols;
+For each family prove: cached and uncached/flat symbols; one request per leg of
+each eligible joined group; both owners receive one success/error; independent symbols;
 out-of-order old/new reads; writes between issue/legs/commit; pending-at-admission
 stickiness; refused writes; malformed or missing eligible rails/margin and the
 superseded-margin discard control; partial initial data; genuine errors;
