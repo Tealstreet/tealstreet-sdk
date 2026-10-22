@@ -19,6 +19,7 @@ export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOp
     payloadSigning: policy?.payloadSigning === true,
     apiKeyIndexRequired: policy?.apiKeyIndexRequired === true,
     isolatedBookSubscriptions: policy?.isolatedBookSubscriptions === true,
+    dispatchSigning:policy?.dispatchSigning===true,
   };
 };
 

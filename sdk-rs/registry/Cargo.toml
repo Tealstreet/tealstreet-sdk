@@ -6,6 +6,8 @@ publish.workspace = true
 description = "Every Rust venue, constructed by name from one options shape"
 
 [features]
+# Additive provider bootstrap; at least one venue feature is still required.
+dispatch-signing = ["dep:safe-cex-crypto"]
 default = [
     "bitunix",
     "grvt",
@@ -57,7 +59,7 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 phemex = ["dep:safe-cex-venue-phemex"]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
-binance = ["dep:safe-cex-venue-binance"]
+binance = ["dep:safe-cex-venue-binance", "dispatch-signing"]
 kucoin = ["dep:safe-cex-venue-kucoin"]
 kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit"]
@@ -66,6 +68,7 @@ okx = ["dep:safe-cex-venue-okx"]
 orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
+safe-cex-crypto = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
 serde.workspace = true
 zeroize.workspace = true

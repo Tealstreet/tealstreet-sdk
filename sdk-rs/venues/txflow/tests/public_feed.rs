@@ -79,7 +79,9 @@ impl Rig {
                         self.timers.retain(|(pending, _)| *pending != timer)
                     }
                     Action::Notice(_) => {}
-                    Action::SignPayload { .. } => {
+                    Action::Sign { .. }
+                    | Action::SignedOutbound { .. }
+                    | Action::SignPayload { .. } => {
                         panic!("unexpected delegated signing request")
                     }
                 }

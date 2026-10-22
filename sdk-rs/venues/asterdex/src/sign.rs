@@ -160,7 +160,7 @@ impl Query {
         if credentials.version == Version::V1 {
             self = self
                 .num("recvWindow", 20_000.0)
-                .num("timestamp", now_ms.floor());
+                .num("timestamp", safe_cex_engine::time::wire_stamp_ms(now_ms));
             let signature = hmac_sha256(
                 credentials.secret.as_bytes(),
                 self.as_str().as_bytes(),
@@ -170,7 +170,7 @@ impl Query {
         }
         let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
         // Aster's replay protection belongs to the agent address, across users.
-        let nonce = next_nonce(&signer, now_ms.floor() as u64)?;
+        let nonce = next_nonce(&signer, safe_cex_engine::time::wire_stamp_ms(now_ms) as u64)?;
         self.signed_v3(credentials, method, path, now_ms, testnet, nonce)
     }
 
@@ -201,7 +201,7 @@ impl Query {
         } else {
             self = self
                 .num("recvWindow", 20_000.0)
-                .num("timestamp", now_ms.floor());
+                .num("timestamp", safe_cex_engine::time::wire_stamp_ms(now_ms));
             let sorted: BTreeMap<_, _> = self
                 .0
                 .iter()

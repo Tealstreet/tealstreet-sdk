@@ -1,14 +1,14 @@
 //! Rare request/response reads. Results go back as JSON in the command's
 //! completion and never enter the flush frame.
 use crate::account::{order_side, order_type, venue_error};
-use crate::sign::{Query, Signed};
+use crate::sign::Query;
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
-use safe_cex_engine::Level;
-use safe_cex_engine::log::code;
+use safe_cex_engine::history::{Completion, HistoryRows, RangeHistory};
 use safe_cex_engine::model::{Order, OrderStatus};
 use safe_cex_engine::paging::{self, PageRow, RangeWalk, Step, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query as Read, Response, TimerId, json, num};
+use safe_cex_engine::{ErrorKind, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
@@ -21,7 +21,6 @@ const INCOME_CHUNK_DELAY_MS: f64 = 2_000.0;
 
 pub struct Request {
     command: CommandId,
-    window: (f64, f64),
 }
 
 enum InFlight {
@@ -34,20 +33,108 @@ enum InFlight {
         order_id: Option<String>,
         limit: u32,
         windows: VecDeque<(Option<f64>, Option<f64>)>,
-        rows: Vec<Execution>,
+        history: HistoryRows<Execution>,
     },
-    Orders,
+    Orders(HistoryRows<HistoricalOrder>),
     Income {
         symbol: Option<String>,
         kind: Option<String>,
-        walk: Option<RangeWalk>,
+        history: IncomeHistory,
         limit: u32,
-        rows: Vec<Income>,
         delay: Option<TimerId>,
     },
     Trades {
         symbol: String,
+        history: HistoryRows<Trade>,
     },
+}
+
+fn encode<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+}
+fn owned<T: Serialize>(command: CommandId) -> HistoryRows<T> {
+    HistoryRows::new(Completion::new(command), encode)
+}
+fn income_incomplete(chunks: u32) -> String {
+    format!(
+        "Income history is INCOMPLETE: {chunks} chunk(s) could not be walked to completion. Any total derived from it is a lower bound."
+    )
+}
+
+enum IncomeHistory {
+    Single(HistoryRows<Income>),
+    Range(Box<RangeHistory<Income>>),
+}
+impl IncomeHistory {
+    fn stage(&mut self, row: Income) {
+        match self {
+            Self::Single(history) => history.stage(row),
+            Self::Range(history) => {
+                let facts = PageRow {
+                    timestamp: row.timestamp,
+                    identity: format!(
+                        "{}|{}|{}|{}",
+                        row.tran_id, row.category, row.income_type, row.income
+                    ),
+                };
+                history.stage(row, facts);
+            }
+        }
+    }
+    fn accept_page(&mut self) {
+        match self {
+            Self::Single(history) => history.accept_page(),
+            Self::Range(history) => history.accept_page(),
+        }
+    }
+    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        match self {
+            Self::Single(history) => history.finish(cx, result),
+            Self::Range(history) => history.finish_with(cx, result, |mut rows| {
+                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+                encode(&rows)
+            }),
+        }
+    }
+    fn reject(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        match self {
+            Self::Single(history) => history.reject(cx, error),
+            Self::Range(history) => history.reject(cx, error),
+        }
+    }
+}
+impl InFlight {
+    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        match self {
+            Self::Lookup { .. } => unreachable!("lookup has a separate completion contract"),
+            Self::Fills { history, .. } => history.finish(cx, result),
+            Self::Orders(history) => history.finish_with(cx, result, |mut rows| {
+                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+                encode(&rows)
+            }),
+            Self::Trades { history, .. } => history.finish(cx, result),
+            Self::Income { history, delay, .. } => {
+                if let Some(timer) = delay {
+                    cx.clear_timer(timer);
+                }
+                history.finish(cx, result);
+            }
+        }
+    }
+    fn reject(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        match self {
+            Self::Lookup { .. } => unreachable!("lookup has a separate completion contract"),
+            Self::Fills { history, .. } => history.reject(cx, error),
+            Self::Orders(history) => history.reject(cx, error),
+            Self::Trades { history, .. } => history.reject(cx, error),
+            Self::Income { history, delay, .. } => {
+                if let Some(timer) = delay {
+                    cx.clear_timer(timer);
+                }
+                history.reject(cx, error);
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -196,6 +283,20 @@ fn nonzero(text: &str) -> Option<f64> {
 }
 
 impl BinanceFutures {
+    pub(crate) fn on_history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Some(read) = self.history.reads.remove(&request.command) {
+            match read {
+                InFlight::Lookup { .. } => cx.fail(request.command, error),
+                read => read.reject(cx, error),
+            };
+        }
+    }
+
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
         if self.is_spot() || (self.is_inverse() && !matches!(read, Read::PublicTrades { .. })) {
             if matches!(
@@ -249,7 +350,7 @@ impl BinanceFutures {
                         order_id,
                         limit: limit.unwrap_or(PAGE_LIMIT).clamp(1, PAGE_LIMIT),
                         windows,
-                        rows: Vec::new(),
+                        history: owned(command),
                     },
                 );
                 self.next_fills_window(cx, command);
@@ -264,7 +365,9 @@ impl BinanceFutures {
                     cx.done(command, "[]".into());
                     return;
                 };
-                self.history.reads.insert(command, InFlight::Orders);
+                self.history
+                    .reads
+                    .insert(command, InFlight::Orders(owned(command)));
                 let query = Query::new()
                     .str("symbol", &symbol)
                     .opt_num("startTime", from_ms)
@@ -273,7 +376,7 @@ impl BinanceFutures {
                         "limit",
                         f64::from(limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT)),
                     );
-                self.history_request(cx, command, self.paths.all_orders, query, (0.0, 0.0));
+                self.history_request(cx, command, self.paths.all_orders, query);
             }
             Read::Income {
                 symbol,
@@ -290,14 +393,22 @@ impl BinanceFutures {
                 };
                 let limit = limit.unwrap_or(PAGE_LIMIT).clamp(1, PAGE_LIMIT);
                 let single = walk.is_none();
+                let history = match walk {
+                    Some(walk) => IncomeHistory::Range(Box::new(RangeHistory::new(
+                        Completion::new(command),
+                        walk,
+                        income_incomplete,
+                        encode,
+                    ))),
+                    None => IncomeHistory::Single(owned(command)),
+                };
                 self.history.reads.insert(
                     command,
                     InFlight::Income {
                         symbol,
                         kind,
-                        walk,
+                        history,
                         limit,
-                        rows: Vec::new(),
                         delay: None,
                     },
                 );
@@ -310,18 +421,19 @@ impl BinanceFutures {
             Read::PublicTrades { symbol, limit } => {
                 let limit = limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT);
                 let path = format!("{}?symbol={symbol}&limit={limit}", self.paths.trades);
-                self.history
-                    .reads
-                    .insert(command, InFlight::Trades { symbol });
+                self.history.reads.insert(
+                    command,
+                    InFlight::Trades {
+                        symbol,
+                        history: owned(command),
+                    },
+                );
                 cx.request(
                     Method::Get,
                     format!("{}{path}", self.urls.rest),
                     Vec::new(),
                     None,
-                    Pending::History(Request {
-                        command,
-                        window: (0.0, 0.0),
-                    }),
+                    Pending::History(Request { command }),
                 );
             }
         }
@@ -387,16 +499,21 @@ impl BinanceFutures {
             .credentials
             .as_ref()
             .expect("lookup credentials checked");
-        let query = query.signed(credentials, cx.now, self.options.recv_window);
         let request = cx.request(
             Method::Get,
-            format!("{}{}?{query}", self.urls.account_rest, self.paths.order),
-            vec![("X-MBX-APIKEY", credentials.key.clone())],
+            format!("{}{}", self.urls.account_rest, self.paths.order),
+            vec![],
             None,
-            Pending::History(Request {
-                command,
-                window: (0.0, 0.0),
-            }),
+            Pending::History(Request { command }),
+        );
+        cx.sign_http(
+            request,
+            Box::new(crate::sign::Http::new(
+                credentials.clone(),
+                query,
+                self.options.recv_window,
+                true,
+            )),
         );
         cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }
@@ -511,14 +628,13 @@ impl BinanceFutures {
         command: CommandId,
         path: &str,
         query: Query,
-        window: (f64, f64),
     ) {
         self.signed(
             cx,
             Method::Get,
             path,
             query,
-            Pending::History(Request { command, window }),
+            Pending::History(Request { command }),
         );
     }
 
@@ -528,15 +644,15 @@ impl BinanceFutures {
             order_id,
             limit,
             windows,
-            rows,
+            ..
         }) = self.history.reads.get_mut(&command)
         else {
             return;
         };
         let Some((from, to)) = windows.pop_front() else {
-            let json = serde_json::to_string(rows).unwrap_or_default();
-            self.history.reads.remove(&command);
-            cx.done(command, json);
+            if let Some(read) = self.history.reads.remove(&command) {
+                read.finish(cx, Ok(()));
+            }
             return;
         };
         let query = Query::new()
@@ -545,7 +661,7 @@ impl BinanceFutures {
             .opt_str("orderId", order_id.as_deref())
             .opt_num("startTime", from)
             .opt_num("endTime", to);
-        self.history_request(cx, command, self.paths.user_trades, query, (0.0, 0.0));
+        self.history_request(cx, command, self.paths.user_trades, query);
     }
 
     fn income_request(
@@ -570,37 +686,25 @@ impl BinanceFutures {
             .opt_str("incomeType", kind.as_deref())
             .opt_num("startTime", from)
             .opt_num("endTime", to);
-        let window = (from.unwrap_or(f64::NAN), to.unwrap_or(f64::NAN));
-        self.history_request(cx, command, self.paths.income, query, window);
+        self.history_request(cx, command, self.paths.income, query);
     }
 
     fn next_income_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let Some(InFlight::Income {
-            walk, rows, delay, ..
+            history: IncomeHistory::Range(history),
+            delay,
+            ..
         }) = self.history.reads.get_mut(&command)
         else {
             return;
         };
-        let Some(walk) = walk else {
-            return;
-        };
-        match walk.step() {
+        match history.step() {
             Step::Fetch { from, to } => self.income_request(cx, command, Some(from), Some(to)),
             Step::ChunkDone => *delay = Some(cx.set_timer(INCOME_CHUNK_DELAY_MS)),
             Step::Finished => {
-                if walk.truncated {
-                    cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
-                        format!(
-                            "Income history is INCOMPLETE: {} chunk(s) could not be walked to completion. Any total derived from it is a lower bound.",
-                            walk.exhausted_chunks
-                        ),
-                        vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
-                    );
+                if let Some(read) = self.history.reads.remove(&command) {
+                    read.finish(cx, Ok(()));
                 }
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                let json = serde_json::to_string(rows).unwrap_or_default();
-                self.history.reads.remove(&command);
-                cx.done(command, json);
             }
         }
     }
@@ -629,7 +733,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        let Request { command, window } = request;
+        let command = request.command;
         if matches!(
             self.history.reads.get(&command),
             Some(InFlight::Lookup { .. })
@@ -640,165 +744,123 @@ impl BinanceFutures {
         let body = match response {
             Ok(response) => match venue_error(&response) {
                 None => Ok(response.body),
-                Some((_, message)) => Err(message),
+                Some((_, message)) => Err(VenueError::new(message)),
             },
-            Err(error) => Err(error.to_owned()),
+            Err(error) => Err(VenueError::new(error).kind(ErrorKind::Network)),
         };
-        let Some(read) = self.history.reads.get_mut(&command) else {
+        let Some(mut read) = self.history.reads.remove(&command) else {
             return;
         };
-        match read {
+        let body = match body {
+            Ok(body) => body,
+            Err(error) => return read.finish(cx, Err(error)),
+        };
+        let parsed = match &mut read {
             InFlight::Lookup { .. } => unreachable!(),
-            InFlight::Fills { rows, .. } => match body {
-                Ok(body) => {
-                    let _ = json::each::<UserTrade>(body, |t| {
-                        let realized = t.realized_pnl.as_deref().map(num::parse);
-                        rows.push(Execution {
-                            id: t.id.to_string(),
-                            timestamp: (t.time / 1000.0).floor(),
-                            symbol: t.symbol.into_owned(),
-                            order_id: t.order_id.to_string(),
-                            price: num::parse(&t.price),
-                            qty: num::parse(&t.qty),
-                            side: side_name(&t.side),
-                            commission: t.commission.as_deref().map_or(0.0, num::parse),
-                            commission_asset: t.commission_asset.map(|a| a.into_owned()),
-                            position_side: hedge_side(t.position_side.as_deref()),
-                            realized_pnl: realized,
-                            maker: t.maker,
-                        });
-                    });
-                    self.next_fills_window(cx, command);
-                }
-                Err(message) => {
-                    cx.command_error(command, format!("Error fetching executions: {message}"));
-                    self.history.reads.remove(&command);
-                    cx.done(command, "[]".into());
-                }
-            },
-            InFlight::Orders => {
-                self.history.reads.remove(&command);
-                match body {
-                    Ok(body) => {
-                        let mut orders = Vec::new();
-                        let _ = json::each::<HistoricalOrderRow>(body, |o| {
-                            if o.time == 0.0 || !matches!(o.side.as_ref(), "BUY" | "SELL") {
-                                return;
-                            }
-                            let kind = o
-                                .orig_type
-                                .as_deref()
-                                .and_then(order_type)
-                                .or_else(|| order_type(&o.kind))
-                                .unwrap_or(safe_cex_engine::model::OrderType::Limit);
-                            let status = match o.status.as_ref() {
-                                "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
-                                "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED" => {
-                                    OrderStatus::Canceled
-                                }
-                                _ => OrderStatus::Closed,
-                            };
-                            orders.push(HistoricalOrder {
-                                id: o.order_id.to_string(),
-                                symbol: o.symbol.into_owned(),
-                                side: side_name(&o.side),
-                                kind,
-                                status,
-                                price: nonzero(&o.price),
-                                average_price: o.avg_price.as_deref().and_then(nonzero),
-                                amount: num::parse(&o.orig_qty),
-                                filled: num::parse(&o.executed_qty),
-                                reduce_only: o.reduce_only,
-                                position_side: hedge_side(o.position_side.as_deref()),
-                                created_time: o.time,
-                                updated_time: (o.update_time > 0.0).then_some(o.update_time),
-                            });
-                        });
-                        orders.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                        cx.done(command, serde_json::to_string(&orders).unwrap_or_default());
-                    }
-                    Err(message) => {
-                        cx.command_error(command, message);
-                        cx.done(command, "[]".into());
-                    }
-                }
-            }
-            InFlight::Income { walk, rows, .. } => {
-                let mut page = Vec::new();
-                let parsed = body.and_then(|body| {
-                    json::each::<IncomeRow>(body, |r| {
-                        page.push(Income {
-                            symbol: r.symbol.into_owned(),
-                            category: income_category(&r.income_type),
-                            income_type: r.income_type.into_owned(),
-                            income: num::parse(&r.income),
-                            asset: r.asset.into_owned(),
-                            timestamp: r.time,
-                            tran_id: r.tran_id.to_string(),
-                            trade_id: r.trade_id.map(|t| t.into_owned()).filter(|t| !t.is_empty()),
-                        });
-                    })
-                    .map_err(|error| error.to_string())
+            InFlight::Fills { history, .. } => json::each::<UserTrade>(body, |t| {
+                let realized = t.realized_pnl.as_deref().map(num::parse);
+                history.stage(Execution {
+                    id: t.id.to_string(),
+                    timestamp: (t.time / 1000.0).floor(),
+                    symbol: t.symbol.into_owned(),
+                    order_id: t.order_id.to_string(),
+                    price: num::parse(&t.price),
+                    qty: num::parse(&t.qty),
+                    side: side_name(&t.side),
+                    commission: t.commission.as_deref().map_or(0.0, num::parse),
+                    commission_asset: t.commission_asset.map(|a| a.into_owned()),
+                    position_side: hedge_side(t.position_side.as_deref()),
+                    realized_pnl: realized,
+                    maker: t.maker,
                 });
-                match walk {
-                    None => {
-                        let result = match parsed {
-                            Ok(()) => serde_json::to_string(&page).unwrap_or_default(),
-                            Err(message) => {
-                                cx.command_error(
-                                    command,
-                                    format!("Error fetching income history: {message}"),
-                                );
-                                "[]".into()
-                            }
-                        };
-                        self.history.reads.remove(&command);
-                        cx.done(command, result);
-                    }
-                    Some(walk) => {
-                        match parsed {
-                            Ok(()) => {
-                                let identities: Vec<PageRow> = page
-                                    .iter()
-                                    .map(|r| PageRow {
-                                        timestamp: r.timestamp,
-                                        identity: format!(
-                                            "{}|{}|{}|{}",
-                                            r.tran_id, r.category, r.income_type, r.income
-                                        ),
-                                    })
-                                    .collect();
-                                let fresh = walk.page(window.0, window.1, &identities);
-                                let mut page: Vec<Option<Income>> =
-                                    page.into_iter().map(Some).collect();
-                                rows.extend(fresh.into_iter().filter_map(|i| page[i].take()));
-                            }
-                            Err(_) => walk.failed(),
-                        }
-                        self.next_income_page(cx, command);
-                    }
+            }),
+            InFlight::Orders(history) => json::each::<HistoricalOrderRow>(body, |o| {
+                if o.time == 0.0 || !matches!(o.side.as_ref(), "BUY" | "SELL") {
+                    return;
                 }
+                let kind = o
+                    .orig_type
+                    .as_deref()
+                    .and_then(order_type)
+                    .or_else(|| order_type(&o.kind))
+                    .unwrap_or(safe_cex_engine::model::OrderType::Limit);
+                let status = match o.status.as_ref() {
+                    "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
+                    "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED" => {
+                        OrderStatus::Canceled
+                    }
+                    _ => OrderStatus::Closed,
+                };
+                history.stage(HistoricalOrder {
+                    id: o.order_id.to_string(),
+                    symbol: o.symbol.into_owned(),
+                    side: side_name(&o.side),
+                    kind,
+                    status,
+                    price: nonzero(&o.price),
+                    average_price: o.avg_price.as_deref().and_then(nonzero),
+                    amount: num::parse(&o.orig_qty),
+                    filled: num::parse(&o.executed_qty),
+                    reduce_only: o.reduce_only,
+                    position_side: hedge_side(o.position_side.as_deref()),
+                    created_time: o.time,
+                    updated_time: (o.update_time > 0.0).then_some(o.update_time),
+                });
+            }),
+            InFlight::Income { history, .. } => json::each::<IncomeRow>(body, |r| {
+                history.stage(Income {
+                    symbol: r.symbol.into_owned(),
+                    category: income_category(&r.income_type),
+                    income_type: r.income_type.into_owned(),
+                    income: num::parse(&r.income),
+                    asset: r.asset.into_owned(),
+                    timestamp: r.time,
+                    tran_id: r.tran_id.to_string(),
+                    trade_id: r.trade_id.map(|t| t.into_owned()).filter(|t| !t.is_empty()),
+                });
+            }),
+            InFlight::Trades { symbol, history } => json::each::<PublicTrade>(body, |t| {
+                history.stage(Trade {
+                    id: t.id.to_string(),
+                    symbol: symbol.clone(),
+                    price: num::parse(&t.price),
+                    qty: num::parse(&t.qty),
+                    quote_qty: num::parse(&t.quote_qty),
+                    timestamp: t.time,
+                    // A buyer-maker trade was an aggressive sell.
+                    side: if t.is_buyer_maker { "sell" } else { "buy" },
+                });
+            }),
+        };
+        if let Err(error) = parsed {
+            return read.finish(
+                cx,
+                Err(VenueError::new(format!(
+                    "Malformed Binance history: {error}"
+                ))),
+            );
+        }
+        // Whole-page admission is the only path which mutates accepted coverage.
+        match &mut read {
+            InFlight::Fills { history, .. } => history.accept_page(),
+            InFlight::Orders(history) => history.accept_page(),
+            InFlight::Income { history, .. } => history.accept_page(),
+            InFlight::Trades { history, .. } => history.accept_page(),
+            InFlight::Lookup { .. } => unreachable!(),
+        }
+        match read {
+            read @ InFlight::Fills { .. } => {
+                self.history.reads.insert(command, read);
+                self.next_fills_window(cx, command);
             }
-            InFlight::Trades { symbol } => {
-                let symbol = symbol.clone();
-                self.history.reads.remove(&command);
-                let mut trades = Vec::new();
-                if let Ok(body) = body {
-                    let _ = json::each::<PublicTrade>(body, |t| {
-                        trades.push(Trade {
-                            id: t.id.to_string(),
-                            symbol: symbol.clone(),
-                            price: num::parse(&t.price),
-                            qty: num::parse(&t.qty),
-                            quote_qty: num::parse(&t.quote_qty),
-                            timestamp: t.time,
-                            // A buyer-maker trade was an aggressive sell.
-                            side: if t.is_buyer_maker { "sell" } else { "buy" },
-                        });
-                    });
-                }
-                cx.done(command, serde_json::to_string(&trades).unwrap_or_default());
+            read @ InFlight::Income {
+                history: IncomeHistory::Range(_),
+                ..
+            } => {
+                self.history.reads.insert(command, read);
+                self.next_income_page(cx, command);
             }
+            read => read.finish(cx, Ok(())),
         }
     }
 }

@@ -347,8 +347,10 @@ impl MexcFutures {
                 method: "login",
                 param: Param {
                     key: &c.key,
-                    time: safe_cex_engine::num::format(cx.now),
-                    signature: c.signature(cx.now, ""),
+                    time: safe_cex_engine::num::format(safe_cex_engine::time::wire_stamp_ms(
+                        cx.now,
+                    )),
+                    signature: c.signature(safe_cex_engine::time::wire_stamp_ms(cx.now), ""),
                 },
             })
             .unwrap(),

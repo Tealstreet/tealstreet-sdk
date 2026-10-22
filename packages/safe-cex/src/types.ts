@@ -1,6 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
 import type { ExchangeErrorKind } from './commandOutcome';
+import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
@@ -65,6 +66,9 @@ export type ExchangeOptions = {
   readonly key: string;
   readonly secret: string;
   readonly passphrase?: string;
+  /** Rust local-provider setup only; consumed before generic options are retained.
+   * Stable IDs are caller-assigned, never derived from credential material. */
+  readonly localSigner?: LocalSignerMetadata;
 
   readonly secondary_key?: string;
   readonly secondary_secret?: string;

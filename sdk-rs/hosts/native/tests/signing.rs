@@ -239,3 +239,135 @@ async fn native_host_disposal_cancels_signing_before_or_during_the_callback() {
         }
     }
 }
+
+struct PrimitiveStep;
+impl safe_cex_engine::SignStep for PrimitiveStep {
+    fn prepare(
+        &mut self,
+        action: &mut safe_cex_engine::Action,
+        context: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        let now = context.now_ms;
+        if let safe_cex_engine::Action::Http(request) = action {
+            request.url = format!("https://venue.invalid/orders?timestamp={}", now.floor());
+        }
+        Ok(safe_cex_engine::signing::SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![safe_cex_engine::signing::Operation::Present {
+                key: safe_cex_engine::signing::KeyRef("account/header".into()),
+            }],
+        })
+    }
+    fn apply(
+        &mut self,
+        action: &mut safe_cex_engine::Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        if let safe_cex_engine::Action::Http(request) = action {
+            request.headers.push((
+                "X-Provider",
+                String::from_utf8(result.values[0].clone()).unwrap(),
+            ));
+        }
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+struct PrimitiveProvider {
+    entered: mpsc::UnboundedSender<()>,
+    release: Arc<tokio::sync::Notify>,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+impl safe_cex_engine::signing::Signer for PrimitiveProvider {
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        struct Guard(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        assert!(
+            matches!(&request.operations[0], safe_cex_engine::signing::Operation::Present { key } if key.0 == "account/header")
+        );
+        let release = self.release.clone();
+        let entered = self.entered.clone();
+        let guard = Guard(self.dropped.clone());
+        Box::pin(async move {
+            let _guard = guard;
+            entered.send(()).unwrap();
+            release.notified().await;
+            Ok(safe_cex_engine::signing::SignResult::new(
+                vec![b"provider-value".to_vec()],
+                request.receipt,
+            ))
+        })
+    }
+}
+
+#[tokio::test]
+async fn native_injected_primitive_signer_waits_and_is_cancelled_on_disposal() {
+    for complete in [false, true] {
+        let venue = safe_cex_engine::test_support::ProbeVenue::new(SignedVenue, |_, cx| {
+            let id = cx.request(
+                safe_cex_engine::Method::Post,
+                "https://venue.invalid/orders".into(),
+                vec![],
+                None,
+                (),
+            );
+            cx.sign_http(id, Box::new(PrimitiveStep));
+        });
+        let (outgoing, mut requests) = mpsc::unbounded_channel();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        let (entered, mut called) = mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let host = safe_cex_native::Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            SignedTransport {
+                signer: NetworkTransport::new(),
+                outgoing,
+            },
+        )
+        .with_signer(Arc::new(PrimitiveProvider {
+            entered,
+            release: release.clone(),
+            dropped: dropped.clone(),
+        }))
+        .unwrap();
+        let running =
+            tokio::spawn(host.run(inbox, std::time::Duration::from_secs(1), |_| {}, |_| {}));
+        tokio::time::timeout(std::time::Duration::from_secs(1), called.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(requests.try_recv().is_err());
+        if complete {
+            release.notify_one();
+            let request = tokio::time::timeout(std::time::Duration::from_secs(1), requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(request.url.contains("?timestamp="));
+            assert_eq!(
+                request.headers,
+                vec![("X-Provider", "provider-value".into())]
+            );
+        }
+        drop(commands);
+        running.await.unwrap();
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        release.notify_one();
+        assert!(requests.try_recv().is_err());
+    }
+}

@@ -1,8 +1,9 @@
 //! Native wallet amounts precede public quotes; no real account or transport.
+use support::Options;
 mod support;
 use safe_cex_engine::model::{Balance, CoinBalance};
 use safe_cex_engine::{Command, Event};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 const INVERSE: &str = r#"{"symbols":[{"symbol":"BTCUSD_PERP","contractStatus":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"120"}]}]}"#;
 const LINEAR_WALLET: &str = r#"{"assets":[{"asset":"USDT","walletBalance":"5000","availableBalance":"4952","initialMargin":"48","unrealizedProfit":"10"},{"asset":"BTC","walletBalance":"0.01","availableBalance":"0.01","initialMargin":"0","unrealizedProfit":"0"}]}"#;

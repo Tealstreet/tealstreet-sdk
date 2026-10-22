@@ -4,6 +4,7 @@ use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -552,7 +553,8 @@ impl BitunixFutures {
         };
         match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_signing_entropy(bytes)) {
             Ok(nonce) => {
-                let timestamp = safe_cex_engine::num::format(cx.now.floor());
+                let timestamp =
+                    safe_cex_engine::num::format(safe_cex_engine::time::wire_stamp_ms(cx.now));
                 let trimmed = sign::Credentials {
                     key: c.key.trim().into(),
                     secret: c.secret.trim().into(),
@@ -1684,8 +1686,7 @@ impl BitunixFutures {
                     if !tpsl {
                         let previous = self.account.filled.get(raw).copied().unwrap_or((0.0, 0.0));
                         let cumulative = cumulative.unwrap_or(previous.0);
-                        let delta = cumulative - previous.0;
-                        if delta > 0.0 {
+                        if cumulative > previous.0 {
                             let side = if o.side.eq_ignore_ascii_case("BUY") {
                                 Some(OrderSide::Buy)
                             } else if o.side.eq_ignore_ascii_case("SELL") {
@@ -1701,26 +1702,39 @@ impl BitunixFutures {
                                 Some(o.price.0)
                             }
                             .filter(|price| price.is_finite() && *price > 0.0);
-                            let cost = if o.average_price.0 > 0.0 {
-                                Some(o.average_price.0 * cumulative)
-                            } else {
-                                price.map(|price| previous.1 + delta * price)
-                            };
-                            if let Some((side, cost)) = side.zip(cost).filter(|(_, cost)| {
-                                let price = (*cost - previous.1) / delta;
-                                price.is_finite() && price > 0.0
-                            }) {
+                            let prepared = Cursor::seed(previous.0, Some(previous.1))
+                                .and_then(|cursor| {
+                                    cursor.prepare_average(
+                                        cumulative,
+                                        (o.average_price.0 > 0.0).then_some(o.average_price.0),
+                                        price,
+                                        Arithmetic::Binary,
+                                    )
+                                })
+                                .and_then(|prepared| {
+                                    prepared
+                                        .map(|prepared| {
+                                            prepared.rounded(ExecutionRounding::Significant15)
+                                        })
+                                        .transpose()
+                                })
+                                .ok()
+                                .flatten()
+                                .and_then(|prepared| {
+                                    prepared.next().value().map(|cost| (prepared, cost))
+                                });
+                            if let Some((side, (prepared, cost))) = side.zip(prepared) {
                                 cx.fill(Fill {
                                     id: None,
                                     order_id: o.order_id.to_string(),
                                     symbol: o.symbol.to_string(),
                                     side,
-                                    price: clean_float((cost - previous.1) / delta),
-                                    amount: clean_float(delta),
+                                    price: prepared.price(),
+                                    amount: prepared.amount(),
                                 });
                                 self.account
                                     .filled
-                                    .insert(raw.to_owned(), (cumulative, cost));
+                                    .insert(raw.to_owned(), (prepared.next().quantity(), cost));
                                 if self
                                     .account
                                     .pending_executions
@@ -1830,14 +1844,4 @@ fn extract_account(text: &str, depth: u8) -> Option<Account<'_>> {
         .into_iter()
         .flatten()
         .find_map(|v| extract_account(v.get(), depth + 1))
-}
-
-/// Fifteen significant digits, like the TS `cleanFloat`: drops binary noise
-/// from value/quantity division (2999.4999999999995 -> 2999.5).
-fn clean_float(value: f64) -> f64 {
-    if value.is_finite() {
-        format!("{value:.14e}").parse().unwrap_or(value)
-    } else {
-        value
-    }
 }

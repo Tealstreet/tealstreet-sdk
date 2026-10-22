@@ -1,4 +1,6 @@
 use super::*;
+use crate::sign::oracle::Signed;
+use crate::test_config::Options;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
@@ -42,8 +44,9 @@ fn secondary_get_keeps_primary_mutations() {
             let mut opts = options();
             opts.variant = variant;
             opts.recv_window = recv_window;
-            let mut engine =
-                safe_cex_engine::test_support::seeded_engine(probe(BinanceFutures::new(opts)));
+            let (venue, signer) = opts.build();
+            let mut engine = safe_cex_engine::test_support::seeded_engine(probe(venue));
+            engine.set_signer(Some(signer)).unwrap();
             engine.start(1700000000000.0);
             let requests: Vec<_> = http_requests(&mut engine)
                 .into_iter()
@@ -62,7 +65,7 @@ fn secondary_get_keeps_primary_mutations() {
                 } else {
                     opts.secret.as_deref().unwrap()
                 };
-                let credentials = sign::Credentials {
+                let credentials = sign::oracle::LegacyCredentials {
                     key: expected.into(),
                     secret: secret.into(),
                 };
@@ -109,11 +112,52 @@ fn secondary_get_keeps_primary_mutations() {
 fn invalid_secondary_identity_stops_startup_before_io() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(opts));
+    let mut engine = crate::test_config::engine(opts);
     engine.start(1700000000000.0);
     assert!(
         !engine
             .drain_actions()
             .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
     );
+}
+
+#[test]
+fn signed_reads_use_the_dispatch_clock_after_queueing_for_all_binance_variants() {
+    for variant in [
+        Variant::UsdM,
+        Variant::PortfolioMargin,
+        Variant::CoinM,
+        Variant::Spot,
+    ] {
+        let mut opts = options();
+        opts.variant = variant;
+        let (venue, signer) = opts.build();
+        let mut engine = safe_cex_engine::test_support::seeded_engine(probe(venue));
+        engine.set_signer(Some(signer)).unwrap();
+        engine.start(1_700_000_000_000.0);
+        engine.prepare_dispatch(1_700_000_003_456.0);
+        let requests: Vec<_> = http_requests(&mut engine)
+            .into_iter()
+            .filter(|request| request.url.contains("secondary-test"))
+            .collect();
+        assert_eq!(requests.len(), 4);
+        for request in requests {
+            assert!(
+                request.url.contains("timestamp=1700000003456"),
+                "{variant:?}: {}",
+                request.url
+            );
+            let identity = if request.method == Method::Get {
+                "read-key"
+            } else {
+                "primary-key"
+            };
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, value)| *name == "X-MBX-APIKEY" && value == identity)
+            );
+        }
+    }
 }

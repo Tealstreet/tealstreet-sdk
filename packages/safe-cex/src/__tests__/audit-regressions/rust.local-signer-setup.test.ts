@@ -1,0 +1,140 @@
+import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeOptions } from '../../types';
+
+import { describe, expect, it } from 'vitest';
+
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { DefaultStore } from '../../store/store.base';
+import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
+
+const options = () =>
+  ({
+    key: 'audit-secret-sentinel',
+    secret: 'audit-secret-sentinel',
+    secondary_key: 'primary-key',
+    secondary_secret: 'audit-secret-sentinel',
+    passphrase: 'audit-secret-sentinel',
+    secondary_passphrase: 'audit-secret-sentinel',
+    secondaryProxyUrl: 'https://proxy.invalid',
+    publicDataOnly: false,
+  }) as ExchangeOptions;
+
+describe('trusted local signer setup', () => {
+  it('separates credential setup from retained generic options and consumes it exactly once', () => {
+    const input = options();
+    const setup = new LocalSignerSetup(input);
+    const safe = withoutSigningCredentials(input);
+    expect(JSON.stringify(safe)).not.toContain('audit-secret-sentinel');
+    expect(JSON.stringify(safe)).not.toContain('primary-key');
+    expect(safe.secondaryProxyUrl).toBe(input.secondaryProxyUrl);
+    expect(input.secret).toBe('audit-secret-sentinel');
+    const calls: unknown[][] = [];
+    class Engine {
+      constructor(...args: unknown[]) {
+        calls.push(args);
+      }
+    }
+    setup.construct(
+      Engine as unknown as new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike,
+      'binance',
+      JSON.stringify(safe),
+    );
+    expect(calls[0][1]).not.toContain('audit-secret-sentinel');
+    expect(JSON.parse(calls[0][2] as string)).toEqual({
+      primary: { key: input.key, secret: input.secret, passphrase: input.passphrase },
+      secondary: { key: input.secondary_key, secret: input.secondary_secret, passphrase: input.secondary_passphrase },
+    });
+    expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
+    expect(JSON.stringify(setup)).not.toContain('audit-secret-sentinel');
+  });
+  it('disposal and failed construction both release the one-use setup', () => {
+    for (const fail of [false, true]) {
+      const setup = new LocalSignerSetup(options());
+      class Engine {
+        constructor() {
+          throw new Error('construction refused');
+        }
+      }
+      if (fail) expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow('construction refused');
+      else setup.dispose();
+      expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed|disposed/);
+    }
+  });
+  it('classifies incomplete secondary setup before a generic exchange can retain it', () => {
+    for (const read of [
+      { secondary_key: 'primary-key' },
+      { secondary_secret: 'audit-secret-sentinel' },
+      { secondary_passphrase: '' },
+    ])
+      expect(
+        () => new LocalSignerSetup({ ...withoutSigningCredentials(options()), ...read } as ExchangeOptions),
+      ).toThrow(/nonempty key and secret/);
+  });
+  it('carries trusted metadata and an empty passphrase only through the one-use setup', () => {
+    const input = { ...options(), passphrase: '', localSigner: {
+      primary: { stableId: 'account/17', secretEncoding: 'base64' as const, trimCredential: true },
+      secondary: { stableId: 'read/17' },
+    } };
+    const setup = new LocalSignerSetup(input);
+    expect(withoutSigningCredentials(input)).not.toHaveProperty('localSigner');
+    let received: unknown;
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
+    }
+    setup.construct(Engine as never, 'binance', '{}');
+    expect(received).toMatchObject({
+      primary: { passphrase: '', ...input.localSigner.primary },
+      secondary: { ...input.localSigner.secondary },
+    });
+    expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
+  });
+  it('refuses provider metadata on unmigrated Rust families before construction', () => {
+    expect(() => new RustEngineExchange('bybit', { ...options(), localSigner: {} }, new DefaultStore()))
+      .toThrow(/not supported/);
+  });
+  it('rejects malformed or unknown setup metadata before constructing an engine', () => {
+    let constructors = 0;
+    class Engine { constructor() { constructors++; } }
+    for (const localSigner of [
+      null, [], 'base64', { tertiary: {} }, { primary: [] },
+      { primary: { secretEncodng: 'base64' } },
+      { primary: { secretEncoding: 'unknown' } },
+      { primary: { trimCredential: 'true' } },
+      { primary: { stableId: '' } },
+      { primary: { stableId: 'bad\nidentity' } },
+      { primary: { stableId: 'x'.repeat(257) } },
+    ]) {
+      let failure: unknown;
+      try {
+        new LocalSignerSetup({ ...options(), localSigner } as unknown as ExchangeOptions)
+          .construct(Engine as never, 'binance', '{}');
+      } catch (error) { failure = error; }
+      expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+      expect(constructors).toBe(0);
+    }
+  });
+});
+
+
+it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot'] as const)(
+  '%s retains private intent without putting credentials in generic exchange or worker options',
+  (venue) => {
+    const input = options();
+    const exchange = new RustEngineExchange(venue, input, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(false);
+      expect(JSON.stringify(exchange.options)).not.toContain('audit-secret-sentinel');
+      expect(JSON.stringify(exchange.options)).not.toContain('primary-key');
+      for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase'])
+        expect(exchange.options).not.toHaveProperty(field);
+      expect(input.secret).toBe('audit-secret-sentinel');
+    } finally { exchange.dispose(); }
+  },
+);
+
+
+it('incomplete secondary setup reports typed invalidInput/notSent at construction', () => {
+  let failure: unknown;
+  try { new LocalSignerSetup({ ...options(), secondary_secret: '' }); } catch (error) { failure = error; }
+  expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+});

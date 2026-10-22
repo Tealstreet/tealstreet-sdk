@@ -67,7 +67,11 @@ regexes = ["^99291b039f7ecd9952d7fc8fda105c5ca631b597cfbc5a4de4a7f95d435e4470$"]
 [[rules.allowlists]]
 description = "Binance published SIGNED Endpoint Examples HMAC secret."
 condition = "AND"
-paths = ["^sdk-rs/venues/binance/src/sign\\.rs$"]
+paths = [
+  "^sdk-rs/venues/binance/src/sign\\.rs$",
+  # Same published vector, now shared with the injected local-provider tests.
+  "^sdk-rs/crypto/tests/fixtures/hmac/binance\\.json$",
+]
 regexTarget = "secret"
 regexes = ["^2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9$"]
 

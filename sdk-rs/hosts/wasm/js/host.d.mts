@@ -229,7 +229,40 @@ export class EngineDisposedError extends Error {
   readonly actualClientOrderIds?: readonly string[];
 }
 
+export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
+export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
+  | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
+export interface SigningIdentity {
+  credential: string; signing: string; passphrase?: string;
+  /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
+  stableId?: string;
+}
+export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
+export interface LocalIdentityMetadata {
+  stableId?: string;
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem';
+  trimCredential?: boolean;
+}
+/** Trusted local setup metadata; credential strings arrive on the setup channel. */
+export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
+/** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
+export interface SignReceipt { stampMs?: number; expiryMs?: number }
+export interface SignResult { values: number[][]; receipt: SignReceipt }
+export interface SignRequest {
+  receipt: SignReceipt;
+  operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
+  context: { venue: string; method: string; host: string; path: string };
+}
+/** Owns secrets. Atomic results are exact raw operation bytes; errors are never logged. */
+export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<SignResult> | SignResult;
+
 export interface EngineHostOptions {
+  /** Transfer raw engine allocation ownership after successful construction.
+   * Defaults false; borrowed callers dispose the host, then free their engine.
+   * Trap cleanup is best effort. */
+  ownsEngine?: boolean;
+  /** Overrides local signing before startup. Context is advisory, not an allowlist. */
+  signer?: Signer;
   /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
    * Defaults to Web Crypto. A seed here never replaces signing entropy. */
   entropy?: EntropyProvider;
@@ -306,6 +339,7 @@ export interface EngineBridgeConstruction {
   payloadSigning: boolean;
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
+  dispatchSigning:boolean;
 }
 
 export interface EngineConstruction {
@@ -316,6 +350,8 @@ export interface EngineConstruction {
 }
 
 export interface WasmEngineLike {
+  /** Optional native allocation cleanup; managed EngineHosts opt into ownership. */
+  free?(): void;
   /** Configure before startup; optional only for older/fake engines without injection. */
   setEntropy?(source: EntropyProvider): void;
   setSigningEntropy?(source: EntropyProvider): void;
@@ -345,6 +381,11 @@ export interface WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
+  requiresExternalSigner?(): boolean;
+  useExternalSigner?(): void;
+  signed?(attempt: number, resultJson: string, now: number): string;
+  signFailed?(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
+  prepareDispatch?(now: number): string;
   payloadSigned?(request: number, signature: string, headers: string, now: number): string;
   payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;

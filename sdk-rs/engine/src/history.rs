@@ -1,7 +1,7 @@
 //! Command-owned history completion. Venues supply rows and endpoint facts;
 //! this path owns semantic completeness and its ordering before the result.
 use crate::log::code;
-use crate::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stall, Step};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 
 /// One query owner, retained across all pages and composite stages. Consuming
@@ -84,6 +84,14 @@ impl<T> HistoryRows<T> {
         self.completion.command()
     }
 
+    pub fn accepted_len(&self) -> usize {
+        self.accepted.len()
+    }
+
+    pub fn staged_len(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Rows may be streamed before the final HTTP/envelope verdict is known.
     pub fn stage(&mut self, row: T) {
         self.pending.push(row);
@@ -94,7 +102,43 @@ impl<T> HistoryRows<T> {
         self.accepted.append(&mut self.pending);
     }
 
-    pub fn finish<P>(mut self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+    /// Range selection is validated before mutating either row set. Indices
+    /// come from the engine pager, in original native-page order.
+    fn accept_selected_page(&mut self, selected: &[usize]) -> bool {
+        if selected.iter().any(|index| *index >= self.pending.len())
+            || selected.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return false;
+        }
+        let mut selected = selected.iter().copied().peekable();
+        for (index, row) in self.pending.drain(..).enumerate() {
+            if selected.peek() == Some(&index) {
+                selected.next();
+                self.accepted.push(row);
+            }
+        }
+        true
+    }
+
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        let encode = self.encode;
+        self.finish_with(cx, result, |rows| encode(&rows));
+    }
+
+    /// Strict endpoint-policy rejection is not a recoverable failed page, even
+    /// when earlier pages were accepted. Never publish its rows or marker.
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+        self.completion.finish(cx, Err(error));
+    }
+
+    /// Final query shaping may sort/dedupe/limit accepted rows, using captured
+    /// endpoint metadata. The finalizer never sees a failed page's staged rows.
+    pub fn finish_with<P>(
+        mut self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) {
         if let Err(error) = result {
             if self.accepted.is_empty() {
                 return self.completion.finish(cx, Err(error));
@@ -111,7 +155,7 @@ impl<T> HistoryRows<T> {
             );
         }
         // Encoding failure still rejects; it cannot publish malformed partial rows.
-        self.completion.finish(cx, (self.encode)(&self.accepted));
+        self.completion.finish(cx, encode(self.accepted));
     }
 }
 
@@ -144,6 +188,14 @@ impl<T> CursorHistory<T> {
 
     pub fn command(&self) -> CommandId {
         self.rows.command()
+    }
+
+    pub fn accepted_len(&self) -> usize {
+        self.rows.accepted_len()
+    }
+
+    pub fn staged_len(&self) -> usize {
+        self.rows.staged_len()
     }
 
     pub fn cursor(&self) -> Option<&str> {
@@ -187,6 +239,23 @@ impl<T> CursorHistory<T> {
     }
 
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        let encode = self.rows.encode;
+        self.finish_with(cx, result, |rows| encode(&rows));
+    }
+
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+        let error = self.lifecycle_error.map_or(error, |message| {
+            VenueError::new(message).kind(ErrorKind::Internal)
+        });
+        self.rows.reject(cx, error);
+    }
+
+    pub fn finish_with<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) {
         let lifecycle_error = self.lifecycle_error.or_else(|| {
             (result.is_ok() && !self.finished)
                 .then_some("history cursor completed with a page still pending")
@@ -197,6 +266,141 @@ impl<T> CursorHistory<T> {
                 .completion
                 .finish(cx, Err(VenueError::new(message).kind(ErrorKind::Internal)));
         }
-        self.rows.finish(cx, result);
+        self.rows.finish_with(cx, result, encode);
+    }
+}
+
+/// Range splitting, identity selection and accepted-row completion share one
+/// owner. A page can affect range coverage/dedupe only after admission.
+#[must_use = "range history must finish or fail through its owner"]
+pub struct RangeHistory<T> {
+    rows: HistoryRows<T>,
+    walk: RangeWalk,
+    pending_facts: Vec<PageRow>,
+    active: Option<(f64, f64)>,
+    finished: bool,
+    lifecycle_error: Option<&'static str>,
+    incomplete_message: fn(u32) -> String,
+}
+
+impl<T> RangeHistory<T> {
+    pub fn new(
+        completion: Completion,
+        walk: RangeWalk,
+        incomplete_message: fn(u32) -> String,
+        encode: fn(&[T]) -> Result<String, VenueError>,
+    ) -> Self {
+        Self {
+            rows: HistoryRows::new(completion, encode),
+            walk,
+            pending_facts: Vec::new(),
+            active: None,
+            finished: false,
+            lifecycle_error: None,
+            incomplete_message,
+        }
+    }
+
+    pub fn command(&self) -> CommandId {
+        self.rows.command()
+    }
+
+    pub fn accepted_len(&self) -> usize {
+        self.rows.accepted_len()
+    }
+
+    /// Row and native range facts are staged together, never independently.
+    pub fn stage(&mut self, row: T, facts: PageRow) {
+        if self.active.is_none() || self.finished || self.lifecycle_error.is_some() {
+            self.lifecycle_error
+                .get_or_insert("history range row staged without an active fetch");
+            return;
+        }
+        self.rows.stage(row);
+        self.pending_facts.push(facts);
+    }
+
+    /// Call only after HTTP/native status and the entire page parse succeed.
+    /// A malformed page must finish with Err instead; its prefix stays staged.
+    pub fn accept_page(&mut self) {
+        if self.lifecycle_error.is_some()
+            || self.finished
+            || self.active.is_none()
+            || self.pending_facts.len() != self.rows.staged_len()
+        {
+            self.lifecycle_error
+                .get_or_insert("history range admitted without an active fetch");
+            return;
+        }
+        let (from, to) = self.active.take().expect("active checked");
+        let selected = self.walk.page(from, to, &self.pending_facts);
+        if !self.rows.accept_selected_page(&selected) {
+            self.lifecycle_error = Some("history range selection is invalid");
+        }
+        self.pending_facts.clear();
+    }
+
+    /// The adapter supplies transport and any ChunkDone pacing; only the owner
+    /// advances bounds or decides when the range has finished.
+    pub fn step(&mut self) -> Step {
+        if self.lifecycle_error.is_some()
+            || self.finished
+            || self.active.is_some()
+            || !self.pending_facts.is_empty()
+            || self.rows.staged_len() != 0
+        {
+            self.lifecycle_error
+                .get_or_insert("history range stepped before page admission or after completion");
+            return Step::Finished;
+        }
+        let step = self.walk.step();
+        match step {
+            Step::Fetch { from, to } => self.active = Some((from, to)),
+            Step::Finished => self.finished = true,
+            Step::ChunkDone => {}
+        }
+        step
+    }
+
+    /// Signing/policy/lifecycle errors are strict, even after accepted rows.
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+        let error = self.lifecycle_error.map_or(error, |message| {
+            VenueError::new(message).kind(ErrorKind::Internal)
+        });
+        self.rows.reject(cx, error);
+    }
+
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        let encode = self.rows.encode;
+        self.finish_with(cx, result, |rows| encode(&rows));
+    }
+
+    pub fn finish_with<P>(
+        mut self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) {
+        let lifecycle_error = self.lifecycle_error.or_else(|| {
+            if result.is_ok() && !self.finished {
+                Some("history range completed before its final step")
+            } else if result.is_err() && self.active.is_none() {
+                Some("history range page failed without an active fetch")
+            } else {
+                None
+            }
+        });
+        if let Some(message) = lifecycle_error {
+            return self
+                .rows
+                .reject(cx, VenueError::new(message).kind(ErrorKind::Internal));
+        }
+        let gaps = self.walk.incomplete_chunks();
+        if gaps > 0 {
+            self.rows
+                .completion
+                .incomplete((self.incomplete_message)(gaps));
+        }
+        self.rows.finish_with(cx, result, encode);
     }
 }

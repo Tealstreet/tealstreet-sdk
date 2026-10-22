@@ -418,7 +418,7 @@ fn aster_api_resolution_preserves_override_and_trimmed_auth_precedence() {
         );
         assert_eq!(
             serde_json::to_string(&options.construction("binance")).unwrap(),
-            r#"{"bridge":{"spot":false,"demo":false,"primaryCredentialsOnly":false,"payloadSigning":false,"apiKeyIndexRequired":false,"isolatedBookSubscriptions":false}}"#
+            r#"{"bridge":{"spot":false,"demo":false,"primaryCredentialsOnly":false,"payloadSigning":false,"apiKeyIndexRequired":false,"isolatedBookSubscriptions":false,"dispatchSigning":true}}"#
         );
     }
     // An inferred V3 reaches the same registry path as an explicit V3.
@@ -708,6 +708,33 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
                 .iter()
                 .any(|(n, v)| n.eq_ignore_ascii_case("api-key") && v == "read-key"),
             "registry must forward read identity to actual native GET"
+        );
+    }
+}
+
+#[test]
+fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
+    for venue in ["bybit", "okx", "hyperliquid", "orderly"] {
+        assert_eq!(
+            rejected(
+                venue,
+                r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#
+            ),
+            "Injected signing is not supported for this venue yet"
+        );
+    }
+}
+
+#[test]
+fn binance_opaque_refs_require_an_injected_provider_before_construction() {
+    for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
+        let error = rejected(
+            venue,
+            r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#,
+        );
+        assert!(
+            error.to_lowercase().contains("provider"),
+            "{venue}: {error}"
         );
     }
 }

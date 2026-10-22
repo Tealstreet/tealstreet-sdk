@@ -114,6 +114,34 @@ impl FrameServer {
         options_json: &str,
         transport: T,
     ) -> io::Result<()> {
+        self.register_venue(id, token, venue, options_json, transport, None)
+    }
+
+    /// Trusted account setup with opaque credential refs in options. The provider
+    /// is deployment-owned and never accepted from the client command wire.
+    #[cfg(feature = "venues")]
+    pub fn add_venue_with_signer<T: Transport + 'static>(
+        &mut self,
+        id: &str,
+        token: &str,
+        venue: &str,
+        options_json: &str,
+        transport: T,
+        signer: safe_cex_engine::signing::Provider,
+    ) -> io::Result<()> {
+        self.register_venue(id, token, venue, options_json, transport, Some(signer))
+    }
+
+    #[cfg(feature = "venues")]
+    fn register_venue<T: Transport + 'static>(
+        &mut self,
+        id: &str,
+        token: &str,
+        venue: &str,
+        options_json: &str,
+        transport: T,
+        signer: Option<safe_cex_engine::signing::Provider>,
+    ) -> io::Result<()> {
         struct Register<'a, T> {
             server: &'a mut FrameServer,
             id: &'a str,
@@ -135,8 +163,18 @@ impl FrameServer {
             token,
             transport,
         };
-        safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+        let result = if let Some(signer) = signer {
+            safe_cex_venues::build_with_signer(
+                venue,
+                options,
+                Some(crate::production_entropy()),
+                Some(signer),
+                register,
+            )
+        } else {
+            safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
+        };
+        result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
     }
 
     /// Tokens grant full access to one preconfigured account. They must be
@@ -2222,6 +2260,20 @@ mod tests {
                         "binance",
                         r#"{"publicDataOnly":true}"#,
                         NoTransport,
+                    )
+                    .unwrap();
+                let (signer, identities) =
+                    safe_cex_crypto::signer::LocalSigner::from_setup(Default::default()).unwrap();
+                let setup = serde_json::json!({ "publicDataOnly": true, "signing": identities })
+                    .to_string();
+                server
+                    .add_venue_with_signer(
+                        "injected",
+                        "token-injected",
+                        "binance",
+                        &setup,
+                        NoTransport,
+                        Arc::new(signer),
                     )
                     .unwrap();
                 for (venue, options, message) in [

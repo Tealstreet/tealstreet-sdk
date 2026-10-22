@@ -125,7 +125,7 @@ pub fn request(
     let timestamp = num::format(if legacy {
         (now / 1000.0).floor() * 1000.0
     } else {
-        now.floor()
+        safe_cex_engine::time::wire_stamp_ms(now)
     });
     let query_method = matches!(request.method, Method::Get | Method::Delete);
     let canonical = if query_method {
@@ -263,10 +263,13 @@ pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
         request_path: "/ws/accounts",
         api_key: key,
         passphrase,
-        timestamp: now.floor() as u64,
+        timestamp: safe_cex_engine::time::wire_stamp_ms(now) as u64,
         signature: hmac(
             secret,
-            &format!("{}GET/ws/accounts", num::format(now.floor())),
+            &format!(
+                "{}GET/ws/accounts",
+                num::format(safe_cex_engine::time::wire_stamp_ms(now))
+            ),
         ),
     };
     let args = [serde_json::to_string(&login).map_err(|e| e.to_string())?];

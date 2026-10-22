@@ -6,6 +6,7 @@ use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus,
@@ -132,17 +133,11 @@ pub struct Mapped {
     /// A position TP/SL (`tpslMode` Full or Partial), rather than an
     /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
-    fill_cursor: FillCursor,
+    fill_cursor: Option<Cursor>,
     terminal: bool,
     /// A spot TP/SL classified with neither a trigger direction nor a price
     /// to compare against; reclassified once tickers are seeded.
     unpriced_tpsl: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-struct FillCursor {
-    quantity: f64,
-    value: Option<f64>,
 }
 
 pub struct MappedPosition {
@@ -216,7 +211,7 @@ pub struct AccountState {
     pub authed: bool,
     pub session_version: u32,
     pub orders_snapshot_version: u32,
-    fill_cursors: HashMap<String, FillCursor>,
+    fill_cursors: HashMap<String, Cursor>,
     terminal_fills: VecDeque<String>,
     executions: HashSet<(String, String)>,
     recent_executions: VecDeque<(String, String)>,
@@ -411,8 +406,7 @@ pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
 /// `a - b` rounded to the larger decimal count of the two, as the TS
 /// `safe-math` subtract does, so float noise never reaches the store.
 pub fn subtract(a: f64, b: f64) -> f64 {
-    let factor = 10f64.powi(num::decimals(a).max(num::decimals(b)) as i32);
-    num::round_half_up((a - b) * factor) / factor
+    num::decimal_subtract(a, b)
 }
 
 pub fn order_side(text: Option<&str>) -> Option<OrderSide> {
@@ -682,11 +676,12 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
             o.order_status.as_ref(),
             "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
         ),
-        fill_cursor: FillCursor {
-            quantity: filled,
-            value: finite(float_of(&o.cum_exec_value))
-                .or_else(|| finite(float_of(&o.avg_price)).map(|price| price * filled)),
-        },
+        fill_cursor: Cursor::seed_with_average(
+            filled,
+            finite(float_of(&o.cum_exec_value)),
+            finite(float_of(&o.avg_price)),
+        )
+        .ok(),
     })
 }
 
@@ -941,7 +936,7 @@ impl BybitLinear {
             .retain(|id| self.account.fill_cursors.contains_key(id));
     }
 
-    fn store_hyro_fill_cursor(&mut self, cx: &Cx<'_, Pending>, id: &str, cursor: FillCursor) {
+    fn store_hyro_fill_cursor(&mut self, cx: &Cx<'_, Pending>, id: &str, cursor: Cursor) {
         self.account.fill_cursors.insert(id.to_owned(), cursor);
         self.remember_hyro_fill_cursor(id);
         let active = cx
@@ -962,8 +957,8 @@ impl BybitLinear {
             .get(row.order_id.as_ref())
             .copied()
             .unwrap_or_default();
-        if quantity < previous.quantity
-            || (quantity == previous.quantity
+        if quantity < previous.quantity()
+            || (quantity == previous.quantity()
                 && self
                     .account
                     .terminal_fills
@@ -985,47 +980,42 @@ impl BybitLinear {
                 self.account.terminal_fills.pop_front();
             }
         }
-        if quantity <= previous.quantity {
-            self.store_hyro_fill_cursor(cx, &row.order_id, previous);
-            return true;
-        }
-        let amount = subtract(quantity, previous.quantity);
-        let cumulative = finite(float_of(&row.cum_exec_value));
-        if cumulative
-            .zip(previous.value)
-            .is_some_and(|(value, previous)| value < previous)
-        {
-            self.fail_hyro(cx, "private fill value regressed while quantity increased");
-            return false;
-        }
-        let delta_value = cumulative
-            .zip(previous.value.or((previous.quantity == 0.0).then_some(0.0)))
-            .map(|(value, previous)| subtract(value, previous))
-            .filter(|value| *value > 0.0);
-        let average = finite(float_of(&row.avg_price))
-            .filter(|price| *price > 0.0)
-            .or_else(|| finite(float_of(&row.price)).filter(|price| *price > 0.0));
-        let price = delta_value.map(|value| value / amount).or(average);
-        if let Some(price) = price.filter(|price| price.is_finite() && *price > 0.0)
-            && let Some(side) = order_side(row.side.as_deref())
-        {
-            cx.fill(Fill {
-                id: None,
-                order_id: row.order_id.to_string(),
-                symbol: row.symbol.to_string(),
-                side,
-                price,
-                amount,
-            });
-        }
-        self.store_hyro_fill_cursor(
-            cx,
-            &row.order_id,
-            FillCursor {
-                quantity,
-                value: cumulative.or_else(|| average.map(|price| price * quantity)),
+        let report = Report::Cumulative {
+            quantity,
+            price: CumulativePrice::Value {
+                cumulative: finite(float_of(&row.cum_exec_value)),
+                fallback: finite(float_of(&row.avg_price))
+                    .filter(|price| *price > 0.0)
+                    .or_else(|| finite(float_of(&row.price)).filter(|price| *price > 0.0)),
             },
-        );
+        };
+        let prepared = match previous.prepare(report, Arithmetic::DecimalRounded) {
+            Ok(Some(prepared)) => prepared,
+            Ok(None) => {
+                self.store_hyro_fill_cursor(cx, &row.order_id, previous);
+                return true;
+            }
+            Err(Rejection::ValueRegressed) => {
+                self.fail_hyro(cx, "private fill value regressed while quantity increased");
+                return false;
+            }
+            Err(Rejection::QuantityRegressed) => return false,
+            // A valid observation can update native order/protocol state while
+            // leaving this unpriced execution eligible for a corrected report.
+            Err(_) => return true,
+        };
+        let Some(side) = order_side(row.side.as_deref()) else {
+            return true;
+        };
+        cx.fill(Fill {
+            id: None,
+            order_id: row.order_id.to_string(),
+            symbol: row.symbol.to_string(),
+            side,
+            price: prepared.price(),
+            amount: prepared.amount(),
+        });
+        self.store_hyro_fill_cursor(cx, &row.order_id, prepared.next());
         true
     }
 
@@ -1288,10 +1278,9 @@ impl BybitLinear {
             // executions whose order events have not arrived yet.
             if !self.account.ready {
                 let previous = self.account.fill_cursors.entry(id.clone()).or_default();
-                if mapped.fill_cursor.quantity > previous.quantity {
-                    *previous = mapped.fill_cursor;
-                } else if mapped.fill_cursor.quantity == previous.quantity {
-                    previous.value = mapped.fill_cursor.value.or(previous.value);
+                // Admission rejects an invalid recovery seed before this commit.
+                if let Some(seed) = mapped.fill_cursor {
+                    *previous = previous.merge_seed(seed);
                 }
                 if mapped.orders[0].status != OrderStatus::Open {
                     self.account.terminal_fills.retain(|known| known != &id);
@@ -1706,7 +1695,7 @@ impl BybitLinear {
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
         }
         if let Some(credentials) = &self.credentials {
-            let auth = credentials.ws_auth(cx.now + self.clock_offset_ms);
+            let auth = credentials.ws_auth(cx.protocol_stamp_ms());
             let auth = if self.variant.is_hyro() {
                 auth.replacen(
                     "{",
@@ -2257,9 +2246,10 @@ impl BybitLinear {
                     rejected.reject(Some(row.order_id.to_string()));
                     unsupported.push(row.order_id.to_string());
                 } else if !well_formed
-                    || mapped
-                        .as_ref()
-                        .is_none_or(|mapped| mapped.orders.iter().any(|order| !valid_order(order)))
+                    || mapped.as_ref().is_none_or(|mapped| {
+                        mapped.orders.iter().any(|order| !valid_order(order))
+                            || (self.variant.is_hyro() && mapped.fill_cursor.is_none())
+                    })
                 {
                     if self.variant.is_hyro() {
                         *invalid = true;

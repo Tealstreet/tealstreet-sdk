@@ -166,8 +166,23 @@ Medium:
    validates complete containers, prepares each native row without mutation and
    admits it before root/fill/store effects, so bad rows preserve their copy while
    healthy peers commit. Remaining keyed consumers still need inventory/fan-out;
-   validated cumulative-fill preparation/commit is an explicit later engine-helper
-   follow-on, not twelve independent venue repairs. Snapshot commits retain the
+   validated cumulative-fill preparation now starts with `engine::execution`
+   and Hyro/Bitget Classic reference consumers, repairing five original-RED
+   financial defects before progress/dedup commit. See
+   [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md). The engine now owns
+   observed/delivered/position suffix separation and bounded priced intervals;
+   WOO/Bitrue adopt it with five more original-RED/core-GREEN controls. An
+   exclusive borrow keeps prepared interval decisions current until consuming
+   commit, which precedes Fill emission; aggregate VWAP cannot price a clipped
+   subset. Bitunix and Coinbase(+spot) now share checked average/direct-suffix
+   quote preparation; emitted rounding preserves unrounded anchors. Native
+   compatibility controls cover equal-endpoint quote refresh, invalid-value retry
+   and Spot/INTX/CFM units. BloFin now shares prefix admission, capped-decimal
+   arithmetic and scaled public execution preparation, with two original-RED/
+   core-GREEN controls preventing infinite-price delivery and lost correction.
+   Historical observations still bypass unused live-price preparation. Remaining
+   cumulative consumers need fan-out before reporting
+   and snapshot freshness, rather than independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
@@ -228,5 +243,19 @@ live together in the engine. It stages each page until validation: failures befo
 accepted rows reject, later failures retain accepted rows with owned incompleteness;
 encoding and lifecycle invariant failures still reject. Shared cursor policy owns its budget/dedupe/end
 checks. Bybit and OKX closed positions now use this owner too, with shared stage reset
-and initial cursor support. General histories remain to migrate; this does not
-close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
+and initial cursor support. Bybit general histories now use shared contextual
+finalization for accepted rows, sorting/dedupe/caps and strict policy refusal;
+actual later-page failures recover with owned incompleteness. Missing list data
+never proves empty complete coverage. Binance general histories now use shared
+accepted-page completion and `RangeHistory` owns income bounds, dedupe selection,
+coverage and finalization; failed prefixes are not accepted, and signing failures
+stay strict. Other general histories remain to migrate;
+this does not close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
+
+
+BloFin general histories also use the landed cursor/completion owner for typed
+staged/accepted rows and native-ID dedupe. Whole-response admission excludes
+failed prefixes; actual later-page failures recover only accepted rows with owned
+incompleteness. Missing/repeated cursor, page budget and header-preparation
+refusal remain strict. Raw paging counts, request pins and native financial
+shaping are retained; no engine extension or universal enforcement claim.

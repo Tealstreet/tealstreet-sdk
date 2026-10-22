@@ -71,6 +71,36 @@ pub fn round_half_up(value: f64) -> f64 {
     (value + 0.5).floor()
 }
 
+/// Existing TS safe-math subtraction, rounded to the larger input decimal
+/// count. Callers handling untrusted values must validate inputs and output.
+pub fn decimal_subtract(a: f64, b: f64) -> f64 {
+    let factor = 10f64.powi(decimals(a).max(decimals(b)) as i32);
+    round_half_up((a - b) * factor) / factor
+}
+
+/// Fifteen significant digits using the established native wire conversion.
+/// Financial callers must validate both the input and the rounded result.
+pub fn significant15(value: f64) -> f64 {
+    format!("{value:.14e}").parse().unwrap_or(value)
+}
+
+/// Existing decimal-factor conversion, distinct from formatting-based rounding.
+/// Financial preparation validates its input and result at the execution boundary.
+pub fn significant15_scaled(value: f64) -> f64 {
+    if value == 0.0 || !value.is_finite() {
+        return value;
+    }
+    let factor = 10f64.powi(14 - value.abs().log10().floor() as i32);
+    (value * factor).round() / factor
+}
+
+/// Capped native decimal subtraction with Rust's away-from-zero tie policy.
+pub fn decimal_subtract_capped20(a: f64, b: f64) -> f64 {
+    let digits = decimals(a).max(decimals(b)).min(20);
+    let factor = 10f64.powi(digits as i32);
+    ((a - b) * factor).round() / factor
+}
+
 /// Round `value` to the nearest multiple of `step`, then trim float noise to
 /// the step's decimal places.
 pub fn adjust(value: f64, step: f64) -> f64 {

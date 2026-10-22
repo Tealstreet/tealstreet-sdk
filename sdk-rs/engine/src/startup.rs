@@ -5,7 +5,7 @@ use crate::{Cx, Level, TimerId};
 
 struct Read<K> {
     key: K,
-    attempts: u32,
+    retry: crate::read_scheduler::RetryState,
     timer: Option<TimerId>,
     due: f64,
 }
@@ -67,7 +67,7 @@ impl<K: PartialEq> Backoff<K> {
             None => {
                 self.reads.push(Read {
                     key,
-                    attempts: 0,
+                    retry: crate::read_scheduler::RetryState::default(),
                     timer: None,
                     due: 0.0,
                 });
@@ -78,10 +78,10 @@ impl<K: PartialEq> Backoff<K> {
         if read.timer.is_some() {
             return;
         }
-        read.attempts = read.attempts.saturating_add(1);
-        let nominal = crate::backoff::Backoff::new(1_000.0, 5, 30_000.0)
-            .delay(read.attempts.saturating_sub(1));
-        let delay = cx.jittered(nominal).max(minimum);
+        let delay = read
+            .retry
+            .failed(|nominal| cx.jittered(nominal))
+            .max(minimum);
         read.timer = Some(cx.set_timer(delay));
         read.due = cx.now + delay;
         cx.notice(
@@ -152,7 +152,8 @@ impl PublicRetries {
             .iter()
             .find(|r| r.key == read)
             .unwrap()
-            .attempts;
+            .retry
+            .failures();
         if attempts < 6 {
             return;
         }

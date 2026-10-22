@@ -708,3 +708,67 @@ test('Workers routes the native WEEX empty-fill fixture before retained rows onl
     assert.deepEqual(messages[1], [{ op: 'done', id: 77, result: [] }]);
   } finally { for (const client of clients) object.leave(client); }
 });
+
+test('Workers obtains opaque signer refs and provider from deployment setup only', async () => {
+  const identities = { primary: { credential: 'account/key', signing: 'account/sign' } };
+  const calls = [];
+  const EngineObject = createEngineObject({
+    accountToken: () => 'fixture-token',
+    flush: { store: 1e9, books: 1e9 },
+    createSigner(state, env, venue) {
+      assert.equal(venue, 'binance');
+      assert.equal(env, environment);
+      calls.push('provision');
+      return { identities, signer: (request) => ({ values: [[1]], receipt: request.receipt }) };
+    },
+    loadEngine: async () => ({ WasmEngine: class {
+      constructor(venue, options) { calls.push(JSON.parse(options)); }
+      requiresExternalSigner() { return true; }
+      useExternalSigner() { calls.push('installed'); }
+      start() { return JSON.stringify([{ op: 'sign', attempt: 7, timeoutMs: 1000, work: {
+        operations: [{ kind: 'present', key: 'account/key' }], context: {}, receipt: { expiryMs: 2000 },
+      } }]); }
+      signed(id, result) { calls.push({ signed: id, result: JSON.parse(result) }); return '[]'; }
+      free() {}
+    } }),
+  });
+  const environment = {};
+  const object = new EngineObject({ storage: { setAlarm() {} } }, environment);
+  const messages = [];
+  const client = { send(message) { messages.push(message); } };
+  object.clients.add(client);
+  await object.receive(client, JSON.stringify({ op: 'start', venue: 'binance', options: {
+    signing: { primary: { credential: 'untrusted', signing: 'untrusted' } },
+  } }));
+  try {
+    assert.ok(object.host, messages.join('\n'));
+    assert.equal(calls[0], 'provision');
+    assert.deepEqual(calls[1].signing, identities);
+    assert.equal(calls[2], 'installed');
+    await until(() => calls.some((call) => call?.signed === 7));
+    assert.deepEqual(calls.find((call) => call?.signed === 7), {
+      signed: 7, result: { values: [[1]], receipt: { expiryMs: 2000 } },
+    });
+  } finally { object.leave(client); }
+});
+
+test('Workers releases managed local signer allocation after failed host construction', async () => {
+  let frees = 0;
+  const Object = createEngineObject({
+    accountToken: () => 'fixture-token',
+    loadEngine: async () => ({ WasmEngine: class {
+      requiresExternalSigner() { return true; }
+      free() { frees++; }
+    } }),
+  });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const messages = [];
+  const client = { send(message) { messages.push(message); } };
+  object.clients.add(client);
+  await object.receive(client, '{"op":"start","venue":"binance"}');
+  assert.equal(frees, 1);
+  assert.equal(object.host, undefined);
+  assert.ok(messages.some((message) => message.includes('Engine start failed')));
+  object.leave(client);
+  assert.equal(frees, 1);
+});

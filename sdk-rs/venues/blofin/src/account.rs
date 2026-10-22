@@ -4,6 +4,9 @@ use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{
+    Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
+};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
@@ -310,7 +313,7 @@ impl Blofin {
             r.secret.as_str()
         });
         let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
-        let timestamp = num::format(now.floor());
+        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
         Ok(vec![
             (
                 "ACCESS-KEY",
@@ -507,7 +510,7 @@ impl Blofin {
                 return;
             }
         };
-        let timestamp = cx.now.floor() as u64;
+        let timestamp = safe_cex_engine::time::wire_stamp_ms(cx.now) as u64;
         let sign = sign::signature(
             self.options.secret.as_deref().unwrap_or(""),
             "/users/self/verify",
@@ -2024,7 +2027,6 @@ impl Blofin {
             return;
         }
         let historical = updated > 0.0 && updated < self.account.session_started;
-        let delta = decimal_difference(qty, previous.0);
         // Missing historical quote value cannot prove the suffix price. This
         // observation supplies the quote baseline for subsequent live executions.
         let Some(previous_value) = previous.1 else {
@@ -2035,22 +2037,50 @@ impl Blofin {
             }
             return;
         };
-        let delta_value = decimal_difference(value, previous_value);
-        if !delta_value.is_finite() || delta_value <= 0.0 {
+        if let Err(error) =
+            execution_prefix(Some((previous.0, Some(previous_value))), qty, Some(value))
+        {
             if historical {
                 self.account.historical_execution_floor(&fill.order_id, qty);
             } else {
-                cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: nonpositive cumulative quote interval; retained proven execution baseline", fill.order_id));
+                cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: {error}; retained proven execution baseline", fill.order_id));
             }
             return;
         }
-        self.account
-            .execution_progress(&fill.order_id, qty, Some(value));
         if historical {
+            self.account
+                .execution_progress(&fill.order_id, qty, Some(value));
             return;
         }
-        fill.price = clean(delta_value / delta);
-        fill.amount = clean(delta * contract);
+        let prepared = Cursor::seed(previous.0, Some(previous_value))
+            .and_then(|cursor| {
+                cursor.prepare(
+                    Report::Cumulative {
+                        quantity: qty,
+                        price: CumulativePrice::Value {
+                            cumulative: Some(value),
+                            fallback: None,
+                        },
+                    },
+                    Arithmetic::DecimalCapped20,
+                )
+            })
+            .and_then(|prepared| {
+                prepared
+                    .map(|prepared| {
+                        prepared.scaled(contract, ExecutionRounding::ScaledSignificant15)
+                    })
+                    .transpose()
+            });
+        let Ok(Some(prepared)) = prepared else {
+            cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {}: invalid incremental execution output; retained proven execution baseline", fill.order_id));
+            return;
+        };
+        let next = prepared.next();
+        self.account
+            .execution_progress(&fill.order_id, next.quantity(), next.value());
+        fill.price = prepared.price();
+        fill.amount = prepared.amount();
         cx.fill(fill);
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -2126,43 +2156,28 @@ impl Blofin {
     }
 }
 pub(crate) fn clean(n: f64) -> f64 {
-    if n == 0.0 || !n.is_finite() {
-        return n;
-    }
-    let factor = 10f64.powi(14 - n.abs().log10().floor() as i32);
-    (n * factor).round() / factor
-}
-fn decimal_difference(a: f64, b: f64) -> f64 {
-    let digits = num::decimals(a).max(num::decimals(b)).min(20);
-    let factor = 10f64.powi(digits as i32);
-    ((a - b) * factor).round() / factor
+    num::significant15_scaled(n)
 }
 fn execution_prefix(
     previous: Option<(f64, Option<f64>)>,
     qty: f64,
     value: Option<f64>,
 ) -> Result<bool, &'static str> {
-    if !qty.is_finite()
-        || qty < 0.0
-        || value.is_some_and(|value| !value.is_finite() || value < 0.0 || qty > 0.0 && value == 0.0)
-    {
-        return Err("invalid cumulative quote value");
-    }
-    if let Some((previous_qty, previous_value)) = previous {
-        if qty <= previous_qty {
-            return Ok(qty == previous_qty && previous_value.is_none() && value.is_some());
-        }
-        if let Some(previous_value) = previous_value {
-            let Some(value) = value else {
-                return Err("missing cumulative quote value");
-            };
-            let interval = decimal_difference(value, previous_value);
-            if !interval.is_finite() || interval <= 0.0 {
-                return Err("nonpositive cumulative quote interval");
+    let previous = previous
+        .map(|(quantity, value)| Cursor::seed(quantity, value))
+        .transpose()
+        .map_err(|_| "invalid cumulative quote value")?;
+    Cursor::prepare_prefix(previous, qty, value, Arithmetic::DecimalCapped20)
+        .map(|next| next.is_some())
+        .map_err(|error| match error {
+            Rejection::InvalidQuantity | Rejection::InvalidValue => {
+                "invalid cumulative quote value"
             }
-        }
-    }
-    Ok(true)
+            Rejection::Unpriced => "missing cumulative quote value",
+            Rejection::ValueRegressed
+            | Rejection::QuantityRegressed
+            | Rejection::NonFiniteArithmetic => "nonpositive cumulative quote interval",
+        })
 }
 
 /// BloFin key refusals no retry can fix (docs "Error Codes", 1524xx); 152405,

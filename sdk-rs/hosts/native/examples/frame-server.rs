@@ -15,16 +15,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if api_key.is_empty() != api_secret.is_empty() {
         return Err("both Binance credentials are required".into());
     }
-    let engine = Engine::new(
+    let (signer, identities) =
+        safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+            primary: (!public_data_only).then(|| safe_cex_crypto::signer::LocalIdentity {
+                key: safe_cex_crypto::signer::Secret::new(api_key),
+                secret: safe_cex_crypto::signer::Secret::new(api_secret),
+                ..Default::default()
+            }),
+            secondary: None,
+        })
+        .map_err(|_| "Invalid local signer setup")?;
+    let mut engine = Engine::new(
         BinanceFutures::new(Options {
-            key: (!public_data_only).then_some(api_key),
-            secret: (!public_data_only).then_some(api_secret),
+            credentials: identities.primary,
             public_data_only,
             ..Options::default()
         }),
         Some(safe_cex_native::production_entropy()),
     )
     .expect("production entropy configured");
+    engine.set_signer(Some(std::sync::Arc::new(signer)))?;
     tokio::task::LocalSet::new()
         .run_until(async move {
             let mut server = FrameServer::new(ServerConfig::default())?;

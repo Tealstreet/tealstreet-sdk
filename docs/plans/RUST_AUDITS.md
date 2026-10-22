@@ -135,6 +135,48 @@ not a deployed-runtime or npm-publication claim.
 ## Trading correctness
 
 High:
+- ~~Cumulative-fill correctness on landing (Hyro and Bitget Classic): an unpriced
+  Hyro report consumes its cursor and loses the corrected fill; a missing quote
+  with bootstrap average0 invents a known zero value and overprices a later delta;
+  Bitget emits negative-price fills, loses cumulative-only corrected delivery
+  after display advances, and rewinds progress on late direct executions so a
+  later cumulative catch-up emits a duplicate.~~ Shared `engine::execution`
+  validates typed quantity/price evidence and derived arithmetic before delivery
+  progress or native dedup commit. Five separate native original-RED/core-GREEN
+  controls cover these real financial defects; a negative-quote compatibility
+  control preserves Hyro recovery. Bootstrap observations remain distinct from
+  delivered progress, zero average means unavailable, explicit quote0 stays
+  distinct, and late direct executions deliver without rewinding their anchor.
+  [Scope, evidence and remaining fan-out](RUST_CUMULATIVE_FILLS.md). This first
+  core now also supports observed suffixes and bounded priced intervals with
+  WOO/Bitrue consumers. Checked average/direct-suffix quote binding and public
+  execution rounding now also serve Bitunix and Coinbase(+spot); compatibility
+  controls preserve historical quotes, equal-endpoint corrections and native
+  Spot/INTX/CFM quantity units. BloFin also uses checked prefix admission,
+  capped-decimal arithmetic and scaled public-output preparation before live
+  progress commits. BingX, AsterDEX, Kraken Spot, Orderly and the KuCoin Spot
+  fallback still need adoption before
+  row reporting and snapshot freshness. ApeX cumulative events still never
+  emit public fills; synthetic history remains distinct. No live capture claim.
+- ~~WOO advances its delivered cumulative anchor on a zero/negative last
+  quantity, losing the same-ID cumulative-only correction. Bitrue replaces a
+  trusted REST quote anchor with an overflowing cumulative-average product,
+  suppressing the next valid VWAP suffix.~~ The shared observed-suffix and
+  priced-interval paths validate before delivered/quote state commits. Two WOO
+  native original-RED/core-GREEN controls recover .001@59000 without moving
+  the position twice; a Bitrue original-RED/core-GREEN control preserves the
+  REST30/quote3300 anchor and delivers the valid10@130 suffix. These are real
+  financial defects on the previous landing, within the helper contract;
+  A fourth original-RED/core-GREEN control prevents WOO last-only unpriced
+  reports and their same-ID correction from doubling displayed quantity (.007
+  instead of .006). Deliberately, inferred last-only observations now wait for
+  a valid financial receipt; explicit cumulative observations stay independent.
+  A fifth original-RED/core-GREEN control recovers a missing Bitrue delivered
+  quote from a valid same-quantity correction, then delivers10@120 once.
+  Shared enrichment fills missing evidence at the exact endpoint only; it
+  cannot replace a known quote, move quantity or replay a Fill. Five controls
+  cover four defect classes. Complete exact-head CI/raw-artifact proof remains
+  required before merge.
 - ~~Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
   (`binance/src/account.rs:1186`).~~ Fixed: late native executions emit independently of lifecycle terminal state.
 - ~~Binance USD-M amend re-places the full original size when the order filled
@@ -952,6 +994,17 @@ backward (`packages/safe-cex/src/utils/virtualClock.ts:98–110,151`).
 
 ### BloFin
 
+- High: ~~a finite cumulative quote can overflow its incremental price division,
+  emit an infinite-price Fill and consume the corrected same-quantity suffix.~~
+  Shared engine prefix/delivery preparation now validates division, contract
+  scaling and public rounding before live progress commits. Two separate native
+  original-RED/core-GREEN controls prove rejection of `(inf, 0.0005)` and recovery
+  of the corrected `.0005 @298` receipt once. Both failures were reproduced on
+  unchanged actual #1729 source before the fix; this is a real financial defect,
+  covered by the owner's same-helper-contract approval. Native historical floors,
+  missing-quote observation recovery, startup census/buffering and 500-prefix
+  retention stay separate; no public Fill is synthesized from historical data.
+
 - ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
   request command before retained rows complete. Its native cap regression
   checks exact ownership and ordering even at Error-only log level.
@@ -1252,12 +1305,23 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   The owned-history core now binds BloFin closed-position completion and cursor
   paging in `engine::history`; its venue no longer emits this marker directly.
   Bybit and OKX closed-position reads now share its staged/accepted cursor owner,
-  including per-window reset and seeded bounds. Their general history reads and
-  other query-marker sites still require fan-out and an enforcement gate; the
-  earlier ownership repairs are retained, not a claim of a universal choke point.
-  Six background account-coverage markers
-  have no command and need a separate account-scoped protocol decision; never
-  attach a fabricated request ID or broadcast unowned semantic markers.
+  including per-window reset and seeded bounds. Bybit general fills/orders/income/
+  public trades now share accepted-only contextual finalization and strict policy
+  rejection: first failures reject typed, later actual-page failures recover only
+  accepted rows with an owned marker; missing result/list never proves empty
+  complete coverage. Binance general histories now use shared accepted-page
+  storage too, with engine-owned range selection/completeness for income. Whole
+  array parse failures cannot leak prefixes or empty complete results; strict
+  signer refusal/timeout keeps typed rejection even after accepted rows.
+  OKX general history and other query-marker sites still need
+  fan-out and enforcement; these repairs do not claim a universal choke point.
+  BloFin general histories now share this owner too: actual later-page failures
+  retain only accepted rows with command-owned incompleteness; native paging
+  and header-preparation refusals still reject strictly. Successful cursor/row
+  mapping and final limits remain.
+  Six background account-coverage markers have no command: the follow-on must
+  route them through one engine-owned account/background notice, never attach a
+  fabricated request ID or broadcast a command-owned marker.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
@@ -1372,7 +1436,12 @@ Signing, integer scaling, tx encoding and nonces match TS.
   size for price-only amendments; explicit replacement quantities are preserved.
 
 ### WOO
-No confirmed highs; valid data matches TS.
+- High: ~~zero/negative last quantity consumes delivered cumulative progress
+  before a valid same-ID correction.~~ Shared observed-suffix preparation
+  retains correction eligibility, while valid display observations remain
+  separate; two native original-RED/core-GREEN controls cover the lost fill.
+  A third prevents last-only unpriced/corrected receipts from doubling display
+  quantity; inferred observation now requires the valid financial receipt.
 - Medium: ~~algo child rows don't inherit the parent's side/status/reduceOnly, so
   fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
   position row freezes positions (`account.rs:749,949`); one unmappable
@@ -1428,6 +1497,12 @@ Mostly matches TS.
   visibly only when no row maps. Placement still validates the batch before writes.
 
 ### Bitrue
+- High: ~~a finite average whose cumulative product overflows overwrites a
+  trusted REST quote anchor and loses a later valid execution.~~ Shared checked
+  quote preparation keeps the trusted anchor; native original-RED/core-GREEN
+  control proves the10@130 suffix, with interval dedup/floor/cap preserved.
+  A second control repairs missing delivered quote evidence from a matching
+  correction and proves the next10@120 suffix, without duplicate delivery.
 - High: ~~orders refused on symbols with no account leverage data, and a fresh
   account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
   default margin to Cross and take leverage from a successful change, never

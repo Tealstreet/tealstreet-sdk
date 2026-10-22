@@ -96,6 +96,14 @@ impl RangeWalk {
         }
     }
 
+    /// Known incomplete chunks, including an active chunk whose gap has not
+    /// reached rollover yet. A finished last chunk is already counted.
+    pub fn incomplete_chunks(&self) -> u32 {
+        self.exhausted_chunks.saturating_add(u32::from(
+            self.chunk_start < self.end && self.chunk_incomplete,
+        ))
+    }
+
     /// A failed page leaves its rows unknown, not absent.
     pub fn failed(&mut self) {
         self.chunk_incomplete = true;
