@@ -1202,3 +1202,57 @@ preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f
 which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
 Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
 separate guard/merge remain required; no landing/deployment claim.
+
+## Next cursor fan-out: GRVT history ownership
+
+Plan first on fresh `feat/rust-owned-history-grvt` from actual capability landing
+`4c4df7c99dc` (2026-10-22). Avoid active OKX/Bitget/BingX signer regions, Bybit
+and Kraken Spot. GRVT already uses engine CursorWalk but retains accepted and
+staged rows plus numeric completion in its venue continuation. Adopt one boxed
+CursorHistory/Completion owner for fills, closed orders, funding/fill-derived
+income and public trades. Preserve single-order lookup's separate identity proof
+and result shape. No RequestContext/dispatch/signer/host/metadata/financial-store
+edits; no managed Completion bridge or unmerged Phemex range dependency.
+
+Keep native row codecs, raw/output identity ledgers, lifecycle ownership maps,
+subaccount/symbol/time filters and count facts in the adapter. Move output-row
+staging/acceptance, cursor advancement, page-cap/stall coverage and finalization
+to the existing shared owner. Stage a full page before admission. Before any
+accepted output, terminal HTTP/transport/decode/envelope failure rejects typed;
+after accepted output, return only previous accepted pages with one command-owned
+incomplete Warn before Done, visible at Error-only logging. Do not publish a
+failed page prefix. Keep native no-row lookup proof separate from history rows.
+
+Retain the existing five read retries and once-only session refresh unchanged.
+They reset only the current unaccepted page, including staged rows and native
+page identity/lifecycle facts; accepted rows and cursor/budget stay unchanged.
+If needed add a small shared CursorHistory discard-staged-page API, fail closed
+when called after completion/poisoning. Do not copy retry/paging policy into the
+adapter or mutate the shared cursor/identity state before page validation.
+Funding-to-fill income remains one owner across restart_stage, preserving the
+first gap, accepted rows, native stage counts and existing per-stage page caps.
+Keep stage-specific shaping/limits and final descending sort/truncation exact.
+
+Order-filtered fills remain a strict proof when lifecycle ownership is missing
+or ambiguous, the requested total limit is exceeded, or bounded cursor walking
+cannot prove the complete order fill set. Route those explicit policy refusals
+through shared reject, preserving no partial totals. General history stalls/caps
+use shared command-owned coverage. Signing/session preparation remains strict;
+do not turn a pre-send setup refusal into a recoverable failed HTTP page.
+Inspect failure origins before assigning kinds; the common callback multiplexes
+transport, malformed-stream and session failures, so do not label all Network.
+
+Commit original-source assertion controls before production edits: first and
+later terminal failures, failed streamed prefixes, retry/session-refresh page
+reset, cross-stage income failure, filtered/no eligible output, concurrent owners
+and Error-only delivery. Preserve strict order-fill proof controls and exact
+request sequence, large IDs/nanosecond bounds, maker/fee/PnL units, row.skipped
+behavior and live Store isolation. Extend engine tests for safe current-page
+discard without erasing accepted rows, coverage or page budget. Independent
+plan/correctness/adversarial reviews must answer the architecture gate: existing
+shared ownership adoption plus reusable admission reset, not a venue-local
+completeness/pagination implementation. Focused engine/GRVT/Binance tests and
+strict touched Clippy/fmt/bans locally with four Cargo jobs; no local WASM release,
+full replay, size or timing sweep. Update caller/AUDITS/QUALITY with exact scope,
+then current-head CI/source-bound proof, queue announcement, separate guard and
+separate merge. Keep #1758's watch active; no cutover/NX/deployment closure.
