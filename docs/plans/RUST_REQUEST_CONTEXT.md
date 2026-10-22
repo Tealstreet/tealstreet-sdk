@@ -1166,3 +1166,28 @@ conformance and feature-control tests pass. Independent implementation review
 CLEAN: lossless counters, distinct third counters, zero/optional representation,
 closed nested schemas, passive ingress-only evidence and every prior unsupported/
 terminal/correlation assertion retained. No executor calls or capability growth.
+
+Post-#1759 integration: exact Store keep-both resolution authorized (broad
+orders_revision/getter followed by selective epoch/methods); independent review
+retained all5,216 unowned entries plus both parents' eight overlapping patches.
+Ordinary managed auth observation now supplies the new read-only Store argument;
+late reconciliation remains silent. Owner requires the late-reconciliation
+follow-on to converge the broad revision with the snapshot epoch or document
+why both are necessary, rather than retaining two unexplained mechanisms.
+
+Header policy review also found the same preexisting bypass in legacy client-ID
+lookup. Its single factory call is cleared by the history owner; completion and
+paging remain legacy. Native managed read+write controls first fail at zero
+released packets, then pass with policy attached; lookup independently reproduces
+the same zero-packet failure before its one-call fix. Lookup remains unsupported
+for COIN-M/Spot, with explicit unchanged native-refusal/no-request controls.
+
+Owner authorized a one-time exact rehash of the two existing cx.sign_http calls
+in Binance lib/history as recipe construction moves to the shared factory.
+No new call kind or site: total inventory1274->1274, two path totals21->21,
+all other maps byte-identical. Exact before/after maps JSON SHA256
+5ef75f6182e96dda2de4ad3166a6d37fcbf3798cae540f8eb0e9a3e3946fe6ce.
+Commit adversarial controls before implementing the exact map transition;
+independent newer-pruned baselines must still block regrowth. These remaining
+legacy signing sites still must reach zero and the bridge be deleted before
+landing-to-master; no managed history or whole-Bybit closure claim.
