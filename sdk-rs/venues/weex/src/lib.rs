@@ -2,6 +2,9 @@
 mod account;
 mod account_wire;
 mod depth_query;
+/// Opaque canonical recipe components; production adoption is not enabled here.
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod identity;
 mod paths;
