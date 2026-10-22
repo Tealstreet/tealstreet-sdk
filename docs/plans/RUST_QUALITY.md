@@ -378,3 +378,20 @@ partial healthy peers and failed/stale/lookup nonpublication. Financial progress
 is separate from Store display, terminal IDs and execution-ID retention. Native
 bounded retention and missing-endpoint ambiguity remain documented; this is not
 new live/provenance evidence or closure of Orderly/reporting fan-out.
+
+
+GRVT general histories now use one shared CursorHistory/Completion for output
+admission, cursor progress and command-owned coverage. A reusable engine page
+discard clears failed retry prefixes without rewinding accepted output, budget,
+identity progress or first gaps. Order-filtered complete-fill proofs and queued
+session/preparation refusal stay strict, while later actual general-query loss
+retains accepted pages only. No venue marker emitter or copied pager/terminal
+policy is introduced; other families and B11 runtime coverage remain open.
+
+
+Crypto.com histories now adopt the existing CursorHistory/Completion and staged
+page reset APIs. The engine owns accepted-only completion and one command-owned
+coverage marker; the adapter supplies exact u64 native cursor/identity facts and
+retains native strict proof checks. No new engine API, copied marker emitter or
+paging/retention implementation; other adapters and caller runtime coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
