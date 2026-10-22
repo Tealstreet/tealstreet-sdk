@@ -169,3 +169,15 @@ reviews CLEAN (architecture YES, engine core first); reviewed controls retain
 bootstrap/healthy-poll separation, native dedup/retention and direct UTA behavior.
 Full exact-head CI and complete246-output candidate proof are still merge gates,
 not claims established by this local readiness receipt.
+
+First CI cycle: frozen66b618ce677 passed all43 applicable checks and expected
+browser SKIP; Rust CI39721825203. Authenticated246/246 full raw outputs match
+actual signer baseline39719358789,123 Rust,70 stable groups,10 PASS/14 known FAIL
+unchanged, only top metrics excluded. This is iteration evidence after landing
+advanced, not the final dependency gate. Actual scheduler #1717
+`faf799268857f7aed35badba5349b572ef836c4a` integrated by clean porcelain merge
+`30c3188f9d139776018f882b6c55d456ac8ba6ee`: all nonshared incoming/owned blobs
+and both complete shared README/lib line sets preserved, exact12 owned files.
+The same reviewed production changes remain unchanged. Fresh exact-head CI and
+complete246-output proof must now use actual scheduler source-equivalent green
+CI39721449594/headf1008a2b48da713c5db2bf378d3196b3619b6a8d as baseline.
