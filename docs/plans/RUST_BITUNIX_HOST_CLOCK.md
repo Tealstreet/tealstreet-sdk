@@ -1,5 +1,10 @@
 # Bitunix synchronized host clock
 
+Clock policy supersession: [engine clock standardisation](RUST_ENGINE_CLOCK.md)
+replaces the historical per-venue `hostClock` opt-in below. Production SDK
+engines share one synchronized default; explicit host/tape clocks remain
+authoritative. Original implementation/regression receipts are retained.
+
 Bitunix signs REST requests and private login using the engine's `cx.now`, but
 its default capability record leaves `hostClock` false. The SDK therefore feeds
 local wall time instead of its synchronized virtual clock, allowing local clock
