@@ -1450,3 +1450,22 @@ Binance/GRVT/Crypto/Orderly checks run before readiness. Start draft CI in paral
 with those additional checks; no proof/readiness/merge claim until every gate
 passes on the same immutable source. Preservation and inventory receipts are
 /tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
+
+
+## Deterministic Workers deadline fixture (priority test-only follow-up)
+
+Start from actual#1765 a3a89719d4079c97d56297bb4738fdc13c659ceb. The Workers
+transport test expects exact20,000/5,000ms budgets but leaves Date.now live while
+prepareFetch samples preparation and binding separately. A real1ms tick correctly
+consumes budget, making the unclocked fixture flaky. Production timing is correct.
+
+Plan before source: force one1ms Date.now tick inside the existing test to obtain
+an assertion-RED [19,999,5,000] versus [20,000,5,000], then replace that temporary
+clock with a test-context-scoped frozen Date.now. Preserve the exact timeout,
+abort-through-body and routing-metadata assertions. No tolerance widening,
+production clock injection/change, harness profile or semantic timeout change.
+Run the filtered original-RED/GREEN and full Workers/related managed-host unit
+checks, independently review the fixture and frozen assertions, then a small PR
+with CI/background watch. Integrate actual#1775 before the separate final guard
+and merge under owner queue. Architecture gate: No; this only fixes a test clock
+for the existing shared managed transport boundary.
