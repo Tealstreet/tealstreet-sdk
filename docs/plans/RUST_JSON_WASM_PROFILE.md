@@ -96,3 +96,34 @@ Concrete source/argument review confirmed that WOO already has an explicit
 venue-level z override in Cargo.toml. This probe changes its shared host/engine/
 inherited dependency defaults from 3 to z; its venue level stays z. All existing
 venue overrides remain unchanged.
+
+
+### Phase 2 initial evidence and actual bridge integration
+
+Initial probe 37115e7eefcf41b40be2c60eadd1ede3bd2c35ac passed all applicable
+checks in Rust PR run 39759510533 against actual #1744 push 39758508925.
+All 28 family web/node budgets fit. Aster shrank 1,213,871 to 1,080,655 bytes,
+KuCoin Spot 844,486 to 739,920 and WOO 1,015,373 to 849,410 per target. Only
+these three families' WASMs changed. Their public CPU/memory objectives passed;
+Aster's overall raw status retained its existing correctness differences.
+Steady Rust CPU was 28.377 to 29.477 ms (Aster), 292.990 to 180.256 (KuCoin
+Spot) and 27.597 to 23.827 (WOO); cross-run timing also varies for unchanged
+WASMs, so these samples establish no attributable throughput or WOO margin fix.
+
+The complete 976-output report is deliberately unequal: all 488 Rust outputs
+match, while two TS correctness outputs differ only in Backpack checkpoint-0
+book presence and TxFlow private request multiplicity. Both entire non-metric
+variants match authenticated pre-change controls. The owner conditionally
+accepted exactly those classes, and independent review verified the live
+run/artifact/digest/full-output evidence. The strict false result and changed
+Backpack diagnostic text remain; no exclusions or comparator changes. PR #1746
+records the four controls, exact archive identities and proof hashes.
+
+Hosted bridge #1745 landed first as actual
+5743c485d44e348e3d29039c4ebe83f6a78f0186, with unchanged db25 reviewed head
+and identical actual/head tree. A real porcelain merge into the probe preserved
+all 37 incoming paths and every unowned blob; the two existing probe blobs
+were unchanged before this evidence addition. Fresh CI and a new actual-bridge
+baseline proof are required for the integrated profile head. Initial 37115
+evidence remains historical and is not relabeled as final. Same budgets,
+workloads, thresholds, entropy, comparators and explicit package policies remain.
