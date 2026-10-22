@@ -249,3 +249,20 @@ generation/modified-root metadata and late parent callbacks are explicit tests.
 No new deadline/send permission; report original batch diagnostic before atomic
 supersession, with empty terminal journal report metadata. This bridge remains
 engine-owned; no direct numeric journal calls from Bybit.
+
+Registry plan-audit correction before source: keep validate_handle as cleanup/
+provenance only. Put superseded send denial in the timed validate path; otherwise
+finish_http_context could strand old pending/delivery holds. Superseded/historical
+Delivery is checked before any exact-root completion exception. Reserve returned
+Vec and HashMap storage for the pre-cleanup peak before journal.replace, and
+never increment pending until physical registration. Existing shared io.next
+wraps; this bridge must explicitly checked_add its entire bounded range, return
+Capacity on exhaustion and never invoke wrapping per-child allocation.
+
+Add error-atomicity snapshots for invalid nth child, wrong/sibling/foreign parent,
+expired/denied delivery, context/journal capacity and near-u32::MAX allocator;
+no visible children/group, no parent authority change or ID reuse on refusal.
+Then prove a valid smaller group still admits. Real engine tests cover old
+preparation/permit/retry/fact/diagnostic callbacks, no-delivery root after cleanup
+and exact child credential/pacing/deadline bounds. Cleanup remains once-only.
+Independent plan review CLEAN with these constraints, architecture No.
