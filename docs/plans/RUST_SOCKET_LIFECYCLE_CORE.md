@@ -497,3 +497,35 @@ propagates synchronous interest admission failure before account refresh;
 catalogue/command callers retain the common coded-error-and-stop wrapper.
 Independent review is CLEAR, and 42 OKX account/socket controls plus strict
 all-target Clippy pass after that correction. Draft CI remains pending.
+
+## First CI replay corrections
+
+Exact draft `7f8c0eb14fb` / Rust39841774617 failed the OKX and Bitunix public
+verification gates. These are not retry/waiver candidates. Independent source
+review identifies repeated full-catalog scans inside OKX's subscription sort
+comparator, and new empty BOOK publication when retiring an OKX subscription
+that never received a snapshot. The latter matches the EEA checkpoint-1 additions.
+Bitunix steady CPU also regressed; an idle engine drain currently allocates a
+feed vector and traverses all authorities despite having no pending frames.
+
+1. Add an original-RED native market-frame test: retirement before first depth
+   must not materialize an empty consumer book; retirement of an actually loaded
+   book must still clear it immediately. Use existing sequence/book state, no new
+   venue-owned epoch/auth flags. Preserve gap recovery and published empty clears.
+2. Precompute OKX native market/underlying ordinals once per encoding and each
+   interest's rank once before sorting. Keep exact original stable topic and
+   market order, first-underlying ownership, 100-argument batches and singleton
+   book frames. Add a multi-market/repeated-underlying order oracle, no benchmark.
+3. Add a shared pending-work fast path to skip drain allocations when neither
+   persistent frames nor epoch-owned one-shots exist. This is presence only;
+   every actual release still uses the same current-epoch/time/auth/signing
+   barriers. Retain existing expired/stale/paused/paced/one-shot tests and add a
+   no-pending-to-later-pending transition control if not already covered.
+4. Run focused engine/OKX/Bitunix/Binance checks, strict lint/fmt/bans and both
+   independent reviews. Real-integrate actual1769 before new CI. Public CPU and
+   complete replay evidence remain CI-only; no local replay or timing claims.
+
+Architecture gate: corrections to the existing shared socket choke point and
+its pure native wire adapter, not a venue-local authority, clock or allocator.
+Safe-ID widening still waits for actual #1741 as a separate shared PR. The draft
+cannot merge until that dependency and fresh CI/proof pass.
