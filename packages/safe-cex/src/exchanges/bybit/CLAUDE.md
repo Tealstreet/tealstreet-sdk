@@ -1210,10 +1210,12 @@ Optional simulator preview/evidence endpoints are not used by this connector.
 then reconciles all pages of current orders/positions and the UNIFIED wallet before
 opening the event gate. The snapshot publishes atomically; failed, malformed, stale
 or incomplete responses preserve prior state and leave recovery unhealthy. Position
-rows require valid leverage, and mapped numeric fields must be finite before publication. Frames
-arriving during recovery invalidate the in-flight snapshot and trigger a bounded
-re-read. A failed handshake or unsettled snapshot reconnects with visible errors.
-Creates are refused while an established private session is recovering.
+rows require valid leverage for open size, and mapped numeric fields must be finite
+before publication. Zero-size clear rows may omit leverage; map them with the
+existing symbol leverage (or `1`) so close events clear state without publishing
+`NaN`. Frames arriving during recovery invalidate the in-flight snapshot and trigger
+a bounded re-read. A failed handshake or unsettled snapshot reconnects with visible
+errors. Creates are refused while an established private session is recovering.
 
 Public streams carry periodic snapshots. Hyro candles use authoritative kline volume
 and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's

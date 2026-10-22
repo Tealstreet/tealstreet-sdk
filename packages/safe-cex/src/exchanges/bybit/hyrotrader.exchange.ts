@@ -46,6 +46,10 @@ export class HyrotraderExchange extends BybitExchange {
     );
   }
 
+  private isFlatPositionRow(row: Record<string, any>) {
+    return this.isFiniteNumeric(row.size) && Number(row.size) === 0;
+  }
+
   fetchRawBalance = async () => {
     const { data } = await this.xhr.get(ENDPOINTS.BALANCE, { params: { accountType: 'UNIFIED' } });
     const status = getBybitResponseMeta(data);
@@ -124,8 +128,9 @@ export class HyrotraderExchange extends BybitExchange {
           : typeof row.orderId === 'string' && row.orderId.length > 0);
       if (!valid) this.fail(`HyroTrader ${endpoint} returned a malformed row`);
       if (endpoint === ENDPOINTS.POSITIONS) {
+        const isFlatPosition = this.isFlatPositionRow(row);
         if (!this.isFiniteNumeric(row.leverage) || Number(row.leverage) <= 0) {
-          this.fail('HyroTrader position response is missing valid leverage');
+          if (!isFlatPosition) this.fail('HyroTrader position response is missing valid leverage');
         }
         const numericFields = [
           'avgPrice',
@@ -158,8 +163,12 @@ export class HyrotraderExchange extends BybitExchange {
   }
 
   mapPosition(row: Record<string, any>) {
-    this.assertPrivateListResponse({ retCode: 0, retMsg: 'OK', result: { list: [row] } }, ENDPOINTS.POSITIONS);
-    const position = super.mapPosition({ ...row, positionIdx: 0 });
+    const normalizedRow =
+      this.isFlatPositionRow(row) && (!this.isFiniteNumeric(row.leverage) || Number(row.leverage) <= 0)
+        ? { ...row, leverage: this.store.positions.find((position) => position.symbol === row.symbol)?.leverage ?? 1 }
+        : row;
+    this.assertPrivateListResponse({ retCode: 0, retMsg: 'OK', result: { list: [normalizedRow] } }, ENDPOINTS.POSITIONS);
+    const position = super.mapPosition({ ...normalizedRow, positionIdx: 0 });
     const fields = [
       position.entryPrice,
       position.contracts,
