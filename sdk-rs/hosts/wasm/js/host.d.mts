@@ -232,8 +232,19 @@ export class EngineDisposedError extends Error {
 export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
   | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
-export interface SigningIdentity { credential: string; signing: string }
+export interface SigningIdentity {
+  credential: string; signing: string; passphrase?: string;
+  /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
+  stableId?: string;
+}
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
+export interface LocalIdentityMetadata {
+  stableId?: string;
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem';
+  trimCredential?: boolean;
+}
+/** Trusted local setup metadata; credential strings arrive on the setup channel. */
+export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
 export interface SignRequest {
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };

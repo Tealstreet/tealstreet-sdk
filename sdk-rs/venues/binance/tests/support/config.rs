@@ -20,6 +20,7 @@ impl Options {
             Some(LocalIdentity {
                 key: Secret::new(self.key.take().unwrap_or_default()),
                 secret: Secret::new(self.secret.take().unwrap_or_default()),
+                ..Default::default()
             })
         } else {
             None
@@ -27,8 +28,11 @@ impl Options {
         let secondary = self.read_credentials.take().map(|mut read| LocalIdentity {
             key: Secret::new(std::mem::take(&mut read.key)),
             secret: Secret::new(std::mem::take(&mut read.secret)),
+            passphrase: read.passphrase.take().map(Secret::new),
+            ..Default::default()
         });
-        let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary });
+        let (signer, identities) =
+            LocalSigner::from_setup(LocalSetup { primary, secondary }).unwrap();
         let venue = BinanceFutures::new(VenueOptions {
             credentials: identities.primary,
             read_credentials: identities.secondary,

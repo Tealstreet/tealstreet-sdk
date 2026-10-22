@@ -8,19 +8,30 @@ use safe_cex_engine::signing::{
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
+mod key_material;
+pub use key_material::KeyEncoding;
 
 /// Trusted provider setup only. Never place these values in venue/engine options.
 #[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
 #[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
     #[serde(default)]
     pub key: Secret,
     #[serde(default)]
     pub secret: Secret,
+    pub passphrase: Option<Secret>,
+    /// Explicit caller account/credential mapping; no key-derived fallback.
+    pub stable_id: Option<String>,
+    #[serde(default)]
+    pub secret_encoding: KeyEncoding,
+    #[serde(default)]
+    pub trim_credential: bool,
 }
 #[derive(Default)]
 pub struct Secret(Zeroizing<String>);
@@ -50,48 +61,82 @@ impl LocalSigner {
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
         self.keys.insert(reference, Zeroizing::new(bytes));
     }
-    pub fn from_setup(setup: LocalSetup) -> (Self, safe_cex_engine::signing::Identities) {
+    pub fn from_setup(
+        setup: LocalSetup,
+    ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
         let mut signer = Self::new();
         let mut install = |slot: &str, identity: Option<LocalIdentity>| {
-            identity.map(|identity| {
-                let key = identity.key.into_bytes();
-                let secret = identity.secret.into_bytes();
-                let credential = KeyRef(if key.is_empty() {
-                    String::new()
-                } else {
-                    format!("{slot}.credential")
-                });
-                let signing = KeyRef(if secret.is_empty() {
-                    String::new()
-                } else {
-                    format!("{slot}.signing")
-                });
-                if !key.is_empty() {
-                    signer.insert(credential.clone(), key);
-                }
-                if !secret.is_empty() {
-                    signer.insert(signing.clone(), secret);
-                }
-                safe_cex_engine::signing::Identity {
-                    credential,
-                    signing,
-                }
-            })
+            identity
+                .map(|identity| {
+                    if identity
+                        .stable_id
+                        .as_deref()
+                        .is_some_and(|id| !safe_cex_engine::signing::valid_stable_id(id))
+                    {
+                        return Err(SignError::InvalidRequest);
+                    }
+                    let mut key = key_material::decode(identity.key, KeyEncoding::Utf8)?;
+                    if identity.trim_credential {
+                        key = Zeroizing::new(
+                            std::str::from_utf8(&key)
+                                .map_err(|_| SignError::InvalidRequest)?
+                                .trim()
+                                .as_bytes()
+                                .to_vec(),
+                        );
+                    }
+                    let secret = key_material::decode(identity.secret, identity.secret_encoding)?;
+                    let passphrase = identity
+                        .passphrase
+                        .map(|value| key_material::decode(value, KeyEncoding::Utf8))
+                        .transpose()?;
+                    let credential = KeyRef(if key.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{slot}.credential")
+                    });
+                    let signing = KeyRef(if secret.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{slot}.signing")
+                    });
+                    if !key.is_empty() {
+                        signer.keys.insert(credential.clone(), key);
+                    }
+                    if !secret.is_empty() {
+                        signer.keys.insert(signing.clone(), secret);
+                    }
+                    let passphrase = passphrase.map(|bytes| {
+                        let reference = KeyRef(format!("{slot}.passphrase"));
+                        signer.keys.insert(reference.clone(), bytes);
+                        reference
+                    });
+                    Ok(safe_cex_engine::signing::Identity {
+                        credential,
+                        signing,
+                        passphrase,
+                        stable_id: identity.stable_id,
+                    })
+                })
+                .transpose()
         };
         let identities = safe_cex_engine::signing::Identities {
-            primary: install("primary", setup.primary),
-            secondary: install("secondary", setup.secondary),
+            primary: install("primary", setup.primary)?,
+            secondary: install("secondary", setup.secondary)?,
         };
-        (signer, identities)
+        Ok((signer, identities))
     }
     /// Own and wipe the setup input on both successful and malformed construction.
     pub fn from_json(
         input: String,
     ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
         let input = Zeroizing::new(input);
+        if input.len() > 4 * 1024 * 1024 {
+            return Err(SignError::InvalidRequest);
+        }
         let setup: LocalSetup =
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
-        Ok(Self::from_setup(setup))
+        Self::from_setup(setup)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
@@ -245,6 +290,173 @@ impl Signer for LocalSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn vector() -> serde_json::Value {
+        serde_json::from_str(include_str!("../tests/fixtures/hmac/binance.json")).unwrap()
+    }
+
+    fn pem(label: &str, body: &str) -> String {
+        let boundary = "-----";
+        format!("{boundary}BEGIN {label}{boundary}\n{body}\n{boundary}END {label}{boundary}\n")
+    }
+
+    #[test]
+    fn trusted_formats_decode_inside_provider_without_changing_signature_bytes() {
+        let vector = vector();
+        let secret = vector["secret"].as_str().unwrap();
+        let base64 = crate::encode(secret.as_bytes(), crate::Encoding::Base64);
+        for (encoding, material) in [
+            ("utf8", secret.to_owned()),
+            ("base64", base64.clone()),
+            ("hex", crate::hex(secret.as_bytes())),
+            ("pem", pem("PRIVATE KEY", &base64)),
+        ] {
+            let (signer, identities) = LocalSigner::from_json(
+                serde_json::json!({
+                    "primary": {
+                        "key": "public-identifier", "secret": material, "secretEncoding": encoding,
+                        "stableId": "account/opaque-17", "passphrase": vector["payload"],
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let identity = identities.primary.clone().unwrap();
+            assert_eq!(identity.require_stable_id(), Ok("account/opaque-17"));
+            let request = SignRequest {
+                context: Default::default(),
+                operations: vec![
+                    Operation::Present {
+                        key: identity.passphrase.unwrap(),
+                    },
+                    Operation::Sign {
+                        algorithm: Algorithm::HmacSha256,
+                        key: identity.signing,
+                        payload: vec![PayloadPart::Bytes {
+                            bytes: vector["payload"].as_str().unwrap().as_bytes().to_vec(),
+                        }],
+                    },
+                ],
+            };
+            let result = signer.sign_now(&request).unwrap();
+            assert_eq!(result.0[0], vector["payload"].as_str().unwrap().as_bytes());
+            assert_eq!(
+                crate::hex(&result.0[1]),
+                vector["signature"].as_str().unwrap(),
+                "{encoding}"
+            );
+            assert!(!format!("{identities:?}{request:?}{result:?}").contains(secret));
+        }
+    }
+
+    #[test]
+    fn stable_ids_are_explicit_and_independent_of_keys_or_normalization() {
+        let setup = |key: &str, stable: Option<&str>| {
+            serde_json::json!({
+            "primary": { "key": key, "secret": vector()["secret"], "trimCredential": true, "stableId": stable },
+            "secondary": { "key": key, "secret": vector()["secret"], "stableId": stable },
+        }).to_string()
+        };
+        let (signer, first) =
+            LocalSigner::from_json(setup(" public-identifier ", Some("same/credential"))).unwrap();
+        let (_, second) = LocalSigner::from_json(setup(
+            "different-public-identifier",
+            Some("same/credential"),
+        ))
+        .unwrap();
+        assert_eq!(
+            first.primary.as_ref().unwrap().require_stable_id(),
+            Ok("same/credential")
+        );
+        assert_eq!(
+            first.primary.as_ref().unwrap().stable_id,
+            second.primary.unwrap().stable_id
+        );
+        assert_eq!(
+            first.primary.as_ref().unwrap().stable_id,
+            first.secondary.as_ref().unwrap().stable_id
+        );
+        let request = SignRequest {
+            context: Default::default(),
+            operations: vec![
+                Operation::Present {
+                    key: first.primary.unwrap().credential,
+                },
+                Operation::Present {
+                    key: first.secondary.unwrap().credential,
+                },
+            ],
+        };
+        let result = signer.sign_now(&request).unwrap();
+        assert_eq!(
+            result.0,
+            [
+                b"public-identifier".to_vec(),
+                b" public-identifier ".to_vec()
+            ]
+        );
+        let (_, legacy) = LocalSigner::from_json(setup("public-identifier", None)).unwrap();
+        assert_eq!(
+            legacy.primary.unwrap().require_stable_id(),
+            Err(SignError::InvalidRequest)
+        );
+    }
+
+    #[test]
+    fn missing_and_explicit_empty_passphrases_remain_distinct() {
+        let (_, absent) = LocalSigner::from_json(r#"{"primary":{}}"#.into()).unwrap();
+        assert!(absent.primary.unwrap().passphrase.is_none());
+        let (signer, present) =
+            LocalSigner::from_json(r#"{"primary":{"passphrase":""}}"#.into()).unwrap();
+        let request = SignRequest {
+            context: Default::default(),
+            operations: vec![Operation::Present {
+                key: present.primary.unwrap().passphrase.unwrap(),
+            }],
+        };
+        assert_eq!(signer.sign_now(&request).unwrap().0, [Vec::<u8>::new()]);
+    }
+
+    #[test]
+    fn malformed_or_oversized_setup_material_has_only_closed_errors() {
+        for (encoding, value) in [
+            ("base64", "not base64!".to_owned()),
+            ("hex", "123".to_owned()),
+            ("hex", "0g".to_owned()),
+            (
+                "pem",
+                pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
+            ),
+            ("pem", format!("{}trailing", pem("PRIVATE KEY", "AQ=="))),
+            ("pem", pem("CERTIFICATE", "AQ==")),
+            ("utf8", "x".repeat(1024 * 1024 + 1)),
+        ] {
+            let result = LocalSigner::from_json(
+                serde_json::json!({ "primary": { "secret": value, "secretEncoding": encoding } })
+                    .to_string(),
+            );
+            assert!(
+                matches!(result, Err(SignError::InvalidRequest)),
+                "{encoding}"
+            );
+        }
+        for id in ["".to_owned(), "bad\nidentity".to_owned(), "x".repeat(257)] {
+            assert!(matches!(
+                LocalSigner::from_json(
+                    serde_json::json!({ "primary": { "stableId": id } }).to_string()
+                ),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+        assert!(matches!(
+            LocalSigner::from_json(" ".repeat(4 * 1024 * 1024 + 1)),
+            Err(SignError::InvalidRequest)
+        ));
+        assert!(matches!(
+            LocalSigner::from_json(r#"{"primary":{"secretEncodng":"base64"}}"#.into()),
+            Err(SignError::InvalidRequest)
+        ));
+    }
+
     fn fixture() -> (LocalSigner, KeyRef) {
         // Reuse the existing public Binance documentation vector; no new keys.
         let key = KeyRef("primary".into());

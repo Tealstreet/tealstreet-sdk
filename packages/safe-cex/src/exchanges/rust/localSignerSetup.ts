@@ -1,9 +1,36 @@
-import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 
-type Credentials = { primary?: { key?: string; secret?: string }; secondary?: { key?: string; secret?: string } };
+type LocalIdentity = LocalIdentityMetadata & { key?: string; secret?: string; passphrase?: string };
+type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
+
+const invalidMetadata = (): never => {
+  const message = 'Invalid local signer setup metadata';
+  throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+};
+const record = (value: unknown, fields: readonly string[]): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key)))
+    return invalidMetadata();
+  return value as Record<string, unknown>;
+};
+const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => {
+  if (input === undefined) return undefined;
+  const value = record(input, ['stableId', 'secretEncoding', 'trimCredential']);
+  const { stableId, secretEncoding, trimCredential } = value;
+  if (stableId !== undefined && (typeof stableId !== 'string' || !stableId.trim() || new TextEncoder().encode(stableId).length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(stableId)))
+    return invalidMetadata();
+  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem'].includes(secretEncoding)))
+    return invalidMetadata();
+  if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
+  return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
+};
+const signerMetadata = (input: unknown): LocalSignerMetadata => {
+  if (input === undefined) return {};
+  const value = record(input, ['primary', 'secondary']);
+  return { primary: identityMetadata(value.primary), secondary: identityMetadata(value.secondary) };
+};
 
 /** Trusted local-provider setup. Secret strings stay inside this capsule until
  * consumed by the Rust provider; JS cannot promise physical string zeroization. */
@@ -13,10 +40,12 @@ export class LocalSignerSetup {
   readonly primaryComplete: boolean;
 
   constructor(options: ExchangeOptions) {
+    const setupMetadata = signerMetadata(options.localSigner);
     const secondary =
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
-      options.secondary_passphrase !== undefined;
+      options.secondary_passphrase !== undefined ||
+      setupMetadata.secondary !== undefined;
     if (secondary && (!options.secondary_key || !options.secondary_secret)) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
       throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
@@ -24,10 +53,10 @@ export class LocalSignerSetup {
     this.hasSecondary = secondary;
     this.primaryComplete = Boolean(options.key && options.secret);
     this.#credentials = {
-      ...(options.key !== undefined || options.secret !== undefined
-        ? { primary: { key: options.key, secret: options.secret } }
+      ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
+        ? { primary: { ...setupMetadata.primary, key: options.key, secret: options.secret, passphrase: options.passphrase } }
         : {}),
-      ...(secondary ? { secondary: { key: options.secondary_key, secret: options.secondary_secret } } : {}),
+      ...(secondary ? { secondary: { ...setupMetadata.secondary, key: options.secondary_key, secret: options.secondary_secret, passphrase: options.secondary_passphrase } } : {}),
     };
   }
 
@@ -41,10 +70,12 @@ export class LocalSignerSetup {
       if (credentials.primary) {
         credentials.primary.key = undefined;
         credentials.primary.secret = undefined;
+        credentials.primary.passphrase = undefined;
       }
       if (credentials.secondary) {
         credentials.secondary.key = undefined;
         credentials.secondary.secret = undefined;
+        credentials.secondary.passphrase = undefined;
       }
     }
   }
@@ -63,6 +94,7 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     secondary_key: _readKey,
     secondary_secret: _readSecret,
     secondary_passphrase: _readPassphrase,
+    localSigner: _setupMetadata,
     ...routing
   } = options;
   // BaseExchange's legacy type requires key/secret; Rust uses the cached

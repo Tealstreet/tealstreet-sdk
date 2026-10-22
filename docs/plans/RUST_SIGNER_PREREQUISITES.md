@@ -66,3 +66,26 @@ context/outcome sealing and protocol-clock calibration remain separate follow-on
   normalized archive equality alone does not prove original wire signatures.
   Integrate relevant landing, review, green CI, separate fresh guard, merge and
   report the actual pin before migration lanes begin.
+
+## Setup API
+
+`LocalSigner::from_setup(LocalSetup)` now returns `Result`; `from_json` and trusted
+registry adapters retain closed constructor errors. `LocalIdentity` accepts optional
+`passphrase` and `stableId`, `secretEncoding` (`utf8` by default; `base64`, `hex`,
+`pem` explicit), and `trimCredential` (false by default). Encoding is not inferred.
+PEM accepts PKCS8/SEC1 envelopes and decodes their bytes; it does not add a new
+signing algorithm or bypass that algorithm's key validation. Encoded fields are
+bounded to 1 MiB and setup JSON to 4 MiB; malformed input never echoes material.
+
+`Identity` carries only `credential` / `signing` refs, optional `passphrase` ref
+and optional non-secret `stableId`. `require_stable_id()` rejects absent/invalid
+mapping; it never substitutes a key hash or slot name. Callers assign consistent
+ids across engines/slots sharing a nonce domain and map account identities
+explicitly. Existing Binance input can omit this metadata.
+
+SDK `ExchangeOptions.localSigner.{primary,secondary}` carries the three metadata
+fields; ordinary key/secret/passphrase fields remain trusted input. The one-use
+capsule consumes both before generic options are retained and forwards them via
+WASM constructor argument 3. Unmigrated Rust families reject the metadata with
+`unsupported` / `notSent`. Worker/hosted callers still need a separate trusted
+bootstrap channel, as required by #1714; this does not implement remote signing.

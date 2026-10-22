@@ -468,19 +468,23 @@ pub fn prepare_local_signer(
         Some(LocalIdentity {
             key: Secret::new(options.key.take().unwrap_or_default()),
             secret: Secret::new(options.secret.take().unwrap_or_default()),
+            passphrase: options.passphrase.take().map(Secret::new),
+            ..Default::default()
         })
     } else {
         None
     };
-    let secondary = options.read_credentials.take().map(|mut read| {
-        use zeroize::Zeroize;
-        read.passphrase.zeroize();
-        LocalIdentity {
+    let secondary = options
+        .read_credentials
+        .take()
+        .map(|mut read| LocalIdentity {
             key: Secret::new(std::mem::take(&mut read.key)),
             secret: Secret::new(std::mem::take(&mut read.secret)),
-        }
-    });
-    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary });
+            passphrase: read.passphrase.take().map(Secret::new),
+            ..Default::default()
+        });
+    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary })
+        .map_err(|_| invalid("Invalid local signer setup"))?;
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.

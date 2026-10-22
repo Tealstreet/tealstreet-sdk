@@ -14,18 +14,48 @@ pub struct KeyRef(pub String);
 
 /// A venue's non-sensitive references to credential presentation and signing.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub credential: KeyRef,
     pub signing: KeyRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passphrase: Option<KeyRef>,
+    /// Caller-assigned, non-secret identity/nonce namespace. Never a key hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_id: Option<String>,
 }
 impl Identity {
+    pub fn require_stable_id(&self) -> Result<&str, SignError> {
+        self.stable_id
+            .as_deref()
+            .filter(|id| valid_stable_id(id))
+            .ok_or(SignError::InvalidRequest)
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.credential.0.is_empty() || self.signing.0.is_empty() {
+        if !valid_key_ref(&self.credential)
+            || !valid_key_ref(&self.signing)
+            || self
+                .passphrase
+                .as_ref()
+                .is_some_and(|key| !valid_key_ref(key))
+            || self
+                .stable_id
+                .as_deref()
+                .is_some_and(|id| !valid_stable_id(id))
+        {
             Err("Secondary read credentials require a nonempty key and secret")
         } else {
             Ok(())
         }
     }
+}
+
+pub fn valid_stable_id(id: &str) -> bool {
+    !id.trim().is_empty() && id.len() <= 256 && !id.chars().any(char::is_control)
+}
+fn valid_key_ref(key: &KeyRef) -> bool {
+    !key.0.is_empty() && key.0.len() <= 256
 }
 
 /// Only opaque identities cross into registry/engine options.
@@ -132,14 +162,13 @@ impl SignRequest {
         {
             return Err(SignError::InvalidRequest);
         }
-        let key_ok = |key: &KeyRef| !key.0.is_empty() && key.0.len() <= 256;
         let mut bytes = 0usize;
         for (index, op) in self.operations.iter().enumerate() {
             match op {
-                Operation::Present { key } if !key_ok(key) => {
+                Operation::Present { key } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
-                Operation::Sign { key, .. } if !key_ok(key) => {
+                Operation::Sign { key, .. } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
                 Operation::Sign { payload, .. } | Operation::Sha256 { payload } => {
@@ -154,7 +183,7 @@ impl SignRequest {
                                     .filter(|n| *n <= 1024 * 1024)
                                     .ok_or(SignError::InvalidRequest)?;
                             }
-                            PayloadPart::Credential { key } if !key_ok(key) => {
+                            PayloadPart::Credential { key } if !valid_key_ref(key) => {
                                 return Err(SignError::InvalidRequest);
                             }
                             PayloadPart::Result { index: prior, .. } if *prior >= index => {
