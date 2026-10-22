@@ -1562,3 +1562,13 @@ transition in checker controls; preserve every other map and all checker logic.
 The funding cursor formatting is factored through a tuple to avoid two false
 macro matches on the local identifier `request`, without changing cursor bytes.
 No new HTTP site, recipe, headers, signing or broad exemption is authorized.
+
+The precise ratchet update passes all 12 checker controls and the full bans
+script. Exact spot map hashes (sorted JSON) are
+`cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff`
+(old) and `fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8`
+(new); existing negative controls also exercise this transition against modified
+baselines, foreign paths, inflated counts/new digests and newer pruning.
+Final tuple-cursor source passes all 257 KuCoin/spot tests (including the same
+17 owned-history controls), strict all-target Clippy/fmt and diff checks. No
+production request-context adoption or signing changes are implied by pruning.

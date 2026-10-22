@@ -316,22 +316,23 @@ impl Kucoin {
         }
         let capped = !request.explicit_range
             && request.owner.accepted_len() + request.owner.staged_len() >= request.limit;
-        let next = if !capped
+        let next_bounds = if !capped
             && page.has_more
             && request
                 .page_minimum
                 .is_some_and(|time| time >= request.start)
         {
             request.end = request.page_minimum.unwrap();
-            Some(format!("{}:{}", request.start, request.end))
+            Some((request.start, request.end))
         } else if !capped && request.start > request.from {
             request.window_end = request.start - 1;
             request.end = request.window_end;
             request.start = request.from.max(request.end.saturating_sub(WINDOW - 1));
-            Some(format!("{}:{}", request.start, request.end))
+            Some((request.start, request.end))
         } else {
             None
         };
+        let next = next_bounds.map(|(start, end)| format!("{start}:{end}"));
         match request.owner.advance(CursorPage {
             next,
             rows: request.page_count,

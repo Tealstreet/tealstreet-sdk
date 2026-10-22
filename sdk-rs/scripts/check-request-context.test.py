@@ -189,6 +189,7 @@ class RequestContextBan(unittest.TestCase):
             'venues/weex/src/history.rs': (17, 10, '28fb5096b49ad5e340d77654b9b7b0bc4b5922b4dc58af5cff5fcfdff2161327', '477c91d6c2d026dea59a81d4dc539b56985dadf3606bdb7eae5b4ed505936163'),
             'venues/cryptocom/src/history.rs': (15, 10, '8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c', '0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6'),
             'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
+            'venues/kucoin/src/spot/mod.rs': (22, 20, 'cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff', 'fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8'),
         }
         self.assertEqual(set(expected), set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
@@ -201,8 +202,13 @@ class RequestContextBan(unittest.TestCase):
                 ref = ('fe44969d033529c244fc4f33fce5395c0273df04'
                        if path in {'venues/cryptocom/src/history.rs', 'venues/grvt/src/history.rs'}
                        else '5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6')
+                if path == 'venues/kucoin/src/spot/mod.rs':
+                    ref = '4a185e6459856ed27f7753b95a74b59d36dc3324'
                 source = ban.git('show', ref + ':sdk-rs/' + path)
                 self.assertEqual(dict(ban.fingerprints(source)), landed)
+                if ref == '4a185e6459856ed27f7753b95a74b59d36dc3324':
+                    original = ban.git('show', 'b2fe97324763e1e2702c69ac5b839da37102928b:sdk-rs/' + path)
+                    self.assertEqual(dict(ban.fingerprints(original)), old)
                 if ref == 'fe44969d033529c244fc4f33fce5395c0273df04':
                     original = ban.git('show', 'a0c528f910efed5993b63abe8ded522b2f7c26ee:sdk-rs/' + path)
                     self.assertEqual(dict(ban.fingerprints(original)), old)
