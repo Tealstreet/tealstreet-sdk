@@ -1164,6 +1164,18 @@ impl WeexFutures {
                 self.account.invalidate_orders();
             } else {
                 self.account.invalidate_settings();
+                let scope = match &step.call {
+                    Call::Leverage { symbol, .. } | Call::Margin { symbol, .. } => {
+                        Some(symbol.as_str())
+                    }
+                    _ => None,
+                };
+                if let Err(error) = cx.store.metadata_write_started(command, scope) {
+                    job.record(error);
+                    job.steps.clear();
+                    self.trade_next(cx, command);
+                    return;
+                }
             }
             match &step.call {
                 Call::Place { orders, .. } => {
@@ -1241,6 +1253,7 @@ impl WeexFutures {
         request: Request,
         error: VenueError,
     ) {
+        cx.store.metadata_write_finished(request.command);
         rollback(
             cx,
             &request.call,
@@ -1261,6 +1274,7 @@ impl WeexFutures {
         request: Request,
         response: Response<'_>,
     ) {
+        cx.store.metadata_write_finished(request.command);
         let owned = request.revision == self.account.order_revision();
         // A fill frame can revoke ownership before the cumulative order frame
         // changes cached quantities. Never replace from that stale amount.

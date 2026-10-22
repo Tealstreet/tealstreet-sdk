@@ -509,12 +509,12 @@ fn hedge_position_snapshots_preserve_both_leverage_rails_in_either_order() {
 fn hedge_snapshot_does_not_erase_the_configured_flat_opposite_leg() {
     let mut h = Harness::ready();
     h.engine.store_mut().set_hedged(true);
-    h.fire_at(3000.0);
     h.engine.store_mut().update_setting("BTCUSDT", |s| {
         s.leverage = 2.0;
         s.buy_leverage = Some(2.0);
         s.sell_leverage = Some(7.0);
     });
+    h.fire_at(3000.0);
     h.respond(POSITIONS, 200, r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":true,"liquidationPrice":0}]}"#);
     let setting = h.engine.store().setting("BTCUSDT").unwrap();
     assert_eq!(setting.leverage, 5.0);
@@ -2015,7 +2015,7 @@ fn newer_settings_writes_and_snapshots_fence_metadata() {
     assert_eq!(metadata_rails(&h, 907), (20.0, 20.0));
 }
 #[test]
-fn metadata_cannot_race_pending_writes_or_a_newer_query() {
+fn metadata_pending_write_is_sticky_and_eligible_queries_coalesce() {
     let mut h = Harness::ready();
     h.event(Event::Command(Command::SetLeverage {
         command: 908,
@@ -2034,8 +2034,12 @@ fn metadata_cannot_race_pending_writes_or_a_newer_query() {
     assert!(!h.requests.iter().any(|r| r.url.contains("/trade/leverage")));
     h.reply(write.id, 200, r#"{"code":0,"data":{}}"#);
     let first = margin_stage(&mut h, 910);
-    let second = margin_stage(&mut h, 911);
-    h.reply(second.id, 200, ISOLATED);
+    fetch_leverage(&mut h, 911, "BTCUSDT");
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/leverage") || r.url.contains("/trade/marginType"))
+    );
     h.reply(first.id, 200, ISOLATED);
     assert_eq!(metadata_rails(&h, 910), (12.0, 34.0));
     assert!(h.done.iter().any(|(id, r)| *id == 911 && r.is_ok()));

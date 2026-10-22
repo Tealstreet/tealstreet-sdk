@@ -18,6 +18,7 @@ use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    VenueError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
@@ -69,9 +70,8 @@ enum Task {
         rows: Vec<Candle>,
     },
     Leverage {
-        command: CommandId,
+        token: safe_cex_engine::metadata::Token,
         symbol: String,
-        revision: u64,
     },
 }
 struct DeferredGet {
@@ -281,10 +281,22 @@ impl WeexFutures {
             cx.fail(command, String::from("WEEX account reads are rate limited"));
             return;
         }
-        let task = Task::Leverage {
+        let token = match cx.store.begin_metadata(
+            &symbol,
             command,
-            symbol,
-            revision: self.account.settings_revision(),
+            true,
+            safe_cex_engine::metadata::Fallback::CompleteSetting,
+        ) {
+            Ok(safe_cex_engine::metadata::Admission::Start(token)) => token,
+            Ok(safe_cex_engine::metadata::Admission::Joined) => return,
+            Err(error) => {
+                cx.fail(command, error);
+                return;
+            }
+        };
+        let task = Task::Leverage {
+            token,
+            symbol: symbol.clone(),
         };
         let query = format!("symbol={market_id}");
         if !self.signed_request(
@@ -296,24 +308,21 @@ impl WeexFutures {
             task,
             None,
         ) {
-            cx.fail(command, String::from("WEEX leverage requires credentials"));
+            self.finish_leverage(
+                cx,
+                token,
+                &symbol,
+                Err(VenueError::new("WEEX leverage requires credentials")),
+            );
         }
     }
     fn leverage_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        token: safe_cex_engine::metadata::Token,
         symbol: &str,
-        revision: u64,
         response: Response<'_>,
     ) {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Fetched {
-            buy_leverage: f64,
-            sell_leverage: f64,
-            margin_type: safe_cex_engine::model::MarginType,
-        }
         let market_id = cx.store.market(symbol).map(|m| m.id.clone());
         let config = serde_json::from_str::<Vec<account_wire::ConfigRow<'_>>>(response.body)
             .map_err(|e| format!("invalid WEEX symbol configuration: {e}"))
@@ -329,51 +338,53 @@ impl WeexFutures {
                     setting.sell_leverage,
                     setting.margin_type,
                 ) {
-                    (Some(buy), Some(sell), Some(margin_type)) if buy > 0.0 && sell > 0.0 => Ok((
-                        account::Config {
+                    (Some(buy), Some(sell), Some(_)) if buy > 0.0 && sell > 0.0 => {
+                        Ok(account::Config {
                             setting,
                             hedged: row.separated_type == "SEPARATED",
                             isolated_long_leverage: row.isolated_long_leverage,
                             isolated_short_leverage: row.isolated_short_leverage,
-                        },
-                        Fetched {
-                            buy_leverage: buy,
-                            sell_leverage: sell,
-                            margin_type,
-                        },
-                    )),
+                        })
+                    }
                     _ => Err("invalid WEEX symbol configuration: non-positive leverage".into()),
                 }
             });
-        let (config, fetched) = match config {
-            Ok(config) => config,
-            Err(error) => {
-                cx.fail(command, error);
-                return;
+        self.finish_leverage(cx, token, symbol, config.map_err(VenueError::new));
+    }
+    fn finish_leverage(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        token: safe_cex_engine::metadata::Token,
+        symbol: &str,
+        result: Result<account::Config, VenueError>,
+    ) {
+        let mut native = None;
+        let proposal = result.and_then(|config| {
+            let snapshot = safe_cex_engine::metadata::Snapshot::new(config.setting)?;
+            native = Some(config);
+            Ok(safe_cex_engine::metadata::Proposal::complete(snapshot))
+        });
+        if let Some(completion) = cx.store.finish_metadata(token, proposal) {
+            if completion.published {
+                self.account
+                    .configs
+                    .insert(symbol.to_owned(), native.expect("validated native config"));
             }
-        };
-        // A settings write since issue supersedes this snapshot: answer the
-        // current settings instead, so the caller's store cannot regress either.
-        let fetched = if revision == self.account.settings_revision() {
-            cx.store
-                .update_setting(symbol, |setting| *setting = config.setting);
-            self.account.configs.insert(symbol.to_owned(), config);
-            fetched
-        } else {
-            cx.store
-                .setting(symbol)
-                .and_then(|s| {
-                    Some(Fetched {
-                        buy_leverage: s.buy_leverage?,
-                        sell_leverage: s.sell_leverage?,
-                        margin_type: s.margin_type?,
-                    })
+            completion.finish(cx, |value| {
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Fetched {
+                    buy_leverage: f64,
+                    sell_leverage: f64,
+                    margin_type: safe_cex_engine::model::MarginType,
+                }
+                serde_json::to_string(&Fetched {
+                    buy_leverage: value.buy,
+                    sell_leverage: value.sell,
+                    margin_type: value.margin.expect("complete setting fallback"),
                 })
-                .unwrap_or(fetched)
-        };
-        match serde_json::to_string(&fetched) {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error.to_string()),
+                .expect("validated finite metadata")
+            });
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -664,7 +675,9 @@ impl WeexFutures {
                 }
             }
             Task::Candles { command, .. } => cx.fail(command, error),
-            Task::Leverage { command, .. } => cx.fail(command, error),
+            Task::Leverage { token, symbol } => {
+                self.finish_leverage(cx, token, &symbol, Err(VenueError::new(error)))
+            }
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -994,11 +1007,9 @@ impl Venue for WeexFutures {
         }
         match p.task {
             Task::BookQuery(_) => unreachable!(),
-            Task::Leverage {
-                command,
-                symbol,
-                revision,
-            } => self.leverage_response(cx, command, &symbol, revision, response),
+            Task::Leverage { token, symbol } => {
+                self.leverage_response(cx, token, &symbol, response)
+            }
             Task::Identity(command) => self.identity_response(cx, command, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),

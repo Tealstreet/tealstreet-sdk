@@ -33,6 +33,7 @@ pub struct Request {
     cycle: u64,
     kind: Kind,
     revision: u64,
+    settings_stamp: safe_cex_engine::metadata::Observation,
     page: u32,
     page_rows: usize,
     orders: Vec<Order>,
@@ -159,7 +160,6 @@ pub struct State {
     refresh: Option<TimerId>,
     revision: u64,
     orders_revision: u64,
-    settings_revision: u64,
     order_stage: Vec<Order>,
     order_skipped: Skipped,
     /// Revision, staged rows, and IDs of positions whose rows were malformed.
@@ -196,12 +196,9 @@ impl State {
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
     }
-    /// Fences a settings read against writes and newer reads.
-    pub fn settings_revision(&self) -> u64 {
-        self.settings_revision
-    }
+    /// Settings writes also supersede position snapshots; keep this financial
+    /// fence separate from engine-owned settings publication authority.
     pub fn invalidate_settings(&mut self) {
-        self.settings_revision += 1;
         self.revision += 1;
     }
     pub fn invalidate_orders(&mut self) {
@@ -368,13 +365,14 @@ impl WeexFutures {
             }
             let revision = match kind {
                 Kind::Normal | Kind::Algo => self.account.orders_revision,
-                Kind::Config | Kind::Metadata => self.account.settings_revision,
+                Kind::Config | Kind::Metadata => cx.store.metadata_revision(),
                 _ => self.account.revision,
             };
             let request = Request {
                 cycle: self.account.cycle,
                 kind,
                 revision,
+                settings_stamp: cx.store.metadata_observation(),
                 page: if matches!(kind, Kind::Algo) { 1 } else { 0 },
                 page_rows: 0,
                 orders: vec![],
@@ -567,14 +565,23 @@ impl WeexFutures {
                 self.account.position_stage =
                     Some((request.revision, request.positions, request.skipped));
             }
-            Kind::Config if request.revision == self.account.settings_revision => {
-                for (symbol, config) in request.configs {
-                    cx.store
-                        .update_setting(&symbol, |setting| *setting = config.setting);
-                    self.account.configs.insert(symbol, config);
+            Kind::Config => {
+                // The native response selects the last valid row for a symbol.
+                // Consolidate before the one observed commit: a repeated stamp
+                // is deliberately ineligible after that commit.
+                let configs: HashMap<_, _> = request.configs.into_iter().collect();
+                for (symbol, config) in configs {
+                    if let Ok(setting) =
+                        safe_cex_engine::metadata::ObservedSetting::new(config.setting)
+                        && cx
+                            .store
+                            .observe_setting(&symbol, request.settings_stamp, setting)
+                    {
+                        self.account.configs.insert(symbol, config);
+                    }
                 }
             }
-            Kind::Metadata if request.revision == self.account.settings_revision => {
+            Kind::Metadata if request.revision == cx.store.metadata_revision() => {
                 let Ok(row) = serde_json::from_str::<AccountConfig>(response.body) else {
                     self.account_failed(cx, request, "malformed account configuration");
                     return;
@@ -1129,6 +1136,7 @@ mod auth_envelopes {
                 cycle: venue.account.cycle,
                 kind,
                 revision: 0,
+                settings_stamp: Default::default(),
                 page: 0,
                 page_rows: 0,
                 orders: vec![],

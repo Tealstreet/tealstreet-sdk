@@ -1936,6 +1936,91 @@ fn metadata_owner_fails_both_joined_callers_and_keeps_good_settings() {
 }
 
 #[test]
+fn metadata_owner_preserves_secondary_only_get_credentials() {
+    let markets = engine().store().markets().to_vec();
+    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: Some("read-passphrase".into()),
+        }),
+        ..Options::default()
+    }));
+    e.store_mut().set_markets(markets);
+    let read = joined_metadata(&mut e, 954, 955);
+    assert!(
+        read.headers
+            .iter()
+            .any(|(key, value)| *key == "ACCESS-KEY" && value == "read-key")
+    );
+    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
+    for id in [954, 955] {
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(action,
+                    Action::Notice(Notice::CommandDone { command, .. }) if *command == id
+                ))
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().sell_leverage,
+        Some(9.0)
+    );
+}
+
+#[test]
+fn metadata_started_during_a_write_stays_nonpublishing_after_refusal() {
+    let mut e = engine();
+    let before = e.store().setting("BTCUSDT");
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 956,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        },
+    );
+    let write = writes(&actions).pop().unwrap();
+    let read = joined_metadata(&mut e, 957, 958);
+    let refusal = response(
+        &mut e,
+        &write,
+        json!({"code":"40015","msg":"Insufficient balance"}),
+    );
+    assert!(done(&refusal).is_err());
+    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
+    for id in [957, 958] {
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command, .. }) if *command == id
+        )));
+    }
+    assert_eq!(e.store().setting("BTCUSDT"), before);
+    // The finished write cannot upgrade the old read, but a newly admitted
+    // group is eligible and refreshes both the Store and native config cache.
+    let next = joined_metadata(&mut e, 959, 960);
+    raw_response(&mut e, &next, ISOLATED_CONFIG);
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(7.0)
+    );
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 961,
+            symbol: "BTCUSDT".into(),
+            leverage: 11.0,
+            side: Some(PositionSide::Long),
+        },
+    );
+    let write = writes(&actions).pop().unwrap();
+    assert_eq!(body(&write)["isolatedShortLeverage"], "9");
+}
+
+#[test]
 fn leverage_read_is_a_fresh_symbol_scoped_configuration_read() {
     let mut e = engine();
     let r = leverage_read(&mut e, 40);

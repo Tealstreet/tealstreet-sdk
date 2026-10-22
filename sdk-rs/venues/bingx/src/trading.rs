@@ -24,6 +24,13 @@ pub struct Request {
     call: Call,
 }
 impl Request {
+    pub fn settings_scope(&self) -> Option<Option<&str>> {
+        match &self.call {
+            Call::Leverage { symbol, .. } | Call::Margin { symbol, .. } => Some(Some(symbol)),
+            Call::Mode { .. } => Some(None),
+            _ => None,
+        }
+    }
     pub fn changes_settings(&self) -> bool {
         matches!(
             self.call,
@@ -96,7 +103,6 @@ struct Observation {
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<CommandId, Job>,
-    settings_pending: HashSet<CommandId>,
     observed: HashMap<String, Observation>,
 }
 
@@ -282,10 +288,6 @@ fn validated_placement(response: Response<'_>) -> Result<String, VenueError> {
 }
 
 impl Trading {
-    pub fn settings_pending(&self) -> bool {
-        !self.settings_pending.is_empty()
-    }
-
     pub fn observe_order(
         &mut self,
         order: &Order,
@@ -416,7 +418,18 @@ impl Trading {
                 &step.call,
                 Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
             ) {
-                self.settings_pending.insert(command);
+                let scope = match &step.call {
+                    Call::Leverage { symbol, .. } | Call::Margin { symbol, .. } => {
+                        Some(symbol.as_str())
+                    }
+                    _ => None,
+                };
+                if let Err(error) = cx.store.metadata_write_started(command, scope) {
+                    job.error = Some(error);
+                    job.steps.clear();
+                    self.advance(cx, credentials, command);
+                    return;
+                }
             }
             cx.command_progress(command, step.receipts);
             crate::issue(
@@ -453,7 +466,7 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.settings_pending.remove(&request.command);
+        cx.store.metadata_write_finished(request.command);
         let places = request.places_order();
         let error = unknown(error).kind(ErrorKind::Network);
         self.finish(cx, credentials, request.command, places, Err(error));
@@ -466,7 +479,7 @@ impl Trading {
         request: Request,
         response: Response<'_>,
     ) {
-        self.settings_pending.remove(&request.command);
+        cx.store.metadata_write_finished(request.command);
         let places = request.places_order();
         let result = (|| {
             let absent_ok = matches!(

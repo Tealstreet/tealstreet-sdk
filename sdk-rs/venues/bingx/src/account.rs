@@ -5,6 +5,9 @@ use crate::sign::{Credentials, Params};
 use safe_cex_engine::Level;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
+use safe_cex_engine::metadata::{
+    Admission, Fallback, Observation, ObservedSetting, Proposal, Rails, Snapshot, Token,
+};
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
@@ -33,11 +36,8 @@ const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Metadata {
-        command: u32,
+        token: Token,
         symbol: String,
-        revision: u64,
-        generation: u64,
-        publish: bool,
         leverage: Option<(f64, f64)>,
     },
     ListenKey {
@@ -57,6 +57,7 @@ pub enum Request {
     },
     Positions {
         revision: u64,
+        settings_stamp: Observation,
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
         skipped: Vec<String>,
@@ -90,8 +91,6 @@ pub struct Account {
     repair: Option<TimerId>,
     orders_revision: u64,
     positions_revision: u64,
-    settings_revision: u64,
-    metadata_generations: HashMap<String, u64>,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -296,8 +295,23 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
-    pub fn settings_changed(&mut self) {
-        self.settings_revision = self.settings_revision.wrapping_add(1);
+    fn metadata_done(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        token: Token,
+        result: Result<Proposal, safe_cex_engine::VenueError>,
+    ) {
+        if let Some(completion) = cx.store.finish_metadata(token, result) {
+            if completion.published {
+                self.bump_positions();
+            }
+            completion.finish(cx, |value| {
+                format!(
+                    r#"{{"buyLeverage":{},"sellLeverage":{}}}"#,
+                    value.buy, value.sell
+                )
+            });
+        }
     }
     pub fn fetch_metadata(
         &mut self,
@@ -319,8 +333,18 @@ impl Account {
             return;
         };
         let native = market.id.clone();
-        let generation = self.metadata_generations.entry(symbol.clone()).or_default();
-        *generation = generation.wrapping_add(1);
+        let token =
+            match cx
+                .store
+                .begin_metadata(&symbol, command, publish, Fallback::IndependentRails)
+            {
+                Ok(Admission::Start(token)) => token,
+                Ok(Admission::Joined) => return,
+                Err(error) => {
+                    cx.fail(command, error);
+                    return;
+                }
+            };
         Self::request(
             cx,
             credentials,
@@ -328,11 +352,8 @@ impl Account {
             crate::paths::LEVERAGE,
             Params::new().str("symbol", &native),
             Request::Metadata {
-                command,
+                token,
                 symbol,
-                revision: self.settings_revision,
-                generation: *generation,
-                publish,
                 leverage: None,
             },
             false,
@@ -481,6 +502,7 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
+        let settings_stamp = cx.store.metadata_observation();
         Self::request(
             cx,
             credentials,
@@ -489,6 +511,7 @@ impl Account {
             Params::new(),
             Request::Positions {
                 revision: self.positions_revision,
+                settings_stamp,
                 rows: Vec::new(),
                 settings: Vec::new(),
                 skipped: Vec::new(),
@@ -844,19 +867,14 @@ impl Account {
         }
         match request {
             Request::Metadata {
-                command,
+                token,
                 symbol,
-                revision,
-                generation,
-                publish,
                 leverage,
             } => {
-                let current = publish
-                    && revision == self.settings_revision
-                    && self.metadata_generations.get(&symbol) == Some(&generation);
+                let current = cx.store.metadata_eligible(token);
                 if let Some((buy, sell)) = leverage {
                     if !current {
-                        current_metadata(cx, command, &symbol, (buy, sell));
+                        self.metadata_done(cx, token, Rails::new(buy, sell).map(Proposal::rails));
                         return;
                     }
                     let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
@@ -864,21 +882,22 @@ impl Account {
                         Ok("ISOLATED") => MarginType::Isolated,
                         Ok("CROSSED") => MarginType::Cross,
                         _ => {
-                            cx.fail(command, metadata_error("Invalid BingX margin metadata"));
+                            self.metadata_done(
+                                cx,
+                                token,
+                                Err(metadata_error("Invalid BingX margin metadata")),
+                            );
                             return;
                         }
                     };
-                    self.bump_positions();
-                    cx.store.update_setting(&symbol, |s| {
-                        s.leverage = buy;
-                        s.buy_leverage = Some(buy);
-                        s.sell_leverage = Some(sell);
-                        s.margin_type = Some(margin);
-                    });
-                    cx.done(
-                        command,
-                        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
-                    );
+                    let proposal = Snapshot::new(MarketSetting {
+                        leverage: buy,
+                        buy_leverage: Some(buy),
+                        sell_leverage: Some(sell),
+                        margin_type: Some(margin),
+                    })
+                    .map(Proposal::complete);
+                    self.metadata_done(cx, token, proposal);
                 } else {
                     let parsed = serde_json::from_str::<Data<Leverage>>(response.body);
                     let Some(rails) = parsed
@@ -886,22 +905,35 @@ impl Account {
                         .map(|p| p.data)
                         .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
                     else {
-                        cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
+                        self.metadata_done(
+                            cx,
+                            token,
+                            Err(metadata_error("Invalid BingX leverage metadata")),
+                        );
                         return;
                     };
+                    let validated = match Rails::new(rails.long_leverage, rails.short_leverage) {
+                        Ok(rails) => rails,
+                        Err(_) => {
+                            self.metadata_done(
+                                cx,
+                                token,
+                                Err(metadata_error("Invalid BingX leverage metadata")),
+                            );
+                            return;
+                        }
+                    };
                     if !current {
-                        current_metadata(
-                            cx,
-                            command,
-                            &symbol,
-                            (rails.long_leverage, rails.short_leverage),
-                        );
+                        self.metadata_done(cx, token, Ok(Proposal::rails(validated)));
                         return;
                     }
                     let Some(market) = cx.store.market(&symbol) else {
-                        cx.fail(
-                            command,
-                            metadata_error("BingX market disappeared during metadata read"),
+                        self.metadata_done(
+                            cx,
+                            token,
+                            Err(metadata_error(
+                                "BingX market disappeared during metadata read",
+                            )),
                         );
                         return;
                     };
@@ -912,11 +944,8 @@ impl Account {
                         "/openApi/swap/v2/trade/marginType",
                         Params::new().str("symbol", &market.id),
                         Request::Metadata {
-                            command,
+                            token,
                             symbol,
-                            revision,
-                            generation,
-                            publish,
                             leverage: Some((rails.long_leverage, rails.short_leverage)),
                         },
                         false,
@@ -1023,6 +1052,7 @@ impl Account {
             }
             Request::Positions {
                 revision,
+                settings_stamp,
                 mut rows,
                 settings,
                 skipped,
@@ -1055,11 +1085,10 @@ impl Account {
                     });
                     rows.extend(kept);
                     cx.store.set_positions(rows);
-                    if !settings.is_empty() {
-                        self.settings_changed();
-                    }
                     for (symbol, value) in settings {
-                        cx.store.update_setting(&symbol, |s| *s = value);
+                        if let Ok(value) = ObservedSetting::new(value) {
+                            cx.store.observe_setting(&symbol, settings_stamp, value);
+                        }
                     }
                 } else {
                     for id in &skipped {
@@ -1149,7 +1178,9 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
-            Request::Metadata { command, .. } => cx.fail(command, metadata_error(error)),
+            Request::Metadata { token, .. } => {
+                self.metadata_done(cx, token, Err(metadata_error(error)))
+            }
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1231,9 +1262,9 @@ impl Account {
             }
             "ACCOUNT_CONFIG_UPDATE" => {
                 if let Some(config) = event.ac {
-                    self.settings_changed();
                     self.bump_positions();
                     let symbol = config.s.replace('-', "");
+                    cx.store.invalidate_metadata(Some(&symbol));
                     let hedged = cx.store.hedged();
                     if config.l > 0.0 {
                         cx.store.update_setting(&symbol, |s| {
@@ -1651,24 +1682,6 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
-}
-
-/// A superseded read still answers without publishing stale settings.
-fn current_metadata(cx: &mut Cx<'_, Pending>, command: u32, symbol: &str, read: (f64, f64)) {
-    let setting = cx.store.setting(symbol);
-    let valid = |value: &f64| value.is_finite() && *value > 0.0;
-    let buy = setting
-        .and_then(|s| s.buy_leverage)
-        .filter(valid)
-        .unwrap_or(read.0);
-    let sell = setting
-        .and_then(|s| s.sell_leverage)
-        .filter(valid)
-        .unwrap_or(read.1);
-    cx.done(
-        command,
-        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
-    );
 }
 
 /// Tag an account read with the credential slot that actually signs it.

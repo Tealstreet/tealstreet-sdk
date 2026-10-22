@@ -165,6 +165,84 @@ fn account_and_position_events_during_a_read_cannot_starve_the_balance() {
     assert!(e.store().loaded().balance);
 }
 #[test]
+fn duplicate_config_rows_keep_the_last_valid_native_configuration() {
+    let (mut e, actions) = started(false);
+    response(
+        &mut e,
+        request(&actions, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"20","isolatedLongLeverage":"10","isolatedShortLeverage":"15"},{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"30","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#,
+    );
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(7.0));
+    assert_eq!(setting.sell_leverage, Some(9.0));
+    assert_eq!(
+        setting.margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    response(
+        &mut e,
+        request(&actions, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    for path in ["/balance", "/openOrders", "/openAlgoOrders"] {
+        response(&mut e, request(&actions, path), 200, "[]");
+    }
+    let position = POSITIONS
+        .replace("\"marginType\":\"CROSSED\",", "")
+        .replace("\"separatedMode\":\"COMBINED\",", "")
+        .replace("\"leverage\":\"100\",", "");
+    response(&mut e, request(&actions, "allPosition"), 200, &position);
+    // The native configuration used by position resolution must agree with
+    // Store, including hedge mode and the side-specific isolated leverage.
+    assert_eq!(e.store().positions()[0].leverage, 7.0);
+    assert_eq!(
+        e.store().positions()[0].side,
+        safe_cex_engine::model::PositionSide::Long
+    );
+}
+
+#[test]
+fn an_old_account_config_cannot_overwrite_completed_metadata() {
+    let (mut e, actions) = started(false);
+    e.handle(
+        NOW,
+        Event::Command(safe_cex_engine::Command::FetchLeverage {
+            command: 970,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let scoped: Vec<_> = e.drain_actions().collect();
+    response(
+        &mut e,
+        request(&scoped, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"30","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#,
+    );
+    let metadata = e.store().setting("BTCUSDT");
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert_eq!(e.store().setting("BTCUSDT"), metadata);
+    // The rejected old account proposal cannot overwrite the native config
+    // either: a later position lacking those fields resolves from the new one.
+    let actions = next_cycle(&mut e);
+    let position = POSITIONS
+        .replace("\"marginType\":\"CROSSED\",", "")
+        .replace("\"separatedMode\":\"COMBINED\",", "")
+        .replace("\"leverage\":\"100\",", "");
+    response(&mut e, request(&actions, "allPosition"), 200, &position);
+    response(
+        &mut e,
+        request(&actions, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    for path in ["symbolConfig", "/balance", "/openOrders", "/openAlgoOrders"] {
+        response(&mut e, request(&actions, path), 200, "[]");
+    }
+    assert_eq!(e.store().positions()[0].leverage, 7.0);
+}
+#[test]
 fn failed_or_malformed_half_never_replaces_order_snapshot() {
     let (mut e, actions) = started(false);
     complete(&mut e, &actions, NORMAL, ALGO);

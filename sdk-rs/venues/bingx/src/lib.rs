@@ -888,8 +888,8 @@ impl Venue for Bingx {
                 return;
             }
             Pending::Trade(request) => {
-                if request.changes_settings() {
-                    self.account.settings_changed();
+                if let Some(scope) = request.settings_scope() {
+                    cx.store.invalidate_metadata(scope);
                 }
                 self.account.bump_orders();
                 self.account.bump_positions();
@@ -1162,13 +1162,12 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if matches!(
-            &command,
-            Command::SetLeverage { .. }
-                | Command::SetMarginType { .. }
-                | Command::SetPositionMode { .. }
-        ) {
-            self.account.settings_changed();
+        match &command {
+            Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } => {
+                cx.store.invalidate_metadata(Some(symbol))
+            }
+            Command::SetPositionMode { .. } => cx.store.invalidate_metadata(None),
+            _ => {}
         }
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
@@ -1176,7 +1175,7 @@ impl Venue for Bingx {
         }
         match command {
             Command::FetchLeverage { command, symbol } => {
-                let publish = !self.trading.settings_pending();
+                let publish = true;
                 self.account.fetch_metadata(
                     cx,
                     self.credentials.as_ref(),
