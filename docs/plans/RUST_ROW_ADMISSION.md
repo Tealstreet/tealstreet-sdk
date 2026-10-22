@@ -370,3 +370,86 @@ tree and every incoming/owned blob verified. Architecture answer YES for the
 financial derivation concern: this bounded Orderly repair was explicitly owner
 approved, and the next fresh plan is [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md).
 Admission/reporting fan-out and snapshot token remain open in owner order.
+
+## Persistent row reporting — 2026-10-23 plan
+
+The cumulative-fill fan-out finishes its Orderly slice in actual #1767
+`bf362312d3edfb4dfa00b726c172f944053b9198`. Its separate guard/merge and complete
+tree audit pass, with strict976/976 raw equality. The financial snapshot token
+already landed in #1759. This fresh `feat/rust-row-reporting-core` phase starts
+from actual #1767 and implements the assigned reporting extension; it does not
+reopen financial preparation, Store freshness or RequestContext authority.
+
+Read-only inventory finds eighteen account source files with `SKIP_LOG_LIMIT`,
+plus Bybit's deferred unsupported-order memory and WOO's changed-message memory.
+Repeat suppression, one Error upgrade, namespace re-arm and grouped/deferred
+emission are cross-cutting policy and belong in engine `coverage`, alongside
+`RowAdmission`/`SnapshotBuilder` and the existing coded `row_skipped` boundary.
+Native identity recovery, message formatting, retained-row lookups and the
+original reporting time remain native. No new production defect is claimed.
+
+Work in bounded, separately reviewable phases:
+
+1. Shared persistent report memory, with Coinbase (Error upgrade/namespaces),
+   Crypto.com (once per key) and WOO (changed message) as real consumers.
+2. Shared grouped/deferred policy extension and consumer adoption, after a
+   concrete native-policy audit: Crypto.com counts every skipped row and retains
+   its first label; WOO counts unique known IDs in first-seen order plus anonymous
+   rows; Bybit reports unsupported rows only after joined snapshot admission.
+   Preserve these distinct policies rather than forcing a single count rule.
+3. Fan the engine path out to the remaining actual copies in bounded slices,
+   coordinating account/pending regions with signer and RequestContext lanes.
+   No fan-out closure claim until the remaining inventory is empty.
+
+The concrete phase-1 API in existing `engine/src/coverage.rs` is:
+
+- `RowRepeat::{Once, ErrorUpgrade, ChangedMessage}`: explicit native repeat
+  policy, stored once per reporter rather than selected differently per key.
+- `RowReports<K>`: one private identity-to-report-state map. `new(RowRepeat)`
+  uses the shared4096 clear-on-cap boundary; `Default` is bounded `Once`.
+  `unbounded(RowRepeat)` preserves the existing WOO fixed-kind/Bybit policy
+  where applicable. No hidden eviction or new per-family threshold.
+- `report<P>(&mut self, cx: &mut Cx<'_, P>, key: K, level: Level,
+  message: impl Into<String>) -> bool`: update memory independently of host log
+  filtering, and emit only through `row_skipped`. Return whether a report was
+  emitted. Once ignores later severity changes; ErrorUpgrade permits exactly
+  the old non-Error-to-Error upgrade; ChangedMessage compares exact text, with
+  no new severity-based repeat. Empty/unknown identity remains a native key.
+- `forget<Q>(&mut self, key: &Q) -> bool` with borrowed-key lookup, and `clear`.
+  `RowReports<String>::rearm_namespace(prefix, clean, mapped)` preserves exact
+  native prefix selection: a clean snapshot clears only that namespace;
+  otherwise remove only its successfully mapped keys. No peer namespace reset.
+
+Bounded reporters must clear the entire native memory at capacity BEFORE looking
+up the next key, including an already remembered key. This reproduces the
+existing wrappers' boundary rather than silently replacing it with LRU or
+clear-only-on-new-key behavior. Suppressed reports do not increment health;
+reported notices retain the exact level, code, message and emission order even
+when the host filters delivery. This memory never changes coverage/protection,
+retained rows, snapshot eligibility, native Fill identity or financial progress.
+
+Phase-1 source scope: `coverage.rs`; Coinbase/Crypto.com/WOO `account.rs` and
+focused native/helper tests; existing admission/audit/quality/caller documents.
+Audit every Account construction path before replacing a field: Coinbase's
+reporter must initialize ErrorUpgrade, Crypto.com's Default stays Once, WOO's
+fixed-kind reporter stays unbounded ChangedMessage. Replace wrapper policy,
+not native label/identity extraction. Existing grouped collection/formatting
+and deferred sites stay unchanged in this first phase and remain explicit
+phase-2 work; do not claim those copies are removed by phase1.
+
+Commit this plan before tests/source. Independently audit its API/compatibility
+and architecture gate. Add meaningful native compatibility controls first and
+run them against unchanged production; architecture-only controls should pass
+original code, not be presented as invented REDs. New engine controls cover all
+repeat policies, unknown keys, namespace clean/partial re-arm, exact capacity
+reset (including duplicate keys), borrowed lookup and log filtering/health.
+Preserve native whole-snapshot/healthy-peer behavior with existing regressions.
+
+Run focused engine/Coinbase/Crypto.com/WOO plus Binance native tests with four
+Cargo jobs, strict Clippy/fmt/bans and root checks. Independent source/adversarial
+and caller review precede the source commit. Integrate actual shared inputs and
+use full green CI plus authenticated post-#1762 all-suite raw/ordered-gate proof;
+no local release WASM build/replay/timing sweep and no changed thresholds or
+allowances. Standing TS classes require fresh complete controls; any other
+difference blocks. Announce a fresh separate guard, merge separately, audit the
+actual parents/whole tree and report each actual pin before the next fresh slice.
