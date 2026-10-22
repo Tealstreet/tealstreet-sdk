@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -50,6 +50,7 @@ test('margin expectation uses native input and preserves unsupported cases', () 
 const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
+  const reportPath = join(cwd, 'gate.json');
   const records = [{ type: 'meta', private: isPrivate }];
   const midpoint = defect?.startsWith('midpoint:');
   const midpointIssue = midpoint ? defect.slice('midpoint:'.length) : undefined;
@@ -130,7 +131,7 @@ const gate = (venue, isPrivate = false, defect) => {
     process.env.ESBUILD_WORKER_THREADS = '1';
     process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
-      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT', '--runs', isPrivate ? '2' : '7'];
+      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT', '--runs', isPrivate ? '2' : '7', '--report', ${JSON.stringify(reportPath)}];
     const spawned = new Set();
     const calls = [];
     childProcess.spawnSync = (_executable, args, options) => {
@@ -239,6 +240,17 @@ const gate = (venue, isPrivate = false, defect) => {
         output.books.BTCUSDT.bids[0][1] = 2;
         output.commands[0].ok.ids.reverse();
       }
+      if (defect?.startsWith('failure-order:')) {
+        const symbols = Array.from({ length: 43 }, (_, index) => 'FAIL' + String(index).padStart(2, '0'));
+        if (defect.endsWith(':reverse')) symbols.reverse();
+        for (const symbol of symbols)
+          output.books[symbol] = { bids: [[99, rust ? 2 : 1]], asks: [[101, 1]] };
+        if (rust) {
+          output.protocolErrors = ['duplicate evidence', 'duplicate evidence'];
+          if (args.includes('--performance'))
+            output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
+        }
+      }
       if (defect === 'duplicate-symbols') output.markets.push({ ...output.markets[0] });
       if (defect === 'filtered-duplicates') output.duplicateSymbols = ['duplicate markets symbol SPOT at rows 0 and 1'];
       if (rust && !args.includes('--performance') && defect === 'checkpoint-transient') output.checkpoints[0].tickers.push({ symbol: 'BTCUSDT', last: 999 });
@@ -320,15 +332,44 @@ const gate = (venue, isPrivate = false, defect) => {
   try {
     const runner = join(cwd, 'run.mjs');
     writeFileSync(runner, script);
-    return spawnSync(process.execPath, [runner], {
+    const result = spawnSync(process.execPath, [runner], {
       cwd,
       encoding: 'utf8',
       timeout: 10000,
     });
+    return { ...result, report: existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : null };
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 };
+
+test('gate CLI orders complete failures deterministically before report and console truncation', () => {
+  const expected = [
+    ...Array.from({ length: 43 }, (_, index) => `book FAIL${String(index).padStart(2, '0')}.bids[0][1]: ts=1 rust=2`),
+    'performance process CPU: Rust must be at least 10% below TS (ts=2, rust=3)',
+    'rust: duplicate evidence',
+    'rust: duplicate evidence',
+  ];
+  const results = ['forward', 'reverse'].map((order) => gate('bybitinverse', false, `failure-order:${order}`));
+  for (const result of results) {
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.report.status, 'FAIL');
+    assert.equal(result.report.failures.filter((failure) => failure === 'rust: duplicate evidence').length, 2);
+    assert.deepEqual([...result.report.failures].sort(), expected, 'sorting must preserve the complete failure multiset');
+    assert.deepEqual(result.report.failures, expected);
+    assert.deepEqual(result.stdout.split('\nFAIL (46)\n')[1]?.trimEnd().split('\n'), expected.slice(0, 40).map((failure) => `  ${failure}`));
+  }
+  const semanticReport = (report) => ({
+    schema: report.schema, venue: report.venue, tapeSha256: report.tapeSha256,
+    private: report.private, books: report.books, runs: report.runs, correctnessRuns: report.correctnessRuns,
+    requiredImprovement: report.requiredImprovement, status: report.status,
+    summary: report.summary, samples: report.samples, fixers: report.fixers,
+    // Each child has a different temporary tape path and PID in raw paths.
+    tapeName: report.tape.split('/').at(-1),
+    artifactSlots: report.artifacts.map(({ impl, mode, run }) => ({ impl, mode, run })),
+  });
+  assert.deepEqual(semanticReport(results[0].report), semanticReport(results[1].report));
+});
 
 test('gate CLI compares populated outputs and calls every venue oracle in public and private runs', () => {
   for (const venue of Object.keys(VENUES)) {

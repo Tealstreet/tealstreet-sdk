@@ -1118,6 +1118,19 @@ that fail on the old checker; run existing conformance tests and bans. This is
 required new-wire recognition in the existing harness choke point, not another
 capability policy or a valid-state proof exemption. Architecture No.
 
+Independent conformance plan review: preparation sequence zero is valid;
+request/generation and permit sequence are nonzero. Compare preparation/permit
+request and generation only: the permit's third field is a host resource id,
+not the preparation sequence. Structurally allow a zero resource id and optional
+u32 timeout zero, matching the native parsers/encoder. Use BigInt only after
+canonical ASCII decimal validation; keep wire strings unchanged. Packet optional
+validation must read the nested packet, not the outer action. Closed route enum
+is primary/direct/publicCors, and intent is independent public/primary/secondary.
+No requirement for a prior Prepare in this one-batch passive checker. Temporary
+exact-incoming-checker controls reproduce assertion RED on valid Prepare/Bind
+and Cancel (unknown managedHttp), before repository implementation. Review CLEAN,
+architecture No; actual dependency integration still precedes source changes.
+
 Bitget public-path source audit after repeated provisional timing misses:
 independent review finds common-event custody pruning/managed admission checks
 and delivery-scope save/restore, plus an empty managed-map lookup for legacy
@@ -1132,3 +1145,63 @@ disposition: constant checks/codegen layout may still affect a narrow margin.
 No obviously unintended expensive work was found; remeasure final integrated CI
 and escalate a repeat with measured evidence before proposing any optimization.
 Architecture No; no Bitget-specific workaround or budget/profile change.
+
+Actual #1757 e6382b5cfc038612a15b4e4eade8542a62f2e1e5 integrated conflict-free.
+Independent preservation checked all5,217 unowned entries and all12 overlapping
+files' two-sided patch lines; all source/assertions preserved. Integration review
+found a real semantic composition gap: managed Binance reads/trades construct
+sign::Http directly, bypassing the incoming legacy helper's trusted header policy.
+Before final CI, route the three signed recipe sites through one native factory
+that attaches construction-owned policy. Keep key-only recipes default-deny.
+Adapt the incoming delegated-provider test driver through actual prepare/bind/
+claim (preserving all header/feed assertions), add managed trade positives and
+capture original assertion RED before the factory fix. Add empty headers only to
+the core SignResult fixture literal, matching the new optional-empty contract.
+No signing policy/capture/provider redesign; architecture No, shared policy
+propagation at the recipe boundary. Incoming private-feed/hosted APIs stay intact.
+
+Passive conformance checkpoint: valid managed Prepare/Bind/Cancel failed the
+exact incoming checker first. Updated one existing checker; all25 new/existing
+conformance and feature-control tests pass. Independent implementation review
+CLEAN: lossless counters, distinct third counters, zero/optional representation,
+closed nested schemas, passive ingress-only evidence and every prior unsupported/
+terminal/correlation assertion retained. No executor calls or capability growth.
+
+Post-#1759 integration: exact Store keep-both resolution authorized (broad
+orders_revision/getter followed by selective epoch/methods); independent review
+retained all5,216 unowned entries plus both parents' eight overlapping patches.
+Ordinary managed auth observation now supplies the new read-only Store argument;
+late reconciliation remains silent. Owner requires the late-reconciliation
+follow-on to converge the broad revision with the snapshot epoch or document
+why both are necessary, rather than retaining two unexplained mechanisms.
+
+Header policy review also found the same preexisting bypass in legacy client-ID
+lookup. Its single factory call is cleared by the history owner; completion and
+paging remain legacy. Native managed read+write controls first fail at zero
+released packets, then pass with policy attached; lookup independently reproduces
+the same zero-packet failure before its one-call fix. Lookup remains unsupported
+for COIN-M/Spot, with explicit unchanged native-refusal/no-request controls.
+
+Owner authorized a one-time exact rehash of the two existing cx.sign_http calls
+in Binance lib/history as recipe construction moves to the shared factory.
+No new call kind or site: total inventory1274->1274, two path totals21->21,
+all other maps byte-identical. Exact before/after maps JSON SHA256
+5ef75f6182e96dda2de4ad3166a6d37fcbf3798cae540f8eb0e9a3e3946fe6ce.
+Commit adversarial controls before implementing the exact map transition;
+independent newer-pruned baselines must still block regrowth. These remaining
+legacy signing sites still must reach zero and the bridge be deleted before
+landing-to-master; no managed history or whole-Bybit closure claim.
+
+Integrated local verification on actual #1757/#1759: 1,053 engine/Binance/
+Bitunix unit and integration tests pass, plus3 real provider tests,43 native-host
+tests (including parked provider+fast ACK450ms physical handoff),17 isolated
+Binance WASM-host native unit tests,358 SDK transport/helper tests,34 HOW tests,
+25 conformance/feature controls,25 JS primitive/managed-host tests and16 hosted
+signing tests. Strict all-target engine/reference/registry Clippy uses the
+Binance+Bybit feature set required by the existing construction fixture; source
+formatting, SDK/HOW typecheck/lint,12 ratchet adversarial controls and bans pass.
+The native parked Signer fixture adds only headers:vec![] for the new SignResult
+shape; all original clocks, sends, gaps and assertions are unchanged. These are
+local/debug checks, not rebuilt-WASM replay or timing/size evidence. Independent
+integration/factory/ratchet reviews CLEAN, architecture No. Fresh CI, complete
+authenticated raw/gate/package proof and separate guard remain required.

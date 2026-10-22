@@ -809,6 +809,7 @@ impl<V: Venue> Engine<V> {
                 &response,
                 true,
                 now,
+                &self.store,
                 &mut self.io.actions,
             );
             self.venue.on_response(
@@ -1153,6 +1154,7 @@ mod tests {
                 result: Ok(crate::signing::SignResult {
                     values: vec![b"value".to_vec()],
                     receipt: work.receipt,
+                    headers: vec![],
                 }),
             },
         );

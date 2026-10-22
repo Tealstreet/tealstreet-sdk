@@ -558,12 +558,7 @@ impl BinanceFutures {
                     planned.method,
                     format!("{}{}", self.urls.account_rest, planned.path),
                     None,
-                    Box::new(crate::sign::Http::new(
-                        credentials,
-                        planned.query,
-                        self.options.recv_window,
-                        true,
-                    )),
+                    Box::new(self.signed_recipe(credentials, planned.query)),
                     Pending::Trade(Request {
                         command,
                         context,
@@ -1978,7 +1973,7 @@ impl BinanceFutures {
                 let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
-                    self.observe_strategy_terminal(&symbol, id);
+                    self.observe_strategy_terminal(cx, &symbol, id);
                 } else {
                     let native = if self.is_spot() || self.options.portfolio_margin {
                         self.spot_native_order_id(&symbol, id)
@@ -1987,16 +1982,16 @@ impl BinanceFutures {
                     };
                     if let Some(native) = native {
                         if closed {
-                            self.observe_native_terminal(&symbol, native, filled);
+                            self.observe_native_terminal(cx, &symbol, native, filled);
                         } else {
-                            self.observe_unquantified_cancel(&symbol, native, filled);
+                            self.observe_unquantified_cancel(cx, &symbol, native, filled);
                         }
                     }
                 }
             }
         }
         mark_canceled_preserving_closed(cx, ids);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target_is_current(
@@ -2038,7 +2033,7 @@ impl BinanceFutures {
 
     fn observe_captured_cancel(
         &mut self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         target: &CancelTarget,
         strategy: bool,
         current: bool,
@@ -2046,9 +2041,9 @@ impl BinanceFutures {
         let Some(native) = target.native else { return };
         if strategy {
             if self.options.portfolio_margin {
-                self.observe_native_strategy_terminal(&target.symbol, native);
+                self.observe_native_strategy_terminal(cx, &target.symbol, native);
             } else {
-                self.observe_strategy_terminal(&target.symbol, &target.id);
+                self.observe_strategy_terminal(cx, &target.symbol, &target.id);
             }
         } else {
             let order = current.then(|| cx.store.order(&target.id)).flatten();
@@ -2056,9 +2051,9 @@ impl BinanceFutures {
                 .known_native_filled(&target.symbol, native)
                 .max(order.map_or(0.0, |order| order.filled));
             if order.is_some_and(|order| order.status == OrderStatus::Closed) {
-                self.observe_native_terminal(&target.symbol, native, filled);
+                self.observe_native_terminal(cx, &target.symbol, native, filled);
             } else {
-                self.observe_unquantified_cancel(&target.symbol, native, filled);
+                self.observe_unquantified_cancel(cx, &target.symbol, native, filled);
             }
         }
     }
@@ -2078,7 +2073,7 @@ impl BinanceFutures {
             }
         }
         mark_canceled_preserving_closed(cx, &unchanged);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target(&self, order: &Order) -> CancelTarget {
@@ -2139,7 +2134,7 @@ impl BinanceFutures {
                 order.last_update = now;
             });
         }
-        self.observe_native_terminal(&ack.symbol, ack.order_id, final_filled);
+        self.observe_native_terminal(cx, &ack.symbol, ack.order_id, final_filled);
         current
     }
 
@@ -2310,7 +2305,7 @@ impl BinanceFutures {
                     }
                 }
                 mark_canceled_preserving_closed(cx, &unchanged);
-                self.fence_order_snapshots();
+                self.fence_order_snapshots(cx);
             }
             CancelProof::SymbolAll { targets, strategy } => {
                 #[derive(serde::Deserialize)]

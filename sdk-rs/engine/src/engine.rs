@@ -869,10 +869,11 @@ fn observe_account_auth<V: Venue>(
     response: &Response<'_>,
     expected_list_present: bool,
     now: f64,
+    store: &Store,
     actions: &mut Vec<Action>,
 ) {
     let Some(auth) = pending.auth else { return };
-    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now) else {
+    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now, store) else {
         return;
     };
     if outcome == AuthOutcome::Accepted && !expected_list_present {
@@ -1076,6 +1077,7 @@ struct Io<P> {
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
     public_feed_policy: PublicFeedPolicy,
+    private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     signing: crate::signing_dispatch::Dispatch,
@@ -1125,6 +1127,7 @@ impl<P> Default for Io<P> {
             actions: Vec::new(),
             placement_acks: Default::default(),
             public_feed_policy: PublicFeedPolicy::Direct,
+            private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
             signing: Default::default(),
@@ -1195,6 +1198,10 @@ impl<P> Cx<'_, P> {
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
         self.io.public_feed_policy
+    }
+
+    pub fn private_feed_policy(&self) -> crate::signing_policy::PrivateFeedPolicy {
+        self.io.private_feed_policy
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -1936,6 +1943,7 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: &Response<'_>,
         _now: f64,
+        _store: &Store,
     ) -> Option<AuthOutcome> {
         None
     }
@@ -2165,6 +2173,21 @@ impl<V: Venue> Engine<V> {
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
         self.io.signer.clone()
+    }
+
+    /// Delegated REST-only intent does not disable account reads or writes.
+    pub fn set_private_feed_policy(
+        &mut self,
+        policy: crate::signing_policy::PrivateFeedPolicy,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Private feed policy must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io.private_feed_policy = policy;
+        Ok(())
     }
 
     /// Read the same calibrated protocol view and revision used by dispatch,
@@ -2976,6 +2999,7 @@ impl<V: Venue> Engine<V> {
                         &response,
                         false,
                         now,
+                        cx.store,
                         &mut cx.io.actions,
                     );
                     self.venue.on_stream_error(&mut cx, pending.value, response);
@@ -3016,6 +3040,7 @@ impl<V: Venue> Engine<V> {
                 &response,
                 true,
                 now,
+                cx.store,
                 &mut cx.io.actions,
             );
             self.venue.on_response(&mut cx, pending.value, response);
@@ -3034,6 +3059,7 @@ impl<V: Venue> Engine<V> {
                     &response,
                     true,
                     now,
+                    cx.store,
                     &mut cx.io.actions,
                 );
                 self.venue.on_response(&mut cx, pending.value, response);

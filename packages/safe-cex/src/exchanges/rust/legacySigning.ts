@@ -45,7 +45,7 @@ export const signHostedHttp = async (
       // The exact preimage already contains this API key for Bybit. Never
       // return a MAC under changed provider material with an unrelated header.
       if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
-      return { signature: output.signature };
+      return { signature: output.signature, ...(output.headers === undefined ? {} : { headers: Object.fromEntries(output.headers) }) };
     },
   };
   const siteHeaders = isBybitSiteIdExchange(name) ? getBybitSiteHeaders(options) : {};

@@ -23,11 +23,13 @@ struct AccountReads {
     tagged: bool,
     delegated: bool,
     valid_before: Option<f64>,
+    token: Option<safe_cex_engine::OrderSnapshotToken>,
 }
 
 impl Venue for AccountReads {
     type Pending = usize;
     fn start(&mut self, cx: &mut Cx<'_, usize>) {
+        self.token = cx.store.begin_orders_snapshot();
         let request = if self.streamed {
             cx.request_streamed(
                 Method::Get,
@@ -68,8 +70,14 @@ impl Venue for AccountReads {
         _: &usize,
         response: &Response<'_>,
         now: f64,
+        store: &safe_cex_engine::Store,
     ) -> Option<AuthOutcome> {
-        if self.valid_before.is_some_and(|deadline| now >= deadline) {
+        if !self
+            .token
+            .as_ref()
+            .is_some_and(|token| store.orders_snapshot_current(token))
+            || self.valid_before.is_some_and(|deadline| now >= deadline)
+        {
             return None;
         }
         if response.status == 401 {
@@ -93,9 +101,11 @@ impl Venue for AccountReads {
         *count += 1;
     }
     fn on_response(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
+        cx.store.invalidate_order_snapshots();
         cx.notice(Level::Info, MARKER, format!("response:{count}"));
     }
     fn on_stream_error(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
+        cx.store.invalidate_order_snapshots();
         cx.notice(Level::Warn, MARKER, format!("missing:{count}"));
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, usize>, _: usize, _: &str) {
@@ -120,6 +130,7 @@ fn engine(streamed: bool, tagged: bool, delegated: bool) -> Engine<AccountReads>
         tagged,
         delegated,
         valid_before: None,
+        token: None,
     });
     engine.start(0.);
     engine.drain_actions().for_each(drop);
@@ -331,6 +342,7 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
             tagged: true,
             delegated: false,
             valid_before: Some(2.),
+            token: None,
         });
         engine.start(0.);
         engine.drain_actions().for_each(drop);
@@ -361,6 +373,26 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
         );
         assert!(
             matches!(actions.last(), Some(Action::Notice(Notice::Event(event))) if event.level == Level::Info && event.message == "response:0")
+        );
+    }
+}
+
+#[test]
+fn token_stale_auth_is_suppressed_using_the_same_store_before_account_callbacks() {
+    for streamed in [false, true] {
+        let mut subject = engine(streamed, true, false);
+        subject.store_mut().invalidate_order_snapshots();
+        let actions = complete(&mut subject, 200, r#"{"accepted":true,"rows":[]}"#);
+        assert_eq!(actions, vec![marker(Level::Info, "response:0")]);
+        let mut subject = engine(streamed, true, false);
+        subject.store_mut().invalidate_order_snapshots();
+        let actions = complete(&mut subject, 200, r#"{"accepted":false}"#);
+        assert_eq!(
+            actions,
+            vec![marker(
+                if streamed { Level::Warn } else { Level::Info },
+                if streamed { "missing:0" } else { "response:0" }
+            )]
         );
     }
 }

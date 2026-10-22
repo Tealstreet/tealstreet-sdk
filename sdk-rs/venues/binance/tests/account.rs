@@ -1526,3 +1526,21 @@ fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
     refresh(&mut h, &bad);
     assert_eq!(h.errors.len(), 3, "mapping re-arms the missing-copy error");
 }
+
+#[test]
+fn exhausted_snapshot_authority_keeps_stream_writes_and_never_issues_an_unfenced_read() {
+    let mut h = ready();
+    safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut());
+    h.message("/private/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"fresh","i":99,"S":"BUY","o":"LIMIT","f":"GTC","q":"1","p":"90","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+    assert!(
+        h.engine.store().order("99").is_some(),
+        "native writes stay admissible"
+    );
+    assert!(h.engine.store().loaded().orders);
+    for _ in 0..3 {
+        h.advance(POLL_MS);
+        assert!(!h.has_request("/fapi/v1/openOrders"));
+        assert!(!h.has_request("/fapi/v1/openAlgoOrders"));
+        assert!(h.engine.store().order("99").is_some());
+    }
+}

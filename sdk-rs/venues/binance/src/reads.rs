@@ -1,5 +1,5 @@
 //! Explicit read adapters; all send and completion authority stays in the engine.
-use crate::{BinanceFutures, Credentials, Pending, Query, sign};
+use crate::{BinanceFutures, Credentials, Pending, Query};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Policy, RetryPolicy, Scope,
@@ -111,12 +111,7 @@ impl BinanceFutures {
                 Method::Get,
                 read.url,
                 None,
-                Box::new(sign::Http::new(
-                    credentials,
-                    read.query,
-                    self.options.recv_window,
-                    true,
-                )),
+                Box::new(self.signed_recipe(credentials, read.query)),
                 pending,
             ),
             None => cx.request_managed(context, Method::Get, read.url, None, pending),

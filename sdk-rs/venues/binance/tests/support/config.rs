@@ -41,6 +41,7 @@ impl Options {
             public_data_only: self.public_data_only,
             recv_window: self.recv_window,
             portfolio_margin: self.portfolio_margin,
+            signing_policy: Default::default(),
         });
         (venue, std::sync::Arc::new(signer))
     }
